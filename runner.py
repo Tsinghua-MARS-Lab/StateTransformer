@@ -25,7 +25,7 @@ from transformers import (
     TrainerCallback,
     set_seed,
 )
-from TansformerXL.model import TransfoXLModelNuPlan
+from models.model import TransfoXLModelNuPlan
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
 from transformers.utils.versions import require_version

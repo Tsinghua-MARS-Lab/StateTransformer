@@ -1,4 +1,7 @@
-from TransformerXL.model import *
+try:
+    from models.TransformerXL.model import *
+except:
+    from TransformerXL.model import *
 import torch.nn as nn
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
@@ -104,6 +107,11 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         else:
             intended_maneuver_embed = None
             current_maneuver_embed = None
+        
+        # for 0405 debug, dataset lack of action_label and trajectory inculudes current state and past one frame 
+        if action_label is None and trajectory_label is not None:
+            trajectory_label = trajectory_label[:, :2]
+            action_label = (trajectory_label[:, 1, :2] - trajectory_label[:, 0, :2]) * 100
 
         device = high_res_raster.device
 
@@ -152,9 +160,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         )
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
-        # assert (
-        #     self.config.pad_token_id is not None or batch_size == 1
-        # ), "Cannot handle batch sizes > 1 if no padding token is defined."
+        assert (
+            self.config.pad_token_id is not None or batch_size == 1
+        ), "Cannot handle batch sizes > 1 if no padding token is defined."
 
         # if self.config.pad_token_id is None:
         #     sequence_lengths = -1
@@ -215,6 +223,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         else:
             pass
             # print('WARNING: current_maneuver_label is None')
+        
 
         if action_label is not None:
             if self.pos_x_decoder is not None:
@@ -290,6 +299,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
 if __name__ == '__main__':
     model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103')
+    model.config.pad_token_id = 0
     result = model.forward(
         intended_maneuver_label=None,
         intended_maneuver_vector=None,
