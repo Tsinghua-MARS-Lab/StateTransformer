@@ -1,4 +1,7 @@
-from TransformerXL.model import *
+try:
+    from models.TransformerXL.model import *
+except:
+    from TransformerXL.model import *
 import torch.nn as nn
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
@@ -104,7 +107,10 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         else:
             intended_maneuver_embed = None
             current_maneuver_embed = None
-
+        
+        # for 0405 debug, dataset lack of action_label and trajectory inculudes current state and past one frame 
+        if action_label is None and trajectory_label is not None:
+            action_label = ((trajectory_label[:, 1, :2] - trajectory_label[:, 0, :2]) * 100).to(torch.int32)
         device = high_res_raster.device
 
         batch_size, h, w, total_channels = high_res_raster.shape
@@ -152,9 +158,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         )
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
-        # assert (
-        #     self.config.pad_token_id is not None or batch_size == 1
-        # ), "Cannot handle batch sizes > 1 if no padding token is defined."
+        assert (
+            self.config.pad_token_id is not None or batch_size == 1
+        ), "Cannot handle batch sizes > 1 if no padding token is defined."
 
         # if self.config.pad_token_id is None:
         #     sequence_lengths = -1
@@ -215,6 +221,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         else:
             pass
             # print('WARNING: current_maneuver_label is None')
+        
 
         if action_label is not None:
             if self.pos_x_decoder is not None:
@@ -289,17 +296,21 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         return result
 
 if __name__ == '__main__':
+    import datasets
     model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103')
+    model.config.pad_token_id = 0
+    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/store/nsm")
+    example = dataset[0]
     result = model.forward(
         intended_maneuver_label=None,
         intended_maneuver_vector=None,
         current_maneuver_label=None,
         current_maneuver_vector=None,
         action_label=None,
-        trajectory_label=torch.zeros(2, 160, 4),
-        context_actions=torch.zeros(2, 9, 4),
-        high_res_raster=torch.zeros(2, 224, 224, 93),
-        low_res_raster=torch.zeros(2, 224, 224, 93),
+        trajectory_label=example['trajectory_label'].unsqueeze(0),
+        context_actions=example['context_actions'].unsqueeze(0),
+        high_res_raster=example['high_res_raster'][:,:,:93].unsqueeze(0),
+        low_res_raster=example['low_res_raster'][:,:,:93].unsqueeze(0),
         mems=None,
         head_mask=None,
         output_attentions=None,
