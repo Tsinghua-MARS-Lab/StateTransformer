@@ -21,13 +21,21 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # self.goal_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
         # self.map_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
         # self.agents_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
-
-        self.use_nsm = False
-        if self.use_nsm:
-            n_embed = config.d_embed // 4
+        # TODO: add followning config into config class
+        self.use_nsm = True
+        self.predict_pose = True
+        self.predict_trajectory = True
+        self.per_instance = True
+        if self.per_instance:
+            in_channels = 1
+            n_embed = config.d_embed
         else:
-            n_embed = config.d_embed // 2 
-        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=29)
+            in_channels = 29 # raster: goal + road_type + agent_type
+            if self.use_nsm:
+                n_embed = config.d_embed // 4
+            else:
+                n_embed = config.d_embed // 2 
+        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
         self.current_m_embed = nn.Sequential(nn.Linear(12, n_embed, bias=False), nn.Tanh())
@@ -36,9 +44,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.pos_x_decoder = None
         self.pos_y_decoder = None
         self.traj_decoder = None
-        self.predict_pose = True
-        self.predict_trajectory = True
-        
+
         try:        
             if self.predict_pose:
                 self.pos_x_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=200)  # from -100 to 100
@@ -98,55 +104,94 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
+        if not self.use_nsm:
+            intended_maneuver_vector = None
+            current_maneuver_vector = None
+            intended_maneuver_label = None
+            current_maneuver_label = None
+
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        if high_res_raster.shape[-1] > 100: # debug version for 0404 dataset
+            high_res_raster = high_res_raster[:, :, :, :93]
+            low_res_raster = low_res_raster[:, :, :, :93]
+        device = high_res_raster.device
 
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
-            intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector)  # [bsz, hidden_size]
+            intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
             # current_maneuver_embed = self.current_m_embed(current_maneuver_vector.float())  # [bsz, hidden_size]
-            current_maneuver_embed = self.current_m_embed(current_maneuver_vector)  # [bsz, hidden_size]
+            current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
         else:
             intended_maneuver_embed = None
             current_maneuver_embed = None
         
         # for 0405 debug, dataset lack of action_label and trajectory inculudes current state and past one frame 
         if action_label is None and trajectory_label is not None:
-            action_label = ((trajectory_label[:, 1, :2] - trajectory_label[:, 0, :2]) * 100).to(torch.int32)
-        device = high_res_raster.device
+            action_label = ((trajectory_label[:, 1, :2] - trajectory_label[:, 0, :2]) * 100).to(torch.int32).to(device)
 
         batch_size, h, w, total_channels = high_res_raster.shape
 
-        high_res_seq = self.cat_raster_seq(high_res_raster.permute(0, 3, 2, 1))
-        low_res_seq = self.cat_raster_seq(low_res_raster.permute(0, 3, 2, 1))
-        batch_size, context_length, c, h, w = high_res_seq.shape
-        # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed) 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size*context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size*context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+        if not self.per_instance:
+            high_res_seq = self.cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
+            low_res_seq = self.cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+            batch_size, context_length, c, h, w = high_res_seq.shape
+            # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed) 
+            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size*context_length, c, h, w))
+            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size*context_length, c, h, w))
+            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+        
+        else:
+            # embed for per-instance with the format (batchsize, total_channel, n_embed)
+            high_res_embed = self.cnn_downsample(high_res_raster.permute(0, 3, 1, 2).reshape(-1, 1, h, w).to(torch.float32)).view(batch_size, total_channels, -1)
+            low_res_embed = self.cnn_downsample(low_res_raster.permute(0, 3, 1, 2).reshape(-1, 1, h, w).to(torch.float32)).view(batch_size, total_channels, -1)
 
         if intended_maneuver_embed is not None and current_maneuver_embed is not None:
-            state_embeds = torch.cat((intended_maneuver_embed.unsqueeze(1),
-                                    current_maneuver_embed.unsqueeze(1),
-                                    high_res_embed,
-                                    low_res_embed), dim=-1).to(torch.float32)
+            if self.per_instance:
+                state_embeds = torch.cat((intended_maneuver_embed.unsqueeze(1),
+                            current_maneuver_embed.unsqueeze(1),
+                            high_res_embed,
+                            low_res_embed), dim=1).to(torch.float32)
+            else:
+                # TODO: repeat should be replaced by historic maneuver
+                state_embeds = torch.cat((intended_maneuver_embed.unsqueeze(1).repeat(1, context_length, 1),
+                                        current_maneuver_embed.unsqueeze(1).repeat(1, context_length, 1),
+                                        high_res_embed,
+                                        low_res_embed), dim=-1).to(torch.float32)
         else:
-            state_embeds = torch.cat((high_res_embed, 
-                                       low_res_embed), dim=-1).to(torch.float32)
+            if self.per_instance:
+                state_embeds = torch.cat((high_res_embed, 
+                                        low_res_embed), dim=1).to(torch.float32)
+            else:
+                state_embeds = torch.cat((high_res_embed,
+                                        low_res_embed), dim=-1).to(torch.float32)
         
-        action_embeds = self.action_m_embed(context_actions)
-        # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
-        n_embed = action_embeds.shape[-1]
-        input_embeds = torch.zeros(
-            (batch_size, context_length * 2, n_embed),
-            dtype=torch.float32,
-            device=device
-        )
-        input_embeds[:, ::2, :] = state_embeds
-        input_embeds[:, 1::2, :] = action_embeds
-
         trajectory_label = trajectory_label[:, 1::2, :] # downsample the 20hz trajectory to 10hz
         pred_length = trajectory_label.shape[1]
-        input_embeds = torch.cat([input_embeds, torch.zeros(batch_size, pred_length - 2 * context_length, n_embed)], dim=1)
+        if not self.per_instance:
+            action_embeds = self.action_m_embed(context_actions)
+            # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
+            n_embed = action_embeds.shape[-1]
+            input_embeds = torch.zeros(
+                (batch_size, context_length * 2, n_embed),
+                dtype=torch.float32,
+                device=device
+            )
+            input_embeds[:, ::2, :] = state_embeds
+            input_embeds[:, 1::2, :] = action_embeds
+            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length - 2 * context_length, n_embed), device=device)], dim=1)
+        else:
+            input_embeds = state_embeds
+        
+        
+        # print(input_embeds.shape)
+        # if mems is not None:
+        #     print(mems.shape)
+        # if head_mask is not None: 
+        #     print(head_mask.shape)
+        # if output_attentions is not None:
+        #     print(output_attentions.shape)
+        # i                     f output_hidden_states is not None:
+        #     print(output_hidden_states.shape)
         transformer_outputs = self.transformer(
             None,
             mems=mems,
@@ -192,7 +237,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         
         if self.traj_decoder is not None:
             # expected shape for pred trajectory is (b, pred_length, 4)
-            traj_pred = self.traj_decoder(transformer_outputs_hidden_state)
+            traj_pred = self.traj_decoder(transformer_outputs_hidden_state[:, :pred_length, :])
         else:
             traj_pred = None
         # pooled_intended_m_logits = intended_m_logits[range(batch_size), sequence_lengths]
@@ -245,11 +290,12 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         if trajectory_label is not None:
             if self.traj_decoder is not None:
                 loss_fct = MSELoss(reduction="mean")
-                loss += loss_fct(traj_pred, trajectory_label)
+                loss += loss_fct(traj_pred, trajectory_label.to(device))
 
         pooled_logits = [intended_m_logits, current_m_logits,
                          pos_x_logits,
-                         pos_y_logits]
+                         pos_y_logits,
+                         traj_pred]
         # pooled_logits = torch.cat((intended_m_logits.unsqueeze(0),
         #                            current_m_logits.unsqueeze(0),
         #                            pos_x_logits.unsqueeze(0),
@@ -287,7 +333,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         goal_raster = raster[:, 0, :, :].reshape(b, 1, h, w)
         road_ratser = raster[:, 1:21, :, :]
-        result = torch.zeros((b, framenum, agent_type + road_type + 1, h, w))
+        result = torch.zeros((b, framenum, agent_type + road_type + 1, h, w), device=raster.device)
         for i in range(framenum):
             agent_raster = raster[:, 1 + road_type + i::framenum, :, :]
             raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim = 1) # expected format (b, 1+20+8, h, w)
@@ -302,10 +348,10 @@ if __name__ == '__main__':
     dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/store/nsm")
     example = dataset[0]
     result = model.forward(
-        intended_maneuver_label=None,
-        intended_maneuver_vector=None,
-        current_maneuver_label=None,
-        current_maneuver_vector=None,
+        intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
+        intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0),
+        current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
+        current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0),
         action_label=None,
         trajectory_label=example['trajectory_label'].unsqueeze(0),
         context_actions=example['context_actions'].unsqueeze(0),
