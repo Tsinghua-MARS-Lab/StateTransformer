@@ -1,6 +1,6 @@
 import torch
 from torch import nn, Tensor
-from transformers import TransfoXLModel
+from transformers import TransfoXLModel, TransfoXLConfig
 import numpy as np
 
 class NuPlanEncoder(nn.Module):
@@ -696,6 +696,24 @@ class TransfoXLSequenceClassifierOutputWithPast(ModelOutput):
     attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 @dataclass
+class TransfoXLNuPLanNSMConfig(TransfoXLConfig):
+    """
+    Args: 
+        use_nsm : True to use nsm label, False to plan without nsm labels
+        predict_pose: True to add loss to predict pose for one step
+        predict_trajectory: True to add loss to predict pose for n seconds
+        per_instance_encoding: True to encode rasters by channels, False to concate channels of the same frame into one embedding
+        time_to_predict: time step to predict
+        frequency_for_prediction: number of frames in one second for prediction, use 1 for Waymo and 2 for NuPlan to be consistant with the ground truth labels
+    """
+    use_nsm: bool = True
+    predict_pose: bool = True
+    predict_trajectory: bool = True
+    per_instance_encoding: bool = True
+    time_to_predict: int = 8
+    frequency_for_prediction: int = 20
+
+@dataclass
 class TransfoXLNuPlanNSMOutput(ModelOutput):
     """
     Base class for outputs of sentence classification models.
@@ -725,6 +743,7 @@ class TransfoXLNuPlanNSMOutput(ModelOutput):
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
     all_logits: List[torch.FloatTensor] = None
+
 
 
 @dataclass

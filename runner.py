@@ -59,6 +59,28 @@ class ModelArguments:
             )
         },
     )
+    predict_result_saving_dir: str = field(
+        default=False,
+        metadata={"help": "The target folder to save prediction results."},
+    )
+    use_nsm: bool = field(
+        default=True,
+    )
+    predict_pose: bool = field(
+        default=True,
+    )
+    predict_trajectory: bool = field(
+        default=True,
+    )
+    per_instance_encoding: bool = field(
+        default=True,
+    )
+    time_to_predict: int = field(
+        default=8,
+    )
+    frequency_for_prediction: int = field(
+        default=20
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -109,8 +131,8 @@ def main():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     # Set up pytorch backend
-    if training_args.deepspeed is None:
-        torch.distributed.init_process_group(backend='nccl')
+    # if training_args.deepspeed is None:
+    #     torch.distributed.init_process_group(backend='nccl')
 
     # Setup training args for torch 2.0
     if int(torch.__version__[0]) > 1:
@@ -174,7 +196,7 @@ def main():
     # Load a model's pretrained weights from a path or from hugging face's model base
     if model_args.model_name == 'TransfoXLModelNuPlan':
         # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
-        model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path)
+        model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         model.config.pad_token_id = 0
         model.config.eos_token_id = 0        
 
@@ -233,8 +255,97 @@ def main():
         trainer.save_metrics("eval", metrics)
 
     if training_args.do_predict:
+        # Currently only supports single GPU predict outputs
         logger.info("*** Predict ***")
-        raise NotImplemented
+
+        """
+        Compute accuracy for the following classifications:
+        1. intended_maneuver
+        2. current_maneuver
+        3. pos_x,
+        4. pos_y
+        """
+        print('Computing metrics for classifications')
+        intended_m_label = []
+        predicted_intended_m_labels = []
+        current_m_weights_bias = []
+        action_bias_x = []
+        action_bias_y = []
+
+        device = model.device
+
+        def preprocess_data(examples):
+            # take a batch of texts
+            for each_key in examples:
+                if isinstance(examples[each_key], type(torch.tensor(0))):
+                    examples[each_key] = examples[each_key].to(device)
+            return examples
+
+        # initialize intended maneuver metrics
+        for input in dataset.iter(batch_size):
+            input = preprocess_data(input)
+            output = model(**input)
+            intended_m_logits, current_m_logits, pos_x_logits, pos_y_logits = output.all_logits
+            intended_m_label.append(input['intended_maneuver_label'])  # tensor
+            predicted_intended_m_labels.append(torch.argmax(intended_m_logits, dim=-1))  # tensor
+            current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_m_logits), dim=1))
+
+            pos_x = torch.argmax(pos_x_logits, dim=-1)
+            pos_y = torch.argmax(pos_y_logits, dim=-1)
+            action_label = input['action_label'].clone() + 100
+            action_bias_x.append(abs(pos_x - action_label[:, 0]))
+            action_bias_y.append(abs(pos_y - action_label[:, 1]))
+            # only evaluate one batch
+            break
+
+        intended_m_label = torch.stack(intended_m_label, -1).flatten()
+        predicted_intended_m_labels = torch.stack(predicted_intended_m_labels, -1).flatten()
+        print('Intended Maneuver Classification')
+        print(classification_report(predicted_intended_m_labels.cpu().numpy(), intended_m_label.cpu().numpy()))
+        current_m_weights_bias = torch.stack(current_m_weights_bias, -1).flatten()
+        print('Current Maneuver Classification')
+        print(f'{np.average(current_m_weights_bias.cpu().numpy())} over 12')
+        action_bias_x = torch.stack(action_bias_x, 0).cpu().numpy()
+        print('Pose x offset: ', np.average(action_bias_x))
+        action_bias_y = torch.stack(action_bias_y, 0).cpu().numpy()
+        print('Pose y offset: ', np.average(action_bias_y))
+
+
+
+
+        prediction_results = {
+            'file_names': [],
+            'current_frame': [],
+            'intended_maneuver': [],
+            'current_maneuver': [],
+            'predicted_trajectory': [],
+        }
+        prediction_metrics = {
+            'intended_maneuver': []
+        }
+        for each_sample in predict_dataset:
+            forward_results = model.forward(each_sample)
+            print('test: ', forward_results)
+            all_logits = forward_results['all_logits']
+            intended_m_logits, current_m_logits, pos_x_logits, pos_y_logits, traj_pred = all_logits
+            intended_m_prediction = torch.argmax(intended_m_logits, dim=-1)
+            current_c_confifence = torch.softmax(current_m_logits, dim=-1)
+            file_name = each_sample['file_name']
+            current_frame_idx = each_sample['frame_index']
+            predict_results['file_names'].append(file_name)
+            predict_results['current_frame'].append(current_frame_idx)
+            predict_results['intended_maneuver'].append(intended_m_prediction.cpu())
+            predict_results['current_maneuver'].append(current_c_confifence.cpu())
+
+            print(predict_results)
+        if training_args.predict_with_generate:
+            # save results
+            output_file_path = os.path.join(training_args.output_dir, 'generated_predictions.pickle')
+            with open(output_file_path, 'wb') as handle:
+                pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        
+
         predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         metrics = predict_results.metrics
         max_predict_samples = (
