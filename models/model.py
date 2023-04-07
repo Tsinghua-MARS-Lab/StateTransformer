@@ -21,13 +21,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # self.goal_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
         # self.map_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
         # self.agents_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
-        # TODO: add followning config into config class
-<<<<<<< HEAD
-        self.use_nsm = True
-        self.predict_pose = False
-        self.predict_trajectory = False
-        self.per_instance = True
-=======
         model_args = kwargs['model_args']
         self.use_nsm = model_args.use_nsm
         self.predict_pose = model_args.predict_pose
@@ -36,7 +29,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.time_to_predict = model_args.time_to_predict
         self.frequency_for_prediction = model_args.frequency_for_prediction
         
->>>>>>> 533cfa932930a4f116725ecca90afa57336c1881
         if self.per_instance:
             in_channels = 1
             n_embed = config.d_embed
