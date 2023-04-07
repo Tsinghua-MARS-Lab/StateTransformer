@@ -22,3 +22,21 @@ runner.py --model_name TransfoXLModelNuPlan \
 --predict_trajectory False \
 --do_train
 `
+
+To predict and evaluate:
+`
+python -m torch.distributed.run \
+--nproc_per_node=1 \
+runner.py --model_name TransfoXLModelNuPlan \
+--model_pretrain_name_or_path /public/MARS/datasets/nuPlanCache/checkpoint/perinstance_onlynsm/checkpoint-18187/ \
+--saved_dataset_folder /localdata_ssd/nuplan_nsm/0404 \
+--output_dir transformerXL_nopose_0405/prediction_results \
+--per_device_eval_batch_size 1 \
+--past_index 2 \
+--dataloader_num_workers 5 \
+--predict_pose False \
+--predict_trajectory False \
+--use_nsm True \
+--max_predict_samples 20000 \
+--do_predict
+`

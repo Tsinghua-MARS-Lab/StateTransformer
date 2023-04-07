@@ -10,6 +10,7 @@ import sys
 import pickle
 from typing import Optional
 import torch
+from tqdm import tqdm
 
 import datasets
 import numpy as np
@@ -120,6 +121,9 @@ class DataTrainingArguments:
             )
         },
     )    
+    dataset_name: Optional[str] = field(
+        default=None, metadata={"help": "The dataset name from hugging face used to push the model."}
+    )
 
 
 def main():
@@ -214,14 +218,12 @@ def main():
             train_dataset = train_dataset.select(range(max_train_samples))
 
     if training_args.do_eval:
-        max_target_length = data_args.val_max_target_length
         eval_dataset = nuplan_dataset["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
     if training_args.do_predict:
-        # max_target_length = data_args.val_max_target_length
         predict_dataset = nuplan_dataset["test"]
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
@@ -259,32 +261,114 @@ def main():
         trainer.save_metrics("eval", metrics)
 
     if training_args.do_predict:
+        from sklearn.metrics import classification_report
         # Currently only supports single GPU predict outputs
         logger.info("*** Predict ***")
-        raise NotImplemented
-        predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
-        print(predict_results)
-        raise NotImplemented
-        metrics = predict_results.metrics
-        max_predict_samples = (
-            data_args.max_predict_samples if data_args.max_predict_samples is not None else len(predict_dataset)
-        )
-        metrics["predict_samples"] = min(max_predict_samples, len(predict_dataset))
+        """
+        Compute accuracy for the following classifications:
+        1. intended_maneuver
+        2. current_maneuver
+        3. pos_x,
+        4. pos_y
+        """
+        with torch.no_grad():
+            prediction_results = {
+                'file_names': [],
+                'current_frame': [],
+                'intended_maneuver': [],
+                'current_maneuver': [],
+                'next_step_action': [],
+                'predicted_trajectory': [],
+            }
+            prediction_metrics = {
+                'intended_maneuver': None,
+                'current_maneuver': None,
+                'next_step_action': None,
+                'predicted_trajectory': None,
+            }        
+            device = model.device
+            def preprocess_data(examples):
+                # take a batch of texts
+                for each_key in examples:
+                    if isinstance(examples[each_key], type(torch.tensor(0))):
+                        examples[each_key] = examples[each_key].to(device)
+                return examples        
+            # TODO: add position/trajectory evaluations
+            if model_args.use_nsm:
+                print('Computing metrics for classifications')
+                intended_m_label = []
+                intended_m_prediction = []
+                current_m_weights_bias = []
+            if model_args.predict_pose:
+                action_bias_x = []
+                action_bias_y = []
 
-        trainer.log_metrics("predict", metrics)
-        trainer.save_metrics("predict", metrics)
+            # initialize intended maneuver metrics
+            for input in tqdm(predict_dataset.iter(training_args.per_device_eval_batch_size)):
+                input = preprocess_data(input)
+                output = model(**input)
+                intended_m_logits, current_m_logits, pos_x_logits, pos_y_logits, traj_pred = output.all_logits
+                file_name = input['file_name']
+                current_frame_idx = input['frame_index']
+                prediction_results['file_names'].append(file_name)
+                prediction_results['current_frame'].append(current_frame_idx)            
+                if model_args.use_nsm:
+                    intended_m_label.append(input['intended_maneuver_label'])  # tensor
+                    intended_m_prediction.append(torch.argmax(intended_m_logits, dim=-1))  # tensor
+                    current_c_confifence = torch.softmax(current_m_logits, dim=-1)
+                    current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))               
+                if model_args.predict_pose:
+                    pos_x = torch.argmax(pos_x_logits, dim=-1)
+                    pos_y = torch.argmax(pos_y_logits, dim=-1)
+                    action_label = input['action_label'].clone() + 100
+                    action_bias_x.append(abs(pos_x - action_label[:, 0]))
+                    action_bias_y.append(abs(pos_y - action_label[:, 1]))
 
-        if trainer.is_world_process_zero():
-            if training_args.predict_with_generate:
-                predictions = tokenizer.batch_decode(
-                    predict_results.predictions, skip_special_tokens=True, clean_up_tokenization_spaces=True
-                )
-                predictions = [pred.strip() for pred in predictions]
-                output_prediction_file = os.path.join(training_args.output_dir, "generated_predictions.txt")
-                with open(output_prediction_file, "w") as writer:
-                    writer.write("\n".join(predictions))
+            if model_args.use_nsm:
+                prediction_results['intended_maneuver'] = intended_m_prediction
+                prediction_results['current_maneuver'] = current_m_weights_bias
 
-    kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "NuPlanPlanning"}
+                intended_m_label = torch.stack(intended_m_label, -1).flatten()
+                intended_m_prediction = torch.stack(intended_m_prediction, -1).flatten()
+                print('Intended Maneuver Classification')
+                prediction_metrics['intended_maneuver'] = classification_report(intended_m_prediction.cpu().numpy(), intended_m_label.cpu().numpy())
+                print(prediction_metrics['intended_maneuver'])
+                current_m_weights_bias = torch.stack(current_m_weights_bias, -1).flatten()
+                print('Current Maneuver Classification')
+                prediction_metrics['current_maneuver'] = np.average(current_m_weights_bias.cpu().numpy())
+                print(f'{np.average(current_m_weights_bias.cpu().numpy())} over 12')
+            # action_bias_x = torch.stack(action_bias_x, 0).cpu().numpy()
+            # print('Pose x offset: ', np.average(action_bias_x))
+            # action_bias_y = torch.stack(action_bias_y, 0).cpu().numpy()
+            # print('Pose y offset: ', np.average(action_bias_y))
+
+            if training_args.output_dir is not None:
+                # save results
+                output_file_path = os.path.join(training_args.output_dir, 'generated_predictions.pickle')
+                with open(output_file_path, 'wb') as handle:
+                    pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
+        # metrics = predict_results.metrics
+        # max_predict_samples = (
+        #     data_args.max_predict_samples if data_args.max_predict_samples is not None else len(predict_dataset)
+        # )
+        # metrics["predict_samples"] = min(max_predict_samples, len(predict_dataset))
+
+        # trainer.log_metrics("predict", metrics)
+        # trainer.save_metrics("predict", metrics)
+
+        # if trainer.is_world_process_zero():
+        #     if training_args.predict_with_generate:
+        #         predictions = tokenizer.batch_decode(
+        #             predict_results.predictions, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        #         )
+        #         predictions = [pred.strip() for pred in predictions]
+        #         output_prediction_file = os.path.join(training_args.output_dir, "generated_predictions.txt")
+        #         with open(output_prediction_file, "w") as writer:
+        #             writer.write("\n".join(predictions))
+
+    kwargs = {"finetuned_from": model_args.model_pretrain_name_or_path, "tasks": "NuPlanPlanning"}
     
     # push to hub?
     if data_args.dataset_name is not None:
