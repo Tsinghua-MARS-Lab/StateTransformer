@@ -59,6 +59,18 @@ class ModelArguments:
             )
         },
     )
+    use_nsm: bool = field(
+        default=True,
+        metadata={"help" : ("whether use nsm label for prediction")}
+    )
+    predict_pose: bool = field(
+        default=True,
+        metadata={"help":("whether add loss item on single pose prediction")}
+    )
+    predict_trajectory: bool = field(
+        default=True,
+        metadata={"help":("whether add loss item on trajetory prediction")}
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -110,7 +122,8 @@ def main():
 
     # Set up pytorch backend
     if training_args.deepspeed is None:
-        torch.distributed.init_process_group(backend='nccl')
+        pass
+        # torch.distributed.init_process_group(backend='nccl')
 
     # Setup training args for torch 2.0
     if int(torch.__version__[0]) > 1:
@@ -181,7 +194,11 @@ def main():
     if training_args.do_train:
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
-            os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / args.nproc_per_node))        
+            try:
+                nproc_per_node = args.nproc_per_node
+            except:
+                nproc_per_node = 1
+            os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / nproc_per_node))        
         train_dataset = nuplan_dataset["train"]
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
@@ -195,7 +212,7 @@ def main():
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
     if training_args.do_predict:
-        max_target_length = data_args.val_max_target_length
+        # max_target_length = data_args.val_max_target_length
         predict_dataset = nuplan_dataset["test"]
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
@@ -234,8 +251,10 @@ def main():
 
     if training_args.do_predict:
         logger.info("*** Predict ***")
-        raise NotImplemented
+      
         predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
+        print(predict_results)
+        raise NotImplemented
         metrics = predict_results.metrics
         max_predict_samples = (
             data_args.max_predict_samples if data_args.max_predict_samples is not None else len(predict_dataset)
