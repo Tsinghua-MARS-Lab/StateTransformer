@@ -59,17 +59,27 @@ class ModelArguments:
             )
         },
     )
+    predict_result_saving_dir: str = field(
+        default=False,
+        metadata={"help": "The target folder to save prediction results."},
+    )
     use_nsm: bool = field(
         default=True,
-        metadata={"help" : ("whether use nsm label for prediction")}
     )
     predict_pose: bool = field(
         default=True,
-        metadata={"help":("whether add loss item on single pose prediction")}
     )
     predict_trajectory: bool = field(
         default=True,
-        metadata={"help":("whether add loss item on trajetory prediction")}
+    )
+    per_instance_encoding: bool = field(
+        default=True,
+    )
+    time_to_predict: int = field(
+        default=8,
+    )
+    frequency_for_prediction: int = field(
+        default=20
     )
 
 @dataclass
@@ -121,9 +131,8 @@ def main():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     # Set up pytorch backend
-    if training_args.deepspeed is None:
-        pass
-        # torch.distributed.init_process_group(backend='nccl')
+    # if training_args.deepspeed is None:
+    #     torch.distributed.init_process_group(backend='nccl')
 
     # Setup training args for torch 2.0
     if int(torch.__version__[0]) > 1:
@@ -187,7 +196,7 @@ def main():
     # Load a model's pretrained weights from a path or from hugging face's model base
     if model_args.model_name == 'TransfoXLModelNuPlan':
         # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
-        model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path)
+        model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         model.config.pad_token_id = 0
         model.config.eos_token_id = 0        
 
@@ -250,8 +259,9 @@ def main():
         trainer.save_metrics("eval", metrics)
 
     if training_args.do_predict:
+        # Currently only supports single GPU predict outputs
         logger.info("*** Predict ***")
-      
+        raise NotImplemented
         predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         print(predict_results)
         raise NotImplemented
