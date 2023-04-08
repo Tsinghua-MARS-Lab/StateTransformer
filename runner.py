@@ -300,7 +300,12 @@ def main():
                 action_bias_y = []
 
             # initialize intended maneuver metrics
+            per_batch_size = training_args.per_device_eval_batch_size
             for input in tqdm(predict_dataset.iter(training_args.per_device_eval_batch_size)):
+                if per_batch_size is None:
+                    per_batch_size = len(input['intended_maneuver_label'])
+                elif len(input['intended_maneuver_label']) != per_batch_size:
+                    continue
                 input = preprocess_data(input)
                 output = model(**input)
                 intended_m_logits, current_m_logits, pos_x_logits, pos_y_logits, traj_pred = output.all_logits
