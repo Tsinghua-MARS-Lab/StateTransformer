@@ -302,6 +302,8 @@ def main():
             if model_args.predict_pose:
                 action_bias_x = []
                 action_bias_y = []
+            if model_args.predict_trajectory:
+                pass
 
             # initialize intended maneuver metrics
             for input in tqdm(predict_dataset.iter(training_args.per_device_eval_batch_size)):
