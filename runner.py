@@ -42,9 +42,11 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
+        default="TransfoXLModelNuPlan",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
+        default="transfo-xl-wt103",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(
@@ -193,7 +195,7 @@ def main():
         nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
         nuplan_dataset.set_format(type='torch')
         print('Dataset Loaded: ', nuplan_dataset)
-        nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.2, shuffle=True)
+        nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 

@@ -176,13 +176,13 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
             n_embed = action_embeds.shape[-1]
             input_embeds = torch.zeros(
-                (batch_size, context_length * 2, n_embed),
+                (batch_size, context_length * 2 - 1, n_embed),
                 dtype=torch.float32,
                 device=device
             )
             input_embeds[:, ::2, :] = state_embeds
             input_embeds[:, 1::2, :] = action_embeds
-            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length - 2 * context_length, n_embed), device=device)], dim=1)
+            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length - 2 * context_length + 1, n_embed), device=device)], dim=1)
         else:
             input_embeds = state_embeds
         
