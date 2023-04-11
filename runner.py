@@ -42,9 +42,11 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
+        default="TransfoXLModelNuPlan",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
+        default="transfo-xl-wt103",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(
@@ -193,7 +195,7 @@ def main():
         nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
         nuplan_dataset.set_format(type='torch')
         print('Dataset Loaded: ', nuplan_dataset)
-        nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.2, shuffle=True)
+        nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
@@ -207,7 +209,11 @@ def main():
     if training_args.do_train:
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
-            os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / args.nproc_per_node))        
+            try:
+                nproc_per_node = args.nproc_per_node
+            except:
+                nproc_per_node = 1
+            os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / nproc_per_node))        
         train_dataset = nuplan_dataset["train"]
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
@@ -298,6 +304,8 @@ def main():
             if model_args.predict_pose:
                 action_bias_x = []
                 action_bias_y = []
+            if model_args.predict_trajectory:
+                pass
 
             # initialize intended maneuver metrics
             per_batch_size = training_args.per_device_eval_batch_size

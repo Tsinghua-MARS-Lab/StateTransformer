@@ -21,7 +21,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # self.goal_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
         # self.map_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
         # self.agents_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
-        # TODO: add followning config into config class
         model_args = kwargs['model_args']
         self.use_nsm = model_args.use_nsm
         self.predict_pose = model_args.predict_pose
@@ -108,6 +107,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
+
         if not self.use_nsm:
             intended_maneuver_vector = None
             current_maneuver_vector = None
@@ -176,25 +176,24 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
             n_embed = action_embeds.shape[-1]
             input_embeds = torch.zeros(
-                (batch_size, context_length * 2, n_embed),
+                (batch_size, context_length * 2 - 1, n_embed),
                 dtype=torch.float32,
                 device=device
             )
             input_embeds[:, ::2, :] = state_embeds
             input_embeds[:, 1::2, :] = action_embeds
-            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length - 2 * context_length, n_embed), device=device)], dim=1)
+            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length - 2 * context_length + 1, n_embed), device=device)], dim=1)
         else:
             input_embeds = state_embeds
         
         
-        # print(input_embeds.shape)
         # if mems is not None:
         #     print(mems.shape)
         # if head_mask is not None: 
         #     print(head_mask.shape)
         # if output_attentions is not None:
         #     print(output_attentions.shape)
-        # i                     f output_hidden_states is not None:
+        # if output_hidden_states is not None:
         #     print(output_hidden_states.shape)
         transformer_outputs = self.transformer(
             None,
@@ -296,10 +295,11 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                 loss_fct = MSELoss(reduction="mean")
                 loss += loss_fct(traj_pred, trajectory_label.to(device))
 
+       
         pooled_logits = [intended_m_logits, current_m_logits,
-                         pos_x_logits,
-                         pos_y_logits,
-                         traj_pred]
+                        pos_x_logits,
+                        pos_y_logits,
+                        traj_pred]
         # pooled_logits = torch.cat((intended_m_logits.unsqueeze(0),
         #                            current_m_logits.unsqueeze(0),
         #                            pos_x_logits.unsqueeze(0),
@@ -345,7 +345,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # return format (batchsize, history_frame_number, channels_per_frame, h, w)
         return result
 
-if __name__ == '__main__':
+if  __name__ == '__main__':
     import datasets
     model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103')
     model.config.pad_token_id = 0
