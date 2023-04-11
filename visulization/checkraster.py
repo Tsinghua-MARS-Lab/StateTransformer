@@ -21,33 +21,55 @@ def visulize_raster(savepath, name, raster):
         for w in range(historic_channel.shape[0]):
             for h in range(historic_channel.shape[1]):
                 if historic_channel[w, h] > 0:
-                    historic_channel[w, h] = 255        
+                    historic_channel[w, h] = 1        
         historic_channel = 255 - 255*historic_channel.astype(np.uint8)
-        cv2.imwrite(os.path.join(savepath, f"{name}_agenttype{i+1}.png"), channel)          
+        cv2.imwrite(os.path.join(savepath, f"{name}_agenttype{i}.png"), historic_channel)          
         
-def visulize_trajectory(savepath, trajectory):
-    if isinstance(trajectory, torch.Tensor):
-        trajectory = trajectory.numpy()
-    x = trajectory[::2, 0]
-    y = trajectory[::2, 1]
-    plt.scatter(x, y)
-    plt.savefig(os.path.join(savepath, f"trajectory.png"), dpi=300, bbox_inches='tight')
-    plt.close()
-
-def visulize_context_trajectory(savepath, context_actions):
+def visulize_trajectory(savepath, future_trajectory, context_actions, scale=0.77):
+    if isinstance(future_trajectory, torch.Tensor):
+        future_trajectory = future_trajectory.numpy()
     if isinstance(context_actions, torch.Tensor):
         context_actions = context_actions.numpy()
-    startpose = np.zeros(2)
+    raster = 255 * np.ones((224, 224)).astype(np.uint8)
+    future_trajectory *= scale
+    future_trajectory = future_trajectory.astype(np.float32) + 112.0
+    future_keypoints = list()
+    for traj in future_trajectory:
+        future_keypoints.append(cv2.KeyPoint(x=traj[0], y=traj[1], _size=2))
+    future_raster = cv2.drawKeypoints(raster, future_keypoints, 0, [0, 0, 0], flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    cv2.imwrite(os.path.join(savepath, "future_trajectory.png"), future_raster)
+
+    startpose = np.array([112, 112], dtype=np.float32) - context_actions[0] * scale
     context_pose = list()
-    for i in range(context_actions.shape[0]):
+    for i in range(1, context_actions.shape[0]):
         startpose += context_actions[i]
-        context_pose.append(startpose.copy())
-    context_pose = np.array(context_pose)
-    x = context_pose[:,0]
-    y = context_pose[:, 1]
-    plt.scatter(x, y)
-    plt.savefig(os.path.join(savepath, f"context_trajectory.png"), dpi=300, bbox_inches='tight')
-    plt.close()
+        context_pose.append(startpose.copy() * scale)
+    past_keypoints = list()
+    for pose in context_pose:
+        past_keypoints.append(cv2.KeyPoint(x=pose[0], y=pose[1], _size=2))
+    past_raster = cv2.drawKeypoints(raster, past_keypoints, 0, [0, 0, 0], flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    cv2.imwrite(os.path.join(savepath, "past_trajectory.png"), past_raster)
+
+    keypoints = list()
+    keypoints.extend(future_keypoints)
+    keypoints.extend(past_keypoints)
+    total_raster = cv2.drawKeypoints(raster, keypoints, 0, [0, 0, 0], flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    cv2.imwrite(os.path.join(savepath, "trajectory.png"), total_raster)
+
+# def visulize_context_trajectory(savepath, context_actions, scale=0.77):
+#     if isinstance(context_actions, torch.Tensor):
+#         context_actions = context_actions.numpy()
+#     raster = np.zeros((224, 224)).astype(np.uint8)
+#     startpose = np.array([112, 112], dtype=np.float32) + context_actions[0] * scale
+#     context_pose = list()
+#     for i in range(1, context_actions.shape[0]):
+#         startpose += context_actions[i]
+#         context_pose.append(startpose.copy() * scale)
+#     keypoints = list()
+#     for pose in context_pose:
+#         keypoints.append(cv2.KeyPoint(x=pose[0], y=pose[1], _size=2))
+#     raster = cv2.drawKeypoints(raster, keypoints, 0, [255, 255, 255], flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+#     cv2.imwrite(os.path.join(savepath, "context_trajectory.png"), raster)  
     
 def main(args):
     if not os.path.exists(args.path_to_save):
@@ -61,7 +83,7 @@ def main(args):
     visulize_raster(args.path_to_save, "high_res_channel", high_res_raster)
     visulize_raster(args.path_to_save, "low_res_channel", low_res_raster)
     visulize_trajectory(args.path_to_save, trajectory)
-    visulize_context_trajectory(args.path_to_save, context_actions)
+    # visulize_context_trajectory(args.path_to_save, context_actions)
     print("done!")
 
 
