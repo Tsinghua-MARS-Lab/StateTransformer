@@ -14,7 +14,8 @@ from nuplan.planning.simulation.trajectory.interpolated_trajectory import  Inter
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from nuplan.common.maps.maps_datatypes import RasterLayer, RasterMap, SemanticMapLayer, StopLineType, VectorLayer
-
+from nuplan.common.actor_state.state_representation import Point2D
+import interactive_sim.envs.util as util
 from transformers import (HfArgumentParser)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.configuration_utils import PretrainedConfig
@@ -137,6 +138,7 @@ class ControlTFPlanner(AbstractPlanner):
         # model initialization and configuration 
         parser = HfArgumentParser((ModelArguments))
         model_args = parser.parse_args_into_dataclasses()[0]
+        model_args.use_nsm = False
         self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
                                                           model_args=model_args)
         self.load_state_dict()
@@ -179,10 +181,11 @@ class ControlTFPlanner(AbstractPlanner):
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(ego_trajectory, agents, statics, road_dic, ego_shape)
-        output = self.model.predict(
-
-        )
-
+        output = self.model(context_actions=torch.tensor(context_action).unsqueeze(0), \
+                            high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
+                            low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
+        return output 
+    
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=500):
         """
         the first dimension is the sequence length, each timestep include n-items.
@@ -330,96 +333,95 @@ class ControlTFPlanner(AbstractPlanner):
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
     
 def get_road_dict(map_api, ego_pose_center):
-        road_dic = {}
-        traffic_dic = {}
-        all_map_obj = map_api.get_available_map_objects()
+    road_dic = {}
+    traffic_dic = {}
+    all_map_obj = map_api.get_available_map_objects()
 
-        # Collect lane information, following nuplan.planning.training.preprocessing.feature_builders.vector_builder_utils.get_neighbor_vector_map
+    # Collect lane information, following nuplan.planning.training.preprocessing.feature_builders.vector_builder_utils.get_neighbor_vector_map
 
-        # currently NuPlan only supports these map obj classes
-        selected_objs = [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]
-        selected_objs += [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR]
-        selected_objs += [SemanticMapLayer.INTERSECTION, SemanticMapLayer.STOP_LINE, SemanticMapLayer.CROSSWALK]
-        selected_objs += [SemanticMapLayer.WALKWAYS, SemanticMapLayer.CARPARK_AREA]
+    # currently NuPlan only supports these map obj classes
+    selected_objs = [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]
+    selected_objs += [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR]
+    selected_objs += [SemanticMapLayer.INTERSECTION, SemanticMapLayer.STOP_LINE, SemanticMapLayer.CROSSWALK]
+    selected_objs += [SemanticMapLayer.WALKWAYS, SemanticMapLayer.CARPARK_AREA]
 
-        all_selected_map_instances = map_api.get_proximal_map_objects(ego_pose_center, 999999,
-                                                                      selected_objs)
-                                                                      
-                                                                      
-        all_selected_objs_to_render = []
-        
-        for layer_name in list(all_selected_map_instances.keys()):
-            all_selected_obj = all_selected_map_instances[layer_name]
-            map_layer_type = layer_name.value
-            for selected_obj in all_selected_obj:
-                map_obj_id = selected_obj.id
-                if map_obj_id in road_dic:
+    all_selected_map_instances = map_api.get_proximal_map_objects(ego_pose_center, 999999,
+                                                                    selected_objs)
+                                                                    
+                                                                    
+    all_selected_objs_to_render = []
+    
+    for layer_name in list(all_selected_map_instances.keys()):
+        all_selected_obj = all_selected_map_instances[layer_name]
+        map_layer_type = layer_name.value
+        for selected_obj in all_selected_obj:
+            map_obj_id = selected_obj.id
+            if map_obj_id in road_dic:
+                continue
+            speed_limit = 80
+            has_traffic_light = -1
+            incoming = []
+            outgoing = []
+            upper_level = []
+            lower_level = []
+            connector = 0
+            if layer_name in [SemanticMapLayer.STOP_LINE]:
+                # PED_CROSSING = 0
+                # STOP_SIGN = 1
+                # TRAFFIC_LIGHT = 2
+                # TURN_STOP = 3
+                # YIELD = 4
+                if selected_obj.stop_line_type not in [0, 1]:
                     continue
-                speed_limit = 80
-                has_traffic_light = -1
-                incoming = []
-                outgoing = []
-                upper_level = []
-                lower_level = []
-                connector = 0
-                if layer_name in [SemanticMapLayer.STOP_LINE]:
-                    # PED_CROSSING = 0
-                    # STOP_SIGN = 1
-                    # TRAFFIC_LIGHT = 2
-                    # TURN_STOP = 3
-                    # YIELD = 4
-                    if selected_obj.stop_line_type not in [0, 1]:
-                        continue
-                elif layer_name in [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]:
-                    line_x, line_y = selected_obj.baseline_path.linestring.coords.xy
-                    if selected_obj.speed_limit_mps is not None:
-                        speed_limit = selected_obj.speed_limit_mps * 3600 / 1609.34  # mps(meters per second) to mph(miles per hour)
-                    if selected_obj.has_traffic_lights() is not None:
-                        has_traffic_light = 1 if selected_obj.has_traffic_lights() else 0
-                    incoming = [int(obj.id) for obj in selected_obj.incoming_edges]
-                    outgoing = [int(obj.id) for obj in selected_obj.outgoing_edges]
-                    upper_level = [int(selected_obj.get_roadblock_id())]
-                    connector = 1 if layer_name == SemanticMapLayer.LANE_CONNECTOR else 0
-                elif layer_name in [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR]:
-                    line_x, line_y = selected_obj.polygon.exterior.coords.xy
-                    incoming = [int(obj.id) for obj in selected_obj.incoming_edges]
-                    outgoing = [int(obj.id) for obj in selected_obj.outgoing_edges]
-                    lower_level = [int(obj.id) for obj in selected_obj.interior_edges]
-                    connector = 1 if layer_name == SemanticMapLayer.ROADBLOCK_CONNECTOR else 0
-                else:
-                    line_x, line_y = selected_obj.polygon.exterior.coords.xy
+            elif layer_name in [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]:
+                line_x, line_y = selected_obj.baseline_path.linestring.coords.xy
+                if selected_obj.speed_limit_mps is not None:
+                    speed_limit = selected_obj.speed_limit_mps * 3600 / 1609.34  # mps(meters per second) to mph(miles per hour)
+                if selected_obj.has_traffic_lights() is not None:
+                    has_traffic_light = 1 if selected_obj.has_traffic_lights() else 0
+                incoming = [int(obj.id) for obj in selected_obj.incoming_edges]
+                outgoing = [int(obj.id) for obj in selected_obj.outgoing_edges]
+                upper_level = [int(selected_obj.get_roadblock_id())]
+                connector = 1 if layer_name == SemanticMapLayer.LANE_CONNECTOR else 0
+            elif layer_name in [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR]:
+                line_x, line_y = selected_obj.polygon.exterior.coords.xy
+                incoming = [int(obj.id) for obj in selected_obj.incoming_edges]
+                outgoing = [int(obj.id) for obj in selected_obj.outgoing_edges]
+                lower_level = [int(obj.id) for obj in selected_obj.interior_edges]
+                connector = 1 if layer_name == SemanticMapLayer.ROADBLOCK_CONNECTOR else 0
+            else:
+                line_x, line_y = selected_obj.polygon.exterior.coords.xy
 
-                num_of_pts = len(line_x)
-                
-                
-                road_xy_np = np.ones([num_of_pts, 3]) * -1
-                road_dir_np = np.ones([num_of_pts, 1]) * -1
-                
-                
-                for i in range(num_of_pts):
-                    road_xy_np[i, 0] = line_x[i]
-                    road_xy_np[i, 1] = line_y[i]
-                    if i != 0:
-                        road_dir_np[i, 0] = util.get_angle_of_a_line(pt1=[road_xy_np[i-1, 0], road_xy_np[i-1, 1]],
-                                                                     pt2=[road_xy_np[i, 0], road_xy_np[i, 1]])
-                        
-                new_dic = {
-                    'dir': road_dir_np, 'type': int(map_layer_type), 'turning': connector,
-                    'next_lanes': outgoing, 'previous_lanes': incoming,
-                    'outbound': 0, 'marking': 0,
-                    'vector_dir': road_dir_np, 'xyz': road_xy_np[:, :3],
-                    'speed_limit': speed_limit,  # in mph,
-                    'upper_level': upper_level, 'lower_level': lower_level,
-                    'render': map_obj_id in all_selected_objs_to_render,
-                }
-                road_dic[int(map_obj_id)] = new_dic
+            num_of_pts = len(line_x)
+            
+            
+            road_xy_np = np.ones([num_of_pts, 3]) * -1
+            road_dir_np = np.ones([num_of_pts, 1]) * -1
+            
+            
+            for i in range(num_of_pts):
+                road_xy_np[i, 0] = line_x[i]
+                road_xy_np[i, 1] = line_y[i]
+                if i != 0:
+                    road_dir_np[i, 0] = util.get_angle_of_a_line(pt1=[road_xy_np[i-1, 0], road_xy_np[i-1, 1]],
+                                                                    pt2=[road_xy_np[i, 0], road_xy_np[i, 1]])
+                    
+            new_dic = {
+                'dir': road_dir_np, 'type': int(map_layer_type), 'turning': connector,
+                'next_lanes': outgoing, 'previous_lanes': incoming,
+                'outbound': 0, 'marking': 0,
+                'vector_dir': road_dir_np, 'xyz': road_xy_np[:, :3],
+                'speed_limit': speed_limit,  # in mph,
+                'upper_level': upper_level, 'lower_level': lower_level,
+                'render': map_obj_id in all_selected_objs_to_render,
+            }
+            road_dic[int(map_obj_id)] = new_dic
 
-        # print("Road loaded with ", len(list(road_dic.keys())), " road elements.")
-        return road_dic
+    # print("Road loaded with ", len(list(road_dic.keys())), " road elements.")
+    return road_dic
 
 if __name__ == "__main__":
-    from nuplan.common.actor_state.state_representation import Point2D
-    import interactive_sim.envs.util as util
+
     with open("history.pkl", "rb") as f:
         input = pickle.load(f)
     
