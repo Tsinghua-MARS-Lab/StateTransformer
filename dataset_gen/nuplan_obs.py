@@ -2,6 +2,7 @@ import numpy as np
 import shapely
 import cv2
 import math
+from interactive_sim.envs.util import rotate, generate_contour_pts
 
 def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number, total_frames, nsm_result=None):
     """
@@ -60,8 +61,8 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     trajectory_label = data_dic['agent']['ego']['pose'][
                        scenario_frame_number - 1:scenario_frame_number + future_frames_number + 1, :].copy()
     trajectory_label -= ego_pose
-    trajectory_label[:, 0] = trajectory_label[:, 0] * cos_ - trajectory_label[:, 1] * sin_
-    trajectory_label[:, 1] = trajectory_label[:, 0] * sin_ + trajectory_label[:, 1] * cos_
+    trajectory_label[:, 0] = trajectory_label[:, 0].copy() * cos_ - trajectory_label[:, 1].copy() * sin_
+    trajectory_label[:, 1] = trajectory_label[:, 0].copy() * sin_ + trajectory_label[:, 1].copy() * cos_
     result_to_return['trajectory_label'] = trajectory_label[2:, :]
     action_label_scale = observation_kwargs["action_label_scale"]
     result_to_return['action_label'] = np.array((trajectory_label[1, :2] - trajectory_label[0, :2])*action_label_scale, dtype=np.int32)
@@ -94,7 +95,7 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     goal_sample_frame = min(total_frames - 1, scenario_frame_number + 20 * 20)
     goal_point = data_dic['agent']['ego']['pose'][goal_sample_frame, :].copy()
     shape = data_dic['agent']['ego']['shape'][scenario_frame_number, :]
-    goal_point -= ego_pose
+    goal_point -= ego_pose 
     rotated_goal_pose = [goal_point[0] * cos_ - goal_point[1] * sin_,
                          goal_point[0] * sin_ + goal_point[1] * cos_,
                          0, goal_point[3]]
@@ -102,8 +103,10 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
                                   (shape[0], shape[1]), rotated_goal_pose[3]))
     goal_contour = np.int0(goal_contour)
     goal_contour_high_res = int(high_res_raster_scale) * goal_contour
+    goal_contour_high_res += observation_kwargs["high_res_raster_shape"][0]//2
     cv2.drawContours(rasters_high_res_channels[0], [goal_contour_high_res], -1, (255, 255, 255), -1)
-    goal_contour_low_res = int(low_res_raster_scale) * goal_contour
+    goal_contour_low_res = (low_res_raster_scale * goal_contour).astype(np.int64)
+    goal_contour_low_res += observation_kwargs["low_res_raster_shape"][0]//2
     cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
 
     # 'map_raster': (n, w, h),  # n is the number of road types and traffic lights types
@@ -121,12 +124,15 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         simplified_x, simplified_y = simplified_xyz_line.xy
         simplified_xyz = np.ones((len(simplified_x), 2)) * -1
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0] * cos_ - simplified_xyz[:, 1] * sin_, simplified_xyz[:, 0] * sin_ + simplified_xyz[:, 1] * cos_
-
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:, 1].copy() * sin_,\
+                                                     simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+        simplified_xyz[:, 1] *= -1
         high_res_road = simplified_xyz * high_res_raster_scale
         low_res_road = simplified_xyz * low_res_raster_scale
         high_res_road = high_res_road.astype('int32')
         low_res_road = low_res_road.astype('int32')
+        high_res_road += observation_kwargs["high_res_raster_shape"][0]//2
+        low_res_road += observation_kwargs["low_res_raster_shape"][0]//2
 
         for j in range(simplified_xyz.shape[0] - 1):
             cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]), tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
@@ -135,21 +141,33 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     for i, key in enumerate(data_dic['agent']):
         for j, sample_frame in enumerate(sample_frames):
             pose = data_dic['agent'][key]['pose'][sample_frame, :].copy()
-            pose -= ego_pose
+            if pose[0] < 0 and pose[1] < 0: 
+                continue
+            pose[:3] -= ego_pose[:3]
+             # TODO: heading : ego - pose work on file 0, nothing else to change
+            pose[3] = ego_pose[3] - pose[3]
             if abs(pose[0]) > max_dis or abs(pose[1]) > max_dis:
                 continue
             agent_type = int(data_dic['agent'][key]['type'])
             rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                             pose[0] * sin_ + pose[1] * cos_]
             shape = data_dic['agent'][key]['shape'][scenario_frame_number, :]
-            rect_pts = cv2.boxPoints(((rotated_pose[0], rotated_pose[1]),
-                                      (shape[0], shape[1]), pose[3]))
-            rect_pts = np.int0(rect_pts)
+            # rect_pts = cv2.boxPoints(((rotated_pose[0], rotated_pose[1]),
+                                    #   (shape[1], shape[0]), np.rad2deg(pose[3])))
+            rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1], direction=pose[3])
+            rect_pts = np.array(rect_pts, dtype=np.int32)
+
             # draw on high resolution
             rect_pts_high_res = int(high_res_raster_scale) * rect_pts
+            rect_pts_high_res += observation_kwargs["high_res_raster_shape"][0]//2
+            # TODO: 224 - x
+            # rect_pts_high_res[:, 0] = 224 - rect_pts_high_res[:, 0] 
             cv2.drawContours(rasters_high_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j], [rect_pts_high_res], -1, (255, 255, 255), -1)
             # draw on low resolution
-            rect_pts_low_res = int(low_res_raster_scale) * rect_pts
+            rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64)
+            rect_pts_low_res += observation_kwargs["low_res_raster_shape"][0]//2
+            # TODO: 224 - x
+            # rect_pts_high_res[:, 0] = 224 - rect_pts_high_res[:, 0]
             cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j], [rect_pts_low_res], -1, (255, 255, 255), -1)
 
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
@@ -159,9 +177,12 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     result_to_return['low_res_raster'] = np.array(rasters_low_res, dtype=bool)
     # context action computation
     context_actions = list()
-    ego_poses = data_dic["agent"]["ego"]["pose"]
+    ego_poses = data_dic["agent"]["ego"]["pose"] - ego_pose
+    rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
+                              ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_]).transpose((1, 0))
+    
     for i in range(len(sample_frames) - 1):
-        action = ego_poses[sample_frames[i + 1]] - ego_poses[sample_frames[i]]
+        action = rotated_poses[sample_frames[i+1]] - rotated_poses[sample_frames[i]]
         context_actions.append(action)
     result_to_return["context_actions"] = np.array(context_actions, dtype=np.float32)
         

@@ -152,11 +152,11 @@ def main(args):
                             road_dic_path=road_path,
                             running_mode=running_mode)
     # data format debug
-    # loaded_dic = data_loader.get_next_file(specify_file_index=6)
-    # with open("data_dic.pkl", "wb") as f:
-    #     pickle.dump(loaded_dic, f)
+    # loaded_dic = data_loader.get_next_file(specify_file_index=3)
+    # # with open("data_dic.pkl", "wb") as f:
+    # #     pickle.dump(loaded_dic, f)
     with open("data_dic.pkl", "rb") as f:
-        loaded_dic = pickle.load(f)
+        loaded_dic = pickle.load(f) 
     
     total_frames = len(loaded_dic['lidar_pc_tokens'])
     observation_dic = obs.get_observation_for_nsm(
