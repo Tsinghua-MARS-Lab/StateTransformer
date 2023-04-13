@@ -270,7 +270,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         if self.predict_current_maneuver and current_maneuver_label is not None:
             loss_fct = MSELoss()
             current_c_confifence = torch.softmax(current_m_logits, dim=-1)
-            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_label.squeeze()) * 10
+            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_label.squeeze()) * 10000
             if self.not_same_scale != 1:
                 loss += loss_to_add * torch.mean(scaler)
             else:

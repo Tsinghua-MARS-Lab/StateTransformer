@@ -28,6 +28,7 @@ from transformers import (
     set_seed,
 )
 from models.model import TransfoXLModelNuPlan
+from transformers import TransfoXLConfig
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
 from transformers.utils.versions import require_version
@@ -195,6 +196,12 @@ def main():
     # See xxx.py to process and save a dataset from the NuPlan Dataset
     if os.path.isdir(data_args.saved_dataset_folder):
         nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
+        # Inspect each sample if you need
+        # for each_sample in nuplan_dataset:
+        #     print(each_sample['intended_maneuver_vector'])
+        #     print(each_sample['intended_maneuver_label'])
+        #     print(each_sample['current_maneuver_vector'])
+        #     print(each_sample['current_maneuver_label'])
         nuplan_dataset.set_format(type='torch')
         print('Dataset Loaded: ', nuplan_dataset)
         nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True)
@@ -206,7 +213,21 @@ def main():
         # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
         model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         model.config.pad_token_id = 0
-        model.config.eos_token_id = 0        
+        model.config.eos_token_id = 0
+    elif model_args.model_name == 'TransfoXLModelNuPlan_Config':
+        config_p = TransfoXLConfig()
+        config_p.n_layer = 4
+        config_p.d_embed = 256
+        config_p.d_model = 256
+        config_p.d_inner = 1024
+        # config_p.n_layer = 8
+        # config_p.d_embed = 512
+        # config_p.d_model = 512
+        # config_p.d_inner = 2048
+        model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+        # model_p.save_pretrained( '../saved_model/transformerxlSml')
+        model.config.pad_token_id = 0
+        model.config.eos_token_id = 0
 
     if training_args.do_train:
         import multiprocessing
