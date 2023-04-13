@@ -25,9 +25,13 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.use_nsm = model_args.use_nsm
         self.predict_pose = model_args.predict_pose
         self.predict_trajectory = model_args.predict_trajectory
+        self.predict_intended_maneuver = model_args.predict_intended_maneuver
+        self.predict_current_maneuver = model_args.predict_current_maneuver
+        assert self.predict_pose or self.predict_trajectory or self.predict_intended_maneuver or self.predict_current_maneuver, 'Predict at least one target! Pass True in Model Args'
         self.per_instance = model_args.per_instance_encoding
         self.time_to_predict = model_args.time_to_predict
         self.frequency_for_prediction = model_args.frequency_for_prediction
+        self.not_same_scale = model_args.scale_on_not_same_loss
         
         if self.per_instance:
             in_channels = 1
@@ -37,7 +41,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             if self.use_nsm:
                 n_embed = config.d_embed // 4
             else:
-                n_embed = config.d_embed // 2 
+                n_embed = config.d_embed // 2
+
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
@@ -48,18 +53,15 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.pos_y_decoder = None
         self.traj_decoder = None
 
-        try:        
-            if self.predict_pose:
-                self.pos_x_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=200)  # from -100 to 100
-                self.pos_y_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=200)  # from -100 to 100
-            if self.predict_trajectory:    
-                self.traj_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=4)
-        
-        except:
-            pass
-        
-        self.intended_m_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=12)
-        self.current_m_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=12)
+        if self.predict_pose:
+            self.pos_x_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=200)  # from -100 to 100
+            self.pos_y_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=200)  # from -100 to 100
+        if self.predict_trajectory:
+            self.traj_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=4)
+        if self.predict_intended_maneuver:
+            self.intended_m_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=12)
+        if self.predict_current_maneuver:
+            self.current_m_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=12)
         # end of added
         # Initialize weights and apply final processing
         self.post_init()
@@ -221,13 +223,12 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         #             f"{self.__class__.__name__} will not detect padding tokens in `inputs_embeds`. Results may be "
         #             "unexpected if using padding tokens in conjunction with `inputs_embeds.`"
         #         )
-        if intended_maneuver_vector is not None and current_maneuver_vector is not None:
+        intended_m_logits = None
+        current_m_logits = None
+        if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             intended_m_logits = self.intended_m_decoder(transformer_outputs_hidden_state[:, 0, :])
+        if self.predict_current_maneuver and current_maneuver_vector is not None:
             current_m_logits = self.current_m_decoder(transformer_outputs_hidden_state[:, 1, :])
-        else:
-            intended_m_logits = None
-            current_m_logits = None
-
         if self.pos_x_decoder is not None:
             pos_x_logits = self.pos_x_decoder(transformer_outputs_hidden_state[:, 2, :])
         else:
@@ -253,23 +254,27 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         self.config_problem_type = 'NuPlan_NSM_SingleStep_Planning'
-        if intended_maneuver_label is not None:
+        if self.not_same_scale != 1:
+            scaler = torch.ones(intended_maneuver_label.shape, dtype=torch.float32, device=device) * self.not_same_scale
+            ones = torch.ones(intended_maneuver_label.shape, dtype=torch.float32, device=device)
+            scaler[intended_maneuver_label==intended_maneuver_vector] = ones[intended_maneuver_label==intended_maneuver_vector]
+
+        if self.predict_intended_maneuver and intended_maneuver_label is not None:
             loss_fct = CrossEntropyLoss()
-            loss += loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_label.view(-1).long())
-            # print('test 1193: ', loss, intended_m_logits, intended_maneuver_label, intended_maneuver_label.dtype)    # 2.8
-        else:
-            pass
-            # print('WARNING: intended_maneuver_label is None')
-        if current_maneuver_label is not None:
+            loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_label.view(-1).long())
+            if self.not_same_scale != 1:
+                loss += loss_to_add * torch.mean(scaler)
+            else:
+                loss += loss_to_add
+
+        if self.predict_current_maneuver and current_maneuver_label is not None:
             loss_fct = MSELoss()
             current_c_confifence = torch.softmax(current_m_logits, dim=-1)
-            loss += loss_fct(current_c_confifence.squeeze(), current_maneuver_label.squeeze())
-
-            # print('test 1200: ', loss, current_m_logits, current_maneuver_label)    # 3.3
-        else:
-            pass
-            # print('WARNING: current_maneuver_label is None')
-        
+            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_label.squeeze()) * 10000
+            if self.not_same_scale != 1:
+                loss += loss_to_add * torch.mean(scaler)
+            else:
+                loss += loss_to_add
 
         if action_label is not None:
             if self.pos_x_decoder is not None:
@@ -318,7 +323,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         return TransfoXLNuPlanNSMOutput(
             loss=loss,
-            logits=intended_m_logits.cpu() if intended_m_logits is not None else None,
+            logits=current_m_logits.cpu() if current_m_logits is not None else None,
             mems=transformer_outputs.mems,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
