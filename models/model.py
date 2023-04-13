@@ -169,8 +169,11 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                 state_embeds = torch.cat((high_res_embed,
                                         low_res_embed), dim=-1).to(torch.float32)
         
-        trajectory_label = trajectory_label[:, 1::2, :] # downsample the 20hz trajectory to 10hz
-        pred_length = trajectory_label.shape[1]
+        if trajectory_label is not None:
+            trajectory_label = trajectory_label[:, 1::2, :] # downsample the 20hz trajectory to 10hz
+            pred_length = trajectory_label.shape[1]
+        else:
+            pred_length = 80
         if not self.per_instance:
             action_embeds = self.action_m_embed(context_actions)
             # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
