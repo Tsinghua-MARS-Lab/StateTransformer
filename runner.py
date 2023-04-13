@@ -320,6 +320,7 @@ def main():
             if model_args.use_nsm:
                 print('Computing metrics for classifications')
                 intended_m_label = []
+                intended_m_vector = []
                 intended_m_prediction = []
                 not_same_intended_m_label = []
                 not_same_intended_m_prediction = []                
@@ -345,14 +346,19 @@ def main():
                 prediction_results['current_frame'].append(current_frame_idx)            
                 if model_args.use_nsm:
                     intended_m_label.append(input['intended_maneuver_label'])  # tensor
-                    intended_m_prediction.append(torch.argmax(intended_m_logits, dim=-1))  # tensor
-                    current_c_confifence = torch.softmax(current_m_logits, dim=-1)
-                    current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))  
+                    intended_m_vector.append(input['intended_maneuver_vector'])  # tensor
+                    if model_args.predict_intended_maneuver:
+                        intended_m_prediction.append(torch.argmax(intended_m_logits, dim=-1))  # tensor
+                    if model_args.predict_current_maneuver:
+                        current_c_confifence = torch.softmax(current_m_logits, dim=-1)
+                        current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))
                     for i in range(training_args.per_device_eval_batch_size):
-                        if int(intended_m_label[-1][i]) != int(intended_m_prediction[-1][i]):
-                            not_same_intended_m_label.append(intended_m_label[-1][i])
-                            not_same_intended_m_prediction.append(intended_m_prediction[-1][i])
-                            not_same_current_m_weights_bias.append(current_m_weights_bias[-1][i])
+                        if int(intended_m_label[-1][i]) != int(intended_m_vector[-1][i]):
+                            if model_args.predict_intended_maneuver:
+                                not_same_intended_m_label.append(intended_m_label[-1][i])
+                                not_same_intended_m_prediction.append(intended_m_prediction[-1][i])
+                            if model_args.predict_current_maneuver:
+                                not_same_current_m_weights_bias.append(current_m_weights_bias[-1][i])
                 if model_args.predict_pose:
                     pos_x = torch.argmax(pos_x_logits, dim=-1)
                     pos_y = torch.argmax(pos_y_logits, dim=-1)
@@ -361,26 +367,28 @@ def main():
                     action_bias_y.append(abs(pos_y - action_label[:, 1]))
 
             if model_args.use_nsm:
-                intended_m_label = torch.stack(intended_m_label, -1).flatten()
-                intended_m_prediction = torch.stack(intended_m_prediction, -1).flatten()
-                print('Intended Maneuver Classification')
-                prediction_metrics['intended_maneuver'] = classification_report(intended_m_prediction.cpu().numpy(), intended_m_label.cpu().numpy())
-                print(prediction_metrics['intended_maneuver'])
-                if len(not_same_intended_m_label) > 0:
-                    not_same_intended_m_label = torch.stack(not_same_intended_m_label, -1).flatten()
-                    not_same_intended_m_prediction = torch.stack(not_same_intended_m_prediction, -1).flatten()                
-                    prediction_metrics['not_same_intended_maneuver'] = classification_report(not_same_intended_m_prediction.cpu().numpy(), not_same_intended_m_label.cpu().numpy())
-                    print(prediction_metrics['not_same_intended_maneuver'])
-                current_m_weights_bias = torch.stack(current_m_weights_bias, -1).flatten()
-                print('Current Maneuver Classification')
-                prediction_metrics['current_maneuver'] = np.average(current_m_weights_bias.cpu().numpy())
-                print(f'{np.average(current_m_weights_bias.cpu().numpy())} over 12')
-                if len(not_same_intended_m_label) > 0:
-                    not_same_current_m_weights_bias = torch.stack(not_same_current_m_weights_bias, -1).flatten()                
-                    prediction_metrics['not_same_current_maneuver'] = np.average(not_same_current_m_weights_bias.cpu().numpy())
-                    print(f'{np.average(not_same_current_m_weights_bias.cpu().numpy())} over 12')
-                prediction_results['intended_maneuver'] = intended_m_prediction.cpu().numpy()
-                prediction_results['current_maneuver'] = current_m_weights_bias.cpu().numpy()
+                if model_args.predict_intended_maneuver:
+                    intended_m_label = torch.stack(intended_m_label, -1).flatten()
+                    intended_m_prediction = torch.stack(intended_m_prediction, -1).flatten()
+                    print('Intended Maneuver Classification')
+                    prediction_metrics['intended_maneuver'] = classification_report(intended_m_prediction.cpu().numpy(), intended_m_label.cpu().numpy())
+                    print(prediction_metrics['intended_maneuver'])
+                    if len(not_same_intended_m_label) > 0:
+                        not_same_intended_m_label = torch.stack(not_same_intended_m_label, -1).flatten()
+                        not_same_intended_m_prediction = torch.stack(not_same_intended_m_prediction, -1).flatten()
+                        prediction_metrics['not_same_intended_maneuver'] = classification_report(not_same_intended_m_prediction.cpu().numpy(), not_same_intended_m_label.cpu().numpy())
+                        print(prediction_metrics['not_same_intended_maneuver'])
+                    prediction_results['intended_maneuver'] = intended_m_prediction.cpu().numpy()
+                if model_args.predict_current_maneuver:
+                    current_m_weights_bias = torch.stack(current_m_weights_bias, -1).flatten()
+                    print('Current Maneuver Classification')
+                    prediction_metrics['current_maneuver'] = np.average(current_m_weights_bias.cpu().numpy())
+                    print(f'{np.average(current_m_weights_bias.cpu().numpy())} over 12')
+                    if len(not_same_intended_m_label) > 0:
+                        not_same_current_m_weights_bias = torch.stack(not_same_current_m_weights_bias, -1).flatten()
+                        prediction_metrics['not_same_current_maneuver'] = np.average(not_same_current_m_weights_bias.cpu().numpy())
+                        print(f'{np.average(not_same_current_m_weights_bias.cpu().numpy())} over 12')
+                    prediction_results['current_maneuver'] = current_m_weights_bias.cpu().numpy()
             # action_bias_x = torch.stack(action_bias_x, 0).cpu().numpy()
             # print('Pose x offset: ', np.average(action_bias_x))
             # action_bias_y = torch.stack(action_bias_y, 0).cpu().numpy()
