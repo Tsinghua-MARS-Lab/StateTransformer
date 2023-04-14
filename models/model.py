@@ -116,23 +116,21 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             intended_maneuver_label = None
             current_maneuver_label = None
 
+        if self.per_instance:
+            intended_maneuver_vector = intended_maneuver_vector[:, -1]
+            intended_maneuver_label = intended_maneuver_label[:, -1]
+            current_maneuver_vector = current_maneuver_vector[:, -1, :]
+            current_maneuver_label = current_maneuver_label[:, -1, :]
+
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        if high_res_raster.shape[-1] > 100: # debug version for 0404 dataset
-            high_res_raster = high_res_raster[:, :, :, :93]
-            low_res_raster = low_res_raster[:, :, :, :93]
         device = high_res_raster.device
 
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
-            # current_maneuver_embed = self.current_m_embed(current_maneuver_vector.float())  # [bsz, hidden_size]
             current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
         else:
             intended_maneuver_embed = None
             current_maneuver_embed = None
-        
-        # for 0405 debug, dataset lack of action_label and trajectory inculudes current state and past one frame 
-        if action_label is None and trajectory_label is not None:
-            action_label = ((trajectory_label[:, 1, :2] - trajectory_label[:, 0, :2]) * 100).to(torch.int32).to(device)
 
         batch_size, h, w, total_channels = high_res_raster.shape
 
@@ -158,9 +156,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                             high_res_embed,
                             low_res_embed), dim=1).to(torch.float32)
             else:
-                # TODO: repeat should be replaced by historic maneuver
-                state_embeds = torch.cat((intended_maneuver_embed.unsqueeze(1).repeat(1, context_length, 1),
-                                        current_maneuver_embed.unsqueeze(1).repeat(1, context_length, 1),
+                state_embeds = torch.cat((intended_maneuver_embed,
+                                        current_maneuver_embed,
                                         high_res_embed,
                                         low_res_embed), dim=-1).to(torch.float32)
         else:
