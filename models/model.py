@@ -118,9 +118,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         if self.per_instance:
             intended_maneuver_vector = intended_maneuver_vector[:, -1]
-            intended_maneuver_label = intended_maneuver_label[:, -1]
             current_maneuver_vector = current_maneuver_vector[:, -1, :]
-            current_maneuver_label = current_maneuver_label[:, -1, :]
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -328,6 +326,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         context_length = actions_embed.shape[1]
         for i in range(context_length):
             result = torch.cat([result, raster_embed[:, 21+i*step:21+(i+1)*step, :], actions_embed[:, i, :].unsqueeze(1)], dim=1)
+        # concat the last observation->[o,a,o,a ..., o]
+        result = torch.cat([result, raster_embed[:, -step:, :]], dim=1)
         return result
 
 if  __name__ == '__main__':
@@ -350,13 +350,13 @@ if  __name__ == '__main__':
     dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/store/nsm")
     example = dataset[0]
     result = model.forward(
-        intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0).unsqueeze(0).repeat(1, 9),
+        intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
         intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9),
-        current_maneuver_label=example['current_maneuver_label'].unsqueeze(0).unsqueeze(0).repeat(1, 9, 1),
+        current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
         current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9, 1),
         action_label=None,
         trajectory_label=example['trajectory_label'].unsqueeze(0),
-        context_actions=example['context_actions'].unsqueeze(0),
+        context_actions=example['context_actions'][:8].unsqueeze(0),
         high_res_raster=example['high_res_raster'][:,:,:93].unsqueeze(0),
         low_res_raster=example['low_res_raster'][:,:,:93].unsqueeze(0),
         mems=None,

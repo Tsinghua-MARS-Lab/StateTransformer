@@ -141,15 +141,12 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     # goal action example: [{'action': <ActionLabel.Stop: 3>, 'weight': 1}]
     if nsm_result is not None:
         current_goal_maneuver_mem = list()
-        target_goal_maneuver_mem = list()
         current_action_weights_mem = list()
-        target_current_action_weights_mem = list()
         
         for i, frame in enumerate(sample_frames):
             current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
             target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame+frame_sample_interval][0]['action'].value - 1
             current_goal_maneuver_mem.append(current_goal_maneuver)
-            target_goal_maneuver_mem.append(target_goal_maneuver)
 
             current_action_weights = np.zeros(12, dtype=np.float32)
             for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
@@ -159,12 +156,11 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
             target_current_action_weights = np.zeros(12, dtype=np.float32)
             for each_current_action in nsm_result['current_actions_weights_per_frame'][frame+frame_sample_interval]:
                 current_action_index = each_current_action['action'].value - 1
-                target_current_action_weights[current_action_index] = each_current_action['weight']
-            target_current_action_weights_mem.append(target_current_action_weights)            
+                target_current_action_weights[current_action_index] = each_current_action['weight']         
         result_to_return['intended_maneuver_vector'] = np.array(current_goal_maneuver_mem, dtype=np.int32)
-        result_to_return['intended_maneuver_label'] = np.array(target_goal_maneuver_mem, dtype=np.int32)
+        result_to_return['intended_maneuver_label'] = np.array(target_goal_maneuver, dtype=np.int32)
         result_to_return['current_maneuver_vector'] = np.array(current_action_weights_mem, dtype=np.float32)
-        result_to_return['current_maneuver_label'] = np.array(target_current_action_weights_mem, dtype=np.float32)
+        result_to_return['current_maneuver_label'] = np.array(target_current_action_weights, dtype=np.float32)
     else:
         result_to_return["intended_maneuver_label"] = None
         result_to_return["intended_maneuver_vector"] = None
