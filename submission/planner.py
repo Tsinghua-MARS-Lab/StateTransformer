@@ -23,6 +23,8 @@ sys.path.append("/home/shiduozhang/Project/transformer4planning")
 from models.model import TransfoXLModelNuPlan
 from runner import ModelArguments, DataTrainingArguments
 from dataset_gen.nuplan_obs import generate_contour_pts
+from transformers import TransfoXLConfig
+
 
 class ControlTFPlanner(AbstractPlanner):
     """
@@ -43,13 +45,24 @@ class ControlTFPlanner(AbstractPlanner):
         # model initialization and configuration 
         parser = HfArgumentParser((ModelArguments))
         model_args = parser.parse_args_into_dataclasses()[0]
-        model_args.use_nsm = False
-        self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
+        # model_args.use_nsm = False
+        model_args.per_instance_encoding = False
+        if model_args.model_name == 'TransfoXLModelNuPlan':
+            self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
                                                           model_args=model_args)
+        else:
+            config_p = TransfoXLConfig()
+            config_p.n_layer = 4
+            config_p.d_embed = 256
+            config_p.d_model = 256
+            config_p.d_inner = 1024
+            self.model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+        self.model.config.pad_token_id = 0
+        self.model.config.eos_token_id = 0
         self.load_state_dict()
 
     def load_state_dict(self):
-        checkpoint = get_last_checkpoint("checkpoints/perinstance_nsm_pose_traj") 
+        checkpoint = get_last_checkpoint("checkpoints/default_pred_all") 
         if os.path.isfile(os.path.join(checkpoint, "config.json")):
             config = PretrainedConfig.from_json_file(os.path.join(checkpoint, "config.json"))
         if os.path.isfile(os.path.join(checkpoint, "pytorch_model.bin")):
@@ -73,7 +86,7 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        history = current_input.history
+        history = current_input
         ego_states = history.ego_state_buffer # a list of ego trajectory
         context_length = len(ego_states)
         # trajectory as format of [(x, y, yaw)]
@@ -86,10 +99,12 @@ class ControlTFPlanner(AbstractPlanner):
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(ego_trajectory, agents, statics, road_dic, ego_shape)
-        output = self.model(context_actions=torch.tensor(context_action).unsqueeze(0), \
+        output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
+                            current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
+                            context_actions=torch.tensor(context_action).unsqueeze(0), \
                             high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
                             low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
-        pred_traj = output[-1][-1]
+        pred_traj = output[-1][-1].squeeze(0).detach().numpy()
         # build output
         ego_state = history.ego_states[-1]
         state = EgoState(
@@ -103,11 +118,11 @@ class ControlTFPlanner(AbstractPlanner):
             is_in_auto_mode=True,
             time_point=ego_state.time_point
         )
-        trajectory = List[EgoState] = [state]
-        for i, traj in enumerate(pred_traj[1:].copy()):
+        trajectory:List[EgoState] = [state]
+        for i in range(0, pred_traj.shape[0]-1):
             state = EgoState.build_from_center(
-                center=StateSE2(traj[0], traj[1], traj[2]),
-                center_velocity_2d=StateVector2D((traj[0]-pred_traj[i, 0])/0.1, (traj[1] - pred_traj[i, 1])/0.1),
+                center=StateSE2(pred_traj[i+1, 0], pred_traj[i+1, 1], pred_traj[i+1, 2]),
+                center_velocity_2d=StateVector2D((pred_traj[i+1, 0]-pred_traj[i, 0])/0.1, (pred_traj[i+1,1] - pred_traj[i, 1])/0.1),
                 center_acceleration_2d=StateVector2D(0, 0),
                 tire_steering_angle=state.tire_steering_angle,
                 time_point=state.time_point,
@@ -159,7 +174,7 @@ class ControlTFPlanner(AbstractPlanner):
         rotated_goal_pose = [relative_goal[0] * cos_ - relative_goal[1] * sin_,
                              relative_goal[0] * sin_ + relative_goal[1] * cos_,
                              relative_goal[2]]
-        goal_contour = generate_contour_pts((rotated_goal_pose[1], rotated_goal_pose[0]), w=shape[0], l=shape[1],
+        goal_contour = generate_contour_pts((rotated_goal_pose[1], rotated_goal_pose[0]), w=ego_shape[0], l=ego_shape[1],
                                             direction=-rotated_goal_pose[2])
         goal_contour = np.array(goal_contour, dtype=np.int32)
         goal_contour_high_res = int(high_res_raster_scale) * goal_contour + 112
@@ -216,8 +231,8 @@ class ControlTFPlanner(AbstractPlanner):
                                 pose[0] * sin_ + pose[1] * cos_]    
                 shape = np.array([static.box.height, static.box.width])
                 rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
-                                                direction=-pose[3])
-                rect_pts = np.array(rect_pts, detype=-pose[3])
+                                                direction=-pose[2])
+                rect_pts = np.array(rect_pts, dtype=np.int32)
                 rect_pts_high_res = int(high_res_raster_scale) * rect_pts + 112
                 cv2.drawContours(rasters_high_res_channels[1 + total_road_types + static_type * 9 + i], [rect_pts_high_res], -1, (255, 255, 255), -1)
                 # draw on low resolution
@@ -236,7 +251,7 @@ class ControlTFPlanner(AbstractPlanner):
                                 pose[0] * sin_ + pose[1] * cos_]
                 shape = np.array([agent.box.height, agent.box.width])
                 rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
-                                                direction=-pose[3])
+                                                direction=-pose[2])
                 rect_pts = np.array(rect_pts, dtype=np.int32)
                 rect_pts_high_res = int(high_res_raster_scale) * rect_pts + 112
                 cv2.drawContours(rasters_high_res_channels[1 + total_road_types + agent_type * 9 + i], [rect_pts_high_res], -1, (255, 255, 255), -1)
@@ -251,7 +266,7 @@ class ControlTFPlanner(AbstractPlanner):
                             pose[0] * sin_ + pose[1] * cos_]
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), 
                                             w=ego_shape[0], l=ego_shape[1],
-                                            direction=-pose[3])
+                                            direction=-pose[2])
             rect_pts = np.int0(rect_pts)
             rect_pts_high_res = int(high_res_raster_scale) * rect_pts + 112
             cv2.drawContours(rasters_high_res_channels[1 + total_road_types + agent_type * 9 + i], [rect_pts_high_res], -1, (255, 255, 255), -1)
@@ -266,10 +281,10 @@ class ControlTFPlanner(AbstractPlanner):
         context_actions = list()
         ego_poses = ego_trajectory - ego_pose
         rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
-                                  ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_]).transpose((1, 0))
+                                  ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
+                                  np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
             action = rotated_poses[i + 1] - rotated_poses[i]
-            action = np.insert(action, 2, 0)
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
