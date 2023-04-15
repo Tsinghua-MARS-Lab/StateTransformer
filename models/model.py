@@ -117,8 +117,15 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             current_maneuver_label = None
 
         if self.per_instance:
-            intended_maneuver_vector = intended_maneuver_vector[:, -1]
-            current_maneuver_vector = current_maneuver_vector[:, -1, :]
+            if len(intended_maneuver_vector.shape) == 2:
+                intended_maneuver_vector = intended_maneuver_vector[:, -1]
+            if len(current_maneuver_vector.shape) == 3:
+                current_maneuver_vector = current_maneuver_vector[:, -1, :]
+        else: # to adjust the old version dataset
+            if len(intended_maneuver_vector.shape) == 1: # format(batchsize, )
+                intended_maneuver_vector = intended_maneuver_vector.unsqueeze(1).repeat(1, 9)
+            if len(current_maneuver_vector.shape) == 2:
+                current_maneuver_vector = current_maneuver_vector.unsqueeze(1).repeat(1, 9, 1)
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device

@@ -9,7 +9,7 @@ import torch, pickle
 
 from datasets import Dataset, Features, Value, Array2D, IterableDataset
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-import dataset_gen.nuplan_obs as obs
+from dataset_gen.nuplan_obs import get_observation_for_nsm
 from torch.utils.data import DataLoader
 import os
 import importlib.util
@@ -81,11 +81,13 @@ def main(args):
                 if env_config.env.nsm:
                     current_frame_is_valid = nsm_result['valid_frames'][t]
                     target_frame_is_valid = nsm_result['valid_frames'][t+observation_kwargs['frame_sample_interval']]
-                    try:
+                    try:    
                         current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t][0]['action']
                         target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t+observation_kwargs['frame_sample_interval']][0]['action']
                     except:
+                        # print(f"frame {t} skip!!!!!")
                         continue
+                    
                     if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
                         if np.random.rand() > 1.0/19:
                             continue
@@ -96,7 +98,7 @@ def main(args):
                     if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
                         continue
                     
-                    observation_dic = obs.get_observation_for_nsm(
+                    observation_dic = get_observation_for_nsm(
                         observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
                     other_info = {
                         'file_name': file_name,
@@ -112,7 +114,7 @@ def main(args):
                     else:
                         continue
                 else:
-                    high_res_obs, low_res_obs, agent_vectors, road_vectors = obs.get_observation_per_frame(
+                    high_res_obs, low_res_obs, agent_vectors, road_vectors = get_observation_for_nsm(
                         observation_kwargs, loaded_dic, t, rasterize=rasterize)
                     '''
                     vectors have the following structure in an array with 7*N where N is the number of points:
@@ -151,29 +153,33 @@ def main(args):
                             data_path=data_path, db=None, gt_relation_path=gt_relation_path,
                             road_dic_path=road_path,
                             running_mode=running_mode)
-    # data format debug
-    # loaded_dic = data_loader.get_next_file(specify_file_index=3)
-    # # with open("data_dic.pkl", "wb") as f:
-    # #     pickle.dump(loaded_dic, f)
-    with open("data_dic.pkl", "rb") as f:
-        loaded_dic = pickle.load(f) 
+    # # data format debug
+    # loaded_dic = data_loader.get_next_file(specify_file_index=2)
+    # with open("/home/shiduozhang/gt_labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle", "rb")  as f:
+    #     nsm = pickle.load(f)
+    # filename = loaded_dic["scenario"]
+    # nsm_data = nsm[filename]
+    # # # with open("data_dic.pkl", "wb") as f:
+    # # #     pickle.dump(loaded_dic, f)
+    # # with open("data_dic.pkl", "rb") as f:
+    # #     loaded_dic = pickle.load(f) 
     
-    total_frames = len(loaded_dic['lidar_pc_tokens'])
-    observation_dic = obs.get_observation_for_nsm(
-                    observation_kwargs, loaded_dic, 100, total_frames, nsm_result=None)
-    high_res_raster = observation_dic["high_res_raster"]
-    low_res_raster = observation_dic["low_res_raster"]
-    context_actions = observation_dic["context_actions"][:, :2]
-    trajectory = observation_dic["trajectory_label"][:, :2]
-    high_res_raster = np.transpose(high_res_raster, (2, 0, 1))
-    low_res_raster = np.transpose(low_res_raster, (2, 0, 1))
-    if not os.path.exists("visulization/debug_raster"):
-        os.makedirs("visulization/debug_raster")
-    visulize_raster("visulization/debug_raster", "high_res",  high_res_raster)
-    visulize_raster("visulization/debug_raster", "low_res", low_res_raster)
-    # visulize_context_trajectory("visulization/debug_raster",  context_actions)
-    visulize_trajectory("visulization/debug_raster", trajectory, context_actions)
-    exit()
+    # total_frames = len(loaded_dic['lidar_pc_tokens'])
+    # observation_dic = get_observation_for_nsm(
+    #                 observation_kwargs, loaded_dic, 100, total_frames, nsm_result=nsm_data)
+    # high_res_raster = observation_dic["high_res_raster"]
+    # low_res_raster = observation_dic["low_res_raster"]
+    # context_actions = observation_dic["context_actions"][:, :2]
+    # trajectory = observation_dic["trajectory_label"][:, :2]
+    # high_res_raster = np.transpose(high_res_raster, (2, 0, 1))
+    # low_res_raster = np.transpose(low_res_raster, (2, 0, 1))
+    # if not os.path.exists("visulization/debug_raster"):
+    #     os.makedirs("visulization/debug_raster")
+    # visulize_raster("visulization/debug_raster", "high_res",  high_res_raster)
+    # visulize_raster("visulization/debug_raster", "low_res", low_res_raster)
+    # # visulize_context_trajectory("visulization/debug_raster",  context_actions)
+    # visulize_trajectory("visulization/debug_raster", trajectory, context_actions)
+    # exit()
     # dataset generation
     if use_nsm:
         nsm_file_names = nsm_labels['file_names']
@@ -202,7 +208,7 @@ def main(args):
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
-    nuplan_dataset.save_to_disk(args.cache_folder+'/nsm_sparse_balance')
+    nuplan_dataset.save_to_disk(args.cache_folder+'/nsm_sparse_balance_4seq')
     print('Dataset saved')
     exit()
 

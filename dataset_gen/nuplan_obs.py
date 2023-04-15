@@ -144,19 +144,26 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         current_action_weights_mem = list()
         
         for i, frame in enumerate(sample_frames):
-            current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
-            target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame+frame_sample_interval][0]['action'].value - 1
+            try:
+                current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
+            except:
+                current_goal_maneuver = 0
             current_goal_maneuver_mem.append(current_goal_maneuver)
 
             current_action_weights = np.zeros(12, dtype=np.float32)
-            for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
-                current_action_index = each_current_action['action'].value - 1
-                current_action_weights[current_action_index] = each_current_action['weight']
+            try:
+                for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
+                    current_action_index = each_current_action['action'].value - 1
+                    current_action_weights[current_action_index] = each_current_action['weight']
+            except:
+                pass
             current_action_weights_mem.append(current_action_weights)
-            target_current_action_weights = np.zeros(12, dtype=np.float32)
-            for each_current_action in nsm_result['current_actions_weights_per_frame'][frame+frame_sample_interval]:
-                current_action_index = each_current_action['action'].value - 1
-                target_current_action_weights[current_action_index] = each_current_action['weight']         
+        
+        target_current_action_weights = np.zeros(12, dtype=np.float32)
+        for each_current_action in nsm_result['current_actions_weights_per_frame'][scenario_frame_number+frame_sample_interval]:
+            current_action_index = each_current_action['action'].value - 1
+            target_current_action_weights[current_action_index] = each_current_action['weight']         
+        target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][scenario_frame_number+frame_sample_interval][0]['action'].value - 1        
         result_to_return['intended_maneuver_vector'] = np.array(current_goal_maneuver_mem, dtype=np.int32)
         result_to_return['intended_maneuver_label'] = np.array(target_goal_maneuver, dtype=np.int32)
         result_to_return['current_maneuver_vector'] = np.array(current_action_weights_mem, dtype=np.float32)
@@ -256,7 +263,8 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     context_actions = list()
     ego_poses = data_dic["agent"]["ego"]["pose"] - ego_pose
     rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
-                              ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_]).transpose((1, 0))
+                              ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
+                              np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
 
     for i in range(len(sample_frames) - 1):
         action = rotated_poses[sample_frames[i + 1]] - rotated_poses[sample_frames[i]]
