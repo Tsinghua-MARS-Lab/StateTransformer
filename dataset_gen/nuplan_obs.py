@@ -3,6 +3,36 @@ import shapely
 import cv2
 import math
 
+def rotate(origin, point, angle, tuple=False):
+    """
+    Rotate a point counter-clockwise by a given angle around a given origin.
+    The angle should be given in radians.
+    """
+
+    ox, oy = origin
+    px, py = point
+
+    qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
+    qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
+    if tuple:
+        return (qx, qy)
+    else:
+        return qx, qy
+
+def normalize_angle(angle):
+    """
+    Normalize an angle to [-pi, pi].
+    :param angle: (float)
+    :return: (float) Angle in radian in [-pi, pi]
+    """
+    while angle > np.pi:
+        angle -= 2.0 * np.pi
+
+    while angle < -np.pi:
+        angle += 2.0 * np.pi
+
+    return angle
+
 def generate_contour_pts(center_pt, w, l, direction):
     pt1 = rotate(center_pt, (center_pt[0]-w/2, center_pt[1]-l/2), direction, tuple=True)
     pt2 = rotate(center_pt, (center_pt[0]+w/2, center_pt[1]-l/2), direction, tuple=True)
@@ -47,8 +77,8 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     Speed: tested on MAC M1 on 2Hz, 6 examples per second with two rasters, 7 examples per second without rasters,
     Size: about 1.3GB per file on 2Hz with two rasters, 40MB per file without rasters
     return:
-        'intended_maneuver_vector': (1),
-        'current_maneuver_vector': (12),
+        'intended_maneuver_vector': (t, 1),
+        'current_maneuver_vector': (t, 12),
         'trajectory_label': (t, 4)  # t = future_frame_num
         'intended_maneuver_label': (1),  # after interval
         'current_maneuver_label': (12),  # after interval
@@ -110,22 +140,34 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     # WARNING: Import actions first
     # goal action example: [{'action': <ActionLabel.Stop: 3>, 'weight': 1}]
     if nsm_result is not None:
-        current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][scenario_frame_number][0]['action']
-        result_to_return['intended_maneuver_vector'] = current_goal_maneuver.value - 1
-        target_goal_maneuver = \
-        nsm_result['goal_actions_weights_per_frame'][scenario_frame_number + frame_sample_interval][0]['action']
-        result_to_return['intended_maneuver_label'] = target_goal_maneuver.value - 1
-        current_action_weights = np.zeros(12, dtype=np.float32)
-        for each_current_action in nsm_result['current_actions_weights_per_frame'][scenario_frame_number]:
-            current_action_index = each_current_action['action'].value - 1
-            current_action_weights[current_action_index] = each_current_action['weight']
-        result_to_return['current_maneuver_vector'] = current_action_weights
+        current_goal_maneuver_mem = list()
+        current_action_weights_mem = list()
+        
+        for i, frame in enumerate(sample_frames):
+            try:
+                current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
+            except:
+                current_goal_maneuver = 0
+            current_goal_maneuver_mem.append(current_goal_maneuver)
+
+            current_action_weights = np.zeros(12, dtype=np.float32)
+            try:
+                for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
+                    current_action_index = each_current_action['action'].value - 1
+                    current_action_weights[current_action_index] = each_current_action['weight']
+            except:
+                pass
+            current_action_weights_mem.append(current_action_weights)
+        
         target_current_action_weights = np.zeros(12, dtype=np.float32)
-        for each_current_action in nsm_result['current_actions_weights_per_frame'][
-            scenario_frame_number + frame_sample_interval]:
+        for each_current_action in nsm_result['current_actions_weights_per_frame'][scenario_frame_number+frame_sample_interval]:
             current_action_index = each_current_action['action'].value - 1
-            target_current_action_weights[current_action_index] = each_current_action['weight']
-        result_to_return['current_maneuver_label'] = target_current_action_weights
+            target_current_action_weights[current_action_index] = each_current_action['weight']         
+        target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][scenario_frame_number+frame_sample_interval][0]['action'].value - 1        
+        result_to_return['intended_maneuver_vector'] = np.array(current_goal_maneuver_mem, dtype=np.int32)
+        result_to_return['intended_maneuver_label'] = np.array(target_goal_maneuver, dtype=np.int32)
+        result_to_return['current_maneuver_vector'] = np.array(current_action_weights_mem, dtype=np.float32)
+        result_to_return['current_maneuver_label'] = np.array(target_current_action_weights, dtype=np.float32)
     else:
         result_to_return["intended_maneuver_label"] = None
         result_to_return["intended_maneuver_vector"] = None
@@ -136,7 +178,7 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     goal_sample_frame = min(total_frames - 1, scenario_frame_number + 20 * 20)
     goal_point = data_dic['agent']['ego']['pose'][goal_sample_frame, :].copy()
     shape = data_dic['agent']['ego']['shape'][scenario_frame_number, :]
-    goal_point -= ego_pose
+    goal_point -= ego_pose 
     rotated_goal_pose = [goal_point[0] * cos_ - goal_point[1] * sin_,
                          goal_point[0] * sin_ + goal_point[1] * cos_,
                          0, goal_point[3]]
@@ -204,15 +246,11 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
             # draw on high resolution
             rect_pts_high_res = int(high_res_raster_scale) * rect_pts
             rect_pts_high_res += observation_kwargs["high_res_raster_shape"][0] // 2
-            # TODO: 224 - x
-            # rect_pts_high_res[:, 0] = 224 - rect_pts_high_res[:, 0]
             cv2.drawContours(rasters_high_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j],
                              [rect_pts_high_res], -1, (255, 255, 255), -1)
             # draw on low resolution
             rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64)
             rect_pts_low_res += observation_kwargs["low_res_raster_shape"][0] // 2
-            # TODO: 224 - x
-            # rect_pts_high_res[:, 0] = 224 - rect_pts_high_res[:, 0]
             cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j],
                              [rect_pts_low_res], -1, (255, 255, 255), -1)
 
@@ -225,7 +263,8 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     context_actions = list()
     ego_poses = data_dic["agent"]["ego"]["pose"] - ego_pose
     rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
-                              ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_]).transpose((1, 0))
+                              ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
+                              np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
 
     for i in range(len(sample_frames) - 1):
         action = rotated_poses[sample_frames[i + 1]] - rotated_poses[sample_frames[i]]
@@ -237,10 +276,12 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
 
 if __name__ == '__main__':
     import pickle
-    with open("../labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle", "rb")  as f:
+    with open("/home/shiduozhang/gt_labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle", "rb")  as f:
         nsm = pickle.load(f)
     with open("data_dic.pkl", "rb") as f:
         data_dic = pickle.load(f)
+    filename = data_dic["scenario"]
+    nsm_data = nsm[filename]
     total_frames = data_dic["agent"]["ego"]["pose"].shape[0]
     observation_encode_kwargs = dict(
             visible_dis=30,
@@ -257,7 +298,7 @@ if __name__ == '__main__':
             frame_sample_interval=5,
             action_label_scale=100
         )
-    result = get_observation_for_nsm(observation_encode_kwargs, data_dic, 88, total_frames)
+    result = get_observation_for_nsm(observation_encode_kwargs, data_dic, 88, total_frames, nsm)
     with open("dataset_example.pkl", "wb") as f:
         pickle.dump(result, f)
     

@@ -116,26 +116,32 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             intended_maneuver_label = None
             current_maneuver_label = None
 
+        if self.per_instance:
+            if len(intended_maneuver_vector.shape) == 2:
+                intended_maneuver_vector = intended_maneuver_vector[:, -1]
+            if len(current_maneuver_vector.shape) == 3:
+                current_maneuver_vector = current_maneuver_vector[:, -1, :]
+        else: # to adjust the old version dataset
+            if len(intended_maneuver_vector.shape) == 1: # format(batchsize, )
+                intended_maneuver_vector = intended_maneuver_vector.unsqueeze(1).repeat(1, 9)
+            if len(current_maneuver_vector.shape) == 2:
+                current_maneuver_vector = current_maneuver_vector.unsqueeze(1).repeat(1, 9, 1)
+
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        if high_res_raster.shape[-1] > 100: # debug version for 0404 dataset
-            high_res_raster = high_res_raster[:, :, :, :93]
-            low_res_raster = low_res_raster[:, :, :, :93]
         device = high_res_raster.device
 
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
-            # current_maneuver_embed = self.current_m_embed(current_maneuver_vector.float())  # [bsz, hidden_size]
             current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
         else:
             intended_maneuver_embed = None
             current_maneuver_embed = None
-        
-        # for 0405 debug, dataset lack of action_label and trajectory inculudes current state and past one frame 
-        if action_label is None and trajectory_label is not None:
-            action_label = ((trajectory_label[:, 1, :2] - trajectory_label[:, 0, :2]) * 100).to(torch.int32).to(device)
 
         batch_size, h, w, total_channels = high_res_raster.shape
-
+        ## action embedding 
+        action_embeds = self.action_m_embed(context_actions)
+        
+        ## ratser embedding
         if not self.per_instance:
             high_res_seq = self.cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
             low_res_seq = self.cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
@@ -150,6 +156,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             # embed for per-instance with the format (batchsize, total_channel, n_embed)
             high_res_embed = self.cnn_downsample(high_res_raster.permute(0, 3, 1, 2).reshape(-1, 1, h, w).to(torch.float32)).view(batch_size, total_channels, -1)
             low_res_embed = self.cnn_downsample(low_res_raster.permute(0, 3, 1, 2).reshape(-1, 1, h, w).to(torch.float32)).view(batch_size, total_channels, -1)
+            # insert context to raster embedding, expected format is (batchsize, total_channel + context_length, n_embed)
+            high_res_embed = self.insert_action(high_res_embed, action_embeds)
+            low_res_embed = self.insert_action(low_res_embed, action_embeds)
 
         if intended_maneuver_embed is not None and current_maneuver_embed is not None:
             if self.per_instance:
@@ -158,9 +167,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                             high_res_embed,
                             low_res_embed), dim=1).to(torch.float32)
             else:
-                # TODO: repeat should be replaced by historic maneuver
-                state_embeds = torch.cat((intended_maneuver_embed.unsqueeze(1).repeat(1, context_length, 1),
-                                        current_maneuver_embed.unsqueeze(1).repeat(1, context_length, 1),
+                state_embeds = torch.cat((intended_maneuver_embed,
+                                        current_maneuver_embed,
                                         high_res_embed,
                                         low_res_embed), dim=-1).to(torch.float32)
         else:
@@ -171,10 +179,13 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                 state_embeds = torch.cat((high_res_embed,
                                         low_res_embed), dim=-1).to(torch.float32)
         
-        trajectory_label = trajectory_label[:, 1::2, :] # downsample the 20hz trajectory to 10hz
-        pred_length = trajectory_label.shape[1]
+        if trajectory_label is not None:
+            trajectory_label = trajectory_label[:, 1::2, :] # downsample the 20hz trajectory to 10hz
+            pred_length = trajectory_label.shape[1]
+        else:
+            pred_length = 80
+        
         if not self.per_instance:
-            action_embeds = self.action_m_embed(context_actions)
             # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
             n_embed = action_embeds.shape[-1]
             input_embeds = torch.zeros(
@@ -188,15 +199,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         else:
             input_embeds = state_embeds
         
-        
-        # if mems is not None:
-        #     print(mems.shape)
-        # if head_mask is not None: 
-        #     print(head_mask.shape)
-        # if output_attentions is not None:
-        #     print(output_attentions.shape)
-        # if output_hidden_states is not None:
-        #     print(output_hidden_states.shape)
         transformer_outputs = self.transformer(
             None,
             mems=mems,
@@ -212,17 +214,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             self.config.pad_token_id is not None or batch_size == 1
         ), "Cannot handle batch sizes > 1 if no padding token is defined."
 
-        # if self.config.pad_token_id is None:
-        #     sequence_lengths = -1
-        # else:
-        #     if input_ids is not None:
-        #         sequence_lengths = torch.ne(input_ids, self.config.pad_token_id).sum(-1) - 1
-        #     else:
-        #         sequence_lengths = -1
-        #         logger.warning(
-        #             f"{self.__class__.__name__} will not detect padding tokens in `inputs_embeds`. Results may be "
-        #             "unexpected if using padding tokens in conjunction with `inputs_embeds.`"
-        #         )
         intended_m_logits = None
         current_m_logits = None
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
@@ -244,13 +235,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             traj_pred = self.traj_decoder(transformer_outputs_hidden_state[:, :pred_length, :])
         else:
             traj_pred = None
-        # pooled_intended_m_logits = intended_m_logits[range(batch_size), sequence_lengths]
-        # pooled_current_m_logits = current_m_logits[range(batch_size), sequence_lengths]
-        # pooled_pos_x_logits = pos_x_logits[range(batch_size), sequence_lengths]
-        # pooled_pos_y_logits = pos_y_logits[range(batch_size), sequence_lengths]
-        # print('test2: ', pooled_intended_m_logits.shape, pooled_current_m_logits.shape, pooled_pos_x_logits.shape, pooled_pos_y_logits.shape)
-        # print('test3" '. pooled_intended_m_logits.view(-1, 12).shape, intended_maneuver_label.view(-1).shape)
-        # pooled_logits = logits[range(batch_size), sequence_lengths]
 
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         self.config_problem_type = 'NuPlan_NSM_SingleStep_Planning'
@@ -313,14 +297,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             output = (pooled_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
-        # return TransfoXLSequenceClassifierOutputWithPast(
-        #     loss=loss,
-        #     logits=pooled_logits,
-        #     mems=transformer_outputs.mems,
-        #     hidden_states=transformer_outputs.hidden_states,
-        #     attentions=transformer_outputs.attentions,
-        # )
-
         return TransfoXLNuPlanNSMOutput(
             loss=loss,
             logits=current_m_logits.cpu() if current_m_logits is not None else None,
@@ -350,20 +326,44 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # return format (batchsize, history_frame_number, channels_per_frame, h, w)
         return result
 
+    def insert_action(self, raster_embed, actions_embed, step=8):
+        goal_embed = raster_embed[:, 0, :].unsqueeze(1)
+        road_embed = raster_embed[:, 1:21, :]
+        result = torch.cat([goal_embed, road_embed], dim=1)
+        context_length = actions_embed.shape[1]
+        for i in range(context_length):
+            result = torch.cat([result, raster_embed[:, 21+i*step:21+(i+1)*step, :], actions_embed[:, i, :].unsqueeze(1)], dim=1)
+        # concat the last observation->[o,a,o,a ..., o]
+        result = torch.cat([result, raster_embed[:, -step:, :]], dim=1)
+        return result
+
 if  __name__ == '__main__':
     import datasets
-    model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103')
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use_nsm", default=True)
+    parser.add_argument("--predict_intended_maneuver", default=True)
+    parser.add_argument("--predict_current_maneuver", default=True)
+    parser.add_argument("--predict_pose", default=True)
+    parser.add_argument("--predict_trajectory", default=True)
+    parser.add_argument("--per_instance_encoding", default=True)
+    parser.add_argument("--time_to_predict", default=8)
+    parser.add_argument("--frequency_for_prediction", default=20)
+    parser.add_argument("--scale_on_not_same_loss", default=1.0)
+    model_args = parser.parse_args()
+
+    model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
     model.config.pad_token_id = 0
     dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/store/nsm")
     example = dataset[0]
     result = model.forward(
         intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
-        intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0),
+        intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9),
         current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
-        current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0),
+        current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9, 1),
         action_label=None,
         trajectory_label=example['trajectory_label'].unsqueeze(0),
-        context_actions=example['context_actions'].unsqueeze(0),
+        context_actions=example['context_actions'][:8].unsqueeze(0),
         high_res_raster=example['high_res_raster'][:,:,:93].unsqueeze(0),
         low_res_raster=example['low_res_raster'][:,:,:93].unsqueeze(0),
         mems=None,
