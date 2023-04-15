@@ -32,6 +32,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.time_to_predict = model_args.time_to_predict
         self.frequency_for_prediction = model_args.frequency_for_prediction
         self.not_same_scale = model_args.scale_on_not_same_loss
+        self.maneuver_repeat = model_args.maneuver_repeat
         
         if self.per_instance:
             in_channels = 1
@@ -116,16 +117,18 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             intended_maneuver_label = None
             current_maneuver_label = None
 
-        if self.per_instance:
-            if len(intended_maneuver_vector.shape) == 2:
-                intended_maneuver_vector = intended_maneuver_vector[:, -1]
-            if len(current_maneuver_vector.shape) == 3:
+        # with history menuever label input
+        if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
+            if self.per_instance:
+                intended_maneuver_vector = intended_maneuver_vector[:, -1] 
                 current_maneuver_vector = current_maneuver_vector[:, -1, :]
-        else: # to adjust the old version dataset
-            if len(intended_maneuver_vector.shape) == 1: # format(batchsize, )
-                intended_maneuver_vector = intended_maneuver_vector.unsqueeze(1).repeat(1, 9)
-            if len(current_maneuver_vector.shape) == 2:
-                current_maneuver_vector = current_maneuver_vector.unsqueeze(1).repeat(1, 9, 1)
+            elif not self.per_instance and self.maneuver_repeat:
+                intended_maneuver_vector = intended_maneuver_vector[:, -1].unsqueeze(1).repeat(1, 9)
+                current_maneuver_vector = current_maneuver_vector[:, -1, :].unsqueeze(1).repeat(1, 9, 1)
+        # without history menuever label input
+        else: 
+            intended_maneuver_vector = intended_maneuver_vector.unsqueeze(1).repeat(1, 9)
+            current_maneuver_vector = current_maneuver_vector.unsqueeze(1).repeat(1, 9, 1)
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -346,10 +349,11 @@ if  __name__ == '__main__':
     parser.add_argument("--predict_current_maneuver", default=True)
     parser.add_argument("--predict_pose", default=True)
     parser.add_argument("--predict_trajectory", default=True)
-    parser.add_argument("--per_instance_encoding", default=True)
+    parser.add_argument("--per_instance_encoding", default=False)
     parser.add_argument("--time_to_predict", default=8)
     parser.add_argument("--frequency_for_prediction", default=20)
     parser.add_argument("--scale_on_not_same_loss", default=1.0)
+    parser.add_argument("--maneuver_repeat", default=True)
     model_args = parser.parse_args()
 
     model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)

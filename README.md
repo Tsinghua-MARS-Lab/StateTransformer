@@ -27,7 +27,8 @@ runner.py --model_name TransfoXLModelNuPlan_Config \
 --predict_trajectory False \
 --dataloader_drop_last True \
 --per_instance_encoding False \
---do_train
+--do_train \
+--maneuver_repeat False
 `
 
 
