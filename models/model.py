@@ -2,8 +2,11 @@ try:
     from models.TransformerXL.model import *
 except:
     from TransformerXL.model import *
+try:
+    from models.nsm import NSMDecoder
+except:
+    from nsm import NSMDecoder
 import torch.nn as nn
-from nsm import NSMDecoder
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
