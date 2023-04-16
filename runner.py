@@ -44,9 +44,11 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
+        default="TransfoXLModelNuPlan_Config",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
+        default="transfo-xl-wt103",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(
@@ -92,6 +94,9 @@ class ModelArguments:
     )
     scale_on_not_same_loss: Optional[float] = field(
         default=1.0,
+    )
+    maneuver_repeat: Optional[bool] = field(
+        default=False
     )
 
 @dataclass
@@ -288,6 +293,11 @@ def main():
         3. pos_x,
         4. pos_y
         """
+        if model_args.model_pretrain_name_or_path:
+            state_dict = torch.load(os.path.join(model_args.model_pretrain_name_or_path, "pytorch_model.bin"))
+            model.load_state_dict(state_dict)
+            print("Checkpoints Loaded!")
+        model.eval()
         with torch.no_grad():
             prediction_results = {
                 'file_names': [],
@@ -327,7 +337,12 @@ def main():
             if model_args.predict_pose:
                 action_bias_x = []
                 action_bias_y = []
-
+            if model_args.predict_trajectory:
+                end_bias_x = []
+                end_bias_y = []
+                losses = []
+                loss_fn = torch.nn.MSELoss(reduction="mean")
+    
             # initialize intended maneuver metrics
             per_batch_size = training_args.per_device_eval_batch_size
             for input in tqdm(predict_dataset.iter(training_args.per_device_eval_batch_size)):
@@ -364,6 +379,15 @@ def main():
                     action_label = input['action_label'].clone() + 100
                     action_bias_x.append(abs(pos_x - action_label[:, 0]))
                     action_bias_y.append(abs(pos_y - action_label[:, 1]))
+                
+                if model_args.predict_trajectory:
+                    trajectory_label = input["trajectory_label"][:, 1::2, :]
+                    loss = loss_fn(trajectory_label, traj_pred)
+                    end_trajectory_label = trajectory_label[:, -1, :]
+                    end_point = traj_pred[:, -1, :]
+                    end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])
+                    end_bias_y.append(end_trajectory_label[:, 1] - end_point[:, 1])
+                    losses.append(loss)
 
             if model_args.use_nsm:
                 if model_args.predict_intended_maneuver:
@@ -390,12 +414,22 @@ def main():
                         prediction_metrics['not_same_current_maneuver'] = np.average(not_same_current_m_weights_bias.cpu().numpy())
                         print(f'{np.average(not_same_current_m_weights_bias.cpu().numpy())} over 12')
                     prediction_results['current_maneuver'] = current_m_weights_prediction.cpu().numpy()
+
                     print('inspect shape: ', prediction_results['intended_maneuver'].shape, prediction_results['current_maneuver'].shape)
 
-            # action_bias_x = torch.stack(action_bias_x, 0).cpu().numpy()
-            # print('Pose x offset: ', np.average(action_bias_x))
-            # action_bias_y = torch.stack(action_bias_y, 0).cpu().numpy()
-            # print('Pose y offset: ', np.average(action_bias_y))
+            if model_args.predict_pose:
+                action_bias_x = torch.stack(action_bias_x, 0).cpu().numpy()
+                print('Pose x offset: ', np.average(action_bias_x))
+                action_bias_y = torch.stack(action_bias_y, 0).cpu().numpy()
+                print('Pose y offset: ', np.average(action_bias_y))
+
+            if model_args.predict_trajectory:
+                end_bias_x = torch.stack(end_bias_x, 0).cpu().numpy()
+                end_bias_y = torch.stack(end_bias_y, 0).cpu().numpy()
+                final_loss = torch.mean(torch.stack(losses, 0)).item()
+                print('End point x offset: ', np.average(np.abs(end_bias_x)))
+                print('End point y offset: ', np.average(np.abs(end_bias_y)))
+                print('Final L2 loss of trajectory predict:', final_loss)
 
             if training_args.output_dir is not None:
                 # save results

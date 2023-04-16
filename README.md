@@ -27,7 +27,8 @@ runner.py --model_name TransfoXLModelNuPlan_Config \
 --predict_trajectory False \
 --dataloader_drop_last True \
 --per_instance_encoding False \
---do_train
+--do_train \
+--maneuver_repeat False
 `
 
 
@@ -52,6 +53,7 @@ runner.py --model_name TransfoXLModelNuPlan_Config \
 --predict_trajectory False \
 --do_predict \
 --max_predict_samples 500 \
---dataloader_drop_last True
+--dataloader_drop_last True \
+--per_instance_encoding False
 `
 
