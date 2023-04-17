@@ -3,36 +3,6 @@ import shapely
 import cv2
 import math
 
-def rotate(origin, point, angle, tuple=False):
-    """
-    Rotate a point counter-clockwise by a given angle around a given origin.
-    The angle should be given in radians.
-    """
-
-    ox, oy = origin
-    px, py = point
-
-    qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
-    qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
-    if tuple:
-        return (qx, qy)
-    else:
-        return qx, qy
-
-def normalize_angle(angle):
-    """
-    Normalize an angle to [-pi, pi].
-    :param angle: (float)
-    :return: (float) Angle in radian in [-pi, pi]
-    """
-    while angle > np.pi:
-        angle -= 2.0 * np.pi
-
-    while angle < -np.pi:
-        angle += 2.0 * np.pi
-
-    return angle
-
 def generate_contour_pts(center_pt, w, l, direction):
     pt1 = rotate(center_pt, (center_pt[0]-w/2, center_pt[1]-l/2), direction, tuple=True)
     pt2 = rotate(center_pt, (center_pt[0]+w/2, center_pt[1]-l/2), direction, tuple=True)
@@ -144,19 +114,13 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         current_action_weights_mem = list()
         
         for i, frame in enumerate(sample_frames):
-            try:
-                current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
-            except:
-                current_goal_maneuver = 0
+            current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
             current_goal_maneuver_mem.append(current_goal_maneuver)
 
             current_action_weights = np.zeros(12, dtype=np.float32)
-            try:
-                for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
-                    current_action_index = each_current_action['action'].value - 1
-                    current_action_weights[current_action_index] = each_current_action['weight']
-            except:
-                pass
+            for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
+                current_action_index = each_current_action['action'].value - 1
+                current_action_weights[current_action_index] = each_current_action['weight']
             current_action_weights_mem.append(current_action_weights)
         
         target_current_action_weights = np.zeros(12, dtype=np.float32)
