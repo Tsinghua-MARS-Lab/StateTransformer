@@ -96,7 +96,19 @@ class ModelArguments:
         default=1.0,
     )
     maneuver_repeat: Optional[bool] = field(
-        default=False
+        default=False,
+    )
+    d_embed: Optional[int] = field(
+        default=256,
+    )
+    d_model: Optional[int] = field(
+        default=256,
+    )
+    d_inner: Optional[int] = field(
+        default=1024,
+    )
+    n_layers: Optional[int] = field(
+        default=4,
     )
 
 @dataclass
@@ -214,17 +226,17 @@ def main():
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # Load a model's pretrained weights from a path or from hugging face's model base
-    if model_args.model_name == 'TransfoXLModelNuPlan':
+    if model_args.model_name == 'pretrain':
         # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
         model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         model.config.pad_token_id = 0
         model.config.eos_token_id = 0
-    elif model_args.model_name == 'TransfoXLModelNuPlan_Config':
+    elif model_args.model_name == 'scratch':
         config_p = TransfoXLConfig()
-        config_p.n_layer = 4
-        config_p.d_embed = 256
-        config_p.d_model = 256
-        config_p.d_inner = 1024
+        config_p.n_layer = model_args.n_layers
+        config_p.d_embed = model_args.d_embed
+        config_p.d_model = model_args.d_model
+        config_p.d_inner = model_args.d_inner
         model = TransfoXLModelNuPlan(config_p, model_args=model_args)
         # model_p.save_pretrained( '../saved_model/transformerxlSml')
         model.config.pad_token_id = 0
@@ -323,7 +335,7 @@ def main():
                     if isinstance(examples[each_key], type(torch.tensor(0))):
                         examples[each_key] = examples[each_key].to(device)
                 return examples        
-            # TODO: add position/trajectory evaluations
+            
             if model_args.use_nsm:
                 print('Computing metrics for classifications')
                 intended_m_label = []
