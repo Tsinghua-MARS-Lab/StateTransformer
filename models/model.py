@@ -118,17 +118,18 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             current_maneuver_label = None
 
         # with history menuever label input
-        if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
-            if self.per_instance:
-                intended_maneuver_vector = intended_maneuver_vector[:, -1] 
-                current_maneuver_vector = current_maneuver_vector[:, -1, :]
-            elif not self.per_instance and self.maneuver_repeat:
-                intended_maneuver_vector = intended_maneuver_vector[:, -1].unsqueeze(1).repeat(1, 9)
-                current_maneuver_vector = current_maneuver_vector[:, -1, :].unsqueeze(1).repeat(1, 9, 1)
-        # without history menuever label input
-        else: 
-            intended_maneuver_vector = intended_maneuver_vector.unsqueeze(1).repeat(1, 9)
-            current_maneuver_vector = current_maneuver_vector.unsqueeze(1).repeat(1, 9, 1)
+        if self.use_nsm:
+            if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
+                if self.per_instance:
+                    intended_maneuver_vector = intended_maneuver_vector[:, -1] 
+                    current_maneuver_vector = current_maneuver_vector[:, -1, :]
+                elif not self.per_instance and self.maneuver_repeat:
+                    intended_maneuver_vector = intended_maneuver_vector[:, -1].unsqueeze(1).repeat(1, 9)
+                    current_maneuver_vector = current_maneuver_vector[:, -1, :].unsqueeze(1).repeat(1, 9, 1)
+            # without history menuever label input
+            else: 
+                intended_maneuver_vector = intended_maneuver_vector.unsqueeze(1).repeat(1, 9)
+                current_maneuver_vector = current_maneuver_vector.unsqueeze(1).repeat(1, 9, 1)
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -302,7 +303,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         return TransfoXLNuPlanNSMOutput(
             loss=loss,
-            logits=current_m_logits.cpu() if current_m_logits is not None else None,
+            logits=current_m_logits.cpu() if current_m_logits is not None else 0,
             mems=transformer_outputs.mems,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
