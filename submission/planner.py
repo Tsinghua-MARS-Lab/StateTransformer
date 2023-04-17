@@ -15,16 +15,20 @@ from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTr
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from nuplan.common.maps.maps_datatypes import RasterLayer, RasterMap, SemanticMapLayer, StopLineType, VectorLayer
 from nuplan.common.actor_state.state_representation import Point2D
-import interactive_sim.envs.util as util
 from transformers import (HfArgumentParser)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.configuration_utils import PretrainedConfig
-sys.path.append("/home/shiduozhang/Project/transformer4planning")
+sys.path.append("../")
 from models.model import TransfoXLModelNuPlan
 from runner import ModelArguments, DataTrainingArguments
 from dataset_gen.nuplan_obs import generate_contour_pts
-from transformers import TransfoXLConfig
 
+def get_angle_of_a_line(pt1, pt2):
+    # angle from horizon to the right, counter-clockwise,
+    x1, y1 = pt1
+    x2, y2 = pt2
+    angle = math.atan2(y2 - y1, x2 - x1)
+    return angle
 
 class ControlTFPlanner(AbstractPlanner):
     """
@@ -35,7 +39,9 @@ class ControlTFPlanner(AbstractPlanner):
                  sampling_time: float,
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
-                 steering_angle: float = 0.0):
+                 steering_angle: float = 0.0,
+                 per_instance_encoding: bool = False,
+                 use_nsm = False):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
         self.samping_time = TimePoint(int(sampling_time * 1e6))
         self.acceleration = StateVector2D(acceleration[0], acceleration[1])
@@ -45,31 +51,13 @@ class ControlTFPlanner(AbstractPlanner):
         # model initialization and configuration 
         parser = HfArgumentParser((ModelArguments))
         model_args = parser.parse_args_into_dataclasses()[0]
-        # model_args.use_nsm = False
-        model_args.per_instance_encoding = False
-        if model_args.model_name == 'TransfoXLModelNuPlan':
-            self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
-                                                          model_args=model_args)
-        else:
-            config_p = TransfoXLConfig()
-            config_p.n_layer = 4
-            config_p.d_embed = 256
-            config_p.d_model = 256
-            config_p.d_inner = 1024
-            self.model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+        model_args.use_nsm = use_nsm
+        model_args.per_instance_encoding = per_instance_encoding
+        assert model_args.model_pretrain_name_or_path is not None
+        self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
+                                                          model_args=model_args) 
         self.model.config.pad_token_id = 0
         self.model.config.eos_token_id = 0
-        self.load_state_dict()
-
-    def load_state_dict(self):
-        checkpoint = get_last_checkpoint("checkpoints/default_pred_all") 
-        if os.path.isfile(os.path.join(checkpoint, "config.json")):
-            config = PretrainedConfig.from_json_file(os.path.join(checkpoint, "config.json"))
-        if os.path.isfile(os.path.join(checkpoint, "pytorch_model.bin")):
-            state_dict = torch.load(os.path.join(checkpoint, "pytorch_model.bin"), map_location="cpu")
-            self.model.load_state_dict(state_dict)
-        else:
-            raise RuntimeError("No checkpoint in current directory")
     
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -86,7 +74,7 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        history = current_input
+        history = current_input.
         ego_states = history.ego_state_buffer # a list of ego trajectory
         context_length = len(ego_states)
         # trajectory as format of [(x, y, yaw)]
@@ -360,7 +348,7 @@ def get_road_dict(map_api, ego_pose_center):
                 road_xy_np[i, 0] = line_x[i]
                 road_xy_np[i, 1] = line_y[i]
                 if i != 0:
-                    road_dir_np[i, 0] = util.get_angle_of_a_line(pt1=[road_xy_np[i-1, 0], road_xy_np[i-1, 1]],
+                    road_dir_np[i, 0] = get_angle_of_a_line(pt1=[road_xy_np[i-1, 0], road_xy_np[i-1, 1]],
                                                                     pt2=[road_xy_np[i, 0], road_xy_np[i, 1]])
                     
             new_dic = {
