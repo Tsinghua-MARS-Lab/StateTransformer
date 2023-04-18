@@ -63,6 +63,7 @@ def main(args):
     )
     rasterize = True
 
+
     def yield_data(shards, dl):
         for shard in shards:
             loaded_dic = dl.get_next_file(specify_file_index=shard)
@@ -85,9 +86,19 @@ def main(args):
                         current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t][0]['action']
                         target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t+observation_kwargs['frame_sample_interval']][0]['action']
                     except:
-                        # print(f"frame {t} skip!!!!!")
                         continue
-                    
+                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t, observation_kwargs["frame_sample_interval"]))
+                    sample_frames.append(t)
+                    skip = False
+                    for frame in sample_frames:
+                        if len(nsm_result['goal_actions_weights_per_frame'][frame]) == 0:
+                            skip = True
+                            break
+                        if len(nsm_result['current_actions_weights_per_frame'][frame]) == 0:
+                            skip = True
+                            break    
+                    if skip:
+                        continue                    
                     if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
                         if np.random.rand() > 1.0/19:
                             continue
@@ -208,7 +219,7 @@ def main(args):
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
-    nuplan_dataset.save_to_disk(args.cache_folder+'/nsm_sparse_balance_4seq')
+    nuplan_dataset.save_to_disk(args.cache_folder+'/nsm_sparse_balance_0415')
     print('Dataset saved')
     exit()
 
