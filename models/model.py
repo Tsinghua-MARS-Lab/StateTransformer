@@ -55,7 +55,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_embed), nn.Tanh())
 
         if self.use_nsm:
-            self.nsm_decoder = NSMDecoder(n_embed)
+            self.nsm_decoder = NSMDecoder(config.d_embed)
         
         self.pos_x_decoder = None
         self.pos_y_decoder = None
@@ -221,11 +221,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         if self.use_nsm:
-            print(transformer_outputs_hidden_state.shape)
-            # [batch_size, seq_len, hidden_dim]
-            nsm_hidden_state = self.nsm_decoder(transformer_outputs_hidden_state)
-            print(nsm_hidden_state.shape)
-            print(1/0)
+            # [batch_size, d_embed]
+            nsm_hidden_state = self.nsm_decoder(transformer_outputs_hidden_state[:, 0, :])
 
         assert (
             self.config.pad_token_id is not None or batch_size == 1
