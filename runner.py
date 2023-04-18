@@ -368,6 +368,7 @@ def main():
                 if model_args.use_nsm:
                     intended_m_label.append(input['intended_maneuver_label'])  # tensor
                     intended_m_vector.append(input['intended_maneuver_vector'])  # tensor
+
                     if model_args.predict_intended_maneuver:
                         intended_m_prediction.append(torch.argmax(intended_m_logits, dim=-1))  # tensor
                     if model_args.predict_current_maneuver:
@@ -375,7 +376,13 @@ def main():
                         current_m_weights_prediction.append(current_c_confifence)
                         current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))
                     for i in range(training_args.per_device_eval_batch_size):
-                        if int(intended_m_label[-1][i]) != int(intended_m_vector[-1][i]):
+                        if len(intended_m_vector[-1].shape) == 2 and intended_m_vector[-1].shape[1] > 1:
+                            # new version multi time steps in vector
+                            intended_m_vector_each = intended_m_vector[-1][i, -1]
+                        else:
+                            # old version only the last time step in vector
+                            intended_m_vector_each = intended_m_vector[-1][i]
+                        if int(intended_m_label[-1][i]) != int(intended_m_vector_each):
                             if model_args.predict_intended_maneuver:
                                 not_same_intended_m_label.append(intended_m_label[-1][i])
                                 not_same_intended_m_prediction.append(intended_m_prediction[-1][i])
