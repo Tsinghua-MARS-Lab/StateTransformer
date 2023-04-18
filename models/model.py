@@ -222,6 +222,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         if self.use_nsm:
             print(transformer_outputs_hidden_state.shape)
+            # [batch_size, seq_len, hidden_dim]
             nsm_hidden_state = self.nsm_decoder(transformer_outputs_hidden_state)
             print(nsm_hidden_state.shape)
             print(1/0)
