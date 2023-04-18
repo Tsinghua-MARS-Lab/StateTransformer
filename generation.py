@@ -36,8 +36,7 @@ def main(args):
         gt_relation_path = env_config.env.relation_gt_path
         running_mode = env_config.env.running_mode
         # use nsm
-        use_nsm = env_config.env.nsm
-        if use_nsm:
+        if args.use_nsm:
             nsm_labels = None
             with open(env_config.env.nsm_label_path, 'rb') as f:
                 # Load the object from the pickle file
@@ -68,26 +67,25 @@ def main(args):
         for shard in shards:
             loaded_dic = dl.get_next_file(specify_file_index=shard)
             file_name = dl.file_names[shard]
-            nsm_result = nsm_labels[file_name] if file_name in nsm_labels else None
-            if env_config.env.nsm and nsm_result is None:
-                print('ERROR: not found, ', file_name, nsm_labels['file_names'])
-                continue
-            if loaded_dic is None:
-                print('Ending data loading, No more file to load, current index is: ', shard)
-                break
+            if args.use_nsm:
+                nsm_result = nsm_labels[file_name] if file_name in nsm_labels else None
+                if env_config.env.nsm and nsm_result is None:
+                    print('ERROR: not found, ', file_name, nsm_labels['file_names'])
+                    continue
+                if loaded_dic is None:
+                    print('Ending data loading, No more file to load, current index is: ', shard)
+                    break
+            else:
+                nsm_result = None
             
             total_frames = len(loaded_dic['lidar_pc_tokens'])
             for t in range(observation_kwargs['past_frame_num'] + 1,
-                           total_frames - observation_kwargs['future_frame_num']):
-                if env_config.env.nsm:
+                           total_frames - observation_kwargs['future_frame_num'], args.sample_interval):
+                if args.use_nsm:
                     current_frame_is_valid = nsm_result['valid_frames'][t]
                     target_frame_is_valid = nsm_result['valid_frames'][t+observation_kwargs['frame_sample_interval']]
-                    try:    
-                        current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t][0]['action']
-                        target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t+observation_kwargs['frame_sample_interval']][0]['action']
-                    except:
-                        continue
-                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t, observation_kwargs["frame_sample_interval"]))
+                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t, \
+                                            observation_kwargs["frame_sample_interval"]))
                     sample_frames.append(t)
                     skip = False
                     for frame in sample_frames:
@@ -99,9 +97,9 @@ def main(args):
                             break    
                     if skip:
                         continue                    
-                    if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
-                        if np.random.rand() > 1.0/19:
-                            continue
+                    # if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
+                    #     if np.random.rand() > args.sample_rate:
+                    #         continue
                     if not current_frame_is_valid or not target_frame_is_valid:
                         continue
                     if len(nsm_result['goal_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
@@ -109,53 +107,21 @@ def main(args):
                     if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
                         continue
                     
-                    observation_dic = get_observation_for_nsm(
-                        observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
-                    other_info = {
-                        'file_name': file_name,
-                        'scenario_id': '',  # empty for NuPlan
-                        'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
-                        'frame_index': t,
-                        'map_name': 'boston',
-                        'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
-                    }
-                    if observation_dic is not None:
-                        observation_dic.update(other_info)
-                        yield observation_dic
-                    else:
-                        continue
+                observation_dic = get_observation_for_nsm(
+                    observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
+                other_info = {
+                    'file_name': file_name,
+                    'scenario_id': '',  # empty for NuPlan
+                    'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
+                    'frame_index': t,
+                    'map_name': 'boston',
+                    'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
+                }
+                if observation_dic is not None:
+                    observation_dic.update(other_info)
+                    yield observation_dic
                 else:
-                    high_res_obs, low_res_obs, agent_vectors, road_vectors = get_observation_for_nsm(
-                        observation_kwargs, loaded_dic, t, rasterize=rasterize)
-                    '''
-                    vectors have the following structure in an array with 7*N where N is the number of points:
-                    [global_index, instance_index, local_index, instance_types, xs, ys, zs]
-                    '''
-                    if rasterize:
-                        yield {
-                            'file_name': file_name,
-                            'scenario_id': '',  # empty for NuPlan
-                            'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
-                            'frame_index': t,
-                            'map_name': 'boston',
-                            'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
-                            'high_res_raster': high_res_obs,
-                            'low_res_raster': low_res_obs,
-                            'agent_vectors': agent_vectors,
-                            'road_vectors': road_vectors,
-                        }
-                    else:
-                        yield {
-                            'file_name': file_name,
-                            'scenario_id': '',  # empty for NuPlan
-                            'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
-                            'frame_index': t,
-                            'map_name': 'boston',
-                            'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
-                            'agent_vectors': agent_vectors,
-                            'road_vectors': road_vectors,
-                        }
-
+                    continue
     
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
     data_loader = NuPlanDL(scenario_to_start=starting_scenario,
@@ -192,7 +158,7 @@ def main(args):
     # visulize_trajectory("visulization/debug_raster", trajectory, context_actions)
     # exit()
     # dataset generation
-    if use_nsm:
+    if args.use_nsm:
         nsm_file_names = nsm_labels['file_names']
         file_indices = []
         for idx, each_file in enumerate(data_loader.file_names):
@@ -219,7 +185,7 @@ def main(args):
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
-    nuplan_dataset.save_to_disk(args.cache_folder+'/nsm_sparse_balance_0415')
+    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name))
     print('Dataset saved')
     exit()
 
@@ -235,8 +201,8 @@ if __name__ == '__main__':
     parser.add_argument('--resume', default=False, action='store_true')
     parser.add_argument('--debug', default=False, action='store_true')
     parser.add_argument('--save_log', default=False, action='store_true')
-    parser.add_argument('--starting_file_num', type=int, default=0)
-    parser.add_argument('--ending_file_num', type=int, default=100)
+    parser.add_argument('--starting_file_num', type=int, default=-1)
+    parser.add_argument('--ending_file_num', type=int, default=-1)
     parser.add_argument('--starting_scenario', type=int, default=-1)
     parser.add_argument('--multi_process', default=False, action='store_true')
     parser.add_argument('--file_per_worker', type=int, default=1)
@@ -250,6 +216,11 @@ if __name__ == '__main__':
     parser.add_argument('--num_epoch', type=int, default=3)
     parser.add_argument('--deepspeed', type=str, default=None)
     parser.add_argument('--model_name', type=str, default=None)
+
+    parser.add_argument('--use_nsm', default=False, action='store_true')
+    parser.add_argument('--balance_rate', type=float, default=1.0, help="balance sample rate of simple scenarios in nsm case")
+    parser.add_argument('--sample_interval', type=int, default=10)
+    parser.add_argument('--dataset_name', type=str, default='nsm')
 
     # parser.add_argument('--save_playback', default=True, action='store_true')
     args_p = parser.parse_args()

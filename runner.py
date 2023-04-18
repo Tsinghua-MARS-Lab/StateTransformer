@@ -305,10 +305,6 @@ def main():
         3. pos_x,
         4. pos_y
         """
-        if model_args.model_pretrain_name_or_path:
-            state_dict = torch.load(os.path.join(model_args.model_pretrain_name_or_path, "pytorch_model.bin"))
-            model.load_state_dict(state_dict)
-            print("Checkpoints Loaded!")
         model.eval()
         with torch.no_grad():
             prediction_results = {
