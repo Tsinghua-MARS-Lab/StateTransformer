@@ -1088,8 +1088,9 @@ class NuPlanDL:
                     # TRAFFIC_LIGHT = 2
                     # TURN_STOP = 3
                     # YIELD = 4
-                    if selected_obj.stop_line_type not in [0, 1]:
-                        continue
+                    line_x, line_y = selected_obj.polygon.exterior.coords.xy
+                    # if selected_obj.stop_line_type not in [0, 1]:
+                    #     continue
                 elif layer_name in [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]:
                     line_x, line_y = selected_obj.baseline_path.linestring.coords.xy
                     if selected_obj.speed_limit_mps is not None:
