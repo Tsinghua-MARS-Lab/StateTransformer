@@ -142,7 +142,7 @@ class NSMDecoder(nn.Module):
                                  self.act_components[num_components - 1], 0.1)
 
 
-    def forward(self, hidden_states: Tensor, gating_input: Tensor):
+    def forward(self, hidden_states: Tensor, gating_input = None):
         """
         :param hidden_states: hidden states of all elements after encoding by global graph (shape [batch_size, -1, hidden_size])
         """
