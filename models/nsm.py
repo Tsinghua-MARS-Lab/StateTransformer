@@ -148,10 +148,13 @@ class NSMDecoder(nn.Module):
         """
         batch_size = hidden_states.shape[0]
         device = hidden_states.device
+        # [1, batch_size]
         weight_blend = torch.ones((self.expert_components[0], batch_size)).to(device)
-        # TODO(cyrushx): Add gating input.
+        # TODO(cyrushx): Add gating input based on action labels and phase.
         gating_input = torch.ones((batch_size, self.dim_gating)).to(device)
+        # [num_components, batch_size]
         weight_blend = self.comp_first(gating_input, weight_blend).T
         output_embedding = self.comp_final(hidden_states, weight_blend)
-        # TODO(cyrushx): Generate trajectories from output embedding.s
+        # TODO(cyrushx): Generate trajectories from output embedding.
+        # [batch_size, d_embed]
         return output_embedding
