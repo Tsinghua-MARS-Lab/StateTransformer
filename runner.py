@@ -99,6 +99,18 @@ class ModelArguments:
     maneuver_repeat: Optional[bool] = field(
         default=False,
     )
+    predict_single_step_trajectory: Optional[bool] = field(
+        default=False,
+    )
+    predict_trajectory_with_nsm: Optional[bool] = field(
+        default=False,
+    )
+    mask_history_intended_maneuver: Optional[bool] = field(
+        default=False,
+    )
+    mask_history_current_maneuver: Optional[bool] = field(
+        default=False,
+    )
     d_embed: Optional[int] = field(
         default=256,
     )
@@ -361,7 +373,7 @@ def main():
             if model_args.predict_pose:
                 action_bias_x = []
                 action_bias_y = []
-            if model_args.predict_trajectory:
+            if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
                 end_bias_x = []
                 end_bias_y = []
                 losses = []
@@ -411,8 +423,10 @@ def main():
                     action_bias_x.append(abs(pos_x - action_label[:, 0]))
                     action_bias_y.append(abs(pos_y - action_label[:, 1]))
                 
-                if model_args.predict_trajectory:
+                if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
                     trajectory_label = input["trajectory_label"][:, 1::2, :]
+                    if model_args.predict_single_step_trajectory:
+                        trajectory_label = trajectory_label[:, :5, :]
                     loss = loss_fn(trajectory_label, traj_pred)
                     end_trajectory_label = trajectory_label[:, -1, :]
                     end_point = traj_pred[:, -1, :]
@@ -454,7 +468,7 @@ def main():
                 action_bias_y = torch.stack(action_bias_y, 0).cpu().numpy()
                 print('Pose y offset: ', np.average(action_bias_y))
 
-            if model_args.predict_trajectory:
+            if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
                 end_bias_x = torch.stack(end_bias_x, 0).cpu().numpy()
                 end_bias_y = torch.stack(end_bias_y, 0).cpu().numpy()
                 final_loss = torch.mean(torch.stack(losses, 0)).item()
