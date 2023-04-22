@@ -13,7 +13,7 @@ import torch
 from tqdm import tqdm
 import random
 
-import datasets
+from datasets.utils.logging import set_verbosity
 import numpy as np
 from datasets import Dataset
 from dataclasses import dataclass, field
@@ -32,7 +32,8 @@ from transformers import TransfoXLConfig
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
 from transformers.utils.versions import require_version
-
+from torch.utils.data.dataset import ConcatDataset
+from torch.utils.data import random_split
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ def main():
 
     log_level = training_args.get_process_log_level()
     logger.setLevel(log_level)
-    datasets.utils.logging.set_verbosity(log_level)
+    set_verbosity(log_level)
     transformers.utils.logging.set_verbosity(log_level)
     transformers.utils.logging.enable_default_handler()
     transformers.utils.logging.enable_explicit_format()
@@ -212,16 +213,31 @@ def main():
     # Pass in the directory to load a saved dataset
     # See xxx.py to process and save a dataset from the NuPlan Dataset
     if os.path.isdir(data_args.saved_dataset_folder):
-        nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
-        # Inspect each sample if you need
-        # for each_sample in nuplan_dataset:
-        #     print(each_sample['intended_maneuver_vector'])
-        #     print(each_sample['intended_maneuver_label'])
-        #     print(each_sample['current_maneuver_vector'])
-        #     print(each_sample['current_maneuver_label'])
-        nuplan_dataset.set_format(type='torch')
-        print('Dataset Loaded: ', nuplan_dataset)
-        nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True)
+        items = os.listdir(data_args.saved_dataset_folder)
+        if os.path.isdir(items[0]): #sub-datasets
+            datasets = list()
+            for item in items:
+                dataset_path = os.path.join(data_args.saved_dataset_folder, item)
+                dataset = Dataset.load_from_disk(dataset_path)
+                dataset.set_format(type='torch')
+                datasets.append(dataset)
+            concat_dataset = ConcatDataset(datasets)
+            datasetsize = len(concat_dataset)
+            train, val, test = random_split(concat_dataset, \
+                                            (int(0.9*datasetsize), \
+                                            int(0.05*datasetsize), \
+                                            int(0.05*datasetsize)))
+            nuplan_dataset = dict(
+                train=train,
+                validation=val,
+                test=test
+            )
+
+        else: # whole hugging face dataset   
+            nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
+            nuplan_dataset.set_format(type='torch')
+            print('Dataset Loaded: ', nuplan_dataset)
+            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 

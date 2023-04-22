@@ -9,7 +9,7 @@ import torch, pickle
 
 from datasets import Dataset, Features, Value, Array2D, IterableDataset
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-from dataset_gen.nuplan_obs import get_observation_for_nsm
+from dataset_gen.nuplan_obs import get_observation_for_nsm, get_observation_for_autoregression_nsm
 from torch.utils.data import DataLoader
 import os
 import importlib.util
@@ -107,8 +107,12 @@ def main(args):
                     if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
                         continue
                     
-                observation_dic = get_observation_for_nsm(
-                    observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
+                if args.auto_regressive:
+                    observation_dic = get_observation_for_autoregression_nsm(
+                        observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
+                else:
+                    observation_dic = get_observation_for_nsm(
+                        observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
                 other_info = {
                     'file_name': file_name,
                     'scenario_id': '',  # empty for NuPlan
@@ -201,8 +205,8 @@ if __name__ == '__main__':
     parser.add_argument('--resume', default=False, action='store_true')
     parser.add_argument('--debug', default=False, action='store_true')
     parser.add_argument('--save_log', default=False, action='store_true')
-    parser.add_argument('--starting_file_num', type=int, default=-1)
-    parser.add_argument('--ending_file_num', type=int, default=-1)
+    parser.add_argument('--starting_file_num', type=int, default=0)
+    parser.add_argument('--ending_file_num', type=int, default=1000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
     parser.add_argument('--multi_process', default=False, action='store_true')
     parser.add_argument('--file_per_worker', type=int, default=1)
@@ -219,8 +223,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--use_nsm', default=False, action='store_true')
     parser.add_argument('--balance_rate', type=float, default=1.0, help="balance sample rate of simple scenarios in nsm case")
-    parser.add_argument('--sample_interval', type=int, default=10)
+    parser.add_argument('--sample_interval', type=int, default=200)
     parser.add_argument('--dataset_name', type=str, default='nsm')
+    parser.add_argument('--auto_regressive', default=True)
 
     # parser.add_argument('--save_playback', default=True, action='store_true')
     args_p = parser.parse_args()

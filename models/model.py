@@ -3,7 +3,7 @@ try:
 except:
     from TransformerXL.model import *
 import torch.nn as nn
-
+from transformers import GPT2Model,GPT2LMHeadModel
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
@@ -236,6 +236,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         
         if self.traj_decoder is not None:
             # expected shape for pred trajectory is (b, pred_length, 4)
+            # TODO
             traj_pred = self.traj_decoder(transformer_outputs_hidden_state[:, :pred_length, :])
         else:
             traj_pred = None
