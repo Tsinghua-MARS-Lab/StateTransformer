@@ -1,12 +1,29 @@
-try:
-    from models.TransformerXL.model import *
-except:
-    from TransformerXL.model import *
+# try:
+#     from models.TransformerXL.model import *
+# except:
+#     from TransformerXL.model import *
+#
+# try:
+#     from models.nsm import NSMDecoder
+# except:
+#     from nsm import NSMDecoder
+#
 
 try:
+    # imports for runner
+    from models.TransformerXL.model import *
+    # from models.GPT2.models import *
     from models.nsm import NSMDecoder
+    from models.encoders import *
+    from models.decoders import *
 except:
+    # imports for unit test
+    from TransformerXL.model import *
+    # from GPT2.models import *
     from nsm import NSMDecoder
+    from encoders import *
+    from decoders import *
+
 import torch.nn as nn
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"

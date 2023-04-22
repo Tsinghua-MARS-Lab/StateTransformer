@@ -1,45 +1,3 @@
-import torch
-from torch import nn, Tensor
-from transformers import TransfoXLModel, TransfoXLConfig
-import numpy as np
-
-class NuPlanEncoder(nn.Module):
-    """
-    Currently only supports encoding vectors, rasters to be added
-    """
-    def __init__(self, vocab_size=1000, embedding_dim=256):
-        super(NuPlanEncoder, self).__init__()
-        self.emb = nn.Embedding(vocab_size, embedding_dim, dtype=torch.int64)
-        self.max_pts_num = 3000
-
-    def forward(self, values_dic):
-        # encode road vectors
-        # road_vectors has a shape of batch_size*N*7
-        road_vectors = values_dic['road_vectors']
-        # encode xyz at one embedding
-        batch_size = road_vectors.shape[0]
-        N = road_vectors.shape[1]
-        road_embeddings = self.emb(road_vectors)
-
-
-        agent_vectors = values_dic['agent_vectors']
-
-        return self.emb(values)
-
-    # def patching(self, value_dics):
-    #     for each_value_dic in value_dics:
-    #         # each data in the batch
-    #         road_vector = each_value_dic['road_vectors']
-    #         target = torch.zeros((self.max_pts_num, road_vector.shape[1]), device=road_vector.device,
-    #                              dtype=road_vector.dtype)
-    #         n = road_vector.shape[0]
-    #         if n > self.max_pts_num:
-    #             target[:, :] = road_vector[:self.max_pts_num, :]
-    #         else:
-    #             target[:n, :] = road_vector[:, :]
-    #         each_value_dic['road_vectors'] = target
-
-
 # coding=utf-8
 # Copyright 2018 Google AI, Google Brain and Carnegie Mellon University Authors and the HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
@@ -64,7 +22,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 
 from transformers.modeling_utils import PreTrainedModel
@@ -76,14 +34,57 @@ from transformers.utils import (
     logging,
 )
 
-from transformers import TransfoXLConfig
+from transformers import TransfoXLModel, TransfoXLConfig
 from transformers.models.transfo_xl.modeling_transfo_xl_utilities import ProjectedAdaptiveLogSoftmax
-
+import numpy as np
 
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
+
+TRANSFO_XL_START_DOCSTRING = r"""
+    This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
+    library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
+    etc.)
+    This model is also a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass.
+    Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage
+    and behavior.
+    Parameters:
+        config ([`TransfoXLConfig`]): Model configuration class with all the parameters of the model.
+            Initializing with a config file does not load the weights associated with the model, only the
+            configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
+"""
+
+TRANSFO_XL_INPUTS_DOCSTRING = r"""
+    Args:
+        input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
+            Indices of input sequence tokens in the vocabulary.
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            [`PreTrainedTokenizer.__call__`] for details.
+            [What are input IDs?](../glossary#input-ids)
+        mems (`List[torch.FloatTensor]` of length `config.n_layers`):
+            Contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model (see
+            `mems` output below). Can be used to speed up sequential decoding. The token ids which have their mems
+            given to this model should not be passed as `input_ids` as they have already been computed.
+        head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
+            Mask to nullify selected heads of the self-attention modules. Mask values selected in `[0, 1]`:
+            - 1 indicates the head is **not masked**,
+            - 0 indicates the head is **masked**.
+        inputs_embeds (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
+            Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation. This
+            is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
+            model's internal embedding lookup matrix.
+        output_attentions (`bool`, *optional*):
+            Whether or not to return the attentions tensors of all attention layers. See `attentions` under returned
+            tensors for more detail.
+        output_hidden_states (`bool`, *optional*):
+            Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
+            more detail.
+        return_dict (`bool`, *optional*):
+            Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
+"""
+
 
 TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "transfo-xl-wt103",
@@ -498,7 +499,10 @@ class AdaptiveEmbedding(nn.Module):
 
         return embed
 
-
+@add_start_docstrings(
+    "The bare Bert Model transformer outputting raw hidden-states without any specific head on top.",
+    TRANSFO_XL_START_DOCSTRING,
+)
 class TransfoXLPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
@@ -787,250 +791,5 @@ class TransfoXLLMHeadModelOutput(ModelOutput):
         # are strictly speaking not exactly `logits`, but behave the same
         # way logits do.
         return self.prediction_scores
-
-
-TRANSFO_XL_START_DOCSTRING = r"""
-    This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
-    library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
-    etc.)
-    This model is also a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass.
-    Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage
-    and behavior.
-    Parameters:
-        config ([`TransfoXLConfig`]): Model configuration class with all the parameters of the model.
-            Initializing with a config file does not load the weights associated with the model, only the
-            configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
-"""
-
-TRANSFO_XL_INPUTS_DOCSTRING = r"""
-    Args:
-        input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
-            Indices of input sequence tokens in the vocabulary.
-            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
-            [`PreTrainedTokenizer.__call__`] for details.
-            [What are input IDs?](../glossary#input-ids)
-        mems (`List[torch.FloatTensor]` of length `config.n_layers`):
-            Contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model (see
-            `mems` output below). Can be used to speed up sequential decoding. The token ids which have their mems
-            given to this model should not be passed as `input_ids` as they have already been computed.
-        head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
-            Mask to nullify selected heads of the self-attention modules. Mask values selected in `[0, 1]`:
-            - 1 indicates the head is **not masked**,
-            - 0 indicates the head is **masked**.
-        inputs_embeds (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
-            Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation. This
-            is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
-            model's internal embedding lookup matrix.
-        output_attentions (`bool`, *optional*):
-            Whether or not to return the attentions tensors of all attention layers. See `attentions` under returned
-            tensors for more detail.
-        output_hidden_states (`bool`, *optional*):
-            Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
-            more detail.
-        return_dict (`bool`, *optional*):
-            Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
-"""
-
-
-@add_start_docstrings(
-    "The bare Bert Model transformer outputting raw hidden-states without any specific head on top.",
-    TRANSFO_XL_START_DOCSTRING,
-)
-
-class RelationNetwork(nn.Module):
-    """docstring for RelationNetwork"""
-
-    def __init__(self, config):
-        super(RelationNetwork, self).__init__()
-        self.layer1 = nn.Sequential(
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512, momentum=1, affine=True),
-            nn.ReLU()
-        )
-        self.layer2 = nn.Sequential(
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512, momentum=1, affine=True),
-            nn.ReLU()
-        )
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.double_conv1 = nn.Sequential(
-            nn.Conv2d(1024, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512, momentum=1, affine=True),
-            nn.ReLU(),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512, momentum=1, affine=True),
-            nn.ReLU()
-        )  # 14 x 14
-        self.double_conv2 = nn.Sequential(
-            nn.Conv2d(1024, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256, momentum=1, affine=True),
-            nn.ReLU(),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256, momentum=1, affine=True),
-            nn.ReLU()
-        )  # 28 x 28
-        self.double_conv3 = nn.Sequential(
-            nn.Conv2d(512, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128, momentum=1, affine=True),
-            nn.ReLU(),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128, momentum=1, affine=True),
-            nn.ReLU()
-        )  # 56 x 56
-        self.double_conv4 = nn.Sequential(
-            nn.Conv2d(256, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64, momentum=1, affine=True),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64, momentum=1, affine=True),
-            nn.ReLU()
-        )  # 112 x 112
-
-        self.double_conv5 = nn.Sequential(
-            nn.Conv2d(128, config.d_embed, kernel_size=3, padding=1),
-            nn.BatchNorm2d(config.d_embed, momentum=1, affine=True),
-            nn.ReLU(),
-        )  # 224 x 224
-
-    def forward(self, x, concat_features):
-        out = self.layer1(x)
-        out = self.layer2(out)
-        out = self.upsample(out)  # block 1
-        out = torch.cat((out, concat_features[-1]), dim=1)
-        out = self.double_conv1(out)
-        out = self.upsample(out)  # block 2
-        out = torch.cat((out, concat_features[-2]), dim=1)
-        out = self.double_conv2(out)
-        out = self.upsample(out)  # block 3
-        out = torch.cat((out, concat_features[-3]), dim=1)
-        out = self.double_conv3(out)
-        out = self.upsample(out)  # block 4
-        out = torch.cat((out, concat_features[-4]), dim=1)
-        out = self.double_conv4(out)
-        # return out
-        out = self.upsample(out)  # block 5
-        out = torch.cat((out, concat_features[-5]), dim=1)
-        out = self.double_conv5(out)
-        return out
-
-
-class CNNDownSamplingResNet18(nn.Module):
-    def __init__(self, d_embed, in_channels):
-        super(CNNDownSamplingResNet18, self).__init__()
-        import torchvision.models as models
-        self.cnn = models.resnet18(pretrained=False, num_classes=d_embed)
-        self.cnn = torch.nn.Sequential(*(list(self.cnn.children())[1:-1]))
-        self.layer1 = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(in_features=512, out_features=d_embed, bias=True)
-        )
-        # self.cnn = models.vgg11(pretrained=False, num_classes=config.d_embed)
-        # self.cnn.features = self.cnn.features[1:]
-        # self.layer1 = nn.Sequential(
-        #     nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
-        # )
-
-    def forward(self, x):
-        x = self.layer1(x)
-        x = self.cnn(x)
-        output = self.classifier(x.squeeze(-1).squeeze(-1))
-        return output
-
-
-class CNNDownSampling(nn.Module):
-    def __init__(self, config, in_channels):
-        super(CNNDownSampling, self).__init__()
-        import torchvision.models as models
-        self.cnn = models.vgg16(pretrained=False, num_classes=config.d_embed)
-        self.cnn.features = self.cnn.features[1:]
-        self.layer1 = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
-        )
-
-    def forward(self, x):
-        x = self.layer1(x)
-        output = self.cnn(x)
-        assert output.shape == (len(x), args.hidden_size), output.shape
-        return output
-
-
-class CNNEncoder(nn.Module):
-    """docstring for ClassName"""
-
-    def __init__(self, config, in_channels):
-        super(CNNEncoder, self).__init__()
-        import torchvision.models as models
-        features = list(models.vgg16_bn(pretrained=False).features)
-        # in_channels = 101
-        self.layer1 = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
-        )
-        self.features = nn.ModuleList(features)[1:]  # .eval()
-        # print (nn.Sequential(*list(models.vgg16_bn(pretrained=True).children())[0]))
-        # self.features = nn.ModuleList(features).eval()
-        self.decoder = RelationNetwork(config)
-
-    def forward(self, x):
-        results = []
-        x = self.layer1(x)
-        for ii, model in enumerate(self.features):
-            x = model(x)
-            if ii in {4, 11, 21, 31, 41}:
-                results.append(x)
-
-        output = self.decoder(x, results)
-        output = output.permute(0, 2, 3, 1)
-        # assert output.shape == (len(x), 224, 224, config.d_embed), output.shape
-        return output
-
-class LayerNorm(nn.Module):
-    r"""
-    Layer normalization.
-    """
-
-    def __init__(self, hidden_size, eps=1e-5):
-        super(LayerNorm, self).__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.bias = nn.Parameter(torch.zeros(hidden_size))
-        self.variance_epsilon = eps
-
-    def forward(self, x):
-        u = x.mean(-1, keepdim=True)
-        s = (x - u).pow(2).mean(-1, keepdim=True)
-        x = (x - u) / torch.sqrt(s + self.variance_epsilon)
-        return self.weight * x + self.bias
-
-
-class MLP(nn.Module):
-    def __init__(self, hidden_size, out_features=None):
-        super(MLP, self).__init__()
-        if out_features is None:
-            out_features = hidden_size
-        self.linear = nn.Linear(hidden_size, out_features)
-        self.layer_norm = LayerNorm(out_features)
-
-    def forward(self, hidden_states):
-        hidden_states = self.linear(hidden_states)
-        hidden_states = self.layer_norm(hidden_states)
-        hidden_states = torch.nn.functional.relu(hidden_states)
-        return hidden_states
-
-
-class DecoderResCat(nn.Module):
-    def __init__(self, hidden_size, in_features, out_features=60):
-        super(DecoderResCat, self).__init__()
-        self.hidden_size = hidden_size
-        self.in_features = in_features
-        self.out_features = out_features
-        self.mlp = MLP(in_features, hidden_size)
-        self.fc = nn.Linear(hidden_size + in_features, out_features)
-
-    def forward(self, hidden_states):
-        hidden_states = torch.cat([hidden_states, self.mlp(hidden_states)], dim=-1)
-        hidden_states = self.fc(hidden_states)
-        return hidden_states
-
 
 
