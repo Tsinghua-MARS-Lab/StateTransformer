@@ -13,7 +13,7 @@ import torch
 from tqdm import tqdm
 import random
 
-from datasets.utils.logging import set_verbosity
+import datasets
 import numpy as np
 from datasets import Dataset
 from dataclasses import dataclass, field
@@ -192,7 +192,7 @@ def main():
 
     log_level = training_args.get_process_log_level()
     logger.setLevel(log_level)
-    set_verbosity(log_level)
+    datasets.utils.logging.set_verbosity(log_level)
     transformers.utils.logging.set_verbosity(log_level)
     transformers.utils.logging.enable_default_handler()
     transformers.utils.logging.enable_explicit_format()
