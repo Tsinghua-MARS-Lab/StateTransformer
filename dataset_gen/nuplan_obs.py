@@ -431,7 +431,7 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
            
     else:
         result_to_return["intended_maneuver_vector"] = None
-        result_to_return["current_maneuver_label"] = None
+        result_to_return["current_maneuver_vector"] = None
 
     return result_to_return
 

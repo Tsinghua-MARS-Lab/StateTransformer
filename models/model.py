@@ -14,7 +14,7 @@ except:
     from decoders import *
 
 import torch.nn as nn
-from transformers import GPT2Model,GPT2LMHeadModel
+from transformers import GPT2Model,GPT2PreTrainedModel
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
@@ -420,8 +420,41 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             self.current_m_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=12)
         # end of added
         # Initialize weights and apply final processing
+        self.model_parallel = False
+        self.device_map = None
         self.post_init()
 
+    @add_start_docstrings(PARALLELIZE_DOCSTRING)
+    def parallelize(self, device_map=None):
+        warnings.warn(
+            "`GPT2LMHeadModel.parallelize` is deprecated and will be removed in v5 of Transformers, you should load"
+            " your model with `device_map='balanced'` in the call to `from_pretrained`. You can also provide your own"
+            " `device_map` but it needs to be a dictionary module_name to device, so for instance {'transformer.h.0':"
+            " 0, 'transformer.h.1': 1, ...}",
+            FutureWarning,
+        )
+        self.device_map = (
+            get_device_map(len(self.transformer.h), range(torch.cuda.device_count()))
+            if device_map is None
+            else device_map
+        )
+        assert_device_map(self.device_map, len(self.transformer.h))
+        self.transformer.parallelize(self.device_map)
+        # self.lm_head = self.lm_head.to(self.transformer.first_device)
+        self.model_parallel = True
+
+    @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
+    def deparallelize(self):
+        warnings.warn(
+            "Like `parallelize`, `deparallelize` is deprecated and will be removed in v5 of Transformers.",
+            FutureWarning,
+        )
+        self.transformer.deparallelize()
+        self.transformer = self.transformer.to("cpu")
+        # self.lm_head = self.lm_head.to("cpu")
+        self.model_parallel = False
+        torch.cuda.empty_cache()
+    
     def forward(
         self,
         intended_maneuver_vector: Optional[torch.Tensor] = None,
@@ -530,38 +563,28 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             interpolated_weights = torch.lerp(current_maneuver_vector,  # [bsz, seq, 12]
                                               current_c_confifence,  #[bsz, seq, 12]
                                               lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
-            # TODO: what's the input hidden state here? 
             # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
-            traj_hidden_state = self.nsm_decoder(hidden_states=manuever_hidden_states.reshape(-1, n_embed),
+            traj_hidden_state = self.nsm_decoder(hidden_states=traj_hidden_state.reshape(-1, n_embed),
                                                  weight_blend=interpolated_weights.view(-1, 12))
             # traj_pred: [batch_size, pred_length, 4]
             traj_logits = self.traj_decoder(traj_hidden_state.reshape(batch_size, seq, n_embed))
         
         loss = torch.tensor(0, dtype=torch.float32, device=device)
-        if self.not_same_scale != 1:
-            scaler = torch.ones(intended_maneuver_vector.shape, dtype=torch.float32, device=device) * self.not_same_scale
-            ones = torch.ones(intended_maneuver_vector.shape, dtype=torch.float32, device=device)
-            # scaler[intended_maneuver_label==intended_maneuver_vector] = ones[intended_maneuver_label==intended_maneuver_vector]
 
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             loss_fct = CrossEntropyLoss()
-            loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_vector.view(-1).long())
-            if self.not_same_scale != 1:
-                loss += loss_to_add * torch.mean(scaler)
-            else:
-                loss += loss_to_add
+            loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_vector.view(-1).long())    
+            loss += loss_to_add
 
         if self.predict_current_maneuver and current_maneuver_vector is not None:
             loss_fct = MSELoss()
-            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_vector.squeeze()) * 10000
-            if self.not_same_scale != 1:
-                loss += loss_to_add * torch.mean(scaler)
-            else:
-                loss += loss_to_add
+            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_vector.squeeze())
+            loss += loss_to_add
         
         if self.predict_trajectory and self.traj_decoder is not None:
             loss_fct = MSELoss(reduction="mean")
-            loss += loss_fct(traj_logits, trajectory.to(device)) * 10000
+            loss_to_add = loss_fct(traj_logits, trajectory.to(device))
+            loss += loss_to_add
 
         if not return_dict:
             output = (traj_logits,) + transformer_outputs[1:]
@@ -599,8 +622,9 @@ if  __name__ == '__main__':
 
     # model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
     # model.config.pad_token_id = 0
-    # dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/store/nsm")
-    # example = dataset[0]
+    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_autoregressive_test")
+    print(dataset.features)
+    example = dataset[0]
     # result = model.forward(
     #     intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
     #     intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9),
@@ -619,11 +643,11 @@ if  __name__ == '__main__':
     # )
     model = GPTModelNuPlan.from_pretrained('gpt2', model_args=model_args)
     result = model(
-        intended_maneuver_vector=torch.zeros(2,10,dtype=torch.int32),
-        current_maneuver_vector=torch.zeros(2,10,12),
-        high_res_raster=torch.zeros(2,10,224,224,29),
-        low_res_raster=torch.zeros(2,10,224,224,29),
-        trajectory=torch.zeros(2,10,4),
+        intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
+        current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
+        high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+        low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+        trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
         return_dict=True,
     )
     print("done")

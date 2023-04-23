@@ -27,8 +27,8 @@ from transformers import (
     TrainerCallback,
     set_seed,
 )
-from models.model import TransfoXLModelNuPlan
-from transformers import TransfoXLConfig
+from models.model import TransfoXLModelNuPlan, GPTModelNuPlan
+from transformers import TransfoXLConfig, GPT2Config
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
 from transformers.utils.versions import require_version
@@ -227,13 +227,13 @@ def main():
     if os.path.isdir(data_args.saved_dataset_folder):
         items = os.listdir(data_args.saved_dataset_folder)
         if os.path.isdir(items[0]): #sub-datasets
-            datasets = list()
+            concatdatasets = list()
             for item in items:
                 dataset_path = os.path.join(data_args.saved_dataset_folder, item)
                 dataset = Dataset.load_from_disk(dataset_path)
                 dataset.set_format(type='torch')
-                datasets.append(dataset)
-            concat_dataset = ConcatDataset(datasets)
+                concatdatasets.append(dataset)
+            concat_dataset = ConcatDataset(concatdatasets)
             datasetsize = len(concat_dataset)
             train, val, test = random_split(concat_dataset, \
                                             (int(0.9*datasetsize), \
@@ -254,21 +254,33 @@ def main():
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # Load a model's pretrained weights from a path or from hugging face's model base
-    if model_args.model_name == 'pretrain':
+    if 'pretrain' in model_args.model_name:
         # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
-        model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
-        model.config.pad_token_id = 0
-        model.config.eos_token_id = 0
-    elif model_args.model_name == 'scratch':
-        config_p = TransfoXLConfig()
-        config_p.n_layer = model_args.n_layers
-        config_p.d_embed = model_args.d_embed
-        config_p.d_model = model_args.d_model
-        config_p.d_inner = model_args.d_inner
-        model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+        if 'xl' in model_args.model_name:
+            model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
+            model.config.pad_token_id = 0
+            model.config.eos_token_id = 0
+        elif 'gpt' in model_args.model_name:
+            model = GPTModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
+    
+    elif 'scratch' in model_args.model_name:
+        if 'xl' in model_args.model_name:
+            config_p = TransfoXLConfig()
+            config_p.n_layer = model_args.n_layers
+            config_p.d_embed = model_args.d_embed
+            config_p.d_model = model_args.d_model
+            config_p.d_inner = model_args.d_inner
+            model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+            model.config.pad_token_id = 0
+            model.config.eos_token_id = 0
+        elif 'gpt' in model_args.model_name:
+            config_p = GPT2Config()
+            config_p.n_layer = model_args.n_layers
+            config_p.n_embd = model_args.d_embed
+            config_p.n_inner = model_args.d_inner
+            model = GPTModelNuPlan(config_p, model_args=model_args)
         # model_p.save_pretrained( '../saved_model/transformerxlSml')
-        model.config.pad_token_id = 0
-        model.config.eos_token_id = 0
+
 
     if training_args.do_train:
         import multiprocessing
