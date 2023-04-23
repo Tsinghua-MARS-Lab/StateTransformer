@@ -7,9 +7,9 @@
 from transformers import TrainingArguments, Trainer, TrainerCallback
 import torch, pickle
 
-from datasets import Dataset, Features, Value, Array2D, IterableDataset
+from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-from dataset_gen.nuplan_obs import get_observation_for_nsm
+from dataset_gen.nuplan_obs import get_observation_for_nsm, get_observation_for_autoregression_nsm
 from torch.utils.data import DataLoader
 import os
 import importlib.util
@@ -21,30 +21,15 @@ from visulization.checkraster import *
 import pickle
 
 def main(args):
-
-    use_config = args.config is not None
-    if use_config:
-        spec = importlib.util.spec_from_file_location('config', args.config)
-        if spec is None:
-            parser.error('Config file not found.')
-        config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config)
-        env_config = config.EnvConfig()
-
-        data_path = env_config.env.data_path
-        road_path = env_config.env.road_dic_path
-        gt_relation_path = env_config.env.relation_gt_path
-        running_mode = env_config.env.running_mode
-        # use nsm
-        use_nsm = env_config.env.nsm
-        if use_nsm:
-            nsm_labels = None
-            with open(env_config.env.nsm_label_path, 'rb') as f:
-                # Load the object from the pickle file
-                nsm_labels = pickle.load(f)
-                print(f'NSM Labels loaded with {len(list(nsm_labels.keys()))} keys')
-    else:
-        raise NotImplementedError
+    running_mode = args.running_mode
+    data_path = args.data_path
+    road_path = args.road_dic_path
+    if args.use_nsm:
+        nsm_labels = None
+        with open(args.nsm_label_path, 'rb') as f:
+            # Load the object from the pickle file
+            nsm_labels = pickle.load(f)
+            print(f'NSM Labels loaded with {len(list(nsm_labels.keys()))} keys')
 
     # check starting or ending number
     starting_file_num = args.starting_file_num if args.starting_file_num != -1 else None
@@ -61,33 +46,30 @@ def main(args):
         frame_sample_interval=5,
         action_label_scale=100,
     )
-    rasterize = True
-
 
     def yield_data(shards, dl):
         for shard in shards:
             loaded_dic = dl.get_next_file(specify_file_index=shard)
             file_name = dl.file_names[shard]
-            nsm_result = nsm_labels[file_name] if file_name in nsm_labels else None
-            if env_config.env.nsm and nsm_result is None:
-                print('ERROR: not found, ', file_name, nsm_labels['file_names'])
-                continue
-            if loaded_dic is None:
-                print('Ending data loading, No more file to load, current index is: ', shard)
-                break
+            if args.use_nsm:
+                nsm_result = nsm_labels[file_name] if file_name in nsm_labels else None
+                if args.use_nsm and nsm_result is None:
+                    print('ERROR: not found, ', file_name, nsm_labels['file_names'])
+                    continue
+                if loaded_dic is None:
+                    print('Ending data loading, No more file to load, current index is: ', shard)
+                    break
+            else:
+                nsm_result = None
             
             total_frames = len(loaded_dic['lidar_pc_tokens'])
             for t in range(observation_kwargs['past_frame_num'] + 1,
-                           total_frames - observation_kwargs['future_frame_num']):
-                if env_config.env.nsm:
+                           total_frames - observation_kwargs['future_frame_num'], args.sample_interval):
+                if args.use_nsm:
                     current_frame_is_valid = nsm_result['valid_frames'][t]
                     target_frame_is_valid = nsm_result['valid_frames'][t+observation_kwargs['frame_sample_interval']]
-                    try:    
-                        current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t][0]['action']
-                        target_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][t+observation_kwargs['frame_sample_interval']][0]['action']
-                    except:
-                        continue
-                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t, observation_kwargs["frame_sample_interval"]))
+                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t, \
+                                            observation_kwargs["frame_sample_interval"]))
                     sample_frames.append(t)
                     skip = False
                     for frame in sample_frames:
@@ -99,9 +81,9 @@ def main(args):
                             break    
                     if skip:
                         continue                    
-                    if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
-                        if np.random.rand() > 1.0/19:
-                            continue
+                    # if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
+                    #     if np.random.rand() > args.sample_rate:
+                    #         continue
                     if not current_frame_is_valid or not target_frame_is_valid:
                         continue
                     if len(nsm_result['goal_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
@@ -109,59 +91,31 @@ def main(args):
                     if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
                         continue
                     
+                if args.auto_regressive:
+                    observation_dic = get_observation_for_autoregression_nsm(
+                        observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
+                else:
                     observation_dic = get_observation_for_nsm(
                         observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
-                    other_info = {
-                        'file_name': file_name,
-                        'scenario_id': '',  # empty for NuPlan
-                        'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
-                        'frame_index': t,
-                        'map_name': 'boston',
-                        'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
-                    }
-                    if observation_dic is not None:
-                        observation_dic.update(other_info)
-                        yield observation_dic
-                    else:
-                        continue
+                other_info = {
+                    'file_name': file_name,
+                    'scenario_id': '',  # empty for NuPlan
+                    'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
+                    'frame_index': t,
+                    'map_name': 'boston',
+                    'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
+                }
+                if observation_dic is not None:
+                    observation_dic.update(other_info)
+                    yield observation_dic
                 else:
-                    high_res_obs, low_res_obs, agent_vectors, road_vectors = get_observation_for_nsm(
-                        observation_kwargs, loaded_dic, t, rasterize=rasterize)
-                    '''
-                    vectors have the following structure in an array with 7*N where N is the number of points:
-                    [global_index, instance_index, local_index, instance_types, xs, ys, zs]
-                    '''
-                    if rasterize:
-                        yield {
-                            'file_name': file_name,
-                            'scenario_id': '',  # empty for NuPlan
-                            'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
-                            'frame_index': t,
-                            'map_name': 'boston',
-                            'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
-                            'high_res_raster': high_res_obs,
-                            'low_res_raster': low_res_obs,
-                            'agent_vectors': agent_vectors,
-                            'road_vectors': road_vectors,
-                        }
-                    else:
-                        yield {
-                            'file_name': file_name,
-                            'scenario_id': '',  # empty for NuPlan
-                            'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
-                            'frame_index': t,
-                            'map_name': 'boston',
-                            'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
-                            'agent_vectors': agent_vectors,
-                            'road_vectors': road_vectors,
-                        }
-
+                    continue
     
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
     data_loader = NuPlanDL(scenario_to_start=starting_scenario,
                             file_to_start=starting_file_num,
                             max_file_number=max_file_num,
-                            data_path=data_path, db=None, gt_relation_path=gt_relation_path,
+                            data_path=data_path, db=None, gt_relation_path=None,
                             road_dic_path=road_path,
                             running_mode=running_mode)
     # # data format debug
@@ -192,7 +146,7 @@ def main(args):
     # visulize_trajectory("visulization/debug_raster", trajectory, context_actions)
     # exit()
     # dataset generation
-    if use_nsm:
+    if args.use_nsm:
         nsm_file_names = nsm_labels['file_names']
         file_indices = []
         for idx, each_file in enumerate(data_loader.file_names):
@@ -214,42 +168,47 @@ def main(args):
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
-    nuplan_dataset = Dataset.from_generator(yield_data, gen_kwargs={'shards': file_indices, 'dl': data_loader},
-                                            writer_batch_size=100, cache_dir=args.cache_folder,
+    nuplan_dataset = Dataset.from_generator(yield_data, 
+                                            # features=features,
+                                            gen_kwargs={'shards': file_indices, 'dl': data_loader},
+                                            writer_batch_size=2, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
-    nuplan_dataset.save_to_disk(args.cache_folder+'/nsm_sparse_balance_0415')
+    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name))
     print('Dataset saved')
     exit()
 
 if __name__ == '__main__':
+    from pathlib import Path
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument('--config', type=str, default='configs/nuplan_training_config.py')
-    parser.add_argument('--render', default=False, action='store_false')
-    parser.add_argument('--method', type=str, default='unknown')
-    parser.add_argument('--log_dir', type=str, default='sim_result')
-    parser.add_argument('--overwrite', default=True, action='store_true')
-    parser.add_argument('--resume', default=False, action='store_true')
-    parser.add_argument('--debug', default=False, action='store_true')
-    parser.add_argument('--save_log', default=False, action='store_true')
+    parser.add_argument("--running_mode", type=int, default=1)
+    parser.add_argument("--data_path", type=dict, default={
+                'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+                'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+                'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/train_boston",
+            })
+    parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
+    parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
+
     parser.add_argument('--starting_file_num', type=int, default=0)
-    parser.add_argument('--ending_file_num', type=int, default=100)
+    parser.add_argument('--ending_file_num', type=int, default=1000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
-    parser.add_argument('--multi_process', default=False, action='store_true')
-    parser.add_argument('--file_per_worker', type=int, default=1)
-    parser.add_argument('--save_playback_data', default=False, action='store_true')
-    parser.add_argument('--max_scenarios', type=int, default=100000)
     parser.add_argument('--cache_folder', type=str, default='/localdata_hdd/nuplan_nsm')
 
     parser.add_argument('--train', default=False, action='store_true')
     parser.add_argument('--local_rank', type=int, default=-1)
     parser.add_argument('--num_proc', type=int, default=1)
-    parser.add_argument('--num_epoch', type=int, default=3)
     parser.add_argument('--deepspeed', type=str, default=None)
     parser.add_argument('--model_name', type=str, default=None)
+
+    parser.add_argument('--use_nsm', default=False, action='store_true')
+    parser.add_argument('--balance_rate', type=float, default=1.0, help="balance sample rate of simple scenarios in nsm case")
+    parser.add_argument('--sample_interval', type=int, default=200)
+    parser.add_argument('--dataset_name', type=str, default='nsm')
+    parser.add_argument('--auto_regressive', default=True)
 
     # parser.add_argument('--save_playback', default=True, action='store_true')
     args_p = parser.parse_args()

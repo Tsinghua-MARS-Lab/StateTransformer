@@ -1,31 +1,20 @@
-# try:
-#     from models.TransformerXL.model import *
-# except:
-#     from TransformerXL.model import *
-#
-# try:
-#     from models.nsm import NSMDecoder
-# except:
-#     from nsm import NSMDecoder
-#
-
 try:
     # imports for runner
     from models.TransformerXL.model import *
-    # from models.GPT2.models import *
+    from models.GPT2.models import *
     from models.nsm import NSMDecoder
     from models.encoders import *
     from models.decoders import *
 except:
     # imports for unit test
     from TransformerXL.model import *
-    # from GPT2.models import *
+    from GPT2.models import *
     from nsm import NSMDecoder
     from encoders import *
     from decoders import *
 
 import torch.nn as nn
-
+from transformers import GPT2Model,GPT2PreTrainedModel
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
@@ -275,6 +264,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         
         if self.traj_decoder is not None:
             # expected shape for pred trajectory is (b, pred_length, 4)
+            # TODO
             traj_pred = self.traj_decoder(transformer_outputs_hidden_state[:, :pred_length, :])
         else:
             traj_pred = None
@@ -390,6 +380,225 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         result = torch.cat([result, raster_embed[:, -step:, :]], dim=1)
         return result
 
+class GPTModelNuPlan(GPT2PreTrainedModel):
+    def __init__(self, config, **kwargs):
+        super().__init__(config)
+        self.transformer = GPT2Model(config)
+        model_args = kwargs['model_args']
+        self.use_nsm = model_args.use_nsm
+        self.predict_trajectory = model_args.predict_trajectory
+        self.predict_intended_maneuver = model_args.predict_intended_maneuver
+        self.predict_current_maneuver = model_args.predict_current_maneuver
+        self.time_to_predict = model_args.time_to_predict
+        self.frequency_for_prediction = model_args.frequency_for_prediction
+        self.not_same_scale = model_args.scale_on_not_same_loss
+        self.predict_single_step_trajectory = model_args.predict_single_step_trajectory
+        self.predict_trajectory_with_nsm = model_args.predict_trajectory_with_nsm
+        self.mask_history_intended_maneuver = model_args.mask_history_intended_maneuver
+        self.mask_history_current_maneuver = model_args.mask_history_current_maneuver
+
+        assert self.predict_trajectory or self.predict_intended_maneuver or self.predict_current_maneuver or self.predict_single_step_trajectory, 'Predict at least one target! Pass True in Model Args'
+
+        in_channels = 29 # raster: goal + road_type + agent_type    
+        n_embed = config.n_embd // 2
+
+        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        
+        self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
+        self.current_m_embed = nn.Sequential(nn.Linear(12, n_embed, bias=False), nn.Tanh())
+        self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
+
+        if self.predict_trajectory_with_nsm:
+            self.nsm_decoder = NSMDecoder(config.n_embd)
+
+        self.traj_decoder = None
+        if self.predict_trajectory or self.predict_single_step_trajectory:
+            self.traj_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=4)
+        if self.predict_intended_maneuver:
+            self.intended_m_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=12)
+        if self.predict_current_maneuver:
+            self.current_m_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=12)
+        # end of added
+        # Initialize weights and apply final processing
+        self.model_parallel = False
+        self.device_map = None
+        self.post_init()
+
+    @add_start_docstrings(PARALLELIZE_DOCSTRING)
+    def parallelize(self, device_map=None):
+        warnings.warn(
+            "`GPT2LMHeadModel.parallelize` is deprecated and will be removed in v5 of Transformers, you should load"
+            " your model with `device_map='balanced'` in the call to `from_pretrained`. You can also provide your own"
+            " `device_map` but it needs to be a dictionary module_name to device, so for instance {'transformer.h.0':"
+            " 0, 'transformer.h.1': 1, ...}",
+            FutureWarning,
+        )
+        self.device_map = (
+            get_device_map(len(self.transformer.h), range(torch.cuda.device_count()))
+            if device_map is None
+            else device_map
+        )
+        assert_device_map(self.device_map, len(self.transformer.h))
+        self.transformer.parallelize(self.device_map)
+        # self.lm_head = self.lm_head.to(self.transformer.first_device)
+        self.model_parallel = True
+
+    @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
+    def deparallelize(self):
+        warnings.warn(
+            "Like `parallelize`, `deparallelize` is deprecated and will be removed in v5 of Transformers.",
+            FutureWarning,
+        )
+        self.transformer.deparallelize()
+        self.transformer = self.transformer.to("cpu")
+        # self.lm_head = self.lm_head.to("cpu")
+        self.model_parallel = False
+        torch.cuda.empty_cache()
+    
+    def forward(
+        self,
+        intended_maneuver_vector: Optional[torch.Tensor] = None,
+        current_maneuver_vector: Optional[torch.Tensor] = None,
+        high_res_raster: Optional[torch.Tensor] = None,
+        low_res_raster: Optional[torch.Tensor] = None,
+        trajectory: Optional[torch.Tensor] = None,
+        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        encoder_attention_mask: Optional[torch.FloatTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
+        
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        device = high_res_raster.device
+        # with history menuever label input
+        if not self.use_nsm:
+            intended_maneuver_vector = None
+            current_maneuver_vector = None
+            
+        if self.mask_history_intended_maneuver:
+            intended_maneuver_vector[:] = 0
+        if self.mask_history_current_maneuver:
+            current_maneuver_vector[:] = 0.0
+
+        if intended_maneuver_vector is not None and current_maneuver_vector is not None:
+            intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
+            current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
+        else:
+            intended_maneuver_embed = None
+            current_maneuver_embed = None
+
+        ## action embedding 
+        action_embeds = self.action_m_embed(trajectory)
+        
+        ## ratser embedding and concat to state embedding
+        high_res_raster = high_res_raster.permute(0, 1, 4, 2, 3)
+        low_res_raster = low_res_raster.permute(0, 1, 4, 2, 3)
+        batch_size, seq, c, h, w = high_res_raster.shape
+        # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed) 
+        high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w))
+        low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w))
+        high_res_embed = high_res_embed.reshape(batch_size, seq, -1)
+        low_res_embed = low_res_embed.reshape(batch_size, seq, -1)
+        
+        state_embeds = torch.cat((high_res_embed,
+                                      low_res_embed), dim=-1).to(torch.float32)
+        if intended_maneuver_embed is not None and current_maneuver_embed is not None:       
+            maneuver_embeds = torch.cat((intended_maneuver_embed,
+                                          current_maneuver_embed), dim=-1).to(torch.float32)
+            input_seq = seq * 3
+        else:
+            maneuver_embeds = None
+            input_seq = seq * 2
+        
+        # concat state embeding, maneuver embeding, action embeding
+        n_embed = action_embeds.shape[-1]
+        input_embeds = torch.zeros(
+            (batch_size, input_seq, n_embed), dtype=torch.float32, device=device)
+        input_embeds[:, ::3, :] = state_embeds
+        input_embeds[:, 1::3, :] = maneuver_embeds
+        input_embeds[:, 2::3, :] = action_embeds
+
+        transformer_outputs = self.transformer(
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=input_embeds,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        hidden_states = transformer_outputs[0]
+        manuever_hidden_states = hidden_states[:, 1::3, :]
+        action_hidden_states = hidden_states[:, 2::3, :]
+
+        intended_m_logits = None
+        current_m_logits = None
+        traj_logits = None
+        if self.predict_intended_maneuver and intended_maneuver_vector is not None:
+            intended_m_logits = self.intended_m_decoder(manuever_hidden_states)
+        if self.predict_current_maneuver and current_maneuver_vector is not None:
+            current_m_logits = self.current_m_decoder(manuever_hidden_states)
+            current_c_confifence = torch.softmax(current_m_logits, dim=-1)
+        
+        if self.traj_decoder is not None and not self.predict_trajectory_with_nsm:
+            # expected shape for pred trajectory is (b, pred_length, 4)
+            traj_logits = self.traj_decoder(action_hidden_states)
+
+        if self.predict_trajectory_with_nsm:
+            assert not self.predict_trajectory, 'Duplicate loss computation, donnot use predict_trajectory and predict_trajectory_with_nsm at the same time'
+            lerp_weights = torch.arange(1.0, 1.0 + seq).float().to(device) / seq
+            # interpolated_weights: [batch_size, pred_length, 12], linear interpolated from current to predicted next step weights
+            interpolated_weights = torch.lerp(current_maneuver_vector,  # [bsz, seq, 12]
+                                              current_c_confifence,  #[bsz, seq, 12]
+                                              lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
+            # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
+            traj_hidden_state = self.nsm_decoder(hidden_states=traj_hidden_state.reshape(-1, n_embed),
+                                                 weight_blend=interpolated_weights.view(-1, 12))
+            # traj_pred: [batch_size, pred_length, 4]
+            traj_logits = self.traj_decoder(traj_hidden_state.reshape(batch_size, seq, n_embed))
+        
+        loss = torch.tensor(0, dtype=torch.float32, device=device)
+
+        if self.predict_intended_maneuver and intended_maneuver_vector is not None:
+            loss_fct = CrossEntropyLoss()
+            loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_vector.view(-1).long())    
+            loss += loss_to_add
+
+        if self.predict_current_maneuver and current_maneuver_vector is not None:
+            loss_fct = MSELoss()
+            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_vector.squeeze())
+            loss += loss_to_add
+        
+        if self.predict_trajectory and self.traj_decoder is not None:
+            loss_fct = MSELoss(reduction="mean")
+            loss_to_add = loss_fct(traj_logits, trajectory.to(device))
+            loss += loss_to_add
+
+        if not return_dict:
+            output = (traj_logits,) + transformer_outputs[1:]
+            return ((loss,) + output) if loss is not None else output
+
+        return CausalLMOutputWithCrossAttentions(
+            loss=loss,
+            logits=traj_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+            cross_attentions=transformer_outputs.cross_attentions,
+        )
+
 if  __name__ == '__main__':
     import datasets
     import argparse
@@ -397,33 +606,48 @@ if  __name__ == '__main__':
     parser.add_argument("--use_nsm", default=True)
     parser.add_argument("--predict_intended_maneuver", default=True)
     parser.add_argument("--predict_current_maneuver", default=True)
-    parser.add_argument("--predict_pose", default=True)
+    # parser.add_argument("--predict_pose", default=True)
     parser.add_argument("--predict_trajectory", default=True)
-    parser.add_argument("--per_instance_encoding", default=False)
+    # parser.add_argument("--per_instance_encoding", default=False)
     parser.add_argument("--time_to_predict", default=8)
     parser.add_argument("--frequency_for_prediction", default=20)
     parser.add_argument("--scale_on_not_same_loss", default=1.0)
     parser.add_argument("--maneuver_repeat", default=True)
+    parser.add_argument("--predict_single_step_trajectory", default=False)
+    parser.add_argument("--predict_trajectory_with_nsm", default=False)
+    parser.add_argument("--mask_history_intended_maneuver", default=False)
+    parser.add_argument("--mask_history_current_maneuver", default=False)
+    parser.add_argument("--d_inner", default=1024)
     model_args = parser.parse_args()
 
-    model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
-    model.config.pad_token_id = 0
-    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/store/nsm")
+    # model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
+    # model.config.pad_token_id = 0
+    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_autoregressive_test")
+    print(dataset.features)
     example = dataset[0]
-    result = model.forward(
-        intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
-        intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9),
-        current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
-        current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9, 1),
-        action_label=None,
-        trajectory_label=example['trajectory_label'].unsqueeze(0),
-        context_actions=example['context_actions'][:8].unsqueeze(0),
-        high_res_raster=example['high_res_raster'][:,:,:93].unsqueeze(0),
-        low_res_raster=example['low_res_raster'][:,:,:93].unsqueeze(0),
-        mems=None,
-        head_mask=None,
-        output_attentions=None,
-        output_hidden_states=None,
+    # result = model.forward(
+    #     intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
+    #     intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9),
+    #     current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
+    #     current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9, 1),
+    #     action_label=None,
+    #     trajectory_label=example['trajectory_label'].unsqueeze(0),
+    #     context_actions=example['context_actions'][:8].unsqueeze(0),
+    #     high_res_raster=example['high_res_raster'][:,:,:93].unsqueeze(0),
+    #     low_res_raster=example['low_res_raster'][:,:,:93].unsqueeze(0),
+    #     mems=None,
+    #     head_mask=None,
+    #     output_attentions=None,
+    #     output_hidden_states=None,
+    #     return_dict=True,
+    # )
+    model = GPTModelNuPlan.from_pretrained('gpt2', model_args=model_args)
+    result = model(
+        intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
+        current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
+        high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+        low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+        trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
         return_dict=True,
     )
     print("done")
