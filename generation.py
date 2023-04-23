@@ -7,7 +7,7 @@
 from transformers import TrainingArguments, Trainer, TrainerCallback
 import torch, pickle
 
-from datasets import Dataset, Features, Value, Array2D, IterableDataset
+from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
 from dataset_gen.nuplan_obs import get_observation_for_nsm, get_observation_for_autoregression_nsm
 from torch.utils.data import DataLoader
@@ -21,29 +21,15 @@ from visulization.checkraster import *
 import pickle
 
 def main(args):
-
-    use_config = args.config is not None
-    if use_config:
-        spec = importlib.util.spec_from_file_location('config', args.config)
-        if spec is None:
-            parser.error('Config file not found.')
-        config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config)
-        env_config = config.EnvConfig()
-
-        data_path = env_config.env.data_path
-        road_path = env_config.env.road_dic_path
-        gt_relation_path = env_config.env.relation_gt_path
-        running_mode = env_config.env.running_mode
-        # use nsm
-        if args.use_nsm:
-            nsm_labels = None
-            with open(env_config.env.nsm_label_path, 'rb') as f:
-                # Load the object from the pickle file
-                nsm_labels = pickle.load(f)
-                print(f'NSM Labels loaded with {len(list(nsm_labels.keys()))} keys')
-    else:
-        raise NotImplementedError
+    running_mode = args.running_mode
+    data_path = args.data_path
+    road_path = args.road_dic_path
+    if args.use_nsm:
+        nsm_labels = None
+        with open(args.nsm_label_path, 'rb') as f:
+            # Load the object from the pickle file
+            nsm_labels = pickle.load(f)
+            print(f'NSM Labels loaded with {len(list(nsm_labels.keys()))} keys')
 
     # check starting or ending number
     starting_file_num = args.starting_file_num if args.starting_file_num != -1 else None
@@ -60,8 +46,6 @@ def main(args):
         frame_sample_interval=5,
         action_label_scale=100,
     )
-    rasterize = True
-
 
     def yield_data(shards, dl):
         for shard in shards:
@@ -69,7 +53,7 @@ def main(args):
             file_name = dl.file_names[shard]
             if args.use_nsm:
                 nsm_result = nsm_labels[file_name] if file_name in nsm_labels else None
-                if env_config.env.nsm and nsm_result is None:
+                if args.use_nsm and nsm_result is None:
                     print('ERROR: not found, ', file_name, nsm_labels['file_names'])
                     continue
                 if loaded_dic is None:
@@ -131,7 +115,7 @@ def main(args):
     data_loader = NuPlanDL(scenario_to_start=starting_scenario,
                             file_to_start=starting_file_num,
                             max_file_number=max_file_num,
-                            data_path=data_path, db=None, gt_relation_path=gt_relation_path,
+                            data_path=data_path, db=None, gt_relation_path=None,
                             road_dic_path=road_path,
                             running_mode=running_mode)
     # # data format debug
@@ -184,8 +168,10 @@ def main(args):
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
-    nuplan_dataset = Dataset.from_generator(yield_data, gen_kwargs={'shards': file_indices, 'dl': data_loader},
-                                            writer_batch_size=100, cache_dir=args.cache_folder,
+    nuplan_dataset = Dataset.from_generator(yield_data, 
+                                            # features=features,
+                                            gen_kwargs={'shards': file_indices, 'dl': data_loader},
+                                            writer_batch_size=2, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
@@ -194,30 +180,27 @@ def main(args):
     exit()
 
 if __name__ == '__main__':
+    from pathlib import Path
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument('--config', type=str, default='configs/nuplan_training_config.py')
-    parser.add_argument('--render', default=False, action='store_false')
-    parser.add_argument('--method', type=str, default='unknown')
-    parser.add_argument('--log_dir', type=str, default='sim_result')
-    parser.add_argument('--overwrite', default=True, action='store_true')
-    parser.add_argument('--resume', default=False, action='store_true')
-    parser.add_argument('--debug', default=False, action='store_true')
-    parser.add_argument('--save_log', default=False, action='store_true')
+    parser.add_argument("--running_mode", type=int, default=1)
+    parser.add_argument("--data_path", type=dict, default={
+                'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+                'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+                'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/train_boston",
+            })
+    parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
+    parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
+
     parser.add_argument('--starting_file_num', type=int, default=0)
     parser.add_argument('--ending_file_num', type=int, default=1000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
-    parser.add_argument('--multi_process', default=False, action='store_true')
-    parser.add_argument('--file_per_worker', type=int, default=1)
-    parser.add_argument('--save_playback_data', default=False, action='store_true')
-    parser.add_argument('--max_scenarios', type=int, default=100000)
     parser.add_argument('--cache_folder', type=str, default='/localdata_hdd/nuplan_nsm')
 
     parser.add_argument('--train', default=False, action='store_true')
     parser.add_argument('--local_rank', type=int, default=-1)
     parser.add_argument('--num_proc', type=int, default=1)
-    parser.add_argument('--num_epoch', type=int, default=3)
     parser.add_argument('--deepspeed', type=str, default=None)
     parser.add_argument('--model_name', type=str, default=None)
 
