@@ -73,3 +73,70 @@ runner.py --model_name pretrain \
  if you need nsm label:
   add '--use_nsm' at the end of command
  '
+ 
+ To evaluate in nuboard:
+
+### Modify the following variables
+nuplan/planning/script/config/common/default_experiment.yaml
+
+`job_name: open_loop_boxes`
+
+nuplan/planning/script/config/common/worker/ray_distributed.yaml
+
+`threads_per_node: 6`
+
+nuplan/planning/script/config/common/worker/single_machine_thread_pool.yaml
+
+`max_workers: 6`
+
+nuplan/planning/script/config/simulation/default_simulation.yaml
+
+`observation: box_observation`
+
+`ego_controller: perfect_tracking_controller`
+
+`planner: control_tf_planner`
+
+nuplan/planning/script/config/common/default_common.yaml
+
+debug mode `- worker: sequential`
+    
+multi-threading `- worker: ray_distributed`
+
+nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
+
+`num_scenarios_per_type: 1`
+
+`limit_total_scenarios: 5`
+
+### Add the following at the beginning of run_xxx.py
+
+`os.environ['USE_PYGEOS'] = '0'`
+
+`import geopandas`
+
+`os.environ['HYDRA_FULL_ERROR'] = '1'`
+
+`os.environ['NUPLAN_DATA_ROOT'] = ''`
+
+`os.environ['NUPLAN_MAPS_ROOT'] = ''`
+
+`os.environ['NUPLAN_DB_FILES'] = ''`
+
+`os.environ['NUPLAN_MAP_VERSION'] = ''`
+
+### Add this file nuplan/planning/script/config/simulation/planner/control_tf_planner.yaml
+Add the following content to the control_tf_planner.yaml file
+
+Change the target path name to the actual planner path name
+
+`control_tf_planner:
+  _target_: nuplan.planning.simulation.planner.transformer_planner.ControlTFPlanner
+  horizon_seconds: 10.0
+  sampling_time: 0.1
+  acceleration: [5.0, 5.0] # x (longitudinal), y (lateral)
+  thread_safe: true`
+
+
+### Run the following command
+`python run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
