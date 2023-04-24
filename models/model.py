@@ -485,6 +485,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        **kwargs
     ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
         
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -552,8 +553,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             return_dict=return_dict,
         )
         hidden_states = transformer_outputs[0]
-        manuever_hidden_states = hidden_states[:, 1::3, :]
-        action_hidden_states = hidden_states[:, 2::3, :]
+        manuever_hidden_states = hidden_states[:, ::3, :]
+        action_hidden_states = hidden_states[:, 1::3, :]
 
         intended_m_logits = None
         current_m_logits = None
