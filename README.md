@@ -139,4 +139,6 @@ Change the target path name to the actual planner path name
 
 
 ### Run the following command
-`python run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
+`python nuplan/planning/script/run_simulation.py`
+
+`python nuplan/planning/script/run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
