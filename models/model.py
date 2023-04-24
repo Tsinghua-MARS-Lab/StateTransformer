@@ -440,7 +440,13 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         )
         assert_device_map(self.device_map, len(self.transformer.h))
         self.transformer.parallelize(self.device_map)
-        # self.lm_head = self.lm_head.to(self.transformer.first_device)
+        self.cnn_downsample = self.cnn_downsample.to(self.transformer.first_device)
+        self.intended_m_embed = self.intended_m_embed.to(self.transformer.first_device)
+        self.current_m_embed = self.current_m_embed.to(self.transformer.first_device)
+        self.intended_m_decoder = self.intended_m_decoder.to(self.transformer.first_device)
+        self.current_m_decoder = self.current_m_decoder.to(self.transformer.first_device)
+        self.nsm_decoder = self.nsm_decoder.to(self.transformer.first_device)
+        self.traj_decoder = self.traj_decoder.to(self.transformer.first_device)
         self.model_parallel = True
 
     @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
@@ -451,7 +457,13 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         )
         self.transformer.deparallelize()
         self.transformer = self.transformer.to("cpu")
-        # self.lm_head = self.lm_head.to("cpu")
+        self.cnn_downsample = self.cnn_downsample.to("cpu")
+        self.intended_m_embed = self.intended_m_embed.to("cpu")
+        self.current_m_embed = self.current_m_embed.to("cpu")
+        self.intended_m_decoder = self.intended_m_decoder.to("cpu")
+        self.current_m_decoder = self.current_m_decoder.to("cpu")
+        self.nsm_decoder = self.nsm_decoder.to("cpu")
+        self.traj_decoder = self.traj_decoder.to("cpu")
         self.model_parallel = False
         torch.cuda.empty_cache()
     
@@ -601,7 +613,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
 if  __name__ == '__main__':
     import datasets
-    import argparse
+    import argparse, time
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_nsm", default=True)
     parser.add_argument("--predict_intended_maneuver", default=True)
@@ -622,9 +634,17 @@ if  __name__ == '__main__':
 
     # model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
     # model.config.pad_token_id = 0
-    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_autoregressive_test")
-    print(dataset.features)
+    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_autoregressive")
+    # print(dataset.features)
+    start = time.time()
     example = dataset[0]
+    print(time.time() - start)
+
+    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_sparse_balance")
+    # print(dataset.features)
+    start = time.time()
+    example = dataset[0]
+    print(time.time() - start)
     # result = model.forward(
     #     intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
     #     intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9),

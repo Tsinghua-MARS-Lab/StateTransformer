@@ -68,9 +68,8 @@ def main(args):
                 if args.use_nsm:
                     current_frame_is_valid = nsm_result['valid_frames'][t]
                     target_frame_is_valid = nsm_result['valid_frames'][t+observation_kwargs['frame_sample_interval']]
-                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t, \
+                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1, \
                                             observation_kwargs["frame_sample_interval"]))
-                    sample_frames.append(t)
                     skip = False
                     for frame in sample_frames:
                         if len(nsm_result['goal_actions_weights_per_frame'][frame]) == 0:
@@ -186,10 +185,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument("--running_mode", type=int, default=1)
     parser.add_argument("--data_path", type=dict, default={
-                'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-                'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-                'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/train_boston",
+                'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
+                'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
+                'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
             })
+    # parser.add_argument("--data_path", type=dict, default={
+    #        'NUPLAN_DATA_ROOT': str(Path.home()) + "/nuplan/dataset",
+    #             'NUPLAN_MAPS_ROOT': str(Path.home()) + "/nuplan/dataset/maps",
+    #             'NUPLAN_DB_FILES': str(Path.home()) + "/nuplan/dataset/nuplan-v1.0/public_set_boston_train/",
+    #     })
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
     parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
 
