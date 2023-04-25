@@ -30,6 +30,8 @@ from tutorials.transformer4planning.models.model import TransfoXLModelNuPlan
 from tutorials.transformer4planning.runner import ModelArguments
 from tutorials.transformer4planning.dataset_gen.nuplan_obs import generate_contour_pts
 
+count = 0
+
 
 def get_angle_of_a_line(pt1, pt2):
     # angle from horizon to the right, counter-clockwise,
@@ -49,9 +51,12 @@ class ControlTFPlanner(AbstractPlanner):
                  sampling_time: float,
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
+                 target_velocity=None,
+                 min_gap_to_lead_agent=None,
                  steering_angle: float = 0.0,
                  per_instance_encoding: bool = False,
-                 use_nsm=False):
+                 use_nsm=False,
+                 **kwargs):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
         self.samping_time = TimePoint(int(sampling_time * 1e6))
         self.acceleration = StateVector2D(acceleration[0], acceleration[1])
@@ -64,10 +69,40 @@ class ControlTFPlanner(AbstractPlanner):
         model_args.use_nsm = use_nsm
         model_args.per_instance_encoding = per_instance_encoding
         assert model_args.model_pretrain_name_or_path is not None
-        self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
-                                                          model_args=model_args)
+        # model_args.use_nsm = False
+        model_args.per_instance_encoding = False
+        if model_args.model_name == 'TransfoXLModelNuPlan':
+            self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
+                                                              model_args=model_args)
+        else:
+            config_p = TransfoXLConfig()
+            config_p.n_layer = 4
+            config_p.d_embed = 256
+            config_p.d_model = 256
+            config_p.d_inner = 1024
+            self.model = TransfoXLModelNuPlan(config_p, model_args=model_args)
         self.model.config.pad_token_id = 0
         self.model.config.eos_token_id = 0
+        self.load_state_dict()
+
+    def load_state_dict(self):
+        checkpoint = get_last_checkpoint("/public/MARS/datasets/nuPlanCache/checkpoint/nonsm_onlytraj/")
+        if os.path.isfile(os.path.join(checkpoint, "config.json")):
+            print(os.path.join(checkpoint, "config.json"))
+            config = PretrainedConfig.from_json_file(os.path.join(checkpoint, "config.json"))
+        if os.path.isfile(os.path.join(checkpoint, "pytorch_model.bin")):
+            print(os.path.join(checkpoint, "pytorch_model.bin"))
+            state_dict = torch.load(os.path.join(checkpoint, "pytorch_model.bin"), map_location="cpu", )
+            new_state_dict = {}
+            new_state_dict = deepcopy(state_dict)
+            for k, v in state_dict.items():
+                if 'current_m_decoder' in k:
+                    new_state_dict.pop(k)
+                    print(k)
+            state_dict = new_state_dict
+            self.model.load_state_dict(state_dict)
+        else:
+            raise RuntimeError("No checkpoint in current directory")
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -84,7 +119,10 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        history = current_input.
+        global count
+        count += 1
+        print("count: ", count)
+        history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
         # trajectory as format of [(x, y, yaw)]
@@ -98,12 +136,33 @@ class ControlTFPlanner(AbstractPlanner):
         road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(ego_trajectory, agents, statics,
                                                                                     road_dic, ego_shape)
-        output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
-                            current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
-                            context_actions=torch.tensor(context_action).unsqueeze(0), \
-                            high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
-                            low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
-        pred_traj = output[-1][-1].squeeze(0).detach().numpy()
+        if torch.cuda.is_available():
+            self.model.to('cuda')
+            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
+                                context_actions=torch.tensor(context_action).unsqueeze(0).to('cuda'), \
+                                high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to('cuda'), \
+                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to('cuda'))
+            # pred_traj [80, 4]
+            pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
+        else:
+            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
+                                context_actions=torch.tensor(context_action).unsqueeze(0), \
+                                high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
+                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
+            pred_traj = output[-1][-1].squeeze(0).detach().numpy()
+
+        # rotate pred_traj
+        rot_eye = np.eye(pred_traj.shape[1])
+        rot = np.array(
+            [[np.cos(ego_trajectory[-1][2]), -np.sin(ego_trajectory[-1][2])],
+             [np.sin(ego_trajectory[-1][2]), np.cos(ego_trajectory[-1][2])]]
+        )
+        rot_eye[:2, :2] = rot
+        pred_traj = rot_eye @ pred_traj.T
+        pred_traj = pred_traj.T
+
         # build output
         ego_state = history.ego_states[-1]
         state = EgoState(
@@ -119,13 +178,16 @@ class ControlTFPlanner(AbstractPlanner):
         )
         trajectory: List[EgoState] = [state]
         for i in range(0, pred_traj.shape[0] - 1):
+            new_time_point = TimePoint(state.time_point.time_us + 1e5)
             state = EgoState.build_from_center(
-                center=StateSE2(pred_traj[i + 1, 0], pred_traj[i + 1, 1], pred_traj[i + 1, 2]),
+                center=StateSE2(pred_traj[i + 1, 0] + ego_trajectory[-1][0],
+                                pred_traj[i + 1, 1] + ego_trajectory[-1][1],
+                                ego_trajectory[-1][2]),
                 center_velocity_2d=StateVector2D((pred_traj[i + 1, 0] - pred_traj[i, 0]) / 0.1,
                                                  (pred_traj[i + 1, 1] - pred_traj[i, 1]) / 0.1),
                 center_acceleration_2d=StateVector2D(0, 0),
                 tire_steering_angle=state.tire_steering_angle,
-                time_point=state.time_point,
+                time_point=new_time_point,
                 vehicle_parameters=state.car_footprint.vehicle_parameters,
                 is_in_auto_mode=True,
                 angular_vel=state.dynamic_car_state.angular_velocity,
@@ -168,7 +230,10 @@ class ControlTFPlanner(AbstractPlanner):
         ego_trajectory = downsample_ego_trajectory
         statics_seq = downsample_statics_seq
         # goal channel
-        relative_goal = np.array([self.goal.x, self.goal.y, self.goal.heading]) - ego_pose
+        if self.goal is None:
+            relative_goal = ego_pose
+        else:
+            relative_goal = np.array([0, 0, 0]) - ego_pose
         rotated_goal_pose = [relative_goal[0] * cos_ - relative_goal[1] * sin_,
                              relative_goal[0] * sin_ + relative_goal[1] * cos_,
                              relative_goal[2]]
@@ -386,10 +451,10 @@ def get_road_dict(map_api, ego_pose_center):
 
 
 if __name__ == "__main__":
-    with open("history.pkl", "rb") as f:
+    with open("/public/MARS/datasets/nuPlanCache/checkpoint/history.pkl", "rb") as f:
         input = pickle.load(f)
 
-    with open("init.pkl", "rb") as f:
+    with open("/public/MARS/datasets/nuPlanCache/checkpoint/init.pkl", "rb") as f:
         initial = pickle.load(f)
     map_api = initial.map_api
     ego_pose = (input.ego_state_buffer[-1].waypoint.center.x, \
