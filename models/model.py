@@ -515,9 +515,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         # with history menuever label input
-        if not self.use_nsm:
-            intended_maneuver_vector = None
-            current_maneuver_vector = None
             
         if self.mask_history_intended_maneuver:
             intended_maneuver_vector[:] = 0
@@ -527,9 +524,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
             current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
-        else:
-            intended_maneuver_embed = None
-            current_maneuver_embed = None
 
         ## ratser embedding and concat to state embedding
         high_res_raster = high_res_raster.permute(0, 1, 4, 2, 3)
@@ -556,7 +550,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         # concat state embeding, maneuver embeding, action embeding
         if self.use_nsm:
             input_embeds_past = torch.cat((
-                    torch.zeros_like(state_embeds[:, :past_seq+1, :], torch.zeros_like(maneuver_embeds[:, :past_seq, :]), torch.zeros_like(action_embeds[:, :past_seq, :]))
+                    torch.zeros_like(state_embeds[:, :past_seq+1, :]), torch.zeros_like(maneuver_embeds[:, :past_seq, :]), torch.zeros_like(action_embeds[:, :past_seq, :])
                 ), dim=1)
             input_embeds_past[:, ::3, :] = state_embeds[:, :past_seq+1, :]
             input_embeds_past[:, 1::3, :] = maneuver_embeds[:, :past_seq, :]
@@ -579,20 +573,20 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 input_embeds[:, 2::3, :] = action_embeds
             else:
                 input_embeds_future = torch.cat((
-                    torch.zeros_like(maneuver_embeds[:, past_seq:, :]), torch.zeros_like(action_embeds[:, past_seq:, :],torch.zeros_like(state_embeds[:, past_seq+1:, :]))
-                ))
+                    torch.zeros_like(maneuver_embeds[:, past_seq:, :]), torch.zeros_like(action_embeds[:, past_seq:, :]),torch.zeros_like(state_embeds[:, past_seq+1:, :])
+                ),dim=1)
                 input_embeds_future[:, ::3, :] = maneuver_embeds[:, past_seq:, :]
                 input_embeds_future[:, 1::3, :] = action_embeds[:, past_seq:, :]
-                input_embeds_future[:, 2::3, :] = state_embeds[:, past_seq+1, :]
+                input_embeds_future[:, 2::3, :] = state_embeds[:, past_seq+1:, :]
                 input_embeds = torch.cat((input_embeds_past, input_embeds_future), dim=1)
         else: 
             
             if self.mode == "PRED-MA":
                 input_embeds_future = torch.cat((
-                    torch.zeros_like(torch.zeros_like(maneuver_embeds[:, past_seq:, :]), torch.zeros_like(action_embeds[:, past_seq:, :]))
+                    torch.zeros_like(maneuver_embeds[:, past_seq:, :]), torch.zeros_like(action_embeds[:, past_seq:, :])
                 ), dim=1)
                 input_embeds_future[:, ::2, :] = maneuver_embeds[:, past_seq:, :]
-                input_embeds_future[:, 1::2, :] = action_embeds[:, past_seq, :]
+                input_embeds_future[:, 1::2, :] = action_embeds[:, past_seq:, :]
             elif self.mode == "PRED-A":
                 input_embeds_future = action_embeds[:, past_seq:, :]
             input_embeds = torch.cat((input_embeds_past, input_embeds_future), dim=1)
@@ -617,20 +611,39 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             return_dict=return_dict,
         )
         hidden_states = transformer_outputs[0]
-        if self.mode == "PRED-OMA":
-            manuever_hidden_states = hidden_states[:, ::3, :]
-            action_hidden_states = hidden_states[:, 1::3, :]
-            obs_recover_hidden_states = hidden_states[:, 2::3, :]
-        else:
+        # compute correspond hidden states to predict
+        if self.use_nsm:
             manuever_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, ::3, :]
             action_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 1::3, :]
-            if self.mode == "PRED-MA":
-                manuever_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, ::2]
+            if self.mode == "PRED-OMA":
+                manuever_hidden_states = hidden_states[:, ::3, :]
+                action_hidden_states = hidden_states[:, 1::3, :]
+                obs_recover_hidden_states = hidden_states[:, 2::3, :]   
+            elif self.mode == "PRED-MA":
+                manuever_hidden_states_future = hidden_states[:, total_past_length-1:-1, :][:, ::2]
+                action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
+                manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+            elif self.mode == "PRED-A":
+                action_hidden_states_future = hidden_states[:, total_past_length-1:-1, :]
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+        else:
+            manuever_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, ::2, :]
+            action_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, ::2, :]
+            obs_recover_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 1::2, :]
+            if self.mode == "PRED-OMA":
+                manuever_hidden_states_future = hidden_states[:, total_past_length-1:-1, :][:, ::3]
+                action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::3]
+                obs_recover_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 2::3]
+                manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
+                obs_recover_hidden_states = torch.cat((obs_recover_hidden_states_past, obs_recover_hidden_states_future), dim=1)               
+            elif self.mode == "PRED-MA":
+                manuever_hidden_states_future = hidden_states[:, total_past_length-1:-1, :][:, ::2]
                 action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
                 manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
             elif self.mode == "PRED-A":
-                action_hidden_states_future = hidden_states[:, total_past_length-1:, :]
-            action_hidden_states = torch.cat(action_hidden_states_past, action_hidden_states_future)
+                action_hidden_states_future = hidden_states[:, total_past_length-1:-1, :]
+            action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
         
         intended_m_logits = None
         current_m_logits = None
@@ -869,13 +882,14 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
     
 if  __name__ == '__main__':
     import datasets
-    import argparse, time
+    import argparse, time, pickle
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_nsm", default=True)
     parser.add_argument("--predict_intended_maneuver", default=True)
     parser.add_argument("--predict_current_maneuver", default=True)
     # parser.add_argument("--predict_pose", default=True)
     parser.add_argument("--predict_trajectory", default=True)
+    parser.add_argument("--recover_obs", default=True)
     # parser.add_argument("--per_instance_encoding", default=False)
     parser.add_argument("--time_to_predict", default=8)
     parser.add_argument("--frequency_for_prediction", default=20)
@@ -885,7 +899,7 @@ if  __name__ == '__main__':
     parser.add_argument("--predict_trajectory_with_nsm", default=False)
     parser.add_argument("--mask_history_intended_maneuver", default=False)
     parser.add_argument("--mask_history_current_maneuver", default=False)
-    parser.add_argument("--recover_obs", default=False)
+    
     parser.add_argument("--d_inner", default=1024)
     model_args = parser.parse_args()
 
@@ -897,6 +911,11 @@ if  __name__ == '__main__':
     # start = time.time()
     # example = dataset[0]
     # print(time.time() - start)
+
+    # with open("autoregressive_data.pkl", "wb") as f:
+    #     pickle.dump(example, f)
+    with open("autoregressive_data.pkl", "rb") as f:    
+        example = pickle.load(f)
     # # shuffle example
     # # dataset = dataset.shuffle(seed=42)
     # # start = time.time()
@@ -932,14 +951,14 @@ if  __name__ == '__main__':
     #     return_dict=True,
     # )
     model = GPTModelNuPlan.from_pretrained('gpt2', model_args=model_args)
-    result = model.generate(
-        intended_maneuver_vector=torch.zeros(2,8,dtype=torch.int32),
-        current_maneuver_vector=torch.zeros(2,8,12),
-        high_res_raster=torch.zeros(2,9,224,224,29),
-        low_res_raster=torch.zeros(2,9,224,224,29),
-        trajectory=torch.zeros(2,8,4),
-        return_dict=True,
-    )
+    # result = model.generate(
+    #     intended_maneuver_vector=torch.zeros(2,8,dtype=torch.int32),
+    #     current_maneuver_vector=torch.zeros(2,8,12),
+    #     high_res_raster=torch.zeros(2,9,224,224,29),
+    #     low_res_raster=torch.zeros(2,9,224,224,29),
+    #     trajectory=torch.zeros(2,8,4),
+    #     return_dict=True,
+    # )
     result = model(
         intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
         current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
