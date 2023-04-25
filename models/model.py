@@ -554,21 +554,39 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         n_embed = action_embeds.shape[-1]
         
         # concat state embeding, maneuver embeding, action embeding
-        if self.mode == "PRED-OMA":
-            input_embeds = torch.cat((
-                torch.zeros_like(state_embeds), torch.zeros_like(maneuver_embeds), torch.zeros_like(action_embeds)
-            ), dim=1)
-            input_embeds[:, ::3, :] = state_embeds
-            input_embeds[:, 1::3, :] = maneuver_embeds
-            input_embeds[:, 2::3, :] = action_embeds
-        else: 
+        if self.use_nsm:
             input_embeds_past = torch.cat((
-                torch.zeros_like(state_embeds[:, :past_seq+1, :], torch.zeros_like(maneuver_embeds[:, :past_seq, :]), torch.zeros_like(action_embeds[:, :past_seq, :]))
-            ), dim=1)
+                    torch.zeros_like(state_embeds[:, :past_seq+1, :], torch.zeros_like(maneuver_embeds[:, :past_seq, :]), torch.zeros_like(action_embeds[:, :past_seq, :]))
+                ), dim=1)
             input_embeds_past[:, ::3, :] = state_embeds[:, :past_seq+1, :]
             input_embeds_past[:, 1::3, :] = maneuver_embeds[:, :past_seq, :]
             input_embeds_past[:, 2::3, :] = action_embeds[:, :past_seq, :]
-            total_past_length = input_embeds_past.shape[1]
+        else:
+            input_embeds_past = torch.cat((
+                torch.zeros_like(state_embeds[:, :past_seq+1]), torch.zeros_like(action_embeds[:, :past_seq, :])
+            ), dim=1)
+            input_embeds_past[:, ::2, :] = state_embeds[:, :past_seq+1, :]
+            input_embeds_past[:, 1::2, :] = action_embeds[:, :past_seq, :]
+
+        total_past_length = input_embeds_past.shape[1]
+        if self.mode == "PRED-OMA":
+            if self.use_nsm:
+                input_embeds = torch.cat((
+                    torch.zeros_like(state_embeds), torch.zeros_like(maneuver_embeds), torch.zeros_like(action_embeds)
+                ), dim=1)
+                input_embeds[:, ::3, :] = state_embeds
+                input_embeds[:, 1::3, :] = maneuver_embeds
+                input_embeds[:, 2::3, :] = action_embeds
+            else:
+                input_embeds_future = torch.cat((
+                    torch.zeros_like(maneuver_embeds[:, past_seq:, :]), torch.zeros_like(action_embeds[:, past_seq:, :],torch.zeros_like(state_embeds[:, past_seq+1:, :]))
+                ))
+                input_embeds_future[:, ::3, :] = maneuver_embeds[:, past_seq:, :]
+                input_embeds_future[:, 1::3, :] = action_embeds[:, past_seq:, :]
+                input_embeds_future[:, 2::3, :] = state_embeds[:, past_seq+1, :]
+                input_embeds = torch.cat((input_embeds_past, input_embeds_future), dim=1)
+        else: 
+            
             if self.mode == "PRED-MA":
                 input_embeds_future = torch.cat((
                     torch.zeros_like(torch.zeros_like(maneuver_embeds[:, past_seq:, :]), torch.zeros_like(action_embeds[:, past_seq:, :]))
