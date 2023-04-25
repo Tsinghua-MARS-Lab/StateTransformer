@@ -787,7 +787,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                     next_embed = self.obs_embed_decoder(hidden_state[:, -1, :].unsqueeze(1))
                             
             # pred mode: Maneuver-Action Pair: [m,a | m,a |... | m,a]
-            elif self.mode == "PRED-MA"
+            elif self.mode == "PRED-MA":
                 if step > 2 * seq_length - 1:
                     break
                 if step % 2 == 0:
