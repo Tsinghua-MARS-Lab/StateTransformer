@@ -84,6 +84,9 @@ class ModelArguments:
     predict_trajectory: Optional[bool] = field(
         default=True,
     )
+    recover_obs: Optional[bool] = field(
+        default=False,
+    )
     per_instance_encoding: Optional[bool] = field(
         default=True,
     )
@@ -262,7 +265,7 @@ def main():
             model.config.eos_token_id = 0
         elif 'gpt' in model_args.model_name:
             model = GPTModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
-    
+            
     elif 'scratch' in model_args.model_name:
         if 'xl' in model_args.model_name:
             config_p = TransfoXLConfig()
@@ -273,12 +276,14 @@ def main():
             model = TransfoXLModelNuPlan(config_p, model_args=model_args)
             model.config.pad_token_id = 0
             model.config.eos_token_id = 0
+            print("Scratch TransformerXL model initilized!")
         elif 'gpt' in model_args.model_name:
             config_p = GPT2Config()
             config_p.n_layer = model_args.n_layers
             config_p.n_embd = model_args.d_embed
             config_p.n_inner = model_args.d_inner
             model = GPTModelNuPlan(config_p, model_args=model_args)
+            print("Scratch GPT model initilized!")
         # model_p.save_pretrained( '../saved_model/transformerxlSml')
 
 

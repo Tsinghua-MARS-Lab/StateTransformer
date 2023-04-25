@@ -11,9 +11,9 @@ python -m torch.distributed.run \
 runner.py --model_name scratch-gpt \
 --model_pretrain_name_or_path transfo-xl-wt103 \
 --saved_dataset_folder /localdata_ssd/nuplan_nsm/nsm_sparse_balance \
---output_dir nsm_perchannel_rebalance_2m_perInsFalse_layer4_lossx10000/training_results \
---logging_dir nsm_perchannel_rebalance_2m_perInsFalse_layer4_lossx10000/training_logs \
---run_name nsm_perchannel_rebalance_2m_perInsFalse_layer4_lossx10000 \
+--output_dir data/example/training_results \
+--logging_dir data/example/training_logs \
+--run_name example \
 --num_train_epochs 50 \
 --per_device_train_batch_size 2 \
 --warmup_steps 500 \
@@ -25,10 +25,11 @@ runner.py --model_name scratch-gpt \
 --dataloader_num_workers 5 \
 --save_total_limit 2 \
 --use_nsm True \
---predict_intended_maneuver True \
---predict_current_maneuver True \
+--predict_intended_maneuver False \
+--predict_current_maneuver False \
 --predict_pose False \
 --predict_trajectory False \
+--recover_obs False \
 --dataloader_drop_last True \
 --per_instance_encoding False \
 --do_train \
@@ -49,29 +50,39 @@ python -m torch.distributed.run \
 --nproc_per_node=1 \
 --master_port 12345 \
 runner.py --model_name pretrain \
---model_pretrain_name_or_path nsm_perchannel_rebalance_current_only_layer4_lossx100/training_results/checkpoint-19320 \
+--model_pretrain_name_or_path data/example/training_results/checkpoint-xxxxx \
 --saved_dataset_folder /public/MARS/datasets/nuPlan/nuplan-v1.1/nsm_cache_boston_0412/nsm_sparse_balance \
---output_dir nsm_perchannel_rebalance_current_only_layer4_lossx100/prediction_results/checkpoint-19320 \
+--output_dir data/example/prediction_results/checkpoint-xxxxx \
 --per_device_eval_batch_size 20 \
 --past_index 2 \
 --dataloader_num_workers 5 \
 --use_nsm True \
---predict_intended_maneuver True \
---predict_current_maneuver True \
+--predict_intended_maneuver False \
+--predict_current_maneuver False \
 --predict_pose False \
 --predict_trajectory False \
+--recover_obs False \
 --do_predict \
 --max_predict_samples 500 \
 --dataloader_drop_last True \
 --per_instance_encoding False \
 --maneuver_repeat False \
 `
+
  To generate dataset:
- '
- python generation.py --config configs/nuplan_training_config_server.py --num_proc 40  --sample_interval 10 --dataset_name nonsm_boston_full --ending_file_num 1647
+`
+ python generation.py \
+ --config configs/nuplan_training_config_server.py \
+ --num_proc 40  \
+ --sample_interval 10 \
+ --dataset_name nonsm_boston_full \
+ --ending_file_num 1647
+`
 
  if you need nsm label:
-  add '--use_nsm' at the end of command
+
+  add `--use_nsm` at the end of command
+  
  '
  
  To evaluate in nuboard:
@@ -142,3 +153,4 @@ Change the target path name to the actual planner path name
 `python nuplan/planning/script/run_simulation.py`
 
 `python nuplan/planning/script/run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
+
