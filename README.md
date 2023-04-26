@@ -34,7 +34,7 @@ runner.py --model_name scratch-gpt \
 --per_instance_encoding False \
 --do_train \
 --maneuver_repeat False \
---d_embed 256 \
+--d_embed 288 \
 --d_model 256 \
 --d_inner 1024 \
 --n_layers 4 \

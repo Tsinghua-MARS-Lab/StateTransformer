@@ -105,7 +105,7 @@ def main(args):
                     'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
                 }
                 if observation_dic is not None:
-                    observation_dic.update(other_info)
+                    # observation_dic.update(other_info)
                     yield observation_dic
                 else:
                     continue
@@ -167,8 +167,29 @@ def main(args):
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
+    features = Features({'trajectory': Sequence(feature=Sequence(feature=Value(dtype='float64', id=None), length=-1, id=None), length=-1, id=None), 
+                        #  'high_res_raster': Sequence(feature=Sequence(
+                        #                                     feature=Sequence(
+                        #                                             feature=Sequence(
+                        #                                                     feature=Value(dtype='bool', id=None), 
+                        #                                                     length=-1, id=None), 
+                        #                                             length=-1, id=None), 
+                        #                                     length=-1, id=None), 
+                        #                     length=-1, id=None), 
+                        'high_res_raster': Sequence(feature=Sequence(feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None),  
+                        # 'low_res_raster': Sequence(feature=Sequence(feature=Sequence(feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None), 
+                        'low_res_raster': Sequence(feature=Sequence(feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None),  
+                        'intended_maneuver_vector': Sequence(feature=Value(dtype='int32', id=None), length=-1, id=None), 
+                        'current_maneuver_vector': Sequence(feature=Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None), length=-1, id=None), 
+                        #  'file_name': Value(dtype='string', id=None), 
+                        #  'scenario_id': Value(dtype='string', id=None), 
+                        #  'time_stamp': Value(dtype='int64', id=None), 
+                        #  'frame_index': Value(dtype='int64', id=None), 
+                        #  'map_name': Value(dtype='string', id=None), 
+                        #  'lidar_token': Value(dtype='string', id=None)
+                         })
     nuplan_dataset = Dataset.from_generator(yield_data, 
-                                            # features=features,
+                                            features=features,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader},
                                             writer_batch_size=2, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)

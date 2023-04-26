@@ -511,6 +511,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         past_seq: Optional[int] = 8,
         **kwargs
     ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
+        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, h, w, c)
+            _b, _h, _w, _= high_res_raster.shape
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
         
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -722,12 +726,16 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 output_attentions: Optional[bool] = False,
                 output_hidden_states: Optional[bool] = False,
                 return_dict: Optional[bool] = True,
-                seq_length: Optional[int] = 32,
+                seq_length: Optional[int] = 33,
                 **kwargs):
         """
         all the input items only include the historic contents
         """
-        device = intended_maneuver_vector.device
+        device = high_res_raster.device
+        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, h, w, c)
+            _b, _h, _w, _= high_res_raster.shape
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
         if not self.use_nsm:
             intended_maneuver_vector, current_maneuver_vector = None, None
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
@@ -756,8 +764,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             input_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device), 
                                       torch.zeros_like(action_embeds, dtype=torch.float32, device=device)), dim=1)
             
-            input_embeds[:, ::3, :] = state_embeds
-            input_embeds[:, 1::3, :] = action_embeds
+            input_embeds[:, ::2, :] = state_embeds
+            input_embeds[:, 1::2, :] = action_embeds
         else:
             input_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device), 
                                       torch.zeros_like(maneuver_embeds, dtype=torch.float32, device=device),
@@ -905,15 +913,15 @@ if  __name__ == '__main__':
 
     # model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
     # model.config.pad_token_id = 0
-    # dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_autoregressive")
-    # dataset.set_format("torch",columns=['trajectory','high_res_raster','low_res_raster','intended_maneuver_vector','current_maneuver_vector'])
-    # # print(dataset.features)
-    # start = time.time()
-    # example = dataset[0]
-    # print(time.time() - start)
+    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_array3d")
+    dataset.set_format("torch",columns=['trajectory','high_res_raster','low_res_raster','intended_maneuver_vector','current_maneuver_vector'])
+    print(dataset.features)
+    start = time.time()
+    example = dataset[0]
+    print(time.time() - start)
 
-    # with open("autoregressive_data.pkl", "wb") as f:
-    #     pickle.dump(example, f)
+    with open("autoregressive_data_3d.pkl", "wb") as f:
+        pickle.dump(example, f)
     with open("autoregressive_data.pkl", "rb") as f:    
         example = pickle.load(f)
     # # shuffle example
