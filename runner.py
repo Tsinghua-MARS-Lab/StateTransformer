@@ -114,6 +114,12 @@ class ModelArguments:
     mask_history_current_maneuver: Optional[bool] = field(
         default=False,
     )
+    predict_intended_maneuver_change: Optional[bool] = field(
+        default=False,
+    )
+    predict_current_maneuver_change: Optional[bool] = field(
+        default=False,
+    )
     d_embed: Optional[int] = field(
         default=256,
     )
