@@ -666,7 +666,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             assert not self.predict_trajectory, 'Duplicate loss computation, donnot use predict_trajectory and predict_trajectory_with_nsm at the same time'
             lerp_weights = torch.arange(1.0, 1.0 + seq).float().to(device) / seq
             # interpolated_weights: [batch_size, pred_length, 12], linear interpolated from current to predicted next step weights
-            interpolated_weights = torch.lerp(current_maneuver_vector,  # [bsz, seq, 12]
+            interpolated_weights = torch.lerp(current_maneuver_vector[:, :-1, :].unsqueeze(1).repeat(),  # [bsz, seq, 12]
                                               current_c_confifence,  #[bsz, seq, 12]
                                               lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
             # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
@@ -693,8 +693,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         
         if self.predict_trajectory and self.traj_decoder is not None:
             loss_fct = MSELoss(reduction="mean")
-            loss_to_add = loss_fct(traj_logits, trajectory.to(device))
+            loss_to_add = loss_fct(traj_logits[:, :-1, :], trajectory[:, :-1, :].to(device))
             loss += loss_to_add
+            final_pt_loss = loss_fct(traj_logits[:, -1, :], trajectory[:, -1, :].to(device))
+            loss += final_pt_loss * 1e3 
 
         if self.recover_obs:
             loss_fct = MSELoss(reduction="mean")
