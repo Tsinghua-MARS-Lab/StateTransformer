@@ -300,9 +300,7 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
         trajectory_label[0] = traj_x * cos_ - traj_y * sin_
         trajectory_label[1] = traj_x * sin_ + traj_y * cos_
         trajectory_list.append(trajectory_label)
-        
-
-        
+                
         # manuever sequence collection
         if nsm_result is not None:
             try:
