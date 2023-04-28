@@ -23,6 +23,7 @@ from nuplan.common.maps.maps_datatypes import SemanticMapLayer
 from nuplan.planning.simulation.observation.observation_type import DetectionsTracks, Observation
 from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner, PlannerInitialization, PlannerInput
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
+from nuplan.planning.simulation.trajectory.interpolated_trajectory import  InterpolatedTrajectory
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from nuplan.common.maps.maps_datatypes import RasterLayer, RasterMap, SemanticMapLayer, StopLineType, VectorLayer
 from nuplan.common.actor_state.state_representation import Point2D
@@ -117,7 +118,7 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        history = current_input
+        history = current_input.history
         ego_states = history.ego_state_buffer # a list of ego trajectory
         context_length = len(ego_states)
         # trajectory as format of [(x, y, yaw)]
