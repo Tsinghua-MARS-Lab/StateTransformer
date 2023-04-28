@@ -27,7 +27,6 @@ runner.py --model_name scratch-gpt \
 --use_nsm True \
 --predict_intended_maneuver False \
 --predict_current_maneuver False \
---predict_pose False \
 --predict_trajectory False \
 --recover_obs False \
 --dataloader_drop_last True \
@@ -59,7 +58,6 @@ runner.py --model_name pretrain \
 --use_nsm True \
 --predict_intended_maneuver False \
 --predict_current_maneuver False \
---predict_pose False \
 --predict_trajectory False \
 --recover_obs False \
 --do_predict \
