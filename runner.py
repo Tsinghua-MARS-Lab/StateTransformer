@@ -255,7 +255,7 @@ def main():
             nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             nuplan_dataset.set_format(type='torch')
             print('Dataset Loaded: ', nuplan_dataset)
-            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True)
+            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True, seed=training_args.seed)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
@@ -417,7 +417,13 @@ def main():
                     prediction_results['file_names'].append(file_name)
                     prediction_results['current_frame'].append(current_frame_idx.cpu().numpy())
                 elif "gpt" in model_args.model_name:
-                    output = model.generate(**input)
+                    actual_input = dict()
+                    actual_input["intended_maneuver_vector"] = input["intended_maneuver_vector"][:, :8] if input["intended_maneuver_vector"][0] is not None else None 
+                    actual_input["current_maneuver_vector"] = input["current_maneuver_vector"][:, :8] if input["current_maneuver_vector"][0] is not None else None 
+                    actual_input["trajectory"] = input["trajectory"][:, :8]
+                    actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
+                    actual_input["low_res_raster"] = input["low_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
+                    output = model.generate(**actual_input)
                     intended_m_logits = output["intend_maneuver"]
                     current_m_logits = output["current_maneuver"]
                     traj_pred = output["trajectory"]
@@ -427,7 +433,6 @@ def main():
                         intended_m_label.append(input['intended_maneuver_label'])  # tensor
                     elif "gpt" in model_args.model_name:
                         intended_m_label.append(input['intended_maneuver_vector'][:, 8:])
-                        print("example:", input['intended_maneuver_vector'][0, 0])
                     intended_m_vector.append(input['intended_maneuver_vector'])  # tensor
 
                     if model_args.predict_intended_maneuver:
@@ -457,7 +462,8 @@ def main():
                     if "xl" in model_args.model_name:
                         trajectory_label = input["trajectory_label"][:, 1::2, :]
                     elif "gpt" in model_args.model_name:
-                        trajectory_label = input["trajectory"][:, 8:, :]
+                        trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
+                        trajectory_label = model.compute_normalized_points(traj_pred)
                     if model_args.predict_single_step_trajectory:
                         trajectory_label = trajectory_label[:, :5, :]
                     loss = loss_fn(trajectory_label, traj_pred)

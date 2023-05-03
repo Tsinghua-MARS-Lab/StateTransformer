@@ -46,8 +46,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.predict_trajectory_with_nsm = model_args.predict_trajectory_with_nsm
         self.mask_history_intended_maneuver = model_args.mask_history_intended_maneuver
         self.mask_history_current_maneuver = model_args.mask_history_current_maneuver
-
-        assert self.predict_trajectory or self.predict_intended_maneuver or self.predict_current_maneuver or self.predict_single_step_trajectory, 'Predict at least one target! Pass True in Model Args'
         
         if self.per_instance:
             in_channels = 1
@@ -355,8 +353,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.mask_history_intended_maneuver = model_args.mask_history_intended_maneuver
         self.mask_history_current_maneuver = model_args.mask_history_current_maneuver
 
-        assert self.predict_trajectory or self.predict_intended_maneuver or self.predict_current_maneuver or self.predict_single_step_trajectory, 'Predict at least one target! Pass True in Model Args'
-
         in_channels = 29 # raster: goal + road_type + agent_type    
         n_embed = config.n_embd // 2
 
@@ -366,8 +362,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.current_m_embed = nn.Sequential(nn.Linear(12, n_embed, bias=False), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
-        if self.predict_trajectory_with_nsm:
-            self.nsm_decoder = NSMDecoder(config.n_embd)
+        # if self.predict_trajectory_with_nsm:
+        self.nsm_decoder = NSMDecoder(config.n_embd)
 
         self.traj_decoder = None
         if self.predict_trajectory or self.predict_single_step_trajectory:
@@ -634,7 +630,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                                               current_c_confifence,  #[bsz, seq, 12]
                                               lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
             # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
-            traj_hidden_state = self.nsm_decoder(hidden_states=traj_hidden_state.reshape(-1, n_embed),
+            traj_hidden_state = self.nsm_decoder(hidden_states=action_hidden_states.reshape(-1, n_embed),
                                                  weight_blend=interpolated_weights.view(-1, 12))
             # traj_pred: [batch_size, pred_length, 4]
             traj_logits = self.traj_decoder(traj_hidden_state.reshape(batch_size, seq, n_embed))
@@ -648,19 +644,21 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             loss_fct = CrossEntropyLoss()
             loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_vector.view(-1).long())    
-            loss += loss_to_add
+            loss += loss_to_add * 1000
 
         if self.predict_current_maneuver and current_maneuver_vector is not None:
             loss_fct = MSELoss()
             loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_vector.squeeze())
-            loss += loss_to_add
+            loss += loss_to_add * 1000
         
         if self.predict_trajectory and self.traj_decoder is not None:
             loss_fct = MSELoss(reduction="mean")
-            loss_to_add = loss_fct(traj_logits[:, :-1, :], trajectory[:, :-1, :].to(device))
+            loss_to_add = loss_fct(traj_logits[:, :, :], trajectory[:, :, :].to(device))
             loss += loss_to_add
-            final_pt_loss = loss_fct(traj_logits[:, -1, :], trajectory[:, -1, :].to(device))
-            loss += final_pt_loss * 1e3 
+            gt_normalized_pts = self.compute_normalized_points(trajectory)
+            pred_normalized_pts = self.compute_normalized_points(traj_logits)
+            final_pt_loss = loss_fct(pred_normalized_pts[:, -1, :2], gt_normalized_pts[:, -1, :2].to(device))
+            loss += final_pt_loss
 
         if self.recover_obs:
             loss_fct = MSELoss(reduction="mean")
@@ -711,8 +709,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             intended_maneuver_embed, current_maneuver_embed = None, None
         
         ## ratser embedding and state embedding concat
-        high_res_raster = high_res_raster.permute(0, 1, 4, 2, 3)
-        low_res_raster = low_res_raster.permute(0, 1, 4, 2, 3)
+        high_res_raster = high_res_raster.permute(0, 3, 4, 1, 2)
+        low_res_raster = low_res_raster.permute(0, 3, 4, 1, 2)
         batch_size, seq, c, h, w = high_res_raster.shape
         # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed) 
         high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
@@ -855,15 +853,44 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
     
+    def compute_normalized_points(self, trajectory):
+        bsz = trajectory.shape[0]
+        device = trajectory.device
+        ego_trajectory = torch.zeros((bsz, 1, 4), device=device)
+        next_normalized_trajectories = list()
+        for idx in range(0, trajectory.shape[1]):
+            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, 2]), torch.sin(-ego_trajectory[:, -1, 2])
+            cos_.to(device)
+            sin_.to(device)
+            delta_yaw = torch.arctan(torch.divide(trajectory[:, idx, 1], trajectory[:, idx, 0]))
+            offset_x = trajectory[:, idx, 0] * cos_ + trajectory[:, idx, 1] * sin_
+            offset_y = trajectory[:, idx, 1] * cos_ - trajectory[:, idx, 0] * sin_
+            next_ego_traj = torch.stack([ego_trajectory[:, -1, 0] + offset_x,
+                                        ego_trajectory[:, -1, 1] + offset_y,
+                                        torch.zeros_like(ego_trajectory[:, -1, 1]),
+                                        ego_trajectory[:, -1, 2] + delta_yaw],dim=-1)
+                                        # ego_trajectory[:, -1, 2] + trajectory[:, idx, -1]],dim=-1)
+            ego_trajectory = torch.cat((ego_trajectory, torch.tensor(next_ego_traj).reshape(bsz, 1, -1)), dim=1)
+            next_normalized_trajectories.append(next_ego_traj)
+            
+        next_normalized_trajectories = torch.stack(next_normalized_trajectories).permute(1, 0, 2)
+        # bsz, seq, 4
+        return next_normalized_trajectories
+    
+    def compute_yaw(self, point):
+        yaw = torch.arctan(point[:, 1]/point[:, 0])
+        return yaw
+    
 if  __name__ == '__main__':
     import datasets
     import argparse, time, pickle
+    import matplotlib.pyplot as plt
     parser = argparse.ArgumentParser()
-    parser.add_argument("--use_nsm", default=True)
-    parser.add_argument("--predict_intended_maneuver", default=True)
-    parser.add_argument("--predict_current_maneuver", default=True)
+    parser.add_argument("--use_nsm", default=False)
+    parser.add_argument("--predict_intended_maneuver", default=False)
+    parser.add_argument("--predict_current_maneuver", default=False)
     parser.add_argument("--predict_trajectory", default=True)
-    parser.add_argument("--recover_obs", default=True)
+    parser.add_argument("--recover_obs", default=False)
     # parser.add_argument("--per_instance_encoding", default=False)
     parser.add_argument("--time_to_predict", default=8)
     parser.add_argument("--frequency_for_prediction", default=20)
@@ -876,14 +903,15 @@ if  __name__ == '__main__':
     
     parser.add_argument("--d_inner", default=1024)
     model_args = parser.parse_args()
-
+    
     # model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
     # model.config.pad_token_id = 0
-    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_array3d")
+    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_autoregressive_rapid")
     dataset.set_format("torch",columns=['trajectory','high_res_raster','low_res_raster','intended_maneuver_vector','current_maneuver_vector'])
+    print("dataset size:", len(dataset))
     print(dataset.features)
     start = time.time()
-    example = dataset[0]
+    example = dataset[1004]
     print(time.time() - start)
 
     # with open("autoregressive_data_3d.pkl", "wb") as f:
@@ -924,21 +952,75 @@ if  __name__ == '__main__':
     #     output_hidden_states=None,
     #     return_dict=True,
     # )
-    model = GPTModelNuPlan.from_pretrained('gpt2', model_args=model_args)
+    model = GPTModelNuPlan.from_pretrained('checkpoints/gpt/checkpoint-6000', model_args=model_args)
+    gt = example["trajectory"][8:]
+    example = torch.zeros(8,33,4)
+    test = model.compute_normalized_points(example)
     result = model.generate(
-        intended_maneuver_vector=torch.zeros(2,8,dtype=torch.int32),
-        current_maneuver_vector=torch.zeros(2,8,12),
-        high_res_raster=torch.zeros(2,9,224,224,29),
-        low_res_raster=torch.zeros(2,9,224,224,29),
-        trajectory=torch.zeros(2,8,4),
+        intended_maneuver_vector=example["intended_maneuver_vector"][:8].unsqueeze(0),
+        current_maneuver_vector=example["current_maneuver_vector"][:8].unsqueeze(0),
+        high_res_raster=example["high_res_raster"].reshape(224, 224, -1, 29)[:, :, :9, :].unsqueeze(0),
+        low_res_raster=example["low_res_raster"].reshape(224, 224, -1, 29)[:, :, :9, :].unsqueeze(0),
+        trajectory=example["trajectory"][:8].unsqueeze(0),
         return_dict=True,
     )
-    result = model(
-        intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
-        current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
-        high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
-        low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
-        trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
-        return_dict=True,
-    )
+    pred_traj = result["trajectory"][0]
+    loss_fn = nn.MSELoss()
+    loss = loss_fn(pred_traj, gt)
+    
+    def compute_world_points(pred_traj, yaw=0):
+        ego_trajectory = np.zeros((1, 3))
+        ego_trajectory[-1] = yaw
+        next_world_coor_trajectories = list()
+        for idx in range(0, pred_traj.shape[0]):
+            cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
+            offset_x = pred_traj[idx, 0] * cos_ + pred_traj[idx, 1] * sin_
+            offset_y = pred_traj[idx, 1] * cos_ - pred_traj[idx, 0] * sin_
+            next_ego_traj = [ego_trajectory[-1][0] + offset_x,
+                            ego_trajectory[-1][1] + offset_y,
+                            ego_trajectory[-1][2] + pred_traj[idx, -1]]
+            ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj.copy()).reshape(1, -1)), axis=0)
+            next_world_coor_trajectories.append(next_ego_traj)
+            
+        next_world_coor_trajectories = np.array(next_world_coor_trajectories)
+        next_world_coor_points = next_world_coor_trajectories[::2]
+        next_world_coor_x = next_world_coor_trajectories[:,0]
+        next_world_coor_y = next_world_coor_trajectories[:,1]
+        next_world_coor_x = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 0])
+        next_world_coor_y = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 1])
+        next_world_coor_yaw = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 2])
+        next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
+        return next_world_coor_x - yaw, next_world_coor_y - yaw
+    gt_x, gt_y = compute_world_points(gt.detach().cpu().numpy())
+    pred_x, pred_y = compute_world_points(pred_traj.detach().cpu().numpy())
+    loss_x = loss_fn(torch.tensor(pred_x), torch.tensor(gt_x))
+    loss_y = loss_fn(torch.tensor(pred_y), torch.tensor(gt_y))
+    # ground truth inverse computation
+    with open("visualization/test/frame1k.pkl", "rb") as f:
+        example = pickle.load(f)
+        trajectory = example["trajectory"]
+        tan = np.divide(trajectory[:, 1], trajectory[:, 0])
+        yaw_np = np.arctan(tan)
+        delta_yaw = yaw_np - trajectory[:, 2]
+        gt = example["gt"]
+        yaw = example["world_yaw"]
+    gt_x, gt_y = gt[:, 0], gt[:, 1]
+    x, y = compute_world_points(trajectory, yaw)
+    diff_x = x - gt_x
+    diff_y = y - gt_y
+    fig = plt.figure(figsize=(200,100))
+    ax1 = fig.add_subplot(1,1,1)    
+    ax1.set_xlim([-100, 100])
+    ax1.set_ylim([-100, 100])
+    ax1.plot(gt_x, gt_y, color='green')
+    ax1.plot(pred_x, pred_y, color='red')
+    plt.show()
+    # result = model(
+    #     intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
+    #     current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
+    #     high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+    #     low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+    #     trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
+    #     return_dict=True,
+    # )
     print("done")
