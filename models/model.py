@@ -442,6 +442,11 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             and not self.predict_current_maneuver and not self.predict_intended_maneuver \
             and not self.recover_obs:
             return "PRED-A"
+
+        elif (self.predict_trajectory or self.predict_trajectory_with_nsm) \
+            and not self.predict_current_maneuver and not self.predict_intended_maneuver \
+            and self.recover_obs:
+            return "PRED-OA"
         
     def forward(
         self,
@@ -488,7 +493,9 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
             current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
-
+        else:
+            intended_maneuver_embed, current_maneuver_embed = None, None
+            
         ## ratser embedding and concat to state embedding
         high_res_raster = high_res_raster.permute(0, 1, 4, 2, 3)
         low_res_raster = low_res_raster.permute(0, 1, 4, 2, 3)
@@ -551,6 +558,12 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 ), dim=1)
                 input_embeds_future[:, ::2, :] = maneuver_embeds[:, past_seq:, :]
                 input_embeds_future[:, 1::2, :] = action_embeds[:, past_seq:, :]
+            elif self.mode == "PRED-OA":
+                input_embeds_future = torch.cat((
+                    torch.zeros_like(state_embeds[:, past_seq+1:, :]), torch.zeros_like(action_embeds[:, past_seq:, :])
+                ), dim=1)
+                input_embeds_future[:, ::2, :] = action_embeds[:, past_seq:, :]
+                input_embeds_future[:, 1::2, :] = state_embeds[:, past_seq+1:, :]  
             elif self.mode == "PRED-A":
                 input_embeds_future = action_embeds[:, past_seq:, :]
             input_embeds = torch.cat((input_embeds_past, input_embeds_future), dim=1)
@@ -588,6 +601,12 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
                 manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
                 action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+            elif self.mode == "PRED-OA":
+                obs_recover_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 2::3]
+                obs_recover_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
+                action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, ::2]
+                obs_recover_hidden_states = torch.cat((obs_recover_hidden_states_past, obs_recover_hidden_states_future),dim=1)
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
             elif self.mode == "PRED-A":
                 action_hidden_states_future = hidden_states[:, total_past_length-1:-1, :]
                 action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
@@ -605,9 +624,13 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 manuever_hidden_states_future = hidden_states[:, total_past_length-1:-1, :][:, ::2]
                 action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
                 manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+            elif self.mode == "PRED-OA":
+                action_hidden_states = hidden_states[:, ::2, :]
+                obs_recover_hidden_states = hidden_states[:, 1::2, :]
             elif self.mode == "PRED-A":
                 action_hidden_states_future = hidden_states[:, total_past_length-1:-1, :]
-            action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
         
         intended_m_logits = None
         current_m_logits = None
@@ -644,21 +667,25 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             loss_fct = CrossEntropyLoss()
             loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_vector.view(-1).long())    
-            loss += loss_to_add * 1000
+            loss += loss_to_add
 
         if self.predict_current_maneuver and current_maneuver_vector is not None:
             loss_fct = MSELoss()
             loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_vector.squeeze())
-            loss += loss_to_add * 1000
+            loss += loss_to_add
         
         if self.predict_trajectory and self.traj_decoder is not None:
             loss_fct = MSELoss(reduction="mean")
-            loss_to_add = loss_fct(traj_logits[:, :, :], trajectory[:, :, :].to(device))
+            loss_to_add = loss_fct(traj_logits[:, :, :2], trajectory[:, :, :2].to(device))
             loss += loss_to_add
-            gt_normalized_pts = self.compute_normalized_points(trajectory)
-            pred_normalized_pts = self.compute_normalized_points(traj_logits)
-            final_pt_loss = loss_fct(pred_normalized_pts[:, -1, :2], gt_normalized_pts[:, -1, :2].to(device))
-            loss += final_pt_loss
+            # yaw_loss = loss_fct(traj_logits[:, :, -1]*1000, trajectory[:, :, -1].to(device)*1000)
+            # loss += yaw_loss
+            # gt_normalized_pts = self.compute_normalized_points(trajectory)
+            # pred_normalized_pts = self.compute_normalized_points(traj_logits)
+            # final_pt_loss = loss_fct(pred_normalized_pts[:, -1, :2], gt_normalized_pts[:, -1, :2].to(device))
+            # loss += final_pt_loss
+            # world_coor_loss = loss_fct(pred_normalized_pts[:, :, :2], gt_normalized_pts[:, :, :2]).to(device)
+            # loss += world_coor_loss
 
         if self.recover_obs:
             loss_fct = MSELoss(reduction="mean")
@@ -853,13 +880,14 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
     
-    def compute_normalized_points(self, trajectory):
+    def compute_normalized_points(self, trajectory, yaw=0):
         bsz = trajectory.shape[0]
         device = trajectory.device
         ego_trajectory = torch.zeros((bsz, 1, 4), device=device)
+        ego_trajectory[-1] = yaw
         next_normalized_trajectories = list()
         for idx in range(0, trajectory.shape[1]):
-            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, 2]), torch.sin(-ego_trajectory[:, -1, 2])
+            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, -1]), torch.sin(-ego_trajectory[:, -1, -1])
             cos_.to(device)
             sin_.to(device)
             delta_yaw = torch.arctan(torch.divide(trajectory[:, idx, 1], trajectory[:, idx, 0]))
@@ -868,8 +896,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             next_ego_traj = torch.stack([ego_trajectory[:, -1, 0] + offset_x,
                                         ego_trajectory[:, -1, 1] + offset_y,
                                         torch.zeros_like(ego_trajectory[:, -1, 1]),
-                                        ego_trajectory[:, -1, 2] + delta_yaw],dim=-1)
-                                        # ego_trajectory[:, -1, 2] + trajectory[:, idx, -1]],dim=-1)
+                                        # ego_trajectory[:, -1, -1] + delta_yaw],dim=-1)
+                                        ego_trajectory[:, -1, -1] + trajectory[:, idx, -1]],dim=-1)
             ego_trajectory = torch.cat((ego_trajectory, torch.tensor(next_ego_traj).reshape(bsz, 1, -1)), dim=1)
             next_normalized_trajectories.append(next_ego_traj)
             
@@ -911,26 +939,15 @@ if  __name__ == '__main__':
     print("dataset size:", len(dataset))
     print(dataset.features)
     start = time.time()
-    example = dataset[1004]
+    example = dataset[300]
     print(time.time() - start)
 
     # with open("autoregressive_data_3d.pkl", "wb") as f:
     #     pickle.dump(example, f)
     # with open("autoregressive_data_3d.pkl", "rb") as f:    
     #     example = pickle.load(f)
-    # # shuffle example
-    # # dataset = dataset.shuffle(seed=42)
-    # # start = time.time()
-    # # example = dataset[0]
-    # # print(time.time() - start)
 
-    # # # fix shuffle
-    # dataset = dataset.flatten()
-    # start = time.time()
-    # example = dataset[0]
-    # print(time.time() - start)
 
-    # # 
     # dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_sparse_balance")
     # # print(dataset.features)
     # start = time.time()
@@ -952,10 +969,8 @@ if  __name__ == '__main__':
     #     output_hidden_states=None,
     #     return_dict=True,
     # )
-    model = GPTModelNuPlan.from_pretrained('checkpoints/gpt/checkpoint-6000', model_args=model_args)
+    model = GPTModelNuPlan.from_pretrained('checkpoints/gpt/checkpoint-58000', model_args=model_args)
     gt = example["trajectory"][8:]
-    example = torch.zeros(8,33,4)
-    test = model.compute_normalized_points(example)
     result = model.generate(
         intended_maneuver_vector=example["intended_maneuver_vector"][:8].unsqueeze(0),
         current_maneuver_vector=example["current_maneuver_vector"][:8].unsqueeze(0),
@@ -986,16 +1001,24 @@ if  __name__ == '__main__':
         next_world_coor_points = next_world_coor_trajectories[::2]
         next_world_coor_x = next_world_coor_trajectories[:,0]
         next_world_coor_y = next_world_coor_trajectories[:,1]
-        next_world_coor_x = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 0])
-        next_world_coor_y = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 1])
-        next_world_coor_yaw = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 2])
-        next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
+        # next_world_coor_x = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 0])
+        # next_world_coor_y = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 1])
+        # next_world_coor_yaw = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 2])
+        # next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
         return next_world_coor_x - yaw, next_world_coor_y - yaw
-    gt_x, gt_y = compute_world_points(gt.detach().cpu().numpy())
-    pred_x, pred_y = compute_world_points(pred_traj.detach().cpu().numpy())
-    loss_x = loss_fn(torch.tensor(pred_x), torch.tensor(gt_x))
-    loss_y = loss_fn(torch.tensor(pred_y), torch.tensor(gt_y))
-    # ground truth inverse computation
+    # gt_x, gt_y = compute_world_points(gt.detach().cpu().numpy())
+    # pred_x, pred_y = compute_world_points(pred_traj.detach().cpu().numpy())
+    # loss_x = loss_fn(torch.tensor(pred_x), torch.tensor(gt_x))
+    # loss_y = loss_fn(torch.tensor(pred_y), torch.tensor(gt_y))
+    # fig = plt.figure(figsize=(200,100))
+    # ax1 = fig.add_subplot(1,1,1)    
+    # ax1.set_xlim([-100, 100])
+    # ax1.set_ylim([-100, 100])
+    # ax1.plot(gt_x, gt_y, color='green')
+    # ax1.plot(pred_x, pred_y, color='red')
+    # plt.show()
+    
+    ## ground truth inverse computation
     with open("visualization/test/frame1k.pkl", "rb") as f:
         example = pickle.load(f)
         trajectory = example["trajectory"]
@@ -1005,7 +1028,10 @@ if  __name__ == '__main__':
         gt = example["gt"]
         yaw = example["world_yaw"]
     gt_x, gt_y = gt[:, 0], gt[:, 1]
-    x, y = compute_world_points(trajectory, yaw)
+    world_trajectory = model.compute_normalized_points(torch.tensor(trajectory).unsqueeze(0), yaw)
+    x = world_trajectory[0, :, 0].numpy() - yaw
+    y = world_trajectory[0, :, 1].numpy() - yaw
+    # x, y = compute_world_points(trajectory, yaw)
     diff_x = x - gt_x
     diff_y = y - gt_y
     fig = plt.figure(figsize=(200,100))
@@ -1013,7 +1039,7 @@ if  __name__ == '__main__':
     ax1.set_xlim([-100, 100])
     ax1.set_ylim([-100, 100])
     ax1.plot(gt_x, gt_y, color='green')
-    ax1.plot(pred_x, pred_y, color='red')
+    ax1.plot(x, y, color='red')
     plt.show()
     # result = model(
     #     intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),

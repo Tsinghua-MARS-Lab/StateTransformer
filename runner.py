@@ -129,7 +129,10 @@ class ModelArguments:
     n_layers: Optional[int] = field(
         default=4,
     )
-
+    # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
+    activation_function: Optional[str] = field(
+        default = "gelu_new"
+    )
 @dataclass
 class DataTrainingArguments:
     """
@@ -232,12 +235,15 @@ def main():
     # See xxx.py to process and save a dataset from the NuPlan Dataset
     if os.path.isdir(data_args.saved_dataset_folder):
         items = os.listdir(data_args.saved_dataset_folder)
-        if os.path.isdir(items[0]): #sub-datasets
+        if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[0])): #sub-datasets
+            print("concating datasets..")
             concatdatasets = list()
             for item in items:
+                print(item)
                 dataset_path = os.path.join(data_args.saved_dataset_folder, item)
                 dataset = Dataset.load_from_disk(dataset_path)
                 dataset.set_format(type='torch')
+                print(dataset)
                 concatdatasets.append(dataset)
             concat_dataset = ConcatDataset(concatdatasets)
             datasetsize = len(concat_dataset)
@@ -250,8 +256,10 @@ def main():
                 validation=val,
                 test=test
             )
+            print("Dataset size:", len(train))
 
         else: # whole hugging face dataset   
+            print("loading dataset...")
             nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             nuplan_dataset.set_format(type='torch')
             print('Dataset Loaded: ', nuplan_dataset)
@@ -463,7 +471,7 @@ def main():
                         trajectory_label = input["trajectory_label"][:, 1::2, :]
                     elif "gpt" in model_args.model_name:
                         trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
-                        trajectory_label = model.compute_normalized_points(traj_pred)
+                        traj_pred = model.compute_normalized_points(traj_pred)
                     if model_args.predict_single_step_trajectory:
                         trajectory_label = trajectory_label[:, :5, :]
                     loss = loss_fn(trajectory_label, traj_pred)
@@ -508,8 +516,8 @@ def main():
                 final_loss = torch.mean(torch.stack(losses, 0)).item()
                 print('End point x offset: ', np.average(np.abs(end_bias_x)))
                 print('End point y offset: ', np.average(np.abs(end_bias_y)))
-                print('ADE', final_loss)
-                print('FDE', np.sqrt(np.average(np.abs(end_bias_x)))**2 + np.average(np.abs(end_bias_y)**2))
+                print('ADE', np.sqrt(final_loss))
+                print('FDE', np.average(np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)))
 
             if training_args.output_dir is not None:
                 # save results
