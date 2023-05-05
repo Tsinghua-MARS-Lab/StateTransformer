@@ -343,7 +343,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.use_nsm = model_args.use_nsm
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_intended_maneuver = model_args.predict_intended_maneuver
-        self.predict_current_maneuver = model_args.predict_current_maneuver
+        # self.predict_current_maneuver = model_args.predict_current_maneuver
         self.recover_obs = model_args.recover_obs
         self.time_to_predict = model_args.time_to_predict
         self.frequency_for_prediction = model_args.frequency_for_prediction
@@ -370,7 +370,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             self.traj_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=4)
         if self.predict_intended_maneuver:
             self.intended_m_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=12)
-        if self.predict_current_maneuver:
+        if model_args.predict_current_maneuver:
+            assert False, 'Deprecated: Do not predict current maneuver, use linear interpolation instead'
             self.current_m_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=12)
         if self.recover_obs:
             self.obs_embed_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=config.n_embd)
@@ -427,19 +428,19 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
     def mode(self):
         # pred mode: Obs-Maneuver-Action Pair: [m,a | o,m,a | ... | o,m,a]
         if (self.predict_trajectory or self.predict_trajectory_with_nsm)\
-            and self.predict_current_maneuver and self.predict_intended_maneuver \
+            and self.predict_intended_maneuver \
             and self.recover_obs:
             return "PRED-OMA"
         
         # pred mode: Maneuver-Action Pair: [m,a | m,a |... | m,a]
         elif (self.predict_trajectory or self.predict_trajectory_with_nsm) \
-            and self.predict_current_maneuver and self.predict_intended_maneuver \
+            and self.predict_intended_maneuver \
             and not self.recover_obs:
             return "PRED-MA"
         
         # pred mode: Only Action
         elif (self.predict_trajectory or self.predict_trajectory_with_nsm) \
-            and not self.predict_current_maneuver and not self.predict_intended_maneuver \
+            and not self.predict_intended_maneuver \
             and not self.recover_obs:
             return "PRED-A"
         
@@ -614,9 +615,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         traj_logits = None
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             intended_m_logits = self.intended_m_decoder(manuever_hidden_states)
-        if self.predict_current_maneuver and current_maneuver_vector is not None:
-            current_m_logits = self.current_m_decoder(manuever_hidden_states)
-            current_c_confifence = torch.softmax(current_m_logits, dim=-1)
         
         if self.traj_decoder is not None and not self.predict_trajectory_with_nsm:
             # expected shape for pred trajectory is (b, pred_length, 4)
@@ -644,11 +642,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             loss_fct = CrossEntropyLoss()
             loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_vector.view(-1).long())    
-            loss += loss_to_add * 1000
-
-        if self.predict_current_maneuver and current_maneuver_vector is not None:
-            loss_fct = MSELoss()
-            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_vector.squeeze())
             loss += loss_to_add * 1000
         
         if self.predict_trajectory and self.traj_decoder is not None:
@@ -703,6 +696,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if not self.use_nsm:
             intended_maneuver_vector, current_maneuver_vector = None, None
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
+            if self.mask_history_intended_maneuver:
+                intended_maneuver_vector[:] = 0
+            if self.mask_history_current_maneuver:
+                current_maneuver_vector[:] = 0.0
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))
             current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))
         else:
@@ -859,7 +856,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         ego_trajectory = torch.zeros((bsz, 1, 4), device=device)
         next_normalized_trajectories = list()
         for idx in range(0, trajectory.shape[1]):
-            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, 2]), torch.sin(-ego_trajectory[:, -1, 2])
+            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, 3]), torch.sin(-ego_trajectory[:, -1, 3])
             cos_.to(device)
             sin_.to(device)
             delta_yaw = torch.arctan(torch.divide(trajectory[:, idx, 1], trajectory[:, idx, 0]))
