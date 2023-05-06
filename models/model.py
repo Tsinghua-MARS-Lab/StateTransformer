@@ -316,8 +316,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                     loss += loss_to_add
             elif self.predict_intended_maneuver_change and intended_maneuver_label is not None:
                 loss_fct = CrossEntropyLoss()
-                intended_maneuver_vector_next = intended_maneuver_vector[:, -1].view(-1, 1)  # [batch_size, 1]
-                change_label = intended_maneuver_label == intended_maneuver_vector_next
+                intended_maneuver_vector_next = intended_maneuver_vector[:, -1].view(batch_size)  # [batch_size]
+                intended_maneuver_label = intended_maneuver_label.view(batch_size)  # [batch_size]
+                change_label = intended_maneuver_label != intended_maneuver_vector_next
                 if self.predict_intended_maneuver_change_non_persuasive:
                     # must change into or change from one of the non-persuasive maneuvers
                     non_persuasive_m = [3, 4, 5, 6, 7, 8, 9, 10, 11]
