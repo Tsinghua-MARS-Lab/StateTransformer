@@ -299,57 +299,61 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         self.config_problem_type = 'NuPlan_NSM_SingleStep_Planning'
-        if self.not_same_scale != 1:
-            scaler = torch.ones(intended_maneuver_label.shape, dtype=torch.float32, device=device) * self.not_same_scale
-            ones = torch.ones(intended_maneuver_label.shape, dtype=torch.float32, device=device)
-            scaler[intended_maneuver_label == intended_maneuver_vector] = ones[
-                intended_maneuver_label == intended_maneuver_vector]
-
-        if self.predict_intended_maneuver and intended_maneuver_label is not None:
-            loss_fct = CrossEntropyLoss()
-            loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_label.view(-1).long())
+        if self.training:
             if self.not_same_scale != 1:
-                loss += loss_to_add * torch.mean(scaler)
-            else:
-                loss += loss_to_add
-        elif self.predict_intended_maneuver_change and intended_maneuver_label is not None:
-            loss_fct = CrossEntropyLoss()
-            intended_maneuver_vector_next = intended_maneuver_vector[:, -1].view(-1, 1)  # [batch_size, 1]
-            change_label = intended_maneuver_label == intended_maneuver_vector_next
-            if self.predict_intended_maneuver_change_non_persuasive:
-                # must change into or change from one of the non-persuasive maneuvers
-                non_persuasive_m = [3, 4, 5, 6, 7, 8, 9, 10, 11]
-                mask_t0 = torch.any(
-                    torch.stack([torch.eq(intended_maneuver_label, aelem).logical_or_(torch.eq(intended_maneuver_label, aelem)) for aelem in non_persuasive_m],
-                                dim=0), dim=0)
-                mask_t0 = mask_t0.logical_and_(torch.eq(intended_maneuver_vector_next, 0))
-                mask_t1 = torch.any(
-                    torch.stack([torch.eq(intended_maneuver_vector_next, aelem).logical_or_(torch.eq(intended_maneuver_vector_next, aelem)) for aelem in non_persuasive_m],
-                                dim=0), dim=0)
-                mask_t1 = mask_t1.logical_and_(torch.eq(intended_maneuver_label, 0))
-                mask = mask_t0.logical_or_(mask_t1)
-                change_label = change_label.logical_and_(mask)
-            loss_to_add = loss_fct(intended_m_logits.view(batch_size, 2), change_label.view(batch_size).long())
-            loss += loss_to_add
+                scaler = torch.ones(intended_maneuver_label.shape, dtype=torch.float32,
+                                    device=device) * self.not_same_scale
+                ones = torch.ones(intended_maneuver_label.shape, dtype=torch.float32, device=device)
+                scaler[intended_maneuver_label == intended_maneuver_vector] = ones[
+                    intended_maneuver_label == intended_maneuver_vector]
 
-        if self.predict_current_maneuver and current_maneuver_label is not None:
-            loss_fct = MSELoss()
-            loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_label.squeeze()) * 10000
-            if self.not_same_scale != 1:
-                loss += loss_to_add * torch.mean(scaler)
-            else:
+            if self.predict_intended_maneuver and intended_maneuver_label is not None:
+                loss_fct = CrossEntropyLoss()
+                loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_label.view(-1).long())
+                if self.not_same_scale != 1:
+                    loss += loss_to_add * torch.mean(scaler)
+                else:
+                    loss += loss_to_add
+            elif self.predict_intended_maneuver_change and intended_maneuver_label is not None:
+                loss_fct = CrossEntropyLoss()
+                intended_maneuver_vector_next = intended_maneuver_vector[:, -1].view(-1, 1)  # [batch_size, 1]
+                change_label = intended_maneuver_label == intended_maneuver_vector_next
+                if self.predict_intended_maneuver_change_non_persuasive:
+                    # must change into or change from one of the non-persuasive maneuvers
+                    non_persuasive_m = [3, 4, 5, 6, 7, 8, 9, 10, 11]
+                    mask_t0 = torch.any(
+                        torch.stack([torch.eq(intended_maneuver_label, aelem).logical_or_(
+                            torch.eq(intended_maneuver_label, aelem)) for aelem in non_persuasive_m],
+                                    dim=0), dim=0)
+                    mask_t0 = mask_t0.logical_and_(torch.eq(intended_maneuver_vector_next, 0))
+                    mask_t1 = torch.any(
+                        torch.stack([torch.eq(intended_maneuver_vector_next, aelem).logical_or_(
+                            torch.eq(intended_maneuver_vector_next, aelem)) for aelem in non_persuasive_m],
+                                    dim=0), dim=0)
+                    mask_t1 = mask_t1.logical_and_(torch.eq(intended_maneuver_label, 0))
+                    mask = mask_t0.logical_or_(mask_t1)
+                    change_label = change_label.logical_and_(mask)
+                loss_to_add = loss_fct(intended_m_logits.view(batch_size, 2), change_label.view(batch_size).long())
                 loss += loss_to_add
-        elif self.predict_current_maneuver_change and current_maneuver_label is not None:
-            loss_fct = MSELoss()
-            batch_size_indices = torch.arange(batch_size, dtype=torch.long, device=device)
-            change_label = current_maneuver_label[batch_size_indices, intended_maneuver_label.flatten()] - \
-                           current_maneuver_vector[batch_size_indices, -1, intended_maneuver_label.flatten()]
-            loss_to_add = loss_fct(current_c_confifence.squeeze(), change_label.squeeze())
-            loss += loss_to_add
 
-        if trajectory_label is not None and self.traj_decoder is not None:
-            loss_fct = MSELoss(reduction="mean")
-            loss += loss_fct(traj_pred, trajectory_label.to(device))
+            if self.predict_current_maneuver and current_maneuver_label is not None:
+                loss_fct = MSELoss()
+                loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_label.squeeze()) * 10000
+                if self.not_same_scale != 1:
+                    loss += loss_to_add * torch.mean(scaler)
+                else:
+                    loss += loss_to_add
+            elif self.predict_current_maneuver_change and current_maneuver_label is not None:
+                loss_fct = MSELoss()
+                batch_size_indices = torch.arange(batch_size, dtype=torch.long, device=device)
+                change_label = current_maneuver_label[batch_size_indices, intended_maneuver_label.flatten()] - \
+                               current_maneuver_vector[batch_size_indices, -1, intended_maneuver_label.flatten()]
+                loss_to_add = loss_fct(current_c_confifence.squeeze(), change_label.squeeze())
+                loss += loss_to_add
+
+            if trajectory_label is not None and self.traj_decoder is not None:
+                loss_fct = MSELoss(reduction="mean")
+                loss += loss_fct(traj_pred, trajectory_label.to(device))
 
         pooled_logits = [intended_m_logits, current_m_logits,
                          None,
