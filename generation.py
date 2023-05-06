@@ -180,7 +180,7 @@ def main(args):
                         'lidar_token': Value(dtype='string', id=None)
                          })
     nuplan_dataset = Dataset.from_generator(yield_data, 
-                                            features=features,
+                                            #features=features,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader},
                                             writer_batch_size=2, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
@@ -202,9 +202,9 @@ if __name__ == '__main__':
     #             'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
     #         })
     parser.add_argument("--data_path", type=dict, default={
-             'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
-                'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
-                'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/train_boston",
+             'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+                'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+                'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/train_pittsburgh",
         })
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
     parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
