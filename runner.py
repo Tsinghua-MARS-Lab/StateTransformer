@@ -114,6 +114,9 @@ class ModelArguments:
     predict_intended_maneuver_change: Optional[bool] = field(
         default=False,
     )
+    predict_intended_maneuver_change_non_persuasive: Optional[bool] = field(
+        default=False,
+    )
     predict_current_maneuver_change: Optional[bool] = field(
         default=False,
     )

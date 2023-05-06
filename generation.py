@@ -68,8 +68,9 @@ def main(args):
                 if args.use_nsm:
                     current_frame_is_valid = nsm_result['valid_frames'][t]
                     target_frame_is_valid = nsm_result['valid_frames'][t+observation_kwargs['frame_sample_interval']]
-                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1, \
-                                            observation_kwargs["frame_sample_interval"]))
+                    # sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1, observation_kwargs["frame_sample_interval"]))
+                    # include future frames
+                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1 + 80))
                     skip = False
                     for frame in sample_frames:
                         if len(nsm_result['goal_actions_weights_per_frame'][frame]) == 0:
