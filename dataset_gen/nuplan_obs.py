@@ -138,6 +138,22 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         result_to_return["current_maneuver_label"] = None
         result_to_return["current_maneuver_vector"] = None
 
+    # add gt maneuver for future 80 frames
+    if nsm_result is not None:
+        current_maneuver_gt = list()
+        intended_maneuver_gt = list()
+        for frame in range(scenario_frame_number, scenario_frame_number + 80):
+            intended_maneuver_gt.append(nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1)
+            current_maneuver_weights = np.zeros(12, dtype=np.float32)
+            for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
+                current_action_index = each_current_action['action'].value - 1
+                current_maneuver_weights[current_action_index] = each_current_action['weight']
+            current_maneuver_gt.append(current_maneuver_weights)
+        # intended_maneuver_gt: [80,]
+        # current_maneuver_gt: [80, 12]
+        result_to_return['intended_maneuver_gt'] = np.array(intended_maneuver_gt, dtype=np.int32)
+        result_to_return['current_maneuver_gt'] = np.array(current_maneuver_gt, dtype=np.float32)
+
     # sample and draw the goal
     goal_sample_frame = min(total_frames - 1, scenario_frame_number + 20 * 20)
     goal_point = data_dic['agent']['ego']['pose'][goal_sample_frame, :].copy()

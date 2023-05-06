@@ -77,6 +77,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             self.current_m_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=12)
 
         self.predict_intended_maneuver_change = model_args.predict_intended_maneuver_change
+        self.predict_intended_maneuver_change_non_persuasive = model_args.predict_intended_maneuver_change_non_persuasive
         self.predict_current_maneuver_change = model_args.predict_current_maneuver_change
         if self.predict_intended_maneuver_change:
             self.intended_m_change_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=2)
@@ -313,7 +314,21 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                 loss += loss_to_add
         elif self.predict_intended_maneuver_change and intended_maneuver_label is not None:
             loss_fct = CrossEntropyLoss()
-            change_label = intended_maneuver_label == intended_maneuver_vector[:, -1].view(-1, 1)
+            intended_maneuver_vector_next = intended_maneuver_vector[:, -1].view(-1, 1)  # [batch_size, 1]
+            change_label = intended_maneuver_label == intended_maneuver_vector_next
+            if self.predict_intended_maneuver_change_non_persuasive:
+                # must change into or change from one of the non-persuasive maneuvers
+                non_persuasive_m = [3, 4, 5, 6, 7, 8, 9, 10, 11]
+                mask_t0 = torch.any(
+                    torch.stack([torch.eq(intended_maneuver_label, aelem).logical_or_(torch.eq(intended_maneuver_label, aelem)) for aelem in non_persuasive_m],
+                                dim=0), dim=0)
+                mask_t0 = mask_t0.logical_and_(torch.eq(intended_maneuver_vector_next, 0))
+                mask_t1 = torch.any(
+                    torch.stack([torch.eq(intended_maneuver_vector_next, aelem).logical_or_(torch.eq(intended_maneuver_vector_next, aelem)) for aelem in non_persuasive_m],
+                                dim=0), dim=0)
+                mask_t1 = mask_t1.logical_and_(torch.eq(intended_maneuver_label, 0))
+                mask = mask_t0.logical_or_(mask_t1)
+                change_label = change_label.logical_and_(mask)
             loss_to_add = loss_fct(intended_m_logits.view(batch_size, 2), change_label.view(batch_size).long())
             loss += loss_to_add
 
