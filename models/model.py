@@ -95,7 +95,6 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # input_ids: Optional[torch.LongTensor] = None,
         intended_maneuver_vector: Optional[torch.LongTensor] = None,
         current_maneuver_vector: Optional[torch.LongTensor] = None,
-        action_label: Optional[torch.LongTensor] = None,
         trajectory_label: Optional[torch.LongTensor] = None,
         context_actions:Optional[torch.LongTensor] = None,
         intended_maneuver_label: Optional[torch.LongTensor] = None,
@@ -217,7 +216,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             input_embeds[:, 1::2, :] = action_embeds
             if not self.predict_single_step_trajectory:
                 # to keep input and output at the same dimension
-                input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length - 2 * context_length + 1, n_embed), device=device)], dim=1)
+                input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         else:
             input_embeds = state_embeds
         
@@ -246,8 +245,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         if self.traj_decoder is not None:
             # expected shape for pred trajectory is (b, pred_length, 4)
-            # TODO
-            traj_pred = self.traj_decoder(transformer_outputs_hidden_state[:, :pred_length, :])
+            traj_pred = self.traj_decoder(transformer_outputs_hidden_state[:, -pred_length:, :])
         else:
             traj_pred = None
 
@@ -288,7 +286,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
                 loss += loss_to_add        
         if trajectory_label is not None and self.traj_decoder is not None:
             loss_fct = MSELoss(reduction="mean")
-            loss += loss_fct(traj_pred, trajectory_label.to(device)) * 10000
+            loss += loss_fct(traj_pred, trajectory_label.to(device))
 
         pooled_logits = [intended_m_logits, current_m_logits, traj_pred]
         if not return_dict:
@@ -592,6 +590,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if self.use_nsm:
             manuever_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, ::3, :]
             action_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 1::3, :]
+            obs_recover_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 2::3]
             if self.mode == "PRED-OMA":
                 manuever_hidden_states = hidden_states[:, ::3, :]
                 action_hidden_states = hidden_states[:, 1::3, :]
@@ -602,7 +601,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
                 action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
             elif self.mode == "PRED-OA":
-                obs_recover_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 2::3]
                 obs_recover_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
                 action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, ::2]
                 obs_recover_hidden_states = torch.cat((obs_recover_hidden_states_past, obs_recover_hidden_states_future),dim=1)
@@ -663,6 +661,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             recovered_obs_embd = self.obs_embed_decoder(obs_recover_hidden_states[:, :-1, :])
             
         loss = torch.tensor(0, dtype=torch.float32, device=device)
+        
+        ## input recover supervision
 
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             loss_fct = CrossEntropyLoss()
@@ -845,6 +845,26 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                     result_to_return["trajectory"].append(traj_logits)
                     next_embed = self.action_m_embed(traj_logits)
             
+            elif self.mode == "PRED-OA":
+                if step > 2 * seq_length - 1:
+                    break
+                if step % 2 == 0:
+                    if self.predict_trajectory_with_nsm:
+                        lerp_weights = torch.arange(1.0, 1.0 + seq).float().to(device) / seq
+                        interpolated_weights = torch.lerp(current_maneuver_vector,  # [bsz, seq, 12]
+                                                        current_c_confifence,  #[bsz, seq, 12]
+                                                        lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
+                        # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
+                        traj_hidden_state = self.nsm_decoder(hidden_states=hidden_state.reshape(-1, hidden_state.shape[-1]),
+                                                            weight_blend=interpolated_weights.view(-1, 12))
+                        # traj_pred: [batch_size, pred_length, 4]
+                        traj_logits = self.traj_decoder(traj_hidden_state.reshape(batch_size, seq, hidden_state.shape[-1]))
+                    elif self.predict_trajectory:
+                        traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
+                    result_to_return["trajectory"].append(traj_logits)
+                    next_embed = self.action_m_embed(traj_logits)
+                if step % 2 == 1:
+                    next_embed = self.obs_embed_decoder(hidden_state[:, -1, :].unsqueeze(1))
             # pred mode : Only Action
             elif self.mode == "PRED-A":
                 if step > seq_length - 1:
@@ -971,6 +991,14 @@ if  __name__ == '__main__':
     # )
     model = GPTModelNuPlan.from_pretrained('checkpoints/gpt/checkpoint-58000', model_args=model_args)
     gt = example["trajectory"][8:]
+    loss_train = model(
+        intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
+        current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
+        high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+        low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+        trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
+        return_dict=True,
+    )[0]
     result = model.generate(
         intended_maneuver_vector=example["intended_maneuver_vector"][:8].unsqueeze(0),
         current_maneuver_vector=example["current_maneuver_vector"][:8].unsqueeze(0),
@@ -980,6 +1008,7 @@ if  __name__ == '__main__':
         return_dict=True,
     )
     pred_traj = result["trajectory"][0]
+    print(gt[:, 0] - pred_traj[:, 0])
     loss_fn = nn.MSELoss()
     loss = loss_fn(pred_traj, gt)
     
@@ -1006,17 +1035,17 @@ if  __name__ == '__main__':
         # next_world_coor_yaw = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 2])
         # next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
         return next_world_coor_x - yaw, next_world_coor_y - yaw
-    # gt_x, gt_y = compute_world_points(gt.detach().cpu().numpy())
-    # pred_x, pred_y = compute_world_points(pred_traj.detach().cpu().numpy())
-    # loss_x = loss_fn(torch.tensor(pred_x), torch.tensor(gt_x))
-    # loss_y = loss_fn(torch.tensor(pred_y), torch.tensor(gt_y))
-    # fig = plt.figure(figsize=(200,100))
-    # ax1 = fig.add_subplot(1,1,1)    
-    # ax1.set_xlim([-100, 100])
-    # ax1.set_ylim([-100, 100])
-    # ax1.plot(gt_x, gt_y, color='green')
-    # ax1.plot(pred_x, pred_y, color='red')
-    # plt.show()
+    gt_x, gt_y = compute_world_points(gt.detach().cpu().numpy())
+    pred_x, pred_y = compute_world_points(pred_traj.detach().cpu().numpy())
+    loss_x = loss_fn(torch.tensor(pred_x), torch.tensor(gt_x))
+    loss_y = loss_fn(torch.tensor(pred_y), torch.tensor(gt_y))
+    fig = plt.figure(figsize=(200,100))
+    ax1 = fig.add_subplot(1,1,1)    
+    ax1.set_xlim([-100, 100])
+    ax1.set_ylim([-100, 100])
+    ax1.plot(gt_x, gt_y, color='green')
+    ax1.plot(pred_x, pred_y, color='red')
+    plt.show()
     
     ## ground truth inverse computation
     with open("visualization/test/frame1k.pkl", "rb") as f:
@@ -1041,12 +1070,5 @@ if  __name__ == '__main__':
     ax1.plot(gt_x, gt_y, color='green')
     ax1.plot(x, y, color='red')
     plt.show()
-    # result = model(
-    #     intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
-    #     current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
-    #     high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
-    #     low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
-    #     trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
-    #     return_dict=True,
-    # )
+
     print("done")
