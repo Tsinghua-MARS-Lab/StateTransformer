@@ -67,8 +67,8 @@ runner.py --model_name pretrain-gpt \
 
  To generate dataset:
 `
-python generation.py  
---num_proc 1   \
+python generation.py \ 
+--num_proc 1 \
 --sample_interval 20 \
 --dataset_name single_test \
 --starting_file_num 0 \
