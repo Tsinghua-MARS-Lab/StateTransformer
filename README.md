@@ -74,7 +74,6 @@ python generation.py \
 --starting_file_num 0 \
 --ending_file_num 1 \
 --cache_folder /localdata_hdd/nuplan_nsm \
-<!-- --use_nsm  \ -->
 --auto_regressive False
 `
 
