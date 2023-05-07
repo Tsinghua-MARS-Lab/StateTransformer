@@ -70,16 +70,13 @@ class ModelArguments:
         metadata={"help": "The target folder to save prediction results."},
     )
     use_nsm: Optional[bool] = field(
-        default=True,
+        default=False,
     )
     predict_intended_maneuver: Optional[bool] = field(
-        default=True,
+        default=False,
     )
     predict_current_maneuver: Optional[bool] = field(
-        default=True,
-    )
-    predict_pose: Optional[bool] = field(
-        default=True,
+        default=False,
     )
     predict_trajectory: Optional[bool] = field(
         default=True,
@@ -87,26 +84,14 @@ class ModelArguments:
     recover_obs: Optional[bool] = field(
         default=False,
     )
-    per_instance_encoding: Optional[bool] = field(
-        default=True,
-    )
-    time_to_predict: Optional[int] = field(
-        default=8,
-    )
-    frequency_for_prediction: Optional[int] = field(
-        default=20,
-    )
-    scale_on_not_same_loss: Optional[float] = field(
-        default=1.0,
-    )
     maneuver_repeat: Optional[bool] = field(
-        default=False,
-    )
-    predict_single_step_trajectory: Optional[bool] = field(
         default=False,
     )
     predict_trajectory_with_nsm: Optional[bool] = field(
         default=False,
+    )
+    predict_trajectory_with_stopflag: Optional[bool] = field(
+        default=False
     )
     mask_history_intended_maneuver: Optional[bool] = field(
         default=False,
@@ -135,7 +120,10 @@ class ModelArguments:
     n_layers: Optional[int] = field(
         default=4,
     )
-
+    # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
+    activation_function: Optional[str] = field(
+        default = "gelu_new"
+    )
 @dataclass
 class DataTrainingArguments:
     """
@@ -238,12 +226,15 @@ def main():
     # See xxx.py to process and save a dataset from the NuPlan Dataset
     if os.path.isdir(data_args.saved_dataset_folder):
         items = os.listdir(data_args.saved_dataset_folder)
-        if os.path.isdir(items[0]): #sub-datasets
+        if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[0])): #sub-datasets
+            print("concating datasets..")
             concatdatasets = list()
             for item in items:
+                print(item)
                 dataset_path = os.path.join(data_args.saved_dataset_folder, item)
                 dataset = Dataset.load_from_disk(dataset_path)
                 dataset.set_format(type='torch')
+                print(dataset)
                 concatdatasets.append(dataset)
             concat_dataset = ConcatDataset(concatdatasets)
             datasetsize = len(concat_dataset)
@@ -256,12 +247,14 @@ def main():
                 validation=val,
                 test=test
             )
+            print("Dataset size:", len(train))
 
         else: # whole hugging face dataset   
+            print("loading dataset...")
             nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             nuplan_dataset.set_format(type='torch')
             print('Dataset Loaded: ', nuplan_dataset)
-            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True)
+            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True, seed=training_args.seed)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
@@ -386,7 +379,7 @@ def main():
                         examples[each_key] = examples[each_key].to(device)
                 return examples        
             
-            if model_args.use_nsm:
+            if model_args.predict_intended_maneuver or model_args.predict_current_maneuver:
                 print('Computing metrics for classifications')
                 intended_m_label = []
                 intended_m_vector = []
@@ -396,10 +389,8 @@ def main():
                 current_m_weights_bias = []
                 not_same_current_m_weights_bias = []
                 current_m_weights_prediction = []
-            if model_args.predict_pose:
-                action_bias_x = []
-                action_bias_y = []
-            if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
+                
+            if model_args.predict_trajectory:
                 end_bias_x = []
                 end_bias_y = []
                 losses = []
@@ -408,19 +399,39 @@ def main():
             # initialize intended maneuver metrics
             per_batch_size = training_args.per_device_eval_batch_size
             for input in tqdm(predict_dataset.iter(training_args.per_device_eval_batch_size)):
+                if "xl" in model_args.model_name:
+                    input_length = len(input['intended_maneuver_label'])
+                elif "gpt" in model_args.model_name:
+                    input_length = len(input['intended_maneuver_vector'])
                 if per_batch_size is None:
                     per_batch_size = len(input['intended_maneuver_label'])
-                elif len(input['intended_maneuver_label']) != per_batch_size:
+                elif input_length != per_batch_size:
                     continue
                 input = preprocess_data(input)
-                output = model(**input)
-                intended_m_logits, current_m_logits, pos_x_logits, pos_y_logits, traj_pred = output.all_logits
-                file_name = input['file_name']
-                current_frame_idx = input['frame_index']
-                prediction_results['file_names'].append(file_name)
-                prediction_results['current_frame'].append(current_frame_idx.cpu().numpy())
-                if model_args.use_nsm:
-                    intended_m_label.append(input['intended_maneuver_label'])  # tensor
+                if "xl" in model_args.model_name:
+                    output = model(**input)
+                    intended_m_logits, current_m_logits, traj_pred = output.all_logits
+                    file_name = input['file_name']
+                    current_frame_idx = input['frame_index']
+                    prediction_results['file_names'].append(file_name)
+                    prediction_results['current_frame'].append(current_frame_idx.cpu().numpy())
+                elif "gpt" in model_args.model_name:
+                    actual_input = dict()
+                    actual_input["intended_maneuver_vector"] = input["intended_maneuver_vector"][:, :8] if input["intended_maneuver_vector"][0] is not None else None 
+                    actual_input["current_maneuver_vector"] = input["current_maneuver_vector"][:, :8] if input["current_maneuver_vector"][0] is not None else None 
+                    actual_input["trajectory"] = input["trajectory"][:, :8]
+                    actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
+                    actual_input["low_res_raster"] = input["low_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
+                    output = model.generate(**actual_input)
+                    intended_m_logits = output["intend_maneuver"]
+                    current_m_logits = output["current_maneuver"]
+                    traj_pred = output["trajectory"]
+               
+                if model_args.predict_intended_maneuver or model_args.predict_current_maneuver:
+                    if "xl" in model_args.model_name:
+                        intended_m_label.append(input['intended_maneuver_label'])  # tensor
+                    elif "gpt" in model_args.model_name:
+                        intended_m_label.append(input['intended_maneuver_vector'][:, 8:])
                     intended_m_vector.append(input['intended_maneuver_vector'])  # tensor
 
                     if model_args.predict_intended_maneuver:
@@ -428,7 +439,10 @@ def main():
                     if model_args.predict_current_maneuver:
                         current_c_confifence = torch.softmax(current_m_logits, dim=-1)
                         current_m_weights_prediction.append(current_c_confifence)
-                        current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))
+                        if "xl" in model_args.model_name:
+                            current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))
+                        elif "gpt" in model_args.model_name:
+                            current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_vector'][:, 8:, :] - current_c_confifence), dim=1))
                     for i in range(training_args.per_device_eval_batch_size):
                         if len(intended_m_vector[-1].shape) == 2 and intended_m_vector[-1].shape[1] > 1:
                             # new version multi time steps in vector
@@ -436,71 +450,63 @@ def main():
                         else:
                             # old version only the last time step in vector
                             intended_m_vector_each = intended_m_vector[-1][i]
-                        if int(intended_m_label[-1][i]) != int(intended_m_vector_each):
+                        if int(intended_m_label[-1][i, -1]) != int(intended_m_vector_each):
                             if model_args.predict_intended_maneuver:
-                                not_same_intended_m_label.append(intended_m_label[-1][i])
+                                not_same_intended_m_label.append(intended_m_label[-1][i, -1])
                                 not_same_intended_m_prediction.append(intended_m_prediction[-1][i])
                             if model_args.predict_current_maneuver:
                                 not_same_current_m_weights_bias.append(current_m_weights_bias[-1][i])
-                if model_args.predict_pose:
-                    pos_x = torch.argmax(pos_x_logits, dim=-1)
-                    pos_y = torch.argmax(pos_y_logits, dim=-1)
-                    action_label = input['action_label'].clone() + 100
-                    action_bias_x.append(abs(pos_x - action_label[:, 0]))
-                    action_bias_y.append(abs(pos_y - action_label[:, 1]))
                 
-                if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
-                    trajectory_label = input["trajectory_label"][:, 1::2, :]
-                    if model_args.predict_single_step_trajectory:
-                        trajectory_label = trajectory_label[:, :5, :]
+                if model_args.predict_trajectory:
+                    if "xl" in model_args.model_name:
+                        trajectory_label = input["trajectory_label"][:, 1::2, :]
+                    elif "gpt" in model_args.model_name:
+                        trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
+                        traj_pred = model.compute_normalized_points(traj_pred)
                     loss = loss_fn(trajectory_label, traj_pred)
                     end_trajectory_label = trajectory_label[:, -1, :]
                     end_point = traj_pred[:, -1, :]
                     end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])
                     end_bias_y.append(end_trajectory_label[:, 1] - end_point[:, 1])
                     losses.append(loss)
+                    
+            
+            if model_args.predict_intended_maneuver:
+                intended_m_label = torch.stack(intended_m_label, 0).flatten()
+                intended_m_prediction = torch.stack(intended_m_prediction, 0).flatten()
+                print('Intended Maneuver Classification')
+                prediction_metrics['intended_maneuver'] = classification_report(intended_m_prediction.cpu().numpy(), intended_m_label.cpu().numpy())
+                print(prediction_metrics['intended_maneuver'])
+                if len(not_same_intended_m_label) > 0:
+                    not_same_intended_m_label = torch.stack(not_same_intended_m_label, -1).flatten()
+                    not_same_intended_m_prediction = torch.stack(not_same_intended_m_prediction, -1).flatten()
+                    prediction_metrics['not_same_intended_maneuver'] = classification_report(not_same_intended_m_prediction.cpu().numpy(), not_same_intended_m_label.cpu().numpy())
+                    print(prediction_metrics['not_same_intended_maneuver'])
+                prediction_results['intended_maneuver'] = intended_m_prediction.cpu().numpy()
+                prediction_results['intended_maneuver_label'] = intended_m_label.cpu().numpy()
+            
+            if model_args.predict_current_maneuver:
+                current_m_weights_bias = torch.stack(current_m_weights_bias, -1).flatten()
+                current_m_weights_prediction = torch.stack(current_m_weights_prediction, 0)  # [n, batch_size, 12]
+                print('Current Maneuver Classification')
+                prediction_metrics['current_maneuver'] = np.average(current_m_weights_bias.cpu().numpy())
+                print(f'{np.average(current_m_weights_bias.cpu().numpy())} over 12')
+                if len(not_same_current_m_weights_bias) > 0:
+                    not_same_current_m_weights_bias = torch.stack(not_same_current_m_weights_bias, -1).flatten()
+                    prediction_metrics['not_same_current_maneuver'] = np.average(not_same_current_m_weights_bias.cpu().numpy())
+                    print(f'{np.average(not_same_current_m_weights_bias.cpu().numpy())} over 12')
+                prediction_results['current_maneuver'] = current_m_weights_prediction.cpu().numpy()
 
-            if model_args.use_nsm:
-                if model_args.predict_intended_maneuver:
-                    intended_m_label = torch.stack(intended_m_label, 0).flatten()
-                    intended_m_prediction = torch.stack(intended_m_prediction, 0).flatten()
-                    print('Intended Maneuver Classification')
-                    prediction_metrics['intended_maneuver'] = classification_report(intended_m_prediction.cpu().numpy(), intended_m_label.cpu().numpy())
-                    print(prediction_metrics['intended_maneuver'])
-                    if len(not_same_intended_m_label) > 0:
-                        not_same_intended_m_label = torch.stack(not_same_intended_m_label, -1).flatten()
-                        not_same_intended_m_prediction = torch.stack(not_same_intended_m_prediction, -1).flatten()
-                        prediction_metrics['not_same_intended_maneuver'] = classification_report(not_same_intended_m_prediction.cpu().numpy(), not_same_intended_m_label.cpu().numpy())
-                        print(prediction_metrics['not_same_intended_maneuver'])
-                    prediction_results['intended_maneuver'] = intended_m_prediction.cpu().numpy()
-                    prediction_results['intended_maneuver_label'] = intended_m_label.cpu().numpy()
-                if model_args.predict_current_maneuver:
-                    current_m_weights_bias = torch.stack(current_m_weights_bias, -1).flatten()
-                    current_m_weights_prediction = torch.stack(current_m_weights_prediction, 0)  # [n, batch_size, 12]
-                    print('Current Maneuver Classification')
-                    prediction_metrics['current_maneuver'] = np.average(current_m_weights_bias.cpu().numpy())
-                    print(f'{np.average(current_m_weights_bias.cpu().numpy())} over 12')
-                    if len(not_same_current_m_weights_bias) > 0:
-                        not_same_current_m_weights_bias = torch.stack(not_same_current_m_weights_bias, -1).flatten()
-                        prediction_metrics['not_same_current_maneuver'] = np.average(not_same_current_m_weights_bias.cpu().numpy())
-                        print(f'{np.average(not_same_current_m_weights_bias.cpu().numpy())} over 12')
-                    prediction_results['current_maneuver'] = current_m_weights_prediction.cpu().numpy()
+                print('inspect shape: ', prediction_results['intended_maneuver'].shape, prediction_results['current_maneuver'].shape)
 
-                    print('inspect shape: ', prediction_results['intended_maneuver'].shape, prediction_results['current_maneuver'].shape)
-
-            if model_args.predict_pose:
-                action_bias_x = torch.stack(action_bias_x, 0).cpu().numpy()
-                print('Pose x offset: ', np.average(action_bias_x))
-                action_bias_y = torch.stack(action_bias_y, 0).cpu().numpy()
-                print('Pose y offset: ', np.average(action_bias_y))
-
-            if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
+            if model_args.predict_trajectory:
                 end_bias_x = torch.stack(end_bias_x, 0).cpu().numpy()
                 end_bias_y = torch.stack(end_bias_y, 0).cpu().numpy()
                 final_loss = torch.mean(torch.stack(losses, 0)).item()
                 print('End point x offset: ', np.average(np.abs(end_bias_x)))
                 print('End point y offset: ', np.average(np.abs(end_bias_y)))
-                print('Final L2 loss of trajectory predict:', final_loss)
+                print('ADE', np.sqrt(final_loss))
+                print('FDE', np.average(np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)))
 
             if training_args.output_dir is not None:
                 # save results

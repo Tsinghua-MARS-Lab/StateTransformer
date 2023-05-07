@@ -316,18 +316,22 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
         trajectory_label[0] = traj_x * cos_ - traj_y * sin_
         trajectory_label[1] = traj_x * sin_ + traj_y * cos_
         trajectory_list.append(trajectory_label)
-        
-
-        
+                
         # manuever sequence collection
         if nsm_result is not None:
-            current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
+            try:
+                current_goal_maneuver = nsm_result['goal_actions_weights_per_frame'][frame][0]['action'].value - 1
+            except:
+                current_goal_maneuver = 0
             current_goal_maneuver_mem.append(current_goal_maneuver)
 
             current_action_weights = np.zeros(12, dtype=np.float32)
-            for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
-                current_action_index = each_current_action['action'].value - 1
-                current_action_weights[current_action_index] = each_current_action['weight']
+            try:
+                for each_current_action in nsm_result['current_actions_weights_per_frame'][frame]:
+                    current_action_index = each_current_action['action'].value - 1
+                    current_action_weights[current_action_index] = each_current_action['weight']
+            except:
+                pass
             current_action_weights_mem.append(current_action_weights)
             
             target_current_action_weights = np.zeros(12, dtype=np.float32)
@@ -439,8 +443,9 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
         low_res_rasters_list.append(rasters_low_res)
     
     result_to_return['trajectory'] = np.array(trajectory_list)
-    result_to_return['high_res_raster'] = np.array(high_res_rasters_list, dtype=bool)
-    result_to_return['low_res_raster'] = np.array(low_res_rasters_list, dtype=bool)
+    result_to_return['high_res_raster'] = np.array(high_res_rasters_list, dtype=bool).transpose(1, 2, 0, 3).reshape(224, 224, -1)
+    result_to_return['low_res_raster'] = np.array(low_res_rasters_list, dtype=bool).transpose(1, 2, 0, 3).reshape(224, 224, -1)
+    #.transpose(1, 2, 0, 3).reshape(224, 224, -1)
     if nsm_result is not None:
         result_to_return['intended_maneuver_vector'] = np.array(current_goal_maneuver_mem, dtype=np.int32)
         result_to_return['current_maneuver_vector'] = np.array(current_action_weights_mem, dtype=np.float32)

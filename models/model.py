@@ -18,74 +18,61 @@ from transformers import GPT2Model,GPT2PreTrainedModel
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
-
 class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
     _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head.weight"]
 
     def __init__(self, config, **kwargs):
         super().__init__(config)
         self.transformer = TransfoXLModel(config)
-        # added
-        # self.goal_cnn_encoder = CNNEncoder(config, in_channels=1)
-        # self.map_cnn_encoder = CNNEncoder(config, in_channels=20)
-        # self.agents_cnn_encoder = CNNEncoder(config, in_channels=72)
-        #
-        # self.goal_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
-        # self.map_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
-        # self.agents_cnn_downsample = CNNDownSampling(config, in_channels=config.d_head)
         model_args = kwargs['model_args']
         self.use_nsm = model_args.use_nsm
-        self.predict_pose = model_args.predict_pose
         self.predict_trajectory = model_args.predict_trajectory
+        self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
+
         self.predict_intended_maneuver = model_args.predict_intended_maneuver
         self.predict_current_maneuver = model_args.predict_current_maneuver
-        self.per_instance = model_args.per_instance_encoding
-        self.time_to_predict = model_args.time_to_predict
-        self.frequency_for_prediction = model_args.frequency_for_prediction
-        self.not_same_scale = model_args.scale_on_not_same_loss
         self.maneuver_repeat = model_args.maneuver_repeat
-        self.predict_single_step_trajectory = model_args.predict_single_step_trajectory
         self.predict_trajectory_with_nsm = model_args.predict_trajectory_with_nsm
         self.mask_history_intended_maneuver = model_args.mask_history_intended_maneuver
         self.mask_history_current_maneuver = model_args.mask_history_current_maneuver
-
-        if self.per_instance:
-            in_channels = 1
-            n_embed = config.d_embed
+        self.predict_intended_maneuver_change = model_args.predict_intended_maneuver_change
+        self.predict_intended_maneuver_change_non_persuasive = model_args.predict_intended_maneuver_change_non_persuasive
+        self.predict_current_maneuver_change = model_args.predict_current_maneuver_change
+        
+        in_channels = 29 # raster: goal + road_type + agent_type
+        if self.use_nsm and self.predict_trajectory_with_stopflag:
+            n_embed = config.d_embed // 3 # high res + low res + intented m
         else:
-            in_channels = 29  # raster: goal + road_type + agent_type
-            if self.use_nsm:
-                n_embed = config.d_embed // 4
-            else:
-                n_embed = config.d_embed // 2
+            n_embed = config.d_embed // 2
 
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        self.current_m_embed = nn.Sequential(nn.Linear(12, n_embed, bias=False), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_embed), nn.Tanh())
 
         if self.predict_trajectory_with_nsm:
             self.nsm_decoder = NSMDecoder(config.d_embed)
+        
+        if self.predict_trajectory_with_stopflag:
+            self.stop_flag_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=config.d_embed), nn.Tanh())
 
         self.traj_decoder = None
-
-        if self.predict_trajectory or self.predict_single_step_trajectory:
-            self.traj_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=4)
+        if self.predict_trajectory:
+            embed_sz = 2 * config.d_embed if self.predict_trajectory_with_stopflag else config.d_embed    
+            self.traj_decoder = DecoderResCat(config.d_inner, embed_sz, out_features=4)
         if self.predict_intended_maneuver:
             self.intended_m_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=12)
         if self.predict_current_maneuver:
             self.current_m_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=12)
 
-        self.predict_intended_maneuver_change = model_args.predict_intended_maneuver_change
-        self.predict_intended_maneuver_change_non_persuasive = model_args.predict_intended_maneuver_change_non_persuasive
-        self.predict_current_maneuver_change = model_args.predict_current_maneuver_change
+
         if self.predict_intended_maneuver_change:
             self.intended_m_change_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=2)
         if self.predict_current_maneuver_change:
             self.current_m_change_decoder = DecoderResCat(config.d_inner, config.d_embed, out_features=1)
+ 
         # end of added
         # Initialize weights and apply final processing
-        assert self.predict_pose or self.predict_trajectory or self.predict_intended_maneuver or self.predict_current_maneuver or self.predict_single_step_trajectory or self.predict_intended_maneuver_change or self.predict_current_maneuver_change, 'Predict at least one target! Pass True in Model Args'
         self.post_init()
 
     def prepare_raster(self, images):
@@ -106,9 +93,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # input_ids: Optional[torch.LongTensor] = None,
         intended_maneuver_vector: Optional[torch.LongTensor] = None,
         current_maneuver_vector: Optional[torch.LongTensor] = None,
-        action_label: Optional[torch.LongTensor] = None,
         trajectory_label: Optional[torch.LongTensor] = None,
-        context_actions: Optional[torch.LongTensor] = None,
+        context_actions:Optional[torch.LongTensor] = None,
         intended_maneuver_label: Optional[torch.LongTensor] = None,
         current_maneuver_label: Optional[torch.LongTensor] = None,
         high_res_raster: Optional[torch.LongTensor] = None,
@@ -120,9 +106,10 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # labels: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+        return_dict: Optional[bool] = True,
         **kwargs,
     ) -> Union[Tuple, TransfoXLNuPlanNSMOutput]:
+
 
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -130,18 +117,15 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
-
+        device = high_res_raster.device
         # with history menuever label input
-        if self.use_nsm:
+        if self.use_nsm and self.predict_trajectory_with_stopflag:
             if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
-                if self.per_instance:
-                    intended_maneuver_vector = intended_maneuver_vector[:, -1]
-                    current_maneuver_vector = current_maneuver_vector[:, -1, :]
-                elif not self.per_instance and self.maneuver_repeat:
+                if self.maneuver_repeat:
                     intended_maneuver_vector = intended_maneuver_vector[:, -1].unsqueeze(1).repeat(1, 9)
                     current_maneuver_vector = current_maneuver_vector[:, -1, :].unsqueeze(1).repeat(1, 9, 1)
             # without history menuever label input
-            else:
+            else: 
                 intended_maneuver_vector = intended_maneuver_vector.unsqueeze(1).repeat(1, 9)
                 current_maneuver_vector = current_maneuver_vector.unsqueeze(1).repeat(1, 9, 1)
         else:
@@ -149,95 +133,66 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             current_maneuver_vector = None
             intended_maneuver_label = None
             current_maneuver_label = None
+        
+        if self.predict_trajectory_with_stopflag:
+            stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz, 
+            stopflag_embed = self.stop_flag_embed(stopflag.to(device).long())
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        device = high_res_raster.device
+
 
         if self.mask_history_intended_maneuver:
             intended_maneuver_vector[:] = 0
         if self.mask_history_current_maneuver:
             current_maneuver_vector[:] = 0.0
 
-        if self.use_nsm:
+        if intended_maneuver_vector is not None and current_maneuver_vector is not None:
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
-            current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
         else:
             intended_maneuver_embed = None
-            current_maneuver_embed = None
 
         batch_size, h, w, total_channels = high_res_raster.shape
-        ## action embedding
+        ## action embedding 
         action_embeds = self.action_m_embed(context_actions)
+        
+        high_res_seq = self.cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
+        low_res_seq = self.cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+        batch_size, context_length, c, h, w = high_res_seq.shape
+        # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
+        high_res_embed = self.cnn_downsample(
+            high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+        low_res_embed = self.cnn_downsample(
+            low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
 
-        ## ratser embedding
-        if not self.per_instance:
-            high_res_seq = self.cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
-            low_res_seq = self.cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
-            batch_size, context_length, c, h, w = high_res_seq.shape
-            # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
-            high_res_embed = self.cnn_downsample(
-                high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-            low_res_embed = self.cnn_downsample(
-                low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-
-        else:
-            # embed for per-instance with the format (batchsize, total_channel, n_embed)
-            high_res_embed = self.cnn_downsample(
-                high_res_raster.permute(0, 3, 1, 2).reshape(-1, 1, h, w).to(torch.float32)).view(batch_size,
-                                                                                                 total_channels, -1)
-            low_res_embed = self.cnn_downsample(
-                low_res_raster.permute(0, 3, 1, 2).reshape(-1, 1, h, w).to(torch.float32)).view(batch_size,
-                                                                                                total_channels, -1)
-            # insert context to raster embedding, expected format is (batchsize, total_channel + context_length, n_embed)
-            high_res_embed = self.insert_action(high_res_embed, action_embeds)
-            low_res_embed = self.insert_action(low_res_embed, action_embeds)
-
-        if self.use_nsm:
-            if self.per_instance:
-                state_embeds = torch.cat((intended_maneuver_embed.unsqueeze(1),
-                                          current_maneuver_embed.unsqueeze(1),
-                                          high_res_embed,
-                                          low_res_embed), dim=1).to(torch.float32)
-            else:
-                state_embeds = torch.cat((intended_maneuver_embed,
-                                          current_maneuver_embed,
-                                          high_res_embed,
-                                          low_res_embed), dim=-1).to(torch.float32)
-        else:
-            if self.per_instance:
-                state_embeds = torch.cat((high_res_embed,
-                                          low_res_embed), dim=1).to(torch.float32)
-            else:
-                state_embeds = torch.cat((high_res_embed,
-                                          low_res_embed), dim=-1).to(torch.float32)
-
+        if intended_maneuver_embed is not None:
+            state_embeds = torch.cat((intended_maneuver_embed,
+                                    high_res_embed,
+                                    low_res_embed), dim=-1).to(torch.float32)
+        else:   
+            state_embeds = torch.cat((high_res_embed,
+                                     low_res_embed), dim=-1).to(torch.float32)
+        
         if trajectory_label is not None:
-            trajectory_label = trajectory_label[:, 1::2, :]  # downsample the 20hz trajectory to 10hz
-            if self.predict_single_step_trajectory:
-                trajectory_label = trajectory_label[:, :5, :]
+            trajectory_label = trajectory_label[:, 1::2, :] # downsample the 20hz trajectory to 10hz
             pred_length = trajectory_label.shape[1]
         else:
             pred_length = 80
-
-        if not self.per_instance:
-            # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
-            n_embed = action_embeds.shape[-1]
-            input_embeds = torch.zeros(
-                (batch_size, context_length * 2 - 1, n_embed),
-                dtype=torch.float32,
-                device=device
-            )
-            input_embeds[:, ::2, :] = state_embeds
-            input_embeds[:, 1::2, :] = action_embeds
-            if not self.predict_single_step_trajectory:
-                # to keep input and output at the same dimension
-                input_embeds = torch.cat([input_embeds,
-                                          torch.zeros((batch_size, pred_length - 2 * context_length + 1, n_embed),
-                                                      device=device)], dim=1)
-        else:
-            input_embeds = state_embeds
+        
+        
+        # n_embed is 2/4 multiple because different embeddings are concated togaher at the same timestep.
+        n_embed = action_embeds.shape[-1]
+        input_embeds = torch.zeros(
+            (batch_size, context_length * 2 - 1, n_embed),
+            dtype=torch.float32,
+            device=device
+        )
+        input_embeds[:, ::2, :] = state_embeds
+        input_embeds[:, 1::2, :] = action_embeds
+        
+        # to keep input and output at the same dimension
+        input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
         transformer_outputs = self.transformer(
             None,
@@ -251,67 +206,48 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         assert (
-                self.config.pad_token_id is not None or batch_size == 1
+            self.config.pad_token_id is not None or batch_size == 1
         ), "Cannot handle batch sizes > 1 if no padding token is defined."
 
         intended_m_logits = None
         current_m_logits = None
-        if self.predict_intended_maneuver and intended_maneuver_label is not None:
-            assert self.predict_intended_maneuver_change is False, "Cannot predict both intended_maneuver and intended_maneuver_change"
+        if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             intended_m_logits = self.intended_m_decoder(transformer_outputs_hidden_state[:, 0, :])
-        elif self.predict_intended_maneuver_change and intended_maneuver_label is not None:
-            intended_m_logits = self.intended_m_change_decoder(transformer_outputs_hidden_state[:, 0, :])
-        if self.predict_current_maneuver and current_maneuver_label is not None:
-            assert self.predict_current_maneuver_change is False, "Cannot predict both current_maneuver and current_maneuver_change"
+        if self.predict_current_maneuver and current_maneuver_vector is not None:
             current_m_logits = self.current_m_decoder(transformer_outputs_hidden_state[:, 1, :])
             current_c_confifence = torch.softmax(current_m_logits, dim=-1)
-        elif self.predict_current_maneuver_change and current_maneuver_label is not None:
-            current_m_logits = self.current_m_change_decoder(transformer_outputs_hidden_state[:, 1, :])
-            current_c_confifence = torch.softmax(current_m_logits, dim=-1)
+        
+        # TODO: NSMdecoder with both transformer hidden states and intended manuever
         if self.traj_decoder is not None:
+            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length:, :]
+            if self.predict_trajectory_with_stopflag:
+                traj_hidden_state = torch.cat([traj_hidden_state, stopflag_embed.repeat(1, pred_length, 1)], dim=-1)
             # expected shape for pred trajectory is (b, pred_length, 4)
-            # TODO
-            traj_pred = self.traj_decoder(transformer_outputs_hidden_state[:, :pred_length, :])
+            traj_pred = self.traj_decoder(traj_hidden_state)
         else:
             traj_pred = None
-
+        
         if self.predict_trajectory_with_nsm:
             assert not self.predict_trajectory, 'Duplicate loss computation, donnot use predict_trajectory and predict_trajectory_with_nsm at the same time'
             lerp_weights = torch.arange(1.0, 1.0 + pred_length).float().to(device) / pred_length
             # interpolated_weights: [batch_size, pred_length, 12], linear interpolated from current to predicted next step weights
-            interpolated_weights = torch.lerp(
-                # [batch_size, 12] -> [batch_size, pred_length, 12]
-                current_maneuver_vector[:, -1, :].unsqueeze(1).repeat(1, pred_length, 1),
-                # [batch_size, 12] -> [batch_size, pred_length, 12]
-                current_c_confifence.unsqueeze(1).repeat(1, pred_length, 1),
-                # [pred_length] -> [1, pred_length, 12]
-                lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))
-            # use gt to test?
-            # interpolated_weights = torch.lerp(current_maneuver_vector[:, -1, :].unsqueeze(1).repeat(1, pred_length, 1),  # [batch_size, 12] -> [batch_size, pred_length, 12]
-            #                                   current_maneuver_label.unsqueeze(1).repeat(1, pred_length, 1),  #[batch_size, 12] -> [batch_size, pred_length, 12]
-            #                                   lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
+            interpolated_weights = torch.lerp(current_maneuver_label.unsqueeze(1).repeat(1, pred_length, 1),  # [20, 12] -> [20, pred_length, 12]
+                                              current_c_confifence.unsqueeze(1).repeat(1, pred_length, 1),  #[20, 12] -> [20, pred_length, 12]
+                                              lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
             # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
-            traj_hidden_state = self.nsm_decoder(
-                hidden_states=transformer_outputs_hidden_state[:, 2:pred_length + 2, :].reshape(-1, n_embed),
-                weight_blend=interpolated_weights.view(-1, 12))
+            traj_hidden_state = self.nsm_decoder(hidden_states=transformer_outputs_hidden_state[:, 2:pred_length+2, :].reshape(-1, n_embed),
+                                                 weight_blend=interpolated_weights.view(-1, 12))
             # traj_pred: [batch_size, pred_length, 4]
             traj_pred = self.traj_decoder(traj_hidden_state.reshape(batch_size, pred_length, n_embed))
 
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         self.config_problem_type = 'NuPlan_NSM_SingleStep_Planning'
-        if self.not_same_scale != 1:
-            scaler = torch.ones(intended_maneuver_label.shape, dtype=torch.float32, device=device) * self.not_same_scale
-            ones = torch.ones(intended_maneuver_label.shape, dtype=torch.float32, device=device)
-            scaler[intended_maneuver_label == intended_maneuver_vector] = ones[
-                intended_maneuver_label == intended_maneuver_vector]
 
         if self.predict_intended_maneuver and intended_maneuver_label is not None:
             loss_fct = CrossEntropyLoss()
             loss_to_add = loss_fct(intended_m_logits.view(-1, 12), intended_maneuver_label.view(-1).long())
-            if self.not_same_scale != 1:
-                loss += loss_to_add * torch.mean(scaler)
-            else:
-                loss += loss_to_add
+            loss += loss_to_add
+            
         elif self.predict_intended_maneuver_change and intended_maneuver_label is not None:
             loss_fct = CrossEntropyLoss()
             intended_maneuver_vector_next = intended_maneuver_vector[:, -1].view(-1, 1)  # [batch_size, 1]
@@ -335,30 +271,12 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         if self.predict_current_maneuver and current_maneuver_label is not None:
             loss_fct = MSELoss()
             loss_to_add = loss_fct(current_c_confifence.squeeze(), current_maneuver_label.squeeze()) * 10000
-            if self.not_same_scale != 1:
-                loss += loss_to_add * torch.mean(scaler)
-            else:
-                loss += loss_to_add
-        elif self.predict_current_maneuver_change and current_maneuver_label is not None:
-            loss_fct = MSELoss()
-            batch_size_indices = torch.arange(batch_size, dtype=torch.long, device=device)
-            change_label = current_maneuver_label[batch_size_indices, intended_maneuver_label.flatten()] - \
-                           current_maneuver_vector[batch_size_indices, -1, intended_maneuver_label.flatten()]
-            loss_to_add = loss_fct(current_c_confifence.squeeze(), change_label.squeeze())
-            loss += loss_to_add
-
+            loss += loss_to_add        
         if trajectory_label is not None and self.traj_decoder is not None:
             loss_fct = MSELoss(reduction="mean")
             loss += loss_fct(traj_pred, trajectory_label.to(device))
 
-        pooled_logits = [intended_m_logits, current_m_logits,
-                         None,
-                         None,
-                         traj_pred]
-        # pooled_logits = torch.cat((intended_m_logits.unsqueeze(0),
-        #                            current_m_logits.unsqueeze(0),
-        #                            pos_x_logits.unsqueeze(0),
-        #                            pos_y_logits.unsqueeze(0)), dim=0)
+        pooled_logits = [intended_m_logits, current_m_logits, traj_pred]
         if not return_dict:
             output = (pooled_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
@@ -371,13 +289,13 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             attentions=transformer_outputs.attentions,
             all_logits=pooled_logits
         )
-
-    def cat_raster_seq(self, raster: Optional[torch.LongTensor]):
+        
+    def cat_raster_seq(self, raster:Optional[torch.LongTensor]):
         """
         input raster can be either high resolution raster or low resolution raster
         expected input size: [bacthsize, channel, h, w], and channel is consisted of goal(1d)+roadtype(20d)+agenttype*time(8*9d)
         """
-        framenum = 9  # default for 2s and 5hz sampling
+        framenum = 9 # default for 2s and 5hz sampling
         b, c, h, w = raster.shape
         agent_type = 8
         road_type = 20
@@ -387,22 +305,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         result = torch.zeros((b, framenum, agent_type + road_type + 1, h, w), device=raster.device)
         for i in range(framenum):
             agent_raster = raster[:, 1 + road_type + i::framenum, :, :]
-            raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim=1)  # expected format (b, 1+20+8, h, w)
+            raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim = 1) # expected format (b, 1+20+8, h, w)
             result[:, i, :, :, :] = raster_i
         # return format (batchsize, history_frame_number, channels_per_frame, h, w)
-        return result
-
-    def insert_action(self, raster_embed, actions_embed, step=8):
-        goal_embed = raster_embed[:, 0, :].unsqueeze(1)
-        road_embed = raster_embed[:, 1:21, :]
-        result = torch.cat([goal_embed, road_embed], dim=1)
-        context_length = actions_embed.shape[1]
-        for i in range(context_length):
-            result = torch.cat(
-                [result, raster_embed[:, 21 + i * step:21 + (i + 1) * step, :], actions_embed[:, i, :].unsqueeze(1)],
-                dim=1)
-        # concat the last observation->[o,a,o,a ..., o]
-        result = torch.cat([result, raster_embed[:, -step:, :]], dim=1)
         return result
 
 
@@ -414,36 +319,30 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.use_nsm = model_args.use_nsm
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_intended_maneuver = model_args.predict_intended_maneuver
-        self.predict_current_maneuver = model_args.predict_current_maneuver
+        # self.predict_current_maneuver = model_args.predict_current_maneuver
         self.recover_obs = model_args.recover_obs
-        self.time_to_predict = model_args.time_to_predict
-        self.frequency_for_prediction = model_args.frequency_for_prediction
-        self.not_same_scale = model_args.scale_on_not_same_loss
-        self.predict_single_step_trajectory = model_args.predict_single_step_trajectory
         self.predict_trajectory_with_nsm = model_args.predict_trajectory_with_nsm
         self.mask_history_intended_maneuver = model_args.mask_history_intended_maneuver
         self.mask_history_current_maneuver = model_args.mask_history_current_maneuver
-
-        assert self.predict_trajectory or self.predict_intended_maneuver or self.predict_current_maneuver or self.predict_single_step_trajectory, 'Predict at least one target! Pass True in Model Args'
 
         in_channels = 29 # raster: goal + road_type + agent_type    
         n_embed = config.n_embd // 2
 
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         
-        self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        self.current_m_embed = nn.Sequential(nn.Linear(12, n_embed, bias=False), nn.Tanh())
+        self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=config.n_embd), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
-        if self.predict_trajectory_with_nsm:
-            self.nsm_decoder = NSMDecoder(config.n_embd)
+        # if self.predict_trajectory_with_nsm:
+        self.nsm_decoder = NSMDecoder(config.n_embd)
 
         self.traj_decoder = None
-        if self.predict_trajectory or self.predict_single_step_trajectory:
+        if self.predict_trajectory:
             self.traj_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=4)
         if self.predict_intended_maneuver:
             self.intended_m_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=12)
-        if self.predict_current_maneuver:
+        if model_args.predict_current_maneuver:
+            assert False, 'Deprecated: Do not predict current maneuver, use linear interpolation instead'
             self.current_m_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=12)
         if self.recover_obs:
             self.obs_embed_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=config.n_embd)
@@ -471,7 +370,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.transformer.parallelize(self.device_map)
         self.cnn_downsample = self.cnn_downsample.to(self.transformer.first_device)
         self.intended_m_embed = self.intended_m_embed.to(self.transformer.first_device)
-        self.current_m_embed = self.current_m_embed.to(self.transformer.first_device)
         self.intended_m_decoder = self.intended_m_decoder.to(self.transformer.first_device)
         self.current_m_decoder = self.current_m_decoder.to(self.transformer.first_device)
         self.nsm_decoder = self.nsm_decoder.to(self.transformer.first_device)
@@ -488,7 +386,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.transformer = self.transformer.to("cpu")
         self.cnn_downsample = self.cnn_downsample.to("cpu")
         self.intended_m_embed = self.intended_m_embed.to("cpu")
-        self.current_m_embed = self.current_m_embed.to("cpu")
         self.intended_m_decoder = self.intended_m_decoder.to("cpu")
         self.current_m_decoder = self.current_m_decoder.to("cpu")
         self.nsm_decoder = self.nsm_decoder.to("cpu")
@@ -500,21 +397,26 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
     def mode(self):
         # pred mode: Obs-Maneuver-Action Pair: [m,a | o,m,a | ... | o,m,a]
         if (self.predict_trajectory or self.predict_trajectory_with_nsm)\
-            and self.predict_current_maneuver and self.predict_intended_maneuver \
+            and self.predict_intended_maneuver \
             and self.recover_obs:
             return "PRED-OMA"
         
         # pred mode: Maneuver-Action Pair: [m,a | m,a |... | m,a]
         elif (self.predict_trajectory or self.predict_trajectory_with_nsm) \
-            and self.predict_current_maneuver and self.predict_intended_maneuver \
+            and self.predict_intended_maneuver \
             and not self.recover_obs:
             return "PRED-MA"
         
         # pred mode: Only Action
         elif (self.predict_trajectory or self.predict_trajectory_with_nsm) \
-            and not self.predict_current_maneuver and not self.predict_intended_maneuver \
+            and not self.predict_intended_maneuver \
             and not self.recover_obs:
             return "PRED-A"
+
+        elif (self.predict_trajectory or self.predict_trajectory_with_nsm) \
+            and not self.predict_current_maneuver and not self.predict_intended_maneuver \
+            and self.recover_obs:
+            return "PRED-OA"
         
     def forward(
         self,
@@ -544,6 +446,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         low_res_raster: batch_size, seq, h, w, c (c=29)
         trajectory: batch_size, seq, 4
         """
+        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, h, w, c)
+            _b, _h, _w, _= high_res_raster.shape
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
         
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -556,8 +462,9 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
-            current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))  # [bsz, hidden_size]
-
+        else:
+            intended_maneuver_embed = None
+            
         ## ratser embedding and concat to state embedding
         high_res_raster = high_res_raster.permute(0, 1, 4, 2, 3)
         low_res_raster = low_res_raster.permute(0, 1, 4, 2, 3)
@@ -570,9 +477,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         state_embeds = torch.cat((high_res_embed,
                                       low_res_embed), dim=-1).to(torch.float32)
         ## maneuver embedding
-        if intended_maneuver_embed is not None and current_maneuver_embed is not None:       
-            maneuver_embeds = torch.cat((intended_maneuver_embed,
-                                          current_maneuver_embed), dim=-1).to(torch.float32)
+        if intended_maneuver_embed is not None:       
+            maneuver_embeds = intended_maneuver_embed.to(torch.float32)
         else:
             maneuver_embeds = None
         
@@ -620,6 +526,12 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 ), dim=1)
                 input_embeds_future[:, ::2, :] = maneuver_embeds[:, past_seq:, :]
                 input_embeds_future[:, 1::2, :] = action_embeds[:, past_seq:, :]
+            elif self.mode == "PRED-OA":
+                input_embeds_future = torch.cat((
+                    torch.zeros_like(state_embeds[:, past_seq+1:, :]), torch.zeros_like(action_embeds[:, past_seq:, :])
+                ), dim=1)
+                input_embeds_future[:, ::2, :] = action_embeds[:, past_seq:, :]
+                input_embeds_future[:, 1::2, :] = state_embeds[:, past_seq+1:, :]  
             elif self.mode == "PRED-A":
                 input_embeds_future = action_embeds[:, past_seq:, :]
             input_embeds = torch.cat((input_embeds_past, input_embeds_future), dim=1)
@@ -648,6 +560,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if self.use_nsm:
             manuever_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, ::3, :]
             action_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 1::3, :]
+            obs_recover_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, 2::3]
             if self.mode == "PRED-OMA":
                 manuever_hidden_states = hidden_states[:, ::3, :]
                 action_hidden_states = hidden_states[:, 1::3, :]
@@ -656,6 +569,11 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 manuever_hidden_states_future = hidden_states[:, total_past_length-1:-1, :][:, ::2]
                 action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
                 manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+            elif self.mode == "PRED-OA":
+                obs_recover_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
+                action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, ::2]
+                obs_recover_hidden_states = torch.cat((obs_recover_hidden_states_past, obs_recover_hidden_states_future),dim=1)
                 action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
             elif self.mode == "PRED-A":
                 action_hidden_states_future = hidden_states[:, total_past_length-1:-1, :]
@@ -674,18 +592,19 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 manuever_hidden_states_future = hidden_states[:, total_past_length-1:-1, :][:, ::2]
                 action_hidden_states_future = hidden_states[:, total_past_length-1:, :][:, 1::2]
                 manuever_hidden_states = torch.cat((manuever_hidden_states_past, manuever_hidden_states_future), dim=1)
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+            elif self.mode == "PRED-OA":
+                action_hidden_states = hidden_states[:, ::2, :]
+                obs_recover_hidden_states = hidden_states[:, 1::2, :]
             elif self.mode == "PRED-A":
                 action_hidden_states_future = hidden_states[:, total_past_length-1:-1, :]
-            action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
+                action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
         
         intended_m_logits = None
         current_m_logits = None
         traj_logits = None
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             intended_m_logits = self.intended_m_decoder(manuever_hidden_states)
-        if self.predict_current_maneuver and current_maneuver_vector is not None:
-            current_m_logits = self.current_m_decoder(manuever_hidden_states)
-            current_c_confifence = torch.softmax(current_m_logits, dim=-1)
         
         if self.traj_decoder is not None and not self.predict_trajectory_with_nsm:
             # expected shape for pred trajectory is (b, pred_length, 4)
@@ -699,7 +618,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                                               current_c_confifence,  #[bsz, seq, 12]
                                               lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
             # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
-            traj_hidden_state = self.nsm_decoder(hidden_states=traj_hidden_state.reshape(-1, n_embed),
+            traj_hidden_state = self.nsm_decoder(hidden_states=action_hidden_states.reshape(-1, n_embed),
                                                  weight_blend=interpolated_weights.view(-1, 12))
             # traj_pred: [batch_size, pred_length, 4]
             traj_logits = self.traj_decoder(traj_hidden_state.reshape(batch_size, seq, n_embed))
@@ -709,6 +628,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             recovered_obs_embd = self.obs_embed_decoder(obs_recover_hidden_states[:, :-1, :])
             
         loss = torch.tensor(0, dtype=torch.float32, device=device)
+        
+        ## input recover supervision
 
         if self.predict_intended_maneuver and intended_maneuver_vector is not None:
             loss_fct = CrossEntropyLoss()
@@ -722,8 +643,16 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         
         if self.predict_trajectory and self.traj_decoder is not None:
             loss_fct = MSELoss(reduction="mean")
-            loss_to_add = loss_fct(traj_logits, trajectory.to(device))
+            loss_to_add = loss_fct(traj_logits[:, :, :2], trajectory[:, :, :2].to(device))
             loss += loss_to_add
+            # yaw_loss = loss_fct(traj_logits[:, :, -1]*1000, trajectory[:, :, -1].to(device)*1000)
+            # loss += yaw_loss
+            # gt_normalized_pts = self.compute_normalized_points(trajectory)
+            # pred_normalized_pts = self.compute_normalized_points(traj_logits)
+            # final_pt_loss = loss_fct(pred_normalized_pts[:, -1, :2], gt_normalized_pts[:, -1, :2].to(device))
+            # loss += final_pt_loss
+            # world_coor_loss = loss_fct(pred_normalized_pts[:, :, :2], gt_normalized_pts[:, :, :2]).to(device)
+            # loss += world_coor_loss
 
         if self.recover_obs:
             loss_fct = MSELoss(reduction="mean")
@@ -755,32 +684,38 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 output_attentions: Optional[bool] = False,
                 output_hidden_states: Optional[bool] = False,
                 return_dict: Optional[bool] = True,
-                seq_length: Optional[int] = 32,
+                seq_length: Optional[int] = 33,
                 **kwargs):
         """
         all the input items only include the historic contents
         """
-        device = intended_maneuver_vector.device
+        device = high_res_raster.device
+        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, h, w, c)
+            _b, _h, _w, _= high_res_raster.shape
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
         if not self.use_nsm:
             intended_maneuver_vector, current_maneuver_vector = None, None
         if intended_maneuver_vector is not None and current_maneuver_vector is not None:
+            if self.mask_history_intended_maneuver:
+                intended_maneuver_vector[:] = 0
+            if self.mask_history_current_maneuver:
+                current_maneuver_vector[:] = 0.0
             intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))
-            current_maneuver_embed = self.current_m_embed(current_maneuver_vector.to(device))
         else:
-            intended_maneuver_embed, current_maneuver_embed = None, None
+            intended_maneuver_embed = None
         
         ## ratser embedding and state embedding concat
-        high_res_raster = high_res_raster.permute(0, 1, 4, 2, 3)
-        low_res_raster = low_res_raster.permute(0, 1, 4, 2, 3)
+        high_res_raster = high_res_raster.permute(0, 3, 4, 1, 2)
+        low_res_raster = low_res_raster.permute(0, 3, 4, 1, 2)
         batch_size, seq, c, h, w = high_res_raster.shape
         # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed) 
         high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
         ## maneuver embedding
-        if intended_maneuver_embed is not None and current_maneuver_embed is not None:
-            maneuver_embeds = torch.cat((intended_maneuver_embed, 
-                                        current_maneuver_embed), dim=-1).to(torch.float32)
+        if intended_maneuver_embed is not None:
+            maneuver_embeds = intended_maneuver_embed.to(torch.float32)
         else:
             maneuver_embeds = None
         ## action embedding
@@ -789,8 +724,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             input_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device), 
                                       torch.zeros_like(action_embeds, dtype=torch.float32, device=device)), dim=1)
             
-            input_embeds[:, ::3, :] = state_embeds
-            input_embeds[:, 1::3, :] = action_embeds
+            input_embeds[:, ::2, :] = state_embeds
+            input_embeds[:, 1::2, :] = action_embeds
         else:
             input_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device), 
                                       torch.zeros_like(maneuver_embeds, dtype=torch.float32, device=device),
@@ -827,11 +762,9 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                     intended_m_logits = self.intended_m_decoder(hidden_state[:, -1, :].unsqueeze(1))
                     current_m_logits = self.current_m_decoder(hidden_state[:, -1, :].unsqueeze(1))
                     current_c_confifence = torch.softmax(current_m_logits, dim=-1)
-                    result_to_return["intend_maneuver"].append(torch.argmax(intended_m_logits, dim=-1))
+                    result_to_return["intend_maneuver"].append(intended_m_logits)
                     result_to_return["current_maneuver"].append(current_c_confifence)
-                    next_embed = torch.cat((
-                        self.intended_m_embed(torch.argmax(intended_m_logits, dim=-1)), 
-                        self.current_m_embed(current_m_logits)), dim=-1)
+                    next_embed = self.intended_m_embed(torch.argmax(intended_m_logits, dim=-1))       
                 elif step % 3 == 1:
                     if self.predict_trajectory_with_nsm:
                         lerp_weights = torch.arange(1.0, 1.0 + seq).float().to(device) / seq
@@ -858,11 +791,9 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                     intended_m_logits = self.intended_m_decoder(hidden_state[:, -1, :].unsqueeze(1))
                     current_m_logits = self.current_m_decoder(hidden_state[:, -1, :].unsqueeze(1))
                     current_c_confifence = torch.softmax(current_m_logits, dim=-1)
-                    result_to_return["intend_maneuver"].append(torch.argmax(intended_m_logits, dim=-1))
+                    result_to_return["intend_maneuver"].append(intended_m_logits)
                     result_to_return["current_maneuver"].append(current_c_confifence)
-                    next_embed = torch.cat((
-                        self.intended_m_embed(torch.argmax(intended_m_logits, dim=-1)), 
-                        self.current_m_embed(current_m_logits)), dim=-1)
+                    next_embed = self.intended_m_embed(torch.argmax(intended_m_logits, dim=-1))
                 elif step % 2 == 1:
                     if self.predict_trajectory_with_nsm:
                         lerp_weights = torch.arange(1.0, 1.0 + seq).float().to(device) / seq
@@ -879,6 +810,26 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                     result_to_return["trajectory"].append(traj_logits)
                     next_embed = self.action_m_embed(traj_logits)
             
+            elif self.mode == "PRED-OA":
+                if step > 2 * seq_length - 1:
+                    break
+                if step % 2 == 0:
+                    if self.predict_trajectory_with_nsm:
+                        lerp_weights = torch.arange(1.0, 1.0 + seq).float().to(device) / seq
+                        interpolated_weights = torch.lerp(current_maneuver_vector,  # [bsz, seq, 12]
+                                                        current_c_confifence,  #[bsz, seq, 12]
+                                                        lerp_weights.unsqueeze(0).unsqueeze(-1).repeat(batch_size, 1, 12))  #[pred_length] -> [1, pred_length, 12]
+                        # [batch_size, pred_length, d_embed] -> [batch_size, pred_length, d_embed]
+                        traj_hidden_state = self.nsm_decoder(hidden_states=hidden_state.reshape(-1, hidden_state.shape[-1]),
+                                                            weight_blend=interpolated_weights.view(-1, 12))
+                        # traj_pred: [batch_size, pred_length, 4]
+                        traj_logits = self.traj_decoder(traj_hidden_state.reshape(batch_size, seq, hidden_state.shape[-1]))
+                    elif self.predict_trajectory:
+                        traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
+                    result_to_return["trajectory"].append(traj_logits)
+                    next_embed = self.action_m_embed(traj_logits)
+                if step % 2 == 1:
+                    next_embed = self.obs_embed_decoder(hidden_state[:, -1, :].unsqueeze(1))
             # pred mode : Only Action
             elif self.mode == "PRED-A":
                 if step > seq_length - 1:
@@ -899,9 +850,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             input_embeds = torch.cat((input_embeds, next_embed), dim=1)
             step += 1
         
-        result_to_return["trajectory"] = torch.cat(result_to_return["trajectory"], dim=1)
-        result_to_return["intend_maneuver"] = torch.cat(result_to_return["intend_maneuver"], dim=1).detach().numpy()
-        result_to_return["current_maneuver"] = torch.cat(result_to_return["current_maneuver"], dim=1).detach().numpy()
+        result_to_return["trajectory"] = torch.cat(result_to_return["trajectory"], dim=1)   
+        result_to_return["intend_maneuver"] = torch.cat(result_to_return["intend_maneuver"], dim=1) if len(result_to_return["intend_maneuver"]) > 0 else None
+        result_to_return["current_maneuver"] = torch.cat(result_to_return["current_maneuver"], dim=1) if len(result_to_return["current_maneuver"]) > 0 else None
+        
         return result_to_return
     
     # def _prepare_model_inputs(self, input)
@@ -913,91 +865,182 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
     
+    def compute_normalized_points(self, trajectory, yaw=0):
+        bsz = trajectory.shape[0]
+        device = trajectory.device
+        ego_trajectory = torch.zeros((bsz, 1, 4), device=device)
+        ego_trajectory[-1] = yaw
+        next_normalized_trajectories = list()
+        for idx in range(0, trajectory.shape[1]):
+            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, -1]), torch.sin(-ego_trajectory[:, -1, -1])
+            cos_.to(device)
+            sin_.to(device)
+            delta_yaw = torch.arctan(torch.divide(trajectory[:, idx, 1], trajectory[:, idx, 0]))
+            offset_x = trajectory[:, idx, 0] * cos_ + trajectory[:, idx, 1] * sin_
+            offset_y = trajectory[:, idx, 1] * cos_ - trajectory[:, idx, 0] * sin_
+            next_ego_traj = torch.stack([ego_trajectory[:, -1, 0] + offset_x,
+                                        ego_trajectory[:, -1, 1] + offset_y,
+                                        torch.zeros_like(ego_trajectory[:, -1, 1]),
+                                        # ego_trajectory[:, -1, -1] + delta_yaw],dim=-1)
+                                        ego_trajectory[:, -1, -1] + trajectory[:, idx, -1]],dim=-1)
+            ego_trajectory = torch.cat((ego_trajectory, torch.tensor(next_ego_traj).reshape(bsz, 1, -1)), dim=1)
+            next_normalized_trajectories.append(next_ego_traj)
+            
+        next_normalized_trajectories = torch.stack(next_normalized_trajectories).permute(1, 0, 2)
+        # bsz, seq, 4
+        return next_normalized_trajectories
+    
+    def compute_yaw(self, point):
+        yaw = torch.arctan(point[:, 1]/point[:, 0])
+        return yaw
+    
 if  __name__ == '__main__':
     import datasets
     import argparse, time, pickle
+    import matplotlib.pyplot as plt
     parser = argparse.ArgumentParser()
-    parser.add_argument("--use_nsm", default=True)
-    parser.add_argument("--predict_intended_maneuver", default=True)
-    parser.add_argument("--predict_current_maneuver", default=True)
-    # parser.add_argument("--predict_pose", default=True)
+    parser.add_argument("--use_nsm", default=False)
+    parser.add_argument("--predict_intended_maneuver", default=False)
+    parser.add_argument("--predict_current_maneuver", default=False)
     parser.add_argument("--predict_trajectory", default=True)
-    parser.add_argument("--recover_obs", default=True)
-    # parser.add_argument("--per_instance_encoding", default=False)
-    parser.add_argument("--time_to_predict", default=8)
-    parser.add_argument("--frequency_for_prediction", default=20)
+    parser.add_argument("--recover_obs", default=False)
     parser.add_argument("--scale_on_not_same_loss", default=1.0)
     parser.add_argument("--maneuver_repeat", default=True)
-    parser.add_argument("--predict_single_step_trajectory", default=False)
     parser.add_argument("--predict_trajectory_with_nsm", default=False)
     parser.add_argument("--mask_history_intended_maneuver", default=False)
     parser.add_argument("--mask_history_current_maneuver", default=False)
     
     parser.add_argument("--d_inner", default=1024)
+    parser.add_argument("--model_name", default="xl")
     model_args = parser.parse_args()
+    model_args.predict_intended_maneuver_change = False
+    model_args.predict_intended_maneuver_change_non_persuasive = False
+    model_args.predict_current_maneuver_change = False
+    
+    if model_args.model_name == 'gpt':
+        dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_autoregressive_rapid")
+        dataset.set_format("torch",columns=['trajectory','high_res_raster','low_res_raster','intended_maneuver_vector','current_maneuver_vector'])
+        print("dataset size:", len(dataset))
+        example = dataset[300]
+        model = GPTModelNuPlan.from_pretrained('checkpoints/gpt/checkpoint-58000', model_args=model_args)
+        gt = example["trajectory"][8:]
+        loss_train = model(
+            intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
+            current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
+            high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+            low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
+            trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
+            return_dict=True,
+        )[0]
+        result = model.generate(
+            intended_maneuver_vector=example["intended_maneuver_vector"][:8].unsqueeze(0),
+            current_maneuver_vector=example["current_maneuver_vector"][:8].unsqueeze(0),
+            high_res_raster=example["high_res_raster"].reshape(224, 224, -1, 29)[:, :, :9, :].unsqueeze(0),
+            low_res_raster=example["low_res_raster"].reshape(224, 224, -1, 29)[:, :, :9, :].unsqueeze(0),
+            trajectory=example["trajectory"][:8].unsqueeze(0),
+            return_dict=True,
+        )
+        pred_traj = result["trajectory"][0]
+        print(gt[:, 0] - pred_traj[:, 0])
+        loss_fn = nn.MSELoss()
+        loss = loss_fn(pred_traj, gt)
+        
+        def compute_world_points(pred_traj, yaw=0):
+            ego_trajectory = np.zeros((1, 3))
+            ego_trajectory[-1] = yaw
+            next_world_coor_trajectories = list()
+            for idx in range(0, pred_traj.shape[0]):
+                cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
+                offset_x = pred_traj[idx, 0] * cos_ + pred_traj[idx, 1] * sin_
+                offset_y = pred_traj[idx, 1] * cos_ - pred_traj[idx, 0] * sin_
+                next_ego_traj = [ego_trajectory[-1][0] + offset_x,
+                                ego_trajectory[-1][1] + offset_y,
+                                ego_trajectory[-1][2] + pred_traj[idx, -1]]
+                ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj.copy()).reshape(1, -1)), axis=0)
+                next_world_coor_trajectories.append(next_ego_traj)
+                
+            next_world_coor_trajectories = np.array(next_world_coor_trajectories)
+            next_world_coor_points = next_world_coor_trajectories[::2]
+            next_world_coor_x = next_world_coor_trajectories[:,0]
+            next_world_coor_y = next_world_coor_trajectories[:,1]
+            # next_world_coor_x = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 0])
+            # next_world_coor_y = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 1])
+            # next_world_coor_yaw = np.interp(np.linspace(0, len(next_world_coor_points)-1, 80), np.arange(0, len(next_world_coor_points)), next_world_coor_points[:, 2])
+            # next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
+            return next_world_coor_x - yaw, next_world_coor_y - yaw
+        gt_x, gt_y = compute_world_points(gt.detach().cpu().numpy())
+        pred_x, pred_y = compute_world_points(pred_traj.detach().cpu().numpy())
+        loss_x = loss_fn(torch.tensor(pred_x), torch.tensor(gt_x))
+        loss_y = loss_fn(torch.tensor(pred_y), torch.tensor(gt_y))
+        fig = plt.figure(figsize=(200,100))
+        ax1 = fig.add_subplot(1,1,1)    
+        ax1.set_xlim([-100, 100])
+        ax1.set_ylim([-100, 100])
+        ax1.plot(gt_x, gt_y, color='green')
+        ax1.plot(pred_x, pred_y, color='red')
+        plt.show()
+    
+    else:
+        model = TransfoXLModelNuPlan.from_pretrained('checkpoints/xl/checkpoint-20000', model_args=model_args)
+        model.config.pad_token_id = 0
+        dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_sparse_balance_new_4seq/")
+        # print(dataset.features)
+        dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
+        example = dataset['test'][3]
+        result = model(
+            intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
+            intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0),
+            current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
+            current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0).unsqueeze(0),
+            action_label=None,
+            trajectory_label=example['trajectory_label'].unsqueeze(0),
+            context_actions=example['context_actions'].unsqueeze(0),
+            high_res_raster=example['high_res_raster'].unsqueeze(0),
+            low_res_raster=example['low_res_raster'].unsqueeze(0),
+            mems=None,
+            head_mask=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=True,
+        )
+        pred_traj = result[-1][-1]
+        gt_traj = example['trajectory_label'][1::2].cpu().numpy()
+        loss_fn = nn.MSELoss()
+        loss = loss_fn(pred_traj, example['trajectory_label'][1::2])
+        print("loss", loss)
+        pred_x, pred_y = pred_traj[0, :, 0].detach().cpu().numpy(), pred_traj[0, :, 1].detach().cpu().numpy()
+        gt_x, gt_y = gt_traj[:, 0], gt_traj[:, 1]
+        fig = plt.figure(figsize=(200,100))
+        ax1 = fig.add_subplot(1,1,1)    
+        ax1.set_xlim([-100, 100])
+        ax1.set_ylim([-100, 100])
+        ax1.scatter(gt_x[::4], gt_y[::4], color='green')
+        ax1.scatter(pred_x[::4], pred_y[::4], color='red')
+        plt.show()
 
-    # model = TransfoXLModelNuPlan.from_pretrained('transfo-xl-wt103', model_args=model_args)
-    # model.config.pad_token_id = 0
-    # dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_autoregressive")
-    # dataset.set_format("torch",columns=['trajectory','high_res_raster','low_res_raster','intended_maneuver_vector','current_maneuver_vector'])
-    # # print(dataset.features)
-    # start = time.time()
-    # example = dataset[0]
-    # print(time.time() - start)
-
-    # with open("autoregressive_data.pkl", "wb") as f:
-    #     pickle.dump(example, f)
-    with open("autoregressive_data.pkl", "rb") as f:    
+    
+    ## ground truth inverse computation
+    with open("visulization/rasters/test/frame1k.pkl", "rb") as f:
         example = pickle.load(f)
-    # # shuffle example
-    # # dataset = dataset.shuffle(seed=42)
-    # # start = time.time()
-    # # example = dataset[0]
-    # # print(time.time() - start)
+        trajectory = example["trajectory"]
+        tan = np.divide(trajectory[:, 1], trajectory[:, 0])
+        yaw_np = np.arctan(tan)
+        delta_yaw = yaw_np - trajectory[:, 2]
+        gt = example["gt"]
+        yaw = example["world_yaw"]
+    gt_x, gt_y = gt[:, 0], gt[:, 1]
+    world_trajectory = model.compute_normalized_points(torch.tensor(trajectory).unsqueeze(0), yaw)
+    x = world_trajectory[0, :, 0].numpy() - yaw
+    y = world_trajectory[0, :, 1].numpy() - yaw
+    # x, y = compute_world_points(trajectory, yaw)
+    diff_x = x - gt_x
+    diff_y = y - gt_y
+    fig = plt.figure(figsize=(200,100))
+    ax1 = fig.add_subplot(1,1,1)    
+    ax1.set_xlim([-100, 100])
+    ax1.set_ylim([-100, 100])
+    ax1.plot(gt_x, gt_y, color='green')
+    ax1.plot(x, y, color='red')
+    plt.show()
 
-    # # # fix shuffle
-    # dataset = dataset.flatten()
-    # start = time.time()
-    # example = dataset[0]
-    # print(time.time() - start)
-
-    # # 
-    # dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_sparse_balance")
-    # # print(dataset.features)
-    # start = time.time()
-    # example = dataset[0]
-    # print(time.time() - start)
-    # result = model.forward(
-    #     intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
-    #     intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9),
-    #     current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
-    #     current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0).unsqueeze(0).repeat(1, 9, 1),
-    #     action_label=None,
-    #     trajectory_label=example['trajectory_label'].unsqueeze(0),
-    #     context_actions=example['context_actions'][:8].unsqueeze(0),
-    #     high_res_raster=example['high_res_raster'][:,:,:93].unsqueeze(0),
-    #     low_res_raster=example['low_res_raster'][:,:,:93].unsqueeze(0),
-    #     mems=None,
-    #     head_mask=None,
-    #     output_attentions=None,
-    #     output_hidden_states=None,
-    #     return_dict=True,
-    # )
-    model = GPTModelNuPlan.from_pretrained('gpt2', model_args=model_args)
-    # result = model.generate(
-    #     intended_maneuver_vector=torch.zeros(2,8,dtype=torch.int32),
-    #     current_maneuver_vector=torch.zeros(2,8,12),
-    #     high_res_raster=torch.zeros(2,9,224,224,29),
-    #     low_res_raster=torch.zeros(2,9,224,224,29),
-    #     trajectory=torch.zeros(2,8,4),
-    #     return_dict=True,
-    # )
-    result = model(
-        intended_maneuver_vector=example["intended_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,dtype=torch.int32),
-        current_maneuver_vector=example["current_maneuver_vector"].unsqueeze(0),#torch.zeros(2,10,12),
-        high_res_raster=example["high_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
-        low_res_raster=example["low_res_raster"].unsqueeze(0),#torch.zeros(2,10,224,224,29),
-        trajectory=example["trajectory"].unsqueeze(0),#torch.zeros(2,10,4),
-        return_dict=True,
-    )
     print("done")

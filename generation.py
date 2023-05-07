@@ -168,8 +168,20 @@ def main(args):
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
+    features = Features({'trajectory': Sequence(feature=Sequence(feature=Value(dtype='float64', id=None), length=-1, id=None), length=-1, id=None), 
+                        'high_res_raster': Sequence(feature=Sequence(feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None),  
+                        'low_res_raster': Sequence(feature=Sequence(feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None),  
+                        'intended_maneuver_vector': Sequence(feature=Value(dtype='int32', id=None), length=-1, id=None), 
+                        'current_maneuver_vector': Sequence(feature=Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None), length=-1, id=None), 
+                        'file_name': Value(dtype='string', id=None), 
+                        'scenario_id': Value(dtype='string', id=None), 
+                        'time_stamp': Value(dtype='int64', id=None), 
+                        'frame_index': Value(dtype='int64', id=None), 
+                        'map_name': Value(dtype='string', id=None), 
+                        'lidar_token': Value(dtype='string', id=None)
+                         })
     nuplan_dataset = Dataset.from_generator(yield_data, 
-                                            # features=features,
+                                            #features=features,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader},
                                             writer_batch_size=2, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
@@ -185,16 +197,16 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument("--running_mode", type=int, default=1)
-    parser.add_argument("--data_path", type=dict, default={
-                'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
-                'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
-                'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
-            })
     # parser.add_argument("--data_path", type=dict, default={
-    #        'NUPLAN_DATA_ROOT': str(Path.home()) + "/nuplan/dataset",
-    #             'NUPLAN_MAPS_ROOT': str(Path.home()) + "/nuplan/dataset/maps",
-    #             'NUPLAN_DB_FILES': str(Path.home()) + "/nuplan/dataset/nuplan-v1.0/public_set_boston_train/",
-    #     })
+    #             'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
+    #             'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
+    #             'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
+    #         })
+    parser.add_argument("--data_path", type=dict, default={
+             'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+                'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+                'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/train_pittsburgh",
+        })
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
     parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
 
