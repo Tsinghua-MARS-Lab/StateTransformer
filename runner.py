@@ -70,13 +70,13 @@ class ModelArguments:
         metadata={"help": "The target folder to save prediction results."},
     )
     use_nsm: Optional[bool] = field(
-        default=True,
+        default=False,
     )
     predict_intended_maneuver: Optional[bool] = field(
-        default=True,
+        default=False,
     )
     predict_current_maneuver: Optional[bool] = field(
-        default=True,
+        default=False,
     )
     predict_trajectory: Optional[bool] = field(
         default=True,
@@ -84,26 +84,14 @@ class ModelArguments:
     recover_obs: Optional[bool] = field(
         default=False,
     )
-    per_instance_encoding: Optional[bool] = field(
-        default=True,
-    )
-    time_to_predict: Optional[int] = field(
-        default=8,
-    )
-    frequency_for_prediction: Optional[int] = field(
-        default=20,
-    )
-    scale_on_not_same_loss: Optional[float] = field(
-        default=1.0,
-    )
     maneuver_repeat: Optional[bool] = field(
-        default=False,
-    )
-    predict_single_step_trajectory: Optional[bool] = field(
         default=False,
     )
     predict_trajectory_with_nsm: Optional[bool] = field(
         default=False,
+    )
+    predict_trajectory_with_stopflag: Optional[bool] = field(
+        default=False
     )
     mask_history_intended_maneuver: Optional[bool] = field(
         default=False,
@@ -402,7 +390,7 @@ def main():
                 not_same_current_m_weights_bias = []
                 current_m_weights_prediction = []
                 
-            if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
+            if model_args.predict_trajectory:
                 end_bias_x = []
                 end_bias_y = []
                 losses = []
@@ -469,14 +457,12 @@ def main():
                             if model_args.predict_current_maneuver:
                                 not_same_current_m_weights_bias.append(current_m_weights_bias[-1][i])
                 
-                if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
+                if model_args.predict_trajectory:
                     if "xl" in model_args.model_name:
                         trajectory_label = input["trajectory_label"][:, 1::2, :]
                     elif "gpt" in model_args.model_name:
                         trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
-                    if model_args.predict_single_step_trajectory:
-                        trajectory_label = trajectory_label[:, :5, :]
                     loss = loss_fn(trajectory_label, traj_pred)
                     end_trajectory_label = trajectory_label[:, -1, :]
                     end_point = traj_pred[:, -1, :]
@@ -513,7 +499,7 @@ def main():
 
                 print('inspect shape: ', prediction_results['intended_maneuver'].shape, prediction_results['current_maneuver'].shape)
 
-            if model_args.predict_trajectory or model_args.predict_single_step_trajectory:
+            if model_args.predict_trajectory:
                 end_bias_x = torch.stack(end_bias_x, 0).cpu().numpy()
                 end_bias_y = torch.stack(end_bias_y, 0).cpu().numpy()
                 final_loss = torch.mean(torch.stack(losses, 0)).item()
