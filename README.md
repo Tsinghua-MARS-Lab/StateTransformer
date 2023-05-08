@@ -1,6 +1,6 @@
 # transformer4planning
 
-To train:
+## To train:
 
 model_name consist of ['scratch','pretrain']-['xl','gpt']
 
@@ -39,7 +39,7 @@ runner.py --model_name scratch-xl \
 
 
 
-To predict and evaluate:
+## To predict and evaluate:
 
 `
 export CUDA_VISIBLE_DEVICES=3; \
@@ -65,7 +65,7 @@ runner.py --model_name pretrain-gpt \
 --maneuver_repeat False \
 `
 
- To generate dataset:
+## To generate dataset:
 `
 python generation.py \ 
 --num_proc 1 \
@@ -82,10 +82,52 @@ python generation.py \
   add `--use_nsm` at the end of command
   
  '
- 
- To evaluate in nuboard:
 
-### Modify the following variables
+## To evaluate on NuBoard:
+
+### Install Transformer4Planning
+
+run `pip install -e .` from the root directory of Transformer4Planning.
+
+### Install NuPlan-Devkit
+(tested with v1.2)
+run `pip install -e .` from the root directory of NuPlan-Devkit.
+Then install these packages:
+
+    pip install aioboto3
+    pip install retry
+    pip install aiofiles
+    pip install bokeh==2.4.1
+
+
+### Register the planner
+Create a new yaml file for Hydra at: `script/config/simulation/planner/control_tf_planner.yaml` with:
+
+
+    control_tf_planner:
+        _target_: transformer4planning.submission.planner.ControlTFPlanner
+        horizon_seconds: 10.0
+        sampling_time: 0.1
+        acceleration: [5.0, 5.0]  # x (longitudinal), y (lateral)
+        thread_safe: true
+
+### Run simulation without yaml changing
+
+
+1. Install Transformer4Planning and NuPlan-Devkit
+2. (Optional) Copy the script folder from NuPlan's Official Repo to update
+3. Run the `run_simulation.py` script to evaluate the model with the tran-xl planner
+
+
+    python script/run_simulation.py 'planner=control_tf_planner' 
+    'scenario_filter.limit_total_scenarios=2' 'scenario_filter.num_scenarios_per_type=1' 
+    'job_name=test' 'scenario_builder=nuplan' 
+    'ego_controller=perfect_tracking_controller' 'observation=box_observation'
+    'model_pretrain_name_or_path=/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1' 
+
+
+### Or Modify yaml files and py scripts 
+#### Modify the following variables in yaml files
 nuplan/planning/script/config/common/default_experiment.yaml
 
 `job_name: open_loop_boxes`
@@ -100,11 +142,9 @@ nuplan/planning/script/config/common/worker/single_machine_thread_pool.yaml
 
 nuplan/planning/script/config/simulation/default_simulation.yaml
 
-`observation: box_observation`
-
-`ego_controller: perfect_tracking_controller`
-
-`planner: control_tf_planner`
+    observation: box_observation
+    ego_controller: perfect_tracking_controller
+    planner: control_tf_planner
 
 nuplan/planning/script/config/common/default_common.yaml
 
@@ -118,37 +158,26 @@ nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
 
 `limit_total_scenarios: 5`
 
-### Add the following at the beginning of run_xxx.py
+#### Add the following at the beginning of run_xxx.py
 
-`os.environ['USE_PYGEOS'] = '0'`
-
-`import geopandas`
-
-`os.environ['HYDRA_FULL_ERROR'] = '1'`
-
-`os.environ['NUPLAN_DATA_ROOT'] = ''`
-
-`os.environ['NUPLAN_MAPS_ROOT'] = ''`
-
-`os.environ['NUPLAN_DB_FILES'] = ''`
-
-`os.environ['NUPLAN_MAP_VERSION'] = ''`
-
-### Add this file nuplan/planning/script/config/simulation/planner/control_tf_planner.yaml
-Add the following content to the control_tf_planner.yaml file
-
-Change the target path name to the actual planner path name
-
-`control_tf_planner:
-  _target_: nuplan.planning.simulation.planner.transformer_planner.ControlTFPlanner
-  horizon_seconds: 10.0
-  sampling_time: 0.1
-  acceleration: [5.0, 5.0] # x (longitudinal), y (lateral)
-  thread_safe: true`
+    os.environ['USE_PYGEOS'] = '0'
+    import geopandas
+    os.environ['HYDRA_FULL_ERROR'] = '1'
+    os.environ['NUPLAN_DATA_ROOT'] = ''
+    os.environ['NUPLAN_MAPS_ROOT'] = ''
+    os.environ['NUPLAN_DB_FILES'] = ''
+    os.environ['NUPLAN_MAP_VERSION'] = ''
 
 
-### Run the following command
+#### Run the following command from NuPlan-Devkit
+
 `python nuplan/planning/script/run_simulation.py`
+
+### Launch nuboard for visualization
+
+``python script/run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'``
+
+or
 
 `python nuplan/planning/script/run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
 

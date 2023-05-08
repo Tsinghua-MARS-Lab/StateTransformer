@@ -40,7 +40,11 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.predict_current_maneuver_change = model_args.predict_current_maneuver_change
 
         in_channels = 29 # raster: goal + road_type + agent_type
-        if self.use_nsm and self.predict_trajectory_with_stopflag:
+
+        self.old_model = True
+        if self.use_nsm and self.old_model:
+            n_embed = config.d_embed // 4
+        elif self.use_nsm and self.predict_trajectory_with_stopflag:
             n_embed = config.d_embed // 3 # high res + low res + intented m
         else:
             n_embed = config.d_embed // 2
@@ -119,7 +123,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         """
         device = high_res_raster.device
         # with history menuever label input
-        if self.use_nsm and self.predict_trajectory_with_stopflag:
+        if self.use_nsm and (self.predict_trajectory_with_stopflag or self.old_model):
             if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
                 if self.maneuver_repeat:
                     intended_maneuver_vector = intended_maneuver_vector[:, -1].unsqueeze(1).repeat(1, 9)
@@ -167,9 +171,15 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
 
         if intended_maneuver_embed is not None:
-            state_embeds = torch.cat((intended_maneuver_embed,
-                                    high_res_embed,
-                                    low_res_embed), dim=-1).to(torch.float32)
+            if self.old_model:
+                state_embeds = torch.cat((intended_maneuver_embed,
+                                          torch.zeros_like(intended_maneuver_embed),
+                                          high_res_embed,
+                                          low_res_embed), dim=-1).to(torch.float32)
+            else:
+                state_embeds = torch.cat((intended_maneuver_embed,
+                                        high_res_embed,
+                                        low_res_embed), dim=-1).to(torch.float32)
         else:
             state_embeds = torch.cat((high_res_embed,
                                      low_res_embed), dim=-1).to(torch.float32)
