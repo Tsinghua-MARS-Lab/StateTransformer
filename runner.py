@@ -34,6 +34,7 @@ from transformers.utils import check_min_version, is_offline_mode, send_example_
 from transformers.utils.versions import require_version
 from torch.utils.data.dataset import ConcatDataset
 from torch.utils.data import random_split
+import tempfile
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -254,7 +255,7 @@ def main():
             nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             nuplan_dataset.set_format(type='torch')
             print('Dataset Loaded: ', nuplan_dataset)
-            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True, seed=training_args.seed)
+            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=False, seed=training_args.seed)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
@@ -262,11 +263,11 @@ def main():
     if 'pretrain' in model_args.model_name:
         # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
         if 'xl' in model_args.model_name:
-            model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
+            model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=False)
             model.config.pad_token_id = 0
             model.config.eos_token_id = 0
         elif 'gpt' in model_args.model_name:
-            model = GPTModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
+            model = GPTModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=True)
             
     elif 'scratch' in model_args.model_name:
         if 'xl' in model_args.model_name:
@@ -275,7 +276,11 @@ def main():
             config_p.d_embed = model_args.d_embed
             config_p.d_model = model_args.d_model
             config_p.d_inner = model_args.d_inner
-            model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+            scratch_model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                scratch_model.save_pretrained(tmp_dir)
+                model = TransfoXLModelNuPlan.from_pretrained(tmp_dir, model_args=model_args, low_cpu_mem_usage=True)
+                del scratch_model
             model.config.pad_token_id = 0
             model.config.eos_token_id = 0
             print("Scratch TransformerXL model initilized!")
@@ -285,6 +290,10 @@ def main():
             config_p.n_embd = model_args.d_embed
             config_p.n_inner = model_args.d_inner
             model = GPTModelNuPlan(config_p, model_args=model_args)
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                scratch_model.save_pretrained(tmp_dir)
+                model = GPTModelNuPlan.from_pretrained(tmp_dir, model_args=model_args, low_cpu_mem_usage=True)
+                del scratch_model
             print("Scratch GPT model initilized!")
         # model_p.save_pretrained( '../saved_model/transformerxlSml')
 
