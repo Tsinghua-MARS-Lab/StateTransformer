@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import pickle
+import copy
 from typing import Optional, Dict, Any
 import torch
 from tqdm import tqdm
@@ -283,7 +284,7 @@ def main():
                 del scratch_model
             model.config.pad_token_id = 0
             model.config.eos_token_id = 0
-            print("Scratch TransformerXL model initilized!")
+            print("Scratch TransformerXL model initialized!")
         elif 'gpt' in model_args.model_name:
             config_p = GPT2Config()
             config_p.n_layer = model_args.n_layers
@@ -418,7 +419,7 @@ def main():
                     continue
                 input = preprocess_data(input)
                 if "xl" in model_args.model_name:
-                    output = model(**input)
+                    output = model(**copy.deepcopy(input))
                     intended_m_logits, current_m_logits, traj_pred = output.all_logits
                     file_name = input['file_name']
                     current_frame_idx = input['frame_index']
@@ -431,7 +432,7 @@ def main():
                     actual_input["trajectory"] = input["trajectory"][:, :8]
                     actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
                     actual_input["low_res_raster"] = input["low_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
-                    output = model.generate(**actual_input)
+                    output = model.generate(**copy.deepcopy(actual_input))
                     intended_m_logits = output["intend_maneuver"]
                     current_m_logits = output["current_maneuver"]
                     traj_pred = output["trajectory"]
