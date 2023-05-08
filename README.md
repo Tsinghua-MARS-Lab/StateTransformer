@@ -116,14 +116,14 @@ Create a new yaml file for Hydra at: `script/config/simulation/planner/control_t
 
 1. Install Transformer4Planning and NuPlan-Devkit
 2. (Optional) Copy the script folder from NuPlan's Official Repo to update
-3. Run the `run_simulation.py` script to evaluate the model with the tran-xl planner
+3. Modify dataset path in the `run_simulation.py` and run it to evaluate the model with the tran-xl planner
 
 
     python script/run_simulation.py 'planner=control_tf_planner' 
     'scenario_filter.limit_total_scenarios=2' 'scenario_filter.num_scenarios_per_type=1' 
     'job_name=test' 'scenario_builder=nuplan' 
     'ego_controller=perfect_tracking_controller' 'observation=box_observation'
-    'model_pretrain_name_or_path=/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1' 
+    '+model_pretrain_name_or_path=/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1' 
 
 
 ### Or Modify yaml files and py scripts 
