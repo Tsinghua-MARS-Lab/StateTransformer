@@ -292,6 +292,7 @@ class RuleBasedPlanner(AbstractPlanner):
         self.planning_to = 0
         self.predict_relations_for_ego = True
         self.planning_interval = 10
+        self.road_dic = None
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -326,12 +327,13 @@ class RuleBasedPlanner(AbstractPlanner):
                               ego_states[-1].waypoint.oriented_box.width])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
-        road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
-
+        if self.road_dic is None:
+            self.road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
+        
         agent_dic = get_agent_dict(ego_states, agents, statics)
         current_state = {
             'agent': agent_dic,
-            'road': road_dic,
+            'road': self.road_dic,
             'route': self.route_roadblock_ids
         }
 

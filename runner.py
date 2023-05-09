@@ -12,7 +12,7 @@ import copy
 from typing import Optional, Dict, Any
 import torch
 from tqdm import tqdm
-import random
+import copy
 
 import datasets
 import numpy as np
@@ -93,6 +93,9 @@ class ModelArguments:
         default=False,
     )
     predict_trajectory_with_stopflag: Optional[bool] = field(
+        default=False
+    )
+    with_future_nsm: Optional[bool] = field(
         default=False
     )
     mask_history_intended_maneuver: Optional[bool] = field(
@@ -239,17 +242,12 @@ def main():
                 print(dataset)
                 concatdatasets.append(dataset)
             concat_dataset = ConcatDataset(concatdatasets)
-            datasetsize = len(concat_dataset)
-            train, val, test = random_split(concat_dataset, \
-                                            (int(0.9*datasetsize), \
-                                            int(0.05*datasetsize), \
-                                            int(0.05*datasetsize)))
             nuplan_dataset = dict(
-                train=train,
-                validation=val,
-                test=test
+                train=concat_dataset,
+                validation=None,
+                test=None
             )
-            print("Dataset size:", len(train))
+            print("Dataset size:", len(concat_dataset))
 
         else: # whole hugging face dataset   
             print("loading dataset...")
@@ -264,7 +262,7 @@ def main():
     if 'pretrain' in model_args.model_name:
         # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
         if 'xl' in model_args.model_name:
-            model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=False)
+            model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=True)
             model.config.pad_token_id = 0
             model.config.eos_token_id = 0
         elif 'gpt' in model_args.model_name:

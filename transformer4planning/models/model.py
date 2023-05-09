@@ -26,6 +26,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.transformer = TransfoXLModel(config)
         model_args = kwargs['model_args']
         self.use_nsm = model_args.use_nsm
+        self.with_future_nsm = model_args.with_future_nsm
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
 
@@ -52,6 +53,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
 
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
+        if self.with_future_nsm:
+            self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.d_embed), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_embed), nn.Tanh())
 
         if self.predict_trajectory_with_nsm:
@@ -103,6 +106,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         current_maneuver_label: Optional[torch.LongTensor] = None,
         high_res_raster: Optional[torch.LongTensor] = None,
         low_res_raster: Optional[torch.LongTensor] = None,
+        intended_maneuver_gt: Optional[torch.LongTensor] = None,
 
         mems: Optional[List[torch.FloatTensor]] = None,
         head_mask: Optional[torch.FloatTensor] = None,
@@ -122,6 +126,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
         device = high_res_raster.device
+        # with history manuever label input
+        if self.with_future_nsm:
+            future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
         # with history menuever label input
         if self.use_nsm and (self.predict_trajectory_with_stopflag or self.old_model):
             if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
@@ -170,7 +177,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
         low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
 
-        if intended_maneuver_embed is not None:
+        if intended_maneuver_embed is not None and not self.with_future_nsm:
             if self.old_model:
                 state_embeds = torch.cat((intended_maneuver_embed,
                                           torch.zeros_like(intended_maneuver_embed),
@@ -202,7 +209,10 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+        if self.with_future_nsm:
+            input_embeds = input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
+        else:
+            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
         transformer_outputs = self.transformer(
             None,
@@ -916,8 +926,10 @@ if  __name__ == '__main__':
     parser.add_argument("--predict_trajectory", default=True)
     parser.add_argument("--recover_obs", default=False)
     parser.add_argument("--scale_on_not_same_loss", default=1.0)
-    parser.add_argument("--maneuver_repeat", default=True)
+    parser.add_argument("--maneuver_repeat", default=False)
+    parser.add_argument("--predict_trajectory_with_stopflag", default=False)
     parser.add_argument("--predict_trajectory_with_nsm", default=False)
+    parser.add_argument("--with_future_nsm", default=True)
     parser.add_argument("--mask_history_intended_maneuver", default=False)
     parser.add_argument("--mask_history_current_maneuver", default=False)
 
@@ -992,9 +1004,11 @@ if  __name__ == '__main__':
         plt.show()
 
     else:
-        model = TransfoXLModelNuPlan.from_pretrained('checkpoints/xl/checkpoint-20000', model_args=model_args)
+        config_p = TransfoXLConfig()
+        model = TransfoXLModelNuPlan(config_p, model_args=model_args)
+        #model = TransfoXLModelNuPlan.from_pretrained('checkpoints/xl/checkpoint-20000', model_args=model_args)
         model.config.pad_token_id = 0
-        dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nsm_sparse_balance_new_4seq/")
+        dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nonauto_nsm_balance/")
         # print(dataset.features)
         dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
         example = dataset['test'][3]
@@ -1008,6 +1022,7 @@ if  __name__ == '__main__':
             context_actions=example['context_actions'].unsqueeze(0),
             high_res_raster=example['high_res_raster'].unsqueeze(0),
             low_res_raster=example['low_res_raster'].unsqueeze(0),
+            intended_maneuver_gt=example['intended_maneuver_gt'].unsqueeze(0),
             mems=None,
             head_mask=None,
             output_attentions=None,
