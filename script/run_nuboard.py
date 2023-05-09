@@ -70,9 +70,13 @@ def main(cfg: DictConfig) -> None:
     Execute all available challenges simultaneously on the same scenario.
     :param cfg: DictConfig. Configuration that is used to run the experiment.
     """
+    print(cfg)
     nuboard = initialize_nuboard(cfg)
     nuboard.run()
 
+os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan'
+os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.1'
+os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/train_boston'
 
 if __name__ == '__main__':
     main()
