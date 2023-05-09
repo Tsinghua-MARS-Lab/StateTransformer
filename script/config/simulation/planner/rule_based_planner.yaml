@@ -1,5 +1,5 @@
-control_tf_planner:
-  _target_: transformer4planning.submission.planner.ControlTFPlanner
+rule_based_planner:
+  _target_: transformer4planning.submission.rule_based_planner.RuleBasedPlanner
   horizon_seconds: 10.0
   sampling_time: 0.1
   acceleration: [5.0, 5.0]  # x (longitudinal), y (lateral)

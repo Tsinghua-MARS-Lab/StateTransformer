@@ -1,18 +1,13 @@
-import os
+import logging
 import pickle
 from copy import deepcopy
 from typing import List, Type
 
-import cv2
+import random
 import math
 import numpy as np
 import numpy.typing as npt
 import time
-# import interactive_sim.envs.util as util
-from transformers import (HfArgumentParser)
-from transformers import TransfoXLConfig
-from transformers.configuration_utils import PretrainedConfig
-from transformers.trainer_utils import get_last_checkpoint
 
 from nuplan.common.actor_state.ego_state import DynamicCarState, EgoState
 from nuplan.common.actor_state.state_representation import Point2D
@@ -22,9 +17,11 @@ from nuplan.planning.simulation.observation.observation_type import DetectionsTr
 from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner, PlannerInitialization, PlannerInput
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
+from transformer4planning.utils import *
+from transformer4planning.libs.classes import SudoInterpolator, GoalSetter, Agent
+import transformer4planning.libs.plan_helper as plan_helper
 
-
-current_frame_idx = 0
+count = 0
 
 """
 Settings for the rule-based planner
@@ -97,6 +94,84 @@ def calculate_yaw_from_states(trajectory, default_yaw):
 def change_axis(yaw):
     return - yaw - math.pi / 2
 
+def normalize_angle(angle):
+    """
+    Normalize an angle to [-pi, pi].
+    :param angle: (float)
+    :return: (float) Angle in radian in [-pi, pi]
+    """
+    while angle > np.pi:
+        angle -= 2.0 * np.pi
+
+    while angle < -np.pi:
+        angle += 2.0 * np.pi
+
+    return angle
+
+def rotate_array(origin, points, angle, tuple=False):
+    """
+    Rotate a numpy array of points counter-clockwise by a given angle around a given origin.
+    The angle should be given in radians.
+    """
+    assert isinstance(points, type(np.array([]))), type(points)
+    ox, oy = origin
+    px = points[:, 0]
+    py = points[:, 1]
+
+    qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
+    qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
+    if tuple:
+        return (qx, qy)
+    else:
+        rst_array = np.zeros_like(points)
+        rst_array[:, 0] = qx
+        rst_array[:, 1] = qy
+        return rst_array
+
+def check_collision(checking_agent, target_agent, vertical_margin=0.7, vertical_margin2=0.7, horizon_margin=0.7):
+    # center_c = [checking_agent.x, checking_agent.y]
+    # center_t = [target_agent.x, target_agent.y]
+
+    length_sum_top_threshold = checking_agent.length + target_agent.length
+    if checking_agent.x == -1 or target_agent.x == -1:
+        return False
+    if abs(checking_agent.x - target_agent.x) > length_sum_top_threshold:
+        return False
+    if abs(checking_agent.y - target_agent.y) > length_sum_top_threshold:
+        return False
+
+    if euclidean_distance([checking_agent.x, checking_agent.y], [target_agent.x, target_agent.y]) <= (checking_agent.width + target_agent.width)/2:
+        return True
+    collision_box_t = [(target_agent.x - target_agent.width/2 * horizon_margin - checking_agent.x,
+                        target_agent.y - target_agent.length/2 * vertical_margin2 - checking_agent.y),
+                       (target_agent.x - target_agent.width / 2 * horizon_margin - checking_agent.x,
+                        target_agent.y - checking_agent.y),
+                       (target_agent.x - target_agent.width/2 * horizon_margin - checking_agent.x,
+                        target_agent.y + target_agent.length/2 * vertical_margin2 - checking_agent.y),
+                       (target_agent.x + target_agent.width/2 * horizon_margin - checking_agent.x,
+                        target_agent.y + target_agent.length/2 * vertical_margin2 - checking_agent.y),
+                       (target_agent.x + target_agent.width / 2 * horizon_margin - checking_agent.x,
+                        target_agent.y - checking_agent.y),
+                       (target_agent.x + target_agent.width/2 * horizon_margin - checking_agent.x,
+                        target_agent.y - target_agent.length/2 * vertical_margin2 - checking_agent.y)]
+    rotated_checking_box_t = rotate_array(origin=(target_agent.x - checking_agent.x, target_agent.y - checking_agent.y),
+                                          points=np.array(collision_box_t),
+                                          angle=normalize_angle( - target_agent.yaw))
+    rotated_checking_box_t = np.insert(rotated_checking_box_t, 0, [target_agent.x - checking_agent.x, target_agent.y - checking_agent.y], 0)
+
+    rotated_checking_box_t = rotate_array(origin=(0, 0),
+                                          points=np.array(rotated_checking_box_t),
+                                          angle=normalize_angle( - checking_agent.yaw))
+
+    rst = False
+    for idx, pt in enumerate(rotated_checking_box_t):
+        x, y = pt
+        if abs(x) < checking_agent.width/2 * horizon_margin and abs(y) < checking_agent.length/2 * vertical_margin:
+            rst = True
+            # print('test: ', idx)
+            break
+    return rst
+
 
 def find_closest_lane(current_state, my_current_pose,
                       ignore_intersection_lane=False,
@@ -141,7 +216,7 @@ def find_closest_lane(current_state, my_current_pose,
         for j, each_xy in enumerate(road_xy):
             road_yaw = current_state['road'][each_lane]['dir'][j]
             dist = euclidean_distance(each_xy, my_current_pose[:2])
-            yaw_diff = abs(utils.normalize_angle(my_current_pose[3] - road_yaw))
+            yaw_diff = abs(normalize_angle(my_current_pose[3] - road_yaw))
             if dist < closest_dist_no_yaw:
                 closest_lane_no_yaw = each_lane
                 closest_dist_no_yaw = dist
@@ -190,7 +265,7 @@ class RuleBasedPlanner(AbstractPlanner):
         self.steering_angle = steering_angle
 
         # parameters for rule-based planner
-        self.planning_horizon = 8.0  # horizon_seconds
+        self.planning_horizon = 160  # horizon_seconds
         self.scenario_frame_number = 0
         # TODO: get rid of the predictor
         self.method_testing = 2
@@ -213,6 +288,10 @@ class RuleBasedPlanner(AbstractPlanner):
         self.dbg = {}
         self.available_routes = {}
         self.goal_setter = GoalSetter()
+        self.predict_env_for_ego_collisions = True
+        self.planning_to = 0
+        self.predict_relations_for_ego = True
+        self.planning_interval = 10
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -229,10 +308,14 @@ class RuleBasedPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        global current_frame_idx
-        current_frame_idx += 1
-        print("current_frame_idx: ", current_frame_idx)
-        history = current_input.history
+        global count
+        current_frame_idx = 22
+        count += 1
+        print("count: ", count)
+        try:
+            history = current_input.history
+        except:  # debug version
+            history = current_input
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
         # trajectory as format of [(x, y, yaw)]
@@ -248,20 +331,22 @@ class RuleBasedPlanner(AbstractPlanner):
         agent_dic = get_agent_dict(ego_states, agents, statics)
         current_state = {
             'agent': agent_dic,
-            'road': road_dic
+            'road': road_dic,
+            'route': self.route_roadblock_ids
         }
+
 
         # load scenario data
         ego_agent_id = 'ego'
         my_current_pose = current_state['agent'][ego_agent_id]['pose'][current_frame_idx - 1]
         my_current_v_per_step = euclidean_distance(
             current_state['agent'][ego_agent_id]['pose'][current_frame_idx - 1, :2],
-            current_state['agent'][ego_agent_id]['pose'][current_frame_idx - 6, :2]) / 5 / 2 # 2 for frame rate change
+            current_state['agent'][ego_agent_id]['pose'][current_frame_idx - 6, :2]) / 5 / 2  # 2 for frame rate change
         total_time_frame = current_state['agent'][ego_agent_id]['pose'].shape[0]
         my_target_speed = DEFAULT_SPEED / self.frame_rate  # change this to the speed limit of the current lane
 
         # TODO: connect goal info and deal with a goal of None
-        goal_pt, goal_yaw = self.goal if self.goal is not None else (None, None)
+        goal_pt, goal_yaw = ((self.goal.x, self.goal.y), self.goal.heading) if self.goal is not None else ((0, 0), 0)
 
         goal_lane, _, _ = find_closest_lane(
             current_state=current_state,
@@ -314,11 +399,11 @@ class RuleBasedPlanner(AbstractPlanner):
                 if abs(ego_org_traj[-1, 0] + 1) < 0.01 or abs(ego_org_traj[0, 0] + 1) < 0.01:
                     ego_dist = 0
                 else:
-                    ego_dist = utils.euclidean_distance(ego_org_traj[-1, :2], ego_org_traj[0, :2])
+                    ego_dist = euclidean_distance(ego_org_traj[-1, :2], ego_org_traj[0, :2])
                 if abs(ego_org_traj[60, 3] + 1) < 0.01:
                     ego_turning_right = False
                 else:
-                    ego_yaw_diff = -utils.normalize_angle(ego_org_traj[60, 3] - ego_org_traj[0, 3])
+                    ego_yaw_diff = -normalize_angle(ego_org_traj[60, 3] - ego_org_traj[0, 3])
                     ego_running_red_light = False
                     if math.pi / 180 * 15 < ego_yaw_diff and abs(ego_org_traj[60, 3] + 1) > 0.01:
                         ego_turning_right = True
@@ -331,7 +416,7 @@ class RuleBasedPlanner(AbstractPlanner):
                                                length=TRAFFIC_LIGHT_COLLISION_SIZE,
                                                width=TRAFFIC_LIGHT_COLLISION_SIZE,
                                                agent_id=99999)
-                        running = utils.check_collision(
+                        running = check_collision(
                             checking_agent=ego_agent,
                             target_agent=dummy_tf_agent)
                         if running:
@@ -369,13 +454,13 @@ class RuleBasedPlanner(AbstractPlanner):
                 if ego_org_traj[-1, 0] == -1.0 or ego_org_traj[0, 0] == -1.0:
                     ego_dist = 0
                 else:
-                    ego_dist = utils.euclidean_distance(ego_org_traj[-1, :2], ego_org_traj[0, :2])
-                if ego_org_traj[20, 3] == -1.0:
+                    ego_dist = euclidean_distance(ego_org_traj[-1, :2], ego_org_traj[0, :2])
+                if ego_org_traj[-1, 3] == -1.0:
                     ego_turning_right = False
                 else:
-                    ego_yaw_diff = -utils.normalize_angle(ego_org_traj[20, 3] - ego_org_traj[0, 3])
+                    ego_yaw_diff = -normalize_angle(ego_org_traj[-1, 3] - ego_org_traj[0, 3])
                     ego_running_red_light = False
-                    if math.pi / 180 * 15 < ego_yaw_diff and ego_org_traj[20, 3] != -1.0:
+                    if math.pi / 180 * 15 < ego_yaw_diff and ego_org_traj[-1, 3] != -1.0:
                         ego_turning_right = True
                     else:
                         ego_turning_right = False
@@ -385,7 +470,7 @@ class RuleBasedPlanner(AbstractPlanner):
                                                length=TRAFFIC_LIGHT_COLLISION_SIZE,
                                                width=TRAFFIC_LIGHT_COLLISION_SIZE,
                                                agent_id=99999)
-                        running = utils.check_collision(
+                        running = check_collision(
                             checking_agent=ego_agent,
                             target_agent=dummy_tf_agent)
                         if running:
@@ -423,8 +508,8 @@ class RuleBasedPlanner(AbstractPlanner):
                         continue
 
                     # check if target agent is running a red light
-                    yaw_diff = utils.normalize_angle(each_other_traj[-1, 3] - each_other_traj[0, 3])
-                    dist = utils.euclidean_distance(each_other_traj[-1, :2], each_other_traj[0, :2])
+                    yaw_diff = normalize_angle(each_other_traj[-1, 3] - each_other_traj[0, 3])
+                    dist = euclidean_distance(each_other_traj[-1, :2], each_other_traj[0, :2])
                     target_agent = Agent(x=target_pose[0],
                                          y=target_pose[1],
                                          yaw=target_pose[3],
@@ -439,14 +524,14 @@ class RuleBasedPlanner(AbstractPlanner):
                                                    length=TRAFFIC_LIGHT_COLLISION_SIZE,
                                                    width=TRAFFIC_LIGHT_COLLISION_SIZE,
                                                    agent_id=99999)
-                            running = utils.check_collision(
+                            running = check_collision(
                                 checking_agent=target_agent,
                                 target_agent=dummy_tf_agent)
                             if running:
                                 # check if they are on two sides of the red light
-                                ego_tf_yaw = utils.get_angle_of_a_line(pt1=ego_pose[:2], pt2=tl_pt[:2])
-                                target_tf_yae = utils.get_angle_of_a_line(pt1=target_pose[:2], pt2=tl_pt[:2])
-                                if abs(utils.normalize_angle(ego_tf_yaw - target_tf_yae)) < math.pi / 2:
+                                ego_tf_yaw = get_angle_of_a_line(pt1=ego_pose[:2], pt2=tl_pt[:2])
+                                target_tf_yae = get_angle_of_a_line(pt1=target_pose[:2], pt2=tl_pt[:2])
+                                if abs(normalize_angle(ego_tf_yaw - target_tf_yae)) < math.pi / 2:
                                     running_red_light = True
                                     break
 
@@ -454,8 +539,8 @@ class RuleBasedPlanner(AbstractPlanner):
                         continue
 
                     # check collision with ego vehicle
-                    has_collision = utils.check_collision(checking_agent=ego_agent,
-                                                          target_agent=target_agent)
+                    has_collision = check_collision(checking_agent=ego_agent,
+                                                    target_agent=target_agent)
 
                     if current_time < ego_time_length - 1:
                         ego_pose2 = ego_org_traj[current_time + 1]
@@ -473,11 +558,11 @@ class RuleBasedPlanner(AbstractPlanner):
                                                   length=target_shape[1],
                                                   width=target_shape[0],
                                                   agent_id=target_agent_id)
-                            has_collision |= utils.check_collision(checking_agent=ego_agent2,
-                                                                   target_agent=target_agent2)
+                            has_collision |= check_collision(checking_agent=ego_agent2,
+                                                             target_agent=target_agent2)
                         else:
-                            has_collision |= utils.check_collision(checking_agent=ego_agent2,
-                                                                   target_agent=target_agent)
+                            has_collision |= check_collision(checking_agent=ego_agent2,
+                                                             target_agent=target_agent)
 
                     if has_collision:
                         if not always_yield:
@@ -501,7 +586,7 @@ class RuleBasedPlanner(AbstractPlanner):
                                                   width=current_state['agent'][ego_agent_id]['shape'][0][0],
                                                   agent_id=ego_agent_id)
 
-                                collision_0 |= utils.check_collision(ego_agent, target_agent_0)
+                                collision_0 |= check_collision(ego_agent, target_agent_0)
                                 if collision_0:
                                     break
 
@@ -524,11 +609,11 @@ class RuleBasedPlanner(AbstractPlanner):
                                                      width=target_shape[0],
                                                      agent_id=target_agent_id)
 
-                                collision_1 |= utils.check_collision(target_agent, ego_agent_0)
+                                collision_1 |= check_collision(target_agent, ego_agent_0)
                                 if collision_1:
                                     break
-                            # collision_1 = utils.check_collision(target_agent, ego_agent_0)
-                            # collision_1 |= utils.check_collision(target_agent2, ego_agent_0)
+                            # collision_1 = check_collision(target_agent, ego_agent_0)
+                            # collision_1 |= check_collision(target_agent2, ego_agent_0)
 
                             if collision_0 and self.predict_with_rules:
                                 # yield
@@ -583,7 +668,8 @@ class RuleBasedPlanner(AbstractPlanner):
         target_speed = None
         detected_relation = None
 
-        tf_light_frame_idx = check_traffic_light(my_interpolated_marginal_trajectories[0])
+        tf_light_frame_idx = None
+        # tf_light_frame_idx = check_traffic_light(my_interpolated_marginal_trajectories[0])
 
         # process prior collision pairs
         progress_for_all_traj = []
@@ -661,7 +747,7 @@ class RuleBasedPlanner(AbstractPlanner):
                             try:
                                 target_length.append(target_shapes[earliest_collision_idx, 1])
                             except:
-                                print("Unknown shape size: ", target_shapes.shape)
+                                print("Unknown shape size: ", target_shapes.shape, earliest_collision_idx)
                                 target_length.append(target_shapes[0, 1])
                     else:
                         target_length.append(target_shapes[1])
@@ -783,17 +869,17 @@ class RuleBasedPlanner(AbstractPlanner):
                                                                 desired_speed=my_target_speed,
                                                                 hold_still=True)
         assert planed_traj.shape[0] >= self.planning_horizon, planed_traj.shape
-        pred_traj = planed_traj[:self.planning_horizon, :]
-
-        # rotate pred_traj
-        rot_eye = np.eye(pred_traj.shape[1])
-        rot = np.array(
-            [[np.cos(ego_trajectory[-1][2]), -np.sin(ego_trajectory[-1][2])],
-             [np.sin(ego_trajectory[-1][2]), np.cos(ego_trajectory[-1][2])]]
-        )
-        rot_eye[:2, :2] = rot
-        pred_traj = rot_eye @ pred_traj.T
-        pred_traj = pred_traj.T
+        pred_traj = planed_traj[:self.planning_horizon, :][::2, :]
+        delta_traj = pred_traj[1:].copy() - pred_traj[:-1].copy()
+        # # rotate pred_traj
+        # rot_eye = np.eye(pred_traj.shape[1])
+        # rot = np.array(
+        #     [[np.cos(ego_trajectory[-1][2]), -np.sin(ego_trajectory[-1][2])],
+        #      [np.sin(ego_trajectory[-1][2]), np.cos(ego_trajectory[-1][2])]]
+        # )
+        # rot_eye[:2, :2] = rot
+        # pred_traj = rot_eye @ pred_traj.T
+        # pred_traj = pred_traj.T
 
         # build output
         ego_state = history.ego_states[-1]
@@ -812,8 +898,8 @@ class RuleBasedPlanner(AbstractPlanner):
         for i in range(0, pred_traj.shape[0] - 1):
             new_time_point = TimePoint(state.time_point.time_us + 1e5)
             state = EgoState.build_from_center(
-                center=StateSE2(pred_traj[i + 1, 0] + ego_trajectory[-1][0],
-                                pred_traj[i + 1, 1] + ego_trajectory[-1][1],
+                center=StateSE2(pred_traj[i + 1, 0],
+                                pred_traj[i + 1, 1],
                                 ego_trajectory[-1][2]),
                 center_velocity_2d=StateVector2D((pred_traj[i + 1, 0] - pred_traj[i, 0]) / 0.1,
                                                  (pred_traj[i + 1, 1] - pred_traj[i, 1]) / 0.1),
@@ -829,10 +915,11 @@ class RuleBasedPlanner(AbstractPlanner):
         return InterpolatedTrajectory(trajectory)
 
     def get_trajectory_from_interpolator(self, my_interpolator, my_current_speed, a_per_step=None,
-                                         check_turning_dynamics=True, desired_speed=31,  # desired_speed in meters per second
+                                         check_turning_dynamics=True, desired_speed=31,
+                                         # desired_speed in meters per second
                                          emergency_stop=False, hold_still=False,
                                          agent_id=None, a_scale_turning=0.7, a_scale_not_turning=0.9):
-        total_frames = self.planning_horizon
+        total_frames = int(self.planning_horizon)
         total_pts_in_interpolator = my_interpolator.trajectory.shape[0]
         trajectory = np.ones((total_frames, 4)) * -1
         # get proper speed for turning
@@ -840,19 +927,26 @@ class RuleBasedPlanner(AbstractPlanner):
         largest_yaw_change_idx = None
         if check_turning_dynamics and not emergency_stop:
             for i in range(min(200, total_pts_in_interpolator - 2)):
-                if my_interpolator.trajectory[i, 0] == -1.0 or my_interpolator.trajectory[i+1, 0] == -1.0 or my_interpolator.trajectory[i+2, 0] == -1.0:
+                if my_interpolator.trajectory[i, 0] == -1.0 or my_interpolator.trajectory[i + 1, 0] == -1.0 or \
+                        my_interpolator.trajectory[i + 2, 0] == -1.0:
                     continue
-                current_yaw = utils.normalize_angle(get_angle_of_a_line(pt1=my_interpolator.trajectory[i, :2], pt2=my_interpolator.trajectory[i+1, :2]))
-                next_yaw = utils.normalize_angle(get_angle_of_a_line(pt1=my_interpolator.trajectory[i+1, :2], pt2=my_interpolator.trajectory[i+2, :2]))
-                dist = utils.euclidean_distance(pt1=my_interpolator.trajectory[i, :2], pt2=my_interpolator.trajectory[i+1, :2])
-                yaw_diff = abs(utils.normalize_angle(next_yaw - current_yaw))
+                current_yaw = normalize_angle(get_angle_of_a_line(pt1=my_interpolator.trajectory[i, :2],
+                                                                  pt2=my_interpolator.trajectory[i + 1, :2]))
+                next_yaw = normalize_angle(get_angle_of_a_line(pt1=my_interpolator.trajectory[i + 1, :2],
+                                                               pt2=my_interpolator.trajectory[i + 2, :2]))
+                dist = euclidean_distance(pt1=my_interpolator.trajectory[i, :2],
+                                          pt2=my_interpolator.trajectory[i + 1, :2])
+                yaw_diff = abs(normalize_angle(next_yaw - current_yaw))
                 if yaw_diff > largest_yaw_change and 0.04 < yaw_diff < math.pi / 2 * 0.9 and 100 > dist > 0.3:
                     largest_yaw_change = yaw_diff
                     largest_yaw_change_idx = i
-            proper_speed_minimal = max(5, math.pi / 3 / largest_yaw_change)  # calculate based on 20m/s turning for 12s a whole round with a 10hz data in m/s
+            proper_speed_minimal = max(5,
+                                       math.pi / 3 / largest_yaw_change)  # calculate based on 20m/s turning for 12s a whole round with a 10hz data in m/s
             proper_speed_minimal_per_frame = proper_speed_minimal / self.frame_rate
             if largest_yaw_change_idx is not None:
-                deceleration_frames = max(0, largest_yaw_change_idx - abs(my_current_speed - proper_speed_minimal_per_frame) / (A_SLOWDOWN_DESIRE / self.frame_rate / self.frame_rate / 2))
+                deceleration_frames = max(0, largest_yaw_change_idx - abs(
+                    my_current_speed - proper_speed_minimal_per_frame) / (
+                                                      A_SLOWDOWN_DESIRE / self.frame_rate / self.frame_rate / 2))
             else:
                 deceleration_frames = 99999
         if agent_id is not None:
@@ -881,7 +975,9 @@ class RuleBasedPlanner(AbstractPlanner):
                         # if far away from the turnings and current speed is smaller than 15m/s, then speed up
                         # else keep current speed
                         if a_per_step is not None:
-                            current_speed += max(-A_SLOWDOWN_DESIRE / self.frame_rate, min(A_SPEEDUP_DESIRE / self.frame_rate * low_speed_a_scale, a_per_step))
+                            current_speed += max(-A_SLOWDOWN_DESIRE / self.frame_rate,
+                                                 min(A_SPEEDUP_DESIRE / self.frame_rate * low_speed_a_scale,
+                                                     a_per_step))
                         else:
                             current_speed += A_SPEEDUP_DESIRE / self.frame_rate * a_scale_turning * low_speed_a_scale
                 elif i > largest_yaw_change_idx:
@@ -889,13 +985,16 @@ class RuleBasedPlanner(AbstractPlanner):
                         current_speed -= A_SLOWDOWN_DESIRE / self.frame_rate
                     else:
                         if a_per_step is not None:
-                            current_speed += max(-A_SLOWDOWN_DESIRE / self.frame_rate, min(A_SPEEDUP_DESIRE / self.frame_rate * low_speed_a_scale, a_per_step))
+                            current_speed += max(-A_SLOWDOWN_DESIRE / self.frame_rate,
+                                                 min(A_SPEEDUP_DESIRE / self.frame_rate * low_speed_a_scale,
+                                                     a_per_step))
                         else:
                             current_speed += A_SPEEDUP_DESIRE / self.frame_rate * a_scale_turning * low_speed_a_scale
             else:
                 if current_speed < desired_speed / self.frame_rate:
                     if a_per_step is not None:
-                        current_speed += max(-A_SLOWDOWN_DESIRE / self.frame_rate, min(A_SPEEDUP_DESIRE / self.frame_rate * low_speed_a_scale, a_per_step))
+                        current_speed += max(-A_SLOWDOWN_DESIRE / self.frame_rate,
+                                             min(A_SPEEDUP_DESIRE / self.frame_rate * low_speed_a_scale, a_per_step))
                     else:
                         current_speed += A_SPEEDUP_DESIRE / self.frame_rate * a_scale_not_turning * low_speed_a_scale  # accelerate with 0.2 of desired acceleration
             current_speed = max(0, current_speed)
@@ -919,7 +1018,7 @@ class RuleBasedPlanner(AbstractPlanner):
         closest_road_blockc, dist_to_roadc = self.map_api.get_distance_to_nearest_map_object(
             point=Point2D(current_pose[0], current_pose[1]),
             layer=SemanticMapLayer.ROADBLOCK_CONNECTOR)
-        closest_road_block = int(closest_road_block) if dist_to_road < dist_to_roadc else int(closest_road_blockc)
+        closest_road_block = closest_road_block if dist_to_road < dist_to_roadc else int(closest_road_blockc)
         # use given route if available
         if route is not None:
             if closest_road_block in route:
@@ -1058,7 +1157,7 @@ class RuleBasedPlanner(AbstractPlanner):
             last_tic = time.perf_counter()
         if self.goal_setter.data is None:
             # initialize goal setter
-            self.goal_setter(data=current_state, )
+            self.goal_setter(new_data=current_state, )
         goal_pt, goal_yaw = self.goal_setter.get_goal(current_data=current_state,
                                                       agent_id=agent_id)
         goal_pose = [goal_pt[0], goal_pt[1], 0, goal_yaw] if goal_pt is not None else None
@@ -1091,7 +1190,7 @@ class RuleBasedPlanner(AbstractPlanner):
             # drive a straight line and stop
             print("WARNING: No Lanes to travel at all")
             routes_in_lanes = []
-            yaw = - utils.normalize_angle(my_current_pose[3] + math.pi / 2)
+            yaw = - normalize_angle(my_current_pose[3] + math.pi / 2)
             delta = 50
             x, y = -math.sin(yaw) * delta + my_current_pose[0], -math.cos(yaw) * delta + my_current_pose[1]
             path = [my_current_pose[:2], [x, y]]
@@ -1115,10 +1214,15 @@ class RuleBasedPlanner(AbstractPlanner):
                     last_tic = time.perf_counter()
 
                 first_block = each_available_route[0]
-                all_lanes_in_block_zero = current_state['road'][first_block]['lower_level'].copy()
+                if first_block in current_state['road']:
+                    all_lanes_in_block_zero = current_state['road'][first_block]['lower_level'].copy()
+                elif str(first_block) in current_state['road']:
+                    all_lanes_in_block_zero = current_state['road'][str(first_block)]['lower_level'].copy()
+                else:
+                    print(f"first_block {first_block} not found, {each_available_route}")
+                    all_lanes_in_block_zero = []
 
                 lanes_to_travel = []
-
                 # 1. add lanes to travel for keeping current lane
                 current_lane, current_closest_pt_idx, dist_to_lane = plan_helper.find_closest_lane(
                     current_state=current_state,
@@ -1130,7 +1234,8 @@ class RuleBasedPlanner(AbstractPlanner):
 
                 # 2. add lanes to travel for 2 neighbor lanes
                 lanes_to_loop = all_lanes_in_block_zero
-                lanes_to_loop.remove(current_lane)
+                if current_lane in lanes_to_loop:
+                    lanes_to_loop.remove(current_lane)
                 if len(lanes_to_loop) < 3:
                     # 0, 1, or 2
                     for each_lane in lanes_to_loop:
@@ -1149,7 +1254,8 @@ class RuleBasedPlanner(AbstractPlanner):
                             selected_lanes=[lanes_to_loop],
                             valid_lane_types=self.valid_lane_types)
                         lanes_to_travel.append([current_lane, current_closest_pt_idx, dist_to_lane])
-                        lanes_to_loop.remove(current_lane)
+                        if current_lane in lanes_to_loop:
+                            lanes_to_loop.remove(current_lane)
 
                 if current_goal_block:
                     goal_lane, goal_closest_pt_idx, dist_to_goal_lane = plan_helper.find_closest_lane(
@@ -1188,22 +1294,44 @@ class RuleBasedPlanner(AbstractPlanner):
                         if i > len(each_available_route) - 2:
                             break
                         next_road_block = each_available_route[i + 1]
-                        next_lanes_on_route = road_dic[next_road_block]['lower_level']
-                        minimal_dist = 100000
-                        closest_next_lane = next_lanes_on_route[0]
-                        for each_next_lane in next_lanes_on_route:
-                            if each_next_lane in road_dic:
-                                starting_pt = road_dic[each_next_lane]['xyz'][0, :2]
-                                dist = utils.euclidean_distance(starting_pt, path[-1])
-                                if dist < minimal_dist:
-                                    minimal_dist = dist
-                                    closest_next_lane = each_next_lane
-
-                        current_lane, current_closest_pt_idx, dist_to_lane = plan_helper.find_closest_lane(
-                            current_state=current_state,
-                            my_current_pose=my_current_pose,
-                            selected_lanes=[closest_next_lane],
-                            valid_lane_types=self.valid_lane_types)
+                        if next_road_block in road_dic:
+                            next_lanes_on_route = road_dic[next_road_block]['lower_level']
+                            minimal_dist = 100000
+                            closest_next_lane = next_lanes_on_route[0]
+                            for each_next_lane in next_lanes_on_route:
+                                if each_next_lane in road_dic:
+                                    starting_pt = road_dic[each_next_lane]['xyz'][0, :2]
+                                    dist = euclidean_distance(starting_pt, path[-1])
+                                    if dist < minimal_dist:
+                                        minimal_dist = dist
+                                        closest_next_lane = each_next_lane
+                            current_lane, current_closest_pt_idx, dist_to_lane = plan_helper.find_closest_lane(
+                                current_state=current_state,
+                                my_current_pose=my_current_pose,
+                                selected_lanes=[closest_next_lane],
+                                valid_lane_types=self.valid_lane_types)
+                        elif str(next_road_block) in road_dic:
+                            next_lanes_on_route = road_dic[str(next_road_block)]['lower_level']
+                            minimal_dist = 100000
+                            closest_next_lane = next_lanes_on_route[0]
+                            for each_next_lane in next_lanes_on_route:
+                                if each_next_lane in road_dic:
+                                    starting_pt = road_dic[each_next_lane]['xyz'][0, :2]
+                                    dist = euclidean_distance(starting_pt, path[-1])
+                                    if dist < minimal_dist:
+                                        minimal_dist = dist
+                                        closest_next_lane = each_next_lane
+                            current_lane, current_closest_pt_idx, dist_to_lane = plan_helper.find_closest_lane(
+                                current_state=current_state,
+                                my_current_pose=my_current_pose,
+                                selected_lanes=[closest_next_lane],
+                                valid_lane_types=self.valid_lane_types)
+                        else:
+                            current_lane, current_closest_pt_idx, dist_to_lane = plan_helper.find_closest_lane(
+                                current_state=current_state,
+                                my_current_pose=my_current_pose,
+                                selected_lanes=[],
+                                valid_lane_types=self.valid_lane_types)
 
                     if len(routes_in_lanes) < 5:
                         # if don't have enough lanes before goal, search random lanes after goal to fill up to 5 lanes
@@ -1227,7 +1355,7 @@ class RuleBasedPlanner(AbstractPlanner):
                     if len(routes_in_lanes) == 0:
                         print("WARNING: No Lanes to travel at all")
                         p1 = my_current_pose[:2]
-                        yaw = - utils.normalize_angle(my_current_pose[3] + math.pi / 2)
+                        yaw = - normalize_angle(my_current_pose[3] + math.pi / 2)
                         delta = 50
                         x, y = -math.sin(yaw) * delta + my_current_pose[0], -math.cos(yaw) * delta + \
                                my_current_pose[1]
@@ -1256,7 +1384,7 @@ class RuleBasedPlanner(AbstractPlanner):
                             max_turning_yaw = math.pi / 180 * max_turning_angle
                             proper_v_for_cbc = my_current_v_per_step * 0.8
                             p1 = my_current_pose[:2]
-                            yaw12 = - utils.normalize_angle(my_current_pose[3] + math.pi / 2)
+                            yaw12 = - normalize_angle(my_current_pose[3] + math.pi / 2)
                             delta0 = max(2, int(10 * my_current_v_per_step))
                             while True:
                                 skip_connector = False
@@ -1278,12 +1406,12 @@ class RuleBasedPlanner(AbstractPlanner):
                                         if advance_index >= len(path) - 2:
                                             break
                                         p4 = path[1 + advance_index]
-                                # yaw34 = utils.normalize_angle(- utils.normalize_angle(utils.get_angle_of_a_line(p4, path[2 + advance_index]) + math.pi / 2) + math.pi)
-                                yaw34 = - utils.normalize_angle(
-                                    utils.get_angle_of_a_line(p4, path[2 + advance_index]) + math.pi / 2)
-                                # yaw34 = -utils.normalize_angle(
+                                # yaw34 = normalize_angle(- normalize_angle(get_angle_of_a_line(p4, path[2 + advance_index]) + math.pi / 2) + math.pi)
+                                yaw34 = - normalize_angle(
+                                    get_angle_of_a_line(p4, path[2 + advance_index]) + math.pi / 2)
+                                # yaw34 = -normalize_angle(
                                 #     road_dic[current_lane]['dir'][current_closest_pt_idx] + math.pi / 2)
-                                delta1 = utils.euclidean_distance(p4, my_current_pose[:2]) / 4
+                                delta1 = euclidean_distance(p4, my_current_pose[:2]) / 4
 
                                 x, y = -math.sin(yaw12) * delta0 + my_current_pose[0], -math.cos(yaw12) * delta0 + \
                                        my_current_pose[1]
@@ -1296,16 +1424,16 @@ class RuleBasedPlanner(AbstractPlanner):
                                     advance_index += 5
                                     advance_index = min(len(path) - 1, advance_index)
                                     continue
-                                starting_yaw_change = utils.get_angle_of_a_line(connection_traj[5, :2],
-                                                                                connection_traj[6,
-                                                                                :2]) - utils.get_angle_of_a_line(
+                                starting_yaw_change = get_angle_of_a_line(connection_traj[5, :2],
+                                                                          connection_traj[6,
+                                                                          :2]) - get_angle_of_a_line(
                                     connection_traj[0, :2], connection_traj[1, :2])
-                                ending_yaw_change = utils.get_angle_of_a_line(connection_traj[-7, :2],
-                                                                              connection_traj[-6,
-                                                                              :2]) - utils.get_angle_of_a_line(
+                                ending_yaw_change = get_angle_of_a_line(connection_traj[-7, :2],
+                                                                        connection_traj[-6,
+                                                                        :2]) - get_angle_of_a_line(
                                     connection_traj[-2, :2], connection_traj[-1, :2])
                                 if abs(starting_yaw_change) > max_turning_yaw:
-                                    if delta0 >= utils.euclidean_distance(p1, p4):
+                                    if delta0 >= euclidean_distance(p1, p4):
                                         print("P1;P2 too far, breaking loop")
                                         # path = [path[0]] + connection_traj[:, :2].tolist() + path[1 + advance_index:]
                                         # break
@@ -1377,13 +1505,421 @@ class RuleBasedPlanner(AbstractPlanner):
 
         return interpolators, marginal_trajectories, routes
 
+    def adjust_speed_for_collision(self, interpolator, distance_to_end, current_v, end_point_v,
+                                   reschedule_speed_profile=False):
+        # constant deceleration
+        time_to_collision = min(self.planning_horizon, distance_to_end / (current_v + end_point_v + 0.0001) * 2)
+        time_to_decelerate = abs(current_v - end_point_v) / (0.1 / self.frame_rate)
+        traj_to_return = []
+        desired_deceleration = 0.2 / self.frame_rate
+        if time_to_collision < time_to_decelerate:
+            # decelerate more than 3m/ss
+            deceleration = (end_point_v - current_v) / time_to_collision
+            dist_travelled = 0
+            for i in range(int(time_to_collision)):
+                current_v += deceleration * 1.2
+                current_v = max(0, current_v)
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+            current_len = len(traj_to_return)
+            while current_len < 100:
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+                current_len = len(traj_to_return)
+        else:
+            # decelerate with 2.5m/ss
+            time_for_current_speed = np.clip(
+                ((distance_to_end - 3 - (current_v + end_point_v) / 2 * time_to_decelerate) / (current_v + 0.0001)), 0,
+                self.frame_rate * self.frame_rate)
+            dist_travelled = 0
+            if time_for_current_speed > 1:
+                for i in range(int(time_for_current_speed)):
+                    if reschedule_speed_profile:
+                        dist_travelled += current_v
+                    else:
+                        if i == 0:
+                            dist_travelled += current_v
+                        elif i >= interpolator.trajectory.shape[0]:
+                            dist_travelled += current_v
+                        else:
+                            current_v_hat = interpolator.get_speed_with_index(i)
+                            if abs(current_v_hat - current_v) > 2 / self.frame_rate:
+                                print("WARNING: sharp speed changing", current_v, current_v_hat)
+                            current_v = current_v_hat
+                            dist_travelled += current_v
+                    traj_to_return.append(interpolator.interpolate(dist_travelled))
+            for i in range(int(time_to_decelerate)):
+                current_v -= desired_deceleration
+                current_v = max(0, current_v)
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+            current_len = len(traj_to_return)
+            while current_len < 100:
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+                current_len = len(traj_to_return)
+        if len(traj_to_return) > 0:
+            short = self.planning_horizon - len(traj_to_return)
+            for _ in range(short):
+                traj_to_return.append(traj_to_return[-1])
+        else:
+            for _ in range(self.planning_horizon):
+                traj_to_return.append(interpolator.interpolate(0))
+        return np.array(traj_to_return, ndmin=2)
+
+    def make_predictions(self, current_state, current_frame_idx, ego_agent_id):
+        other_agent_traj = []
+        other_agent_ids = []
+        # prior for ped and cyclist
+        prior_agent_traj = []
+        prior_agent_ids = []
+
+        if self.predict_env_for_ego_collisions:
+            if False:
+                # predict on all agents for detection checking
+                self.online_predictor.marginal_predict(current_frame=current_frame_idx, selected_agent_ids='all',
+                                                       current_data=current_state)
+                for each_agent_id in self.online_predictor.data['predicting']['marginal_trajectory'].keys():
+                    if each_agent_id == ego_agent_id:
+                        continue
+                    # if k = 1
+                    k = 6
+                    for n in range(k):
+                        pred_traj = \
+                        self.online_predictor.data['predicting']['marginal_trajectory'][each_agent_id]['rst'][n]
+                        total_frames_in_pred = pred_traj.shape[0]
+                        pred_traj_with_yaw = np.ones((total_frames_in_pred, 4)) * -1
+                        pred_traj_with_yaw[:, :2] = pred_traj[:, :]
+                        for t in range(total_frames_in_pred):
+                            if t == total_frames_in_pred - 1:
+                                pred_traj_with_yaw[t, 3] = pred_traj_with_yaw[t - 1, 3]
+                            else:
+                                pred_traj_with_yaw[t, 3] = get_angle_of_a_line(pt1=pred_traj[t, :2],
+                                                                               pt2=pred_traj[t + 1, :2])
+                        other_agent_traj.append(pred_traj_with_yaw)
+                        other_agent_ids.append(each_agent_id)
+            else:
+                # use constant velocity
+                for each_agent_id in current_state['agent']:
+                    if each_agent_id == ego_agent_id:
+                        continue
+                    varies = [1, 0.5, 0.9, 1.1, 1.5, 2.0]
+                    # varies = [1]
+                    for v in varies:
+                        delta_x = (current_state['agent'][each_agent_id]['pose'][current_frame_idx - 1, 0] -
+                                   current_state['agent'][each_agent_id]['pose'][current_frame_idx - 6, 0]) / 5
+                        delta_y = (current_state['agent'][each_agent_id]['pose'][current_frame_idx - 1, 1] -
+                                   current_state['agent'][each_agent_id]['pose'][current_frame_idx - 6, 1]) / 5
+                        pred_traj_with_yaw = np.ones((int(self.planning_horizon), 4)) * -1
+                        pred_traj_with_yaw[:, 3] = current_state['agent'][each_agent_id]['pose'][
+                            current_frame_idx - 1, 3]
+                        for t in range(int(self.planning_horizon)):
+                            pred_traj_with_yaw[t, 0] = current_state['agent'][each_agent_id]['pose'][
+                                                           current_frame_idx - 1, 0] + t * delta_x * v
+                            pred_traj_with_yaw[t, 1] = current_state['agent'][each_agent_id]['pose'][
+                                                           current_frame_idx - 1, 1] + t * delta_y * v
+                        # always yield with constant v
+                        prior_agent_traj.append(pred_traj_with_yaw)
+                        prior_agent_ids.append(each_agent_id)
+        else:
+            for each_agent in current_state['agent']:
+                if each_agent == ego_agent_id:
+                    continue
+                each_agent_pose = current_state['agent'][each_agent]['pose']
+                # check distance
+                if euclidean_distance(current_state['agent'][ego_agent_id]['pose'][current_frame_idx - 1, :2],
+                                      each_agent_pose[current_frame_idx - 1, :2]) > 500 and \
+                        current_state['agent'][ego_agent_id]['pose'][
+                            current_frame_idx - 1, 0] != -1:  # 20m for 1 second on 70km/h
+                    continue
+
+                # 'predict' its trajectory by following lanes
+                if int(current_state['agent'][each_agent]['type']) not in self.vehicle_types:
+                    # for pedestrians or bicycles
+                    if each_agent_pose[current_frame_idx - 1, 0] == -1.0 or \
+                            each_agent_pose[current_frame_idx - 6, 0] == -1.0:
+                        continue
+                    # for non-vehicle types agent
+                    delta_x = (each_agent_pose[current_frame_idx - 1, 0] -
+                               each_agent_pose[current_frame_idx - 6, 0]) / 5
+                    delta_y = (each_agent_pose[current_frame_idx - 1, 1] -
+                               each_agent_pose[current_frame_idx - 6, 1]) / 5
+                    if delta_x < 1 and delta_y < 1:
+                        traj_with_yaw = np.ones((self.planning_horizon, 4)) * -1
+                        traj_with_yaw[:, 3] = each_agent_pose[current_frame_idx - 1, 3]
+                        traj_with_yaw[:, :] = each_agent_pose[current_frame_idx, :]
+                        other_agent_ids.append(each_agent)
+                        other_agent_traj.append(traj_with_yaw)
+                        continue
+                    else:
+                        varies = [1, 0.5, 0.9, 1.1, 1.5, 2.0]
+                        predict_horizon = 39  # in frames
+                        for mul in varies:
+                            traj_with_yaw = np.ones((self.planning_horizon, 4)) * -1
+                            traj_with_yaw[:, 3] = each_agent_pose[current_frame_idx - 1, 3]
+                            traj_with_yaw[:, :] = each_agent_pose[current_frame_idx, :]
+                            for i in range(predict_horizon):
+                                # constant v with variations
+                                traj_with_yaw[i + 1, 0] = traj_with_yaw[i, 0] + min(0.5, delta_x * mul)
+                                traj_with_yaw[i + 1, 1] = traj_with_yaw[i, 1] + min(0.5, delta_y * mul)
+                            other_agent_ids.append(each_agent)
+                            other_agent_traj.append(traj_with_yaw)
+                else:
+                    # for vehicles
+                    if each_agent_pose[current_frame_idx - 1, 0] == -1.0 or \
+                            each_agent_pose[current_frame_idx - 6, 0] == -1.0 or \
+                            each_agent_pose[current_frame_idx - 11, 0] == -1.0:
+                        continue
+
+                    # for vehicle types agents
+                    each_agent_current_pose = each_agent_pose[current_frame_idx - 1]
+                    each_agent_current_v_per_step = euclidean_distance(
+                        each_agent_pose[current_frame_idx - 1, :2],
+                        each_agent_pose[current_frame_idx - 6, :2]) / 5
+                    each_agent_current_a_per_step = (euclidean_distance(
+                        each_agent_pose[current_frame_idx - 1, :2],
+                        each_agent_pose[current_frame_idx - 6, :2]) / 5 - euclidean_distance(
+                        each_agent_pose[current_frame_idx - 6, :2],
+                        each_agent_pose[current_frame_idx - 11, :2]) / 5) / 5
+
+                    if each_agent_current_v_per_step < 0.05:
+                        steady_in_past = True
+                        # for static vehicles, skip prediction
+                        traj_with_yaw = np.ones((int(self.planning_horizon), 4)) * -1
+                        traj_with_yaw[:, 3] = each_agent_pose[current_frame_idx - 1, 3]
+                        traj_with_yaw[:, :] = each_agent_pose[current_frame_idx, :]
+                        prior_agent_traj.append(traj_with_yaw)
+                        prior_agent_ids.append(each_agent)
+                        continue
+
+                    if each_agent_current_v_per_step > 1 * self.frame_rate:
+                        each_agent_current_v_per_step = 0.1 * self.frame_rate
+                    # get the route for each agent, you can use your prediction model here
+                    if each_agent_current_v_per_step < 0.025 * self.frame_rate:
+                        each_agent_current_v_per_step = 0
+                    if each_agent_current_a_per_step > 0.05 * self.frame_rate:
+                        each_agent_current_a_per_step = 0.03 * self.frame_rate
+
+                    # 1. find the closest lane
+                    current_lane, current_closest_pt_idx, dist_to_lane, _ = self.find_closes_lane(
+                        current_state=current_state,
+                        agent_id=each_agent,
+                        my_current_v_per_step=each_agent_current_v_per_step,
+                        my_current_pose=each_agent_current_pose,
+                        no_unparallel=False,
+                        return_list=False)
+
+                    # detect parking vehicles
+                    steady_in_past = euclidean_distance(
+                        each_agent_pose[current_frame_idx - 1, :2],
+                        each_agent_pose[current_frame_idx - 10, :2]) < 3
+
+                    if each_agent_current_v_per_step < 0.05 and (
+                            dist_to_lane is None or dist_to_lane > 2) and steady_in_past:
+                        dummy_steady = np.repeat(
+                            each_agent_pose[current_frame_idx - 1, :][np.newaxis, :], self.planning_horizon,
+                            axis=0)
+                        prior_agent_ids.append(each_agent)
+                        prior_agent_traj.append(dummy_steady)
+                        current_state['agent'][each_agent]['marking'] = "Parking"
+                        continue
+
+                    # 2. search all possible route from this lane and add trajectory from the lane following model
+                    # random shooting for all possible routes
+                    if current_lane in current_state['road'] and 'speed_limit' in current_state['road'][current_lane]:
+                        speed_limit = current_state['road'][current_lane]['speed_limit']
+                        my_target_speed = speed_limit if speed_limit is not None else mph_to_meterpersecond(
+                            DEFAULT_SPEED) / self.frame_rate
+                    else:
+                        my_target_speed = mph_to_meterpersecond(DEFAULT_SPEED) / self.frame_rate
+
+                    routes = []
+                    for _ in range(self.frame_rate):
+                        lanes_in_a_route = [current_lane]
+                        current_looping = current_lane
+                        route_traj_left = np.array(
+                            current_state['road'][current_looping]['xyz'][current_closest_pt_idx + self.frame_rate:,
+                            :2], ndmin=2)
+                        next_lanes = current_state['road'][current_looping]['next_lanes']
+                        while len(next_lanes) > 0 and len(lanes_in_a_route) < 5:
+                            lanes_in_a_route.append(current_looping)
+                            current_looping = random.choice(next_lanes)
+                            if current_looping not in current_state['road']:
+                                continue
+                            next_lanes = current_state['road'][current_looping]['next_lanes']
+                            route_traj_left = np.concatenate(
+                                (route_traj_left, current_state['road'][current_looping]['xyz'][:, :2]))
+                        if lanes_in_a_route not in routes:
+                            routes.append(lanes_in_a_route)
+                            varies = [1, 0.5, 0.9, 1.1, 1.5, 2.0]
+                            for mul in varies:
+                                other_interpolator = SudoInterpolator(route_traj_left.copy(), each_agent_current_pose)
+                                traj_with_yaw = self.get_trajectory_from_interpolator(
+                                    my_interpolator=other_interpolator,
+                                    my_current_speed=each_agent_current_v_per_step * mul,
+                                    a_per_step=each_agent_current_a_per_step,
+                                    desired_speed=my_target_speed,
+                                    check_turning_dynamics=False)
+                                other_agent_traj.append(traj_with_yaw)
+                                other_agent_ids.append(each_agent)
+        return other_agent_traj, other_agent_ids, prior_agent_traj, prior_agent_ids
+
+    def find_closes_lane(self, current_state, agent_id, my_current_v_per_step, my_current_pose, no_unparallel=False,
+                         return_list=False, current_route=[]):
+        # find a closest lane to trace
+        closest_dist = 999999
+        closest_dist_no_yaw = 999999
+        closest_dist_threshold = 5
+        closest_lane = None
+        closest_lane_no_yaw = None
+        closest_lane_pt_no_yaw_idx = None
+        closest_lane_pt_idx = None
+
+        current_lane = None
+        current_closest_pt_idx = None
+        dist_to_lane = None
+        distance_threshold = None
+
+        closest_lanes_same_dir = []
+        closest_lanes_idx_same_dir = []
+
+        for each_lane in current_state['road']:
+            if len(current_route) > 0 and each_lane not in current_route:
+                continue
+
+            if isinstance(current_state['road'][each_lane]['type'], int):
+                if current_state['road'][each_lane]['type'] not in self.valid_lane_types:
+                    continue
+            else:
+                if current_state['road'][each_lane]['type'][0] not in self.valid_lane_types:
+                    continue
+
+            road_xy = current_state['road'][each_lane]['xyz'][:, :2]
+            if road_xy.shape[0] < 3:
+                continue
+            current_lane_closest_dist = 999999
+            current_lane_closest_idx = None
+
+            for j, each_xy in enumerate(road_xy):
+                road_yaw = current_state['road'][each_lane]['dir'][j]
+                dist = euclidean_distance(each_xy, my_current_pose[:2])
+                yaw_diff = abs(normalize_angle(my_current_pose[3] - road_yaw))
+                if dist < closest_dist_no_yaw:
+                    closest_lane_no_yaw = each_lane
+                    closest_dist_no_yaw = dist
+                    closest_lane_pt_no_yaw_idx = j
+                if yaw_diff < math.pi / 180 * 20 and dist < closest_dist_threshold:
+                    if dist < closest_dist:
+                        closest_lane = each_lane
+                        closest_dist = dist
+                        closest_lane_pt_idx = j
+                    if dist < current_lane_closest_dist:
+                        current_lane_closest_dist = dist
+                        current_lane_closest_idx = j
+
+            # classify current agent as a lane changer or not:
+            if my_current_v_per_step > 0.1 and 0.5 < current_lane_closest_dist < 3.2 and each_lane not in closest_lanes_same_dir and \
+                    current_state['road'][each_lane]['turning'] == 0:
+                closest_lanes_same_dir.append(each_lane)
+                closest_lanes_idx_same_dir.append(current_lane_closest_idx)
+
+        if closest_lane is not None and not 0.5 < closest_dist < 3.2:
+            closest_lanes_same_dir = []
+            closest_lanes_idx_same_dir = []
+
+        if closest_lane is not None:
+            current_lane = closest_lane
+            current_closest_pt_idx = closest_lane_pt_idx
+            dist_to_lane = closest_dist
+            distance_threshold = max(7, max(7 * my_current_v_per_step, dist_to_lane))
+        elif closest_lane_no_yaw is not None and not no_unparallel:
+            current_lane = closest_lane_no_yaw
+            current_closest_pt_idx = closest_lane_pt_no_yaw_idx
+            dist_to_lane = closest_dist_no_yaw
+            distance_threshold = max(10, dist_to_lane)
+        else:
+            logging.warning(f'No current lane founded: {agent_id}')
+            # return
+        if return_list:
+            if len(closest_lanes_same_dir) > 0:
+                return closest_lanes_same_dir, closest_lanes_idx_same_dir, dist_to_lane, distance_threshold
+            else:
+                return [current_lane], [current_closest_pt_idx], dist_to_lane, distance_threshold
+        else:
+            return current_lane, current_closest_pt_idx, dist_to_lane, distance_threshold
+
+    def get_traffic_light_collision_pts(self, current_state, current_frame_idx,
+                                        continue_time_threshold=5):
+        tl_dics = current_state['traffic_light']
+        road_dics = current_state['road']
+        traffic_light_ending_pts = []
+        for lane_id in tl_dics.keys():
+            if lane_id == -1:
+                continue
+            tl = tl_dics[lane_id]
+            # get the position of the end of this lane
+            # Unknown = 0, Arrow_Stop = 1, Arrow_Caution = 2, Arrow_Go = 3, Stop = 4, Caution = 5, Go = 6, Flashing_Stop = 7, Flashing_Caution = 8
+            try:
+                tl_state = tl["state"][current_frame_idx]
+            except:
+                tl_state = tl["state"][0]
+
+            if tl_state in [1, 4, 7]:
+                end_of_tf_checking = min(len(tl["state"]), current_frame_idx + continue_time_threshold)
+                all_red = True
+                for k in range(current_frame_idx, end_of_tf_checking):
+                    if tl["state"][k] not in [1, 4, 7]:
+                        all_red = False
+                        break
+                if all_red:
+                    for seg_id in road_dics.keys():
+                        if lane_id == seg_id:
+                            road_seg = road_dics[seg_id]
+                            if self.dataset == 'Waymo':
+                                if road_seg["type"] in [1, 2, 3]:
+                                    if len(road_seg["dir"].shape) < 1:
+                                        continue
+                                    if road_seg['turning'] == 1 and tl_state in [4, 7]:
+                                        # can do right turn with red light
+                                        continue
+                                    end_point = road_seg["xyz"][0][:2]
+                                    traffic_light_ending_pts.append(end_point)
+                                break
+                            elif self.dataset == 'NuPlan':
+                                end_point = road_seg["xyz"][0][:2]
+                                traffic_light_ending_pts.append(end_point)
+                                break
+                            else:
+                                assert False, f'Unknown dataset in env planner - {self.dataset}'
+        return traffic_light_ending_pts
+
+    def trajectory_from_cubic_BC(self, p1, p2, p3, p4, v):
+        # form a Bezier Curve
+        total_dist = euclidean_distance(p4, p1)
+        total_t = max(5, min(93, int(total_dist/max(1, v))))
+        traj_to_return = []
+        for i in range(total_t):
+            if i >= 92:
+                break
+            t = (i+1)/total_t
+            p0_x = pow((1 - t), 3) * p1[0]
+            p0_y = pow((1 - t), 3) * p1[1]
+            p1_x = 3 * pow((1 - t), 2) * t * p2[0]
+            p1_y = 3 * pow((1 - t), 2) * t * p2[1]
+            p2_x = 3 * (1 - t) * pow(t, 2) * p3[0]
+            p2_y = 3 * (1 - t) * pow(t, 2) * p3[1]
+            p3_x = pow(t, 3) * p4[0]
+            p3_y = pow(t, 3) * p4[1]
+            traj_to_return.append((p0_x+p1_x+p2_x+p3_x, p0_y+p1_y+p2_y+p3_y))
+        return np.array(traj_to_return, ndmin=2)
+
 
 def get_road_dict(map_api, ego_pose_center):
     road_dic = {}
     traffic_dic = {}
     all_map_obj = map_api.get_available_map_objects()
 
-    # Collect lane information, following nuplan.planning.training.preprocessing.feature_builders.vector_builder_utils.get_neighbor_vector_map
+    # Collect lane information, following nuplan.planning.training.preprocessing.feature_builders.vector_builder_get_neighbor_vector_map
 
     # currently NuPlan only supports these map obj classes
     selected_objs = [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]
@@ -1498,33 +2034,35 @@ def get_agent_dict(ego_states, other_agents, statics):
                           ego_states[t].waypoint.heading]  # x, y, z, yaw
         shapes_np[t, :] = [ego_states[-1].waypoint.oriented_box.width, ego_states[-1].waypoint.oriented_box.height,
                            0]  # width, height
-        speeds_np[t, :] = [ego_states[t].linear_velocity.x, ego_states[t].linear_velocity.y]
+        speeds_np[t, :] = [ego_states[t].waypoint.velocity.x, ego_states[t].waypoint.velocity.y]
 
     for t in range(context_length):
-        for each_agent in other_agents:
+        for each_agent in other_agents[t]:
             agent_token = each_agent.track_token
             if agent_token not in agent_dic:
                 agent_dic[agent_token] = deepcopy(new_dic)
-            agent_dic[agent_token]['pose'][t, :] = [each_agent.center.x, each_agent.center.y, 0, each_agent.center.heading]
-            agent_dic[agent_token]['shape'][t, :] = [each_agent.oriented_box.width, each_agent.oriented_box.length, each_agent.oriented_box.height]
+            agent_dic[agent_token]['pose'][t, :] = [each_agent.center.x, each_agent.center.y, 0,
+                                                    each_agent.center.heading]
+            agent_dic[agent_token]['shape'][t, :] = [each_agent.box.width, each_agent.box.length, each_agent.box.height]
             agent_dic[agent_token]['speed'][t, :] = [each_agent.velocity.x, each_agent.velocity.y]
 
-        for each_agent in statics:
+        for each_agent in statics[t]:
             agent_token = each_agent.track_token
             if agent_token not in agent_dic:
                 agent_dic[agent_token] = deepcopy(new_dic)
-            agent_dic[agent_token]['pose'][t, :] = [each_agent.center.x, each_agent.center.y, 0, each_agent.center.heading]
-            agent_dic[agent_token]['shape'][t, :] = [each_agent.oriented_box.width, each_agent.oriented_box.length, each_agent.oriented_box.height]
+            agent_dic[agent_token]['pose'][t, :] = [each_agent.center.x, each_agent.center.y, 0,
+                                                    each_agent.center.heading]
+            agent_dic[agent_token]['shape'][t, :] = [each_agent.box.width, each_agent.box.length, each_agent.box.height]
             agent_dic[agent_token]['speed'][t, :] = [each_agent.velocity.x, each_agent.velocity.y]
 
     return agent_dic
 
 
 if __name__ == "__main__":
-    with open("history.pkl", "rb") as f:
+    with open("/home/shiduozhang/Project/transformer4planning/history.pkl", "rb") as f:
         input = pickle.load(f)
 
-    with open("init.pkl", "rb") as f:
+    with open("/home/shiduozhang/Project/transformer4planning/init.pkl", "rb") as f:
         initial = pickle.load(f)
     map_api = initial.map_api
     ego_pose = (input.ego_state_buffer[-1].waypoint.center.x, \
