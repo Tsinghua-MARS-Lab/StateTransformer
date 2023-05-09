@@ -21,7 +21,7 @@ from transformer4planning.utils import *
 from transformer4planning.libs.classes import SudoInterpolator, GoalSetter, Agent
 import transformer4planning.libs.plan_helper as plan_helper
 
-current_frame_idx = 20
+count = 0
 
 """
 Settings for the rule-based planner
@@ -213,6 +213,7 @@ class RuleBasedPlanner(AbstractPlanner):
         self.predict_env_for_ego_collisions = True
         self.planning_to = 0
         self.predict_relations_for_ego = True
+        self.planning_interval = 10
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -229,10 +230,14 @@ class RuleBasedPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        global current_frame_idx
-        current_frame_idx += 1
-        print("current_frame_idx: ", current_frame_idx)
-        history = current_input
+        global count
+        current_frame_idx = 22
+        count += 1
+        print("count: ", count)
+        try:
+            history = current_input.history
+        except: # debug version
+            history = current_input
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
         # trajectory as format of [(x, y, yaw)]
@@ -785,8 +790,8 @@ class RuleBasedPlanner(AbstractPlanner):
                                                                 desired_speed=my_target_speed,
                                                                 hold_still=True)
         assert planed_traj.shape[0] >= self.planning_horizon, planed_traj.shape
-        pred_traj = planed_traj[:self.planning_horizon, :]
-
+        pred_traj = planed_traj[:self.planning_horizon, :][::2, :]
+        delta_traj = pred_traj[1:].copy() - pred_traj[:-1].copy()
         # # rotate pred_traj
         # rot_eye = np.eye(pred_traj.shape[1])
         # rot = np.array(
@@ -814,8 +819,8 @@ class RuleBasedPlanner(AbstractPlanner):
         for i in range(0, pred_traj.shape[0] - 1):
             new_time_point = TimePoint(state.time_point.time_us + 1e5)
             state = EgoState.build_from_center(
-                center=StateSE2(pred_traj[i + 1, 0] + ego_trajectory[-1][0],
-                                pred_traj[i + 1, 1] + ego_trajectory[-1][1],
+                center=StateSE2(pred_traj[i + 1, 0],
+                                pred_traj[i + 1, 1],
                                 ego_trajectory[-1][2]),
                 center_velocity_2d=StateVector2D((pred_traj[i + 1, 0] - pred_traj[i, 0]) / 0.1,
                                                  (pred_traj[i + 1, 1] - pred_traj[i, 1]) / 0.1),
@@ -828,7 +833,7 @@ class RuleBasedPlanner(AbstractPlanner):
                 angular_accel=state.dynamic_car_state.angular_acceleration
             )
             trajectory.append(state)
-        return InterpolatedTrajectory(trajectory[::2])
+        return InterpolatedTrajectory(trajectory)
 
     def get_trajectory_from_interpolator(self, my_interpolator, my_current_speed, a_per_step=None,
                                          check_turning_dynamics=True, desired_speed=31,  # desired_speed in meters per second
@@ -921,7 +926,7 @@ class RuleBasedPlanner(AbstractPlanner):
         closest_road_blockc, dist_to_roadc = self.map_api.get_distance_to_nearest_map_object(
             point=Point2D(current_pose[0], current_pose[1]),
             layer=SemanticMapLayer.ROADBLOCK_CONNECTOR)
-        closest_road_block = int(closest_road_block) if dist_to_road < dist_to_roadc else int(closest_road_blockc)
+        closest_road_block = closest_road_block if dist_to_road < dist_to_roadc else int(closest_road_blockc)
         # use given route if available
         if route is not None:
             if closest_road_block in route:
@@ -1378,6 +1383,65 @@ class RuleBasedPlanner(AbstractPlanner):
         assert len(marginal_trajectories) > 0, f'No Available Navigation Paths? {routes}'
 
         return interpolators, marginal_trajectories, routes
+    
+    def adjust_speed_for_collision(self, interpolator, distance_to_end, current_v, end_point_v, reschedule_speed_profile=False):
+        # constant deceleration
+        time_to_collision = min(self.planning_horizon, distance_to_end / (current_v + end_point_v + 0.0001) * 2)
+        time_to_decelerate = abs(current_v - end_point_v) / (0.1/self.frame_rate)
+        traj_to_return = []
+        desired_deceleration = 0.2 /self.frame_rate
+        if time_to_collision < time_to_decelerate:
+            # decelerate more than 3m/ss
+            deceleration = (end_point_v - current_v) / time_to_collision
+            dist_travelled = 0
+            for i in range(int(time_to_collision)):
+                current_v += deceleration * 1.2
+                current_v = max(0, current_v)
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+            current_len = len(traj_to_return)
+            while current_len < 100:
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+                current_len = len(traj_to_return)
+        else:
+            # decelerate with 2.5m/ss
+            time_for_current_speed = np.clip(((distance_to_end - 3 - (current_v+end_point_v)/2*time_to_decelerate) / (current_v + 0.0001)), 0, self.frame_rate*self.frame_rate)
+            dist_travelled = 0
+            if time_for_current_speed > 1:
+                for i in range(int(time_for_current_speed)):
+                    if reschedule_speed_profile:
+                        dist_travelled += current_v
+                    else:
+                        if i == 0:
+                            dist_travelled += current_v
+                        elif i >= interpolator.trajectory.shape[0]:
+                            dist_travelled += current_v
+                        else:
+                            current_v_hat = interpolator.get_speed_with_index(i)
+                            if abs(current_v_hat - current_v) > 2 / self.frame_rate:
+                                print("WARNING: sharp speed changing", current_v, current_v_hat)
+                            current_v = current_v_hat
+                            dist_travelled += current_v
+                    traj_to_return.append(interpolator.interpolate(dist_travelled))
+            for i in range(int(time_to_decelerate)):
+                current_v -= desired_deceleration
+                current_v = max(0, current_v)
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+            current_len = len(traj_to_return)
+            while current_len < 100:
+                dist_travelled += current_v
+                traj_to_return.append(interpolator.interpolate(dist_travelled))
+                current_len = len(traj_to_return)
+        if len(traj_to_return) > 0:
+            short = self.planning_horizon - len(traj_to_return)
+            for _ in range(short):
+                traj_to_return.append(traj_to_return[-1])
+        else:
+            for _ in range(self.planning_horizon):
+                traj_to_return.append(interpolator.interpolate(0))
+        return np.array(traj_to_return, ndmin=2)
     
     def make_predictions(self, current_state, current_frame_idx, ego_agent_id):
         other_agent_traj = []
