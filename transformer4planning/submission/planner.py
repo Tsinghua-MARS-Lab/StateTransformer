@@ -84,8 +84,8 @@ class ControlTFPlanner(AbstractPlanner):
         parser = HfArgumentParser((ModelArguments))
         model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
         if model_args.model_pretrain_name_or_path is None:
-            # model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/gpt-baseline/gpt-naive"
-            model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/checkpoint-20000"
+            model_args.model_pretrain_name_or_path = "/home/zhangsd/project/transformer4planning/data/xl-oa-a-embed1024-block12-goon/training_results/checkpoint-2000"
+            #model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/checkpoint-20000"
         assert model_args.model_pretrain_name_or_path is not None
         if "xl" in model_type:
             self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \

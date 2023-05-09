@@ -24,7 +24,7 @@ runner.py --model_name scratch-xl \
 --past_index 2 \
 --dataloader_num_workers 40 \
 --save_total_limit 5 \
---use_nsm True \
+--use_nsm False \
 --predict_trajectory True \
 --predict_trajectory_with_stopflag False \
 --dataloader_drop_last True \
