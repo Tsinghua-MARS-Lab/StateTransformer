@@ -1122,8 +1122,10 @@ class RuleBasedPlanner(AbstractPlanner):
                     last_tic = time.perf_counter()
 
                 first_block = each_available_route[0]
-                all_lanes_in_block_zero = current_state['road'][first_block]['lower_level'].copy()
-
+                if first_block in current_state['road'].keys():
+                    all_lanes_in_block_zero = current_state['road'][first_block]['lower_level'].copy()
+                else:
+                    continue
                 lanes_to_travel = []
 
                 # 1. add lanes to travel for keeping current lane
@@ -1804,8 +1806,9 @@ def get_road_dict(map_api, ego_pose_center):
                 # TRAFFIC_LIGHT = 2
                 # TURN_STOP = 3
                 # YIELD = 4
-                if selected_obj.stop_line_type not in [0, 1]:
-                    continue
+                # if selected_obj.stop_line_type not in [0, 1]:
+                #     continue
+                pass
             elif layer_name in [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]:
                 line_x, line_y = selected_obj.baseline_path.linestring.coords.xy
                 if selected_obj.speed_limit_mps is not None:
