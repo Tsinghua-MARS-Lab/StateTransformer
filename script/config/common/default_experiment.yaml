@@ -2,7 +2,7 @@
 
 group: ${oc.env:NUPLAN_EXP_ROOT}/exp               # This is where results, logs, config, etc. are saved
 experiment_name: ???                                # Experiment name, by default 'simulation' or 'training'
-job_name: ???                                       # Job name, as defined in the specific yaml files.
+job_name: open_loop_boxes                                       # Job name, as defined in the specific yaml files.
 
 # Directory structure
 date_format: '%Y.%m.%d.%H.%M.%S'

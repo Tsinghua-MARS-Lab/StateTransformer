@@ -1,6 +1,58 @@
 MINIMAL_DISTANCE_PER_STEP = 0.05
 from transformer4planning.utils import *
 from typing import List
+import math
+import numpy as np
+
+def euclidean_distance(pt1, pt2):
+    x_1, y_1 = pt1
+    x_2, y_2 = pt2
+    return math.sqrt((x_1-x_2)**2+(y_1-y_2)**2)
+
+def get_angle_of_a_line(pt1, pt2):
+    # angle from horizon to the right, counter-clockwise,
+    x1, y1 = pt1
+    x2, y2 = pt2
+    angle = math.atan2(y2 - y1, x2 - x1)
+    return angle
+
+def get_angle(x, y):
+    return math.atan2(y, x)
+
+def calculate_yaw_from_states(trajectory, default_yaw):
+    time_frames, _ = trajectory.shape
+    pred_yaw = np.zeros([time_frames])
+    for i in range(time_frames - 1):
+        pose_p = trajectory[i + 1]
+        pose = trajectory[i]
+        delta_x = pose_p[0] - pose[0]
+        delta_y = pose_p[1] - pose[1]
+        dis = np.sqrt(delta_x * delta_x + delta_y * delta_y)
+        if dis > 1:
+            angel = get_angle(delta_x, delta_y)
+            pred_yaw[i] = angel
+            default_yaw = angel
+        else:
+            pred_yaw[i] = default_yaw
+    return pred_yaw
+
+
+def change_axis(yaw):
+    return - yaw - math.pi / 2
+
+def normalize_angle(angle):
+    """
+    Normalize an angle to [-pi, pi].
+    :param angle: (float)
+    :return: (float) Angle in radian in [-pi, pi]
+    """
+    while angle > np.pi:
+        angle -= 2.0 * np.pi
+
+    while angle < -np.pi:
+        angle += 2.0 * np.pi
+
+    return angle
 
 class GoalSetter:
     def __init__(self):

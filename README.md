@@ -121,7 +121,7 @@ Create a new yaml file for Hydra at: `script/config/simulation/planner/control_t
 
     python script/run_simulation.py 'planner=control_tf_planner' 
     'scenario_filter.limit_total_scenarios=2' 'scenario_filter.num_scenarios_per_type=1' 
-    'job_name=test' 'scenario_builder=nuplan' 
+    'job_name=open_loop_boxes' 'scenario_builder=nuplan' 
     'ego_controller=perfect_tracking_controller' 'observation=box_observation'
     '+model_pretrain_name_or_path=/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1' 
 
@@ -175,9 +175,9 @@ nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
 
 ### Launch nuboard for visualization
 
-``python script/run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'``
+``python script/run_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/test/2023.05.08.19.17.16]' 'scenario_builder=nuplan' 'port_number=5005'``
 
 or
 
-`python nuplan/planning/script/run_nuboard.py simulation_path='[/home/xiongx/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
+`python nuplan/planning/script/run_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
 
