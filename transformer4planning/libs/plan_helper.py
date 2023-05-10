@@ -1,7 +1,19 @@
-import interactive_sim.envs.util as utils
 import math
 import numpy as np
 
+def normalize_angle(angle):
+    """
+    Normalize an angle to [-pi, pi].
+    :param angle: (float)
+    :return: (float) Angle in radian in [-pi, pi]
+    """
+    while angle > np.pi:
+        angle -= 2.0 * np.pi
+
+    while angle < -np.pi:
+        angle += 2.0 * np.pi
+
+    return angle
 
 def mph_to_meterpersecond(mph):
     return mph * 0.4472222222
@@ -101,7 +113,7 @@ def find_closest_lane(current_state, my_current_pose,
         for j, each_xy in enumerate(road_xy):
             road_yaw = current_state['road'][each_lane]['dir'][j]
             dist = euclidean_distance(each_xy, my_current_pose[:2])
-            yaw_diff = abs(utils.normalize_angle(my_current_pose[3] - road_yaw))
+            yaw_diff = abs(normalize_angle(my_current_pose[3] - road_yaw))
             if dist < closest_dist_no_yaw:
                 closest_lane_no_yaw = each_lane
                 closest_dist_no_yaw = dist
@@ -122,9 +134,11 @@ def find_closest_lane(current_state, my_current_pose,
         current_closest_pt_idx = closest_lane_pt_no_yaw_idx
         dist_to_lane = closest_dist_no_yaw
         # distance_threshold = max(10, dist_to_lane)
-    # else:
-    #     logging.warning(f'No current lane founded: {agent_id}')
+    else:
+        road_dic = current_state['road']
+        print(f'No current lane founded: {excluded_lanes} {selected_lanes} {list(road_dic.keys())[:3]}')
         # return
+    assert current_lane is not None, f'current lane none: {excluded_lanes} {selected_lanes} {list(road_dic.keys())[:3]}'
     return current_lane, current_closest_pt_idx, dist_to_lane
 
 
@@ -144,7 +158,7 @@ def search_neighbour_lanes(current_pose, current_state, dist_threshold=2,
         for j, each_xy in enumerate(road_xy):
             road_yaw = current_state['road'][each_lane]['dir'][j]
             dist = euclidean_distance(each_xy, current_pose[:2])
-            yaw_diff = abs(utils.normalize_angle(current_pose[3] - road_yaw))
+            yaw_diff = abs(normalize_angle(current_pose[3] - road_yaw))
             if yaw_diff < math.pi / 180 * 20 and dist < dist_threshold:
                 lanes_to_return.append(each_lane)
                 continue
