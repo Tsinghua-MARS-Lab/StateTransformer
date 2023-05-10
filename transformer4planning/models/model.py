@@ -210,7 +210,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         # to keep input and output at the same dimension
         if self.with_future_nsm:
-            input_embeds = input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
+            input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
         else:
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
