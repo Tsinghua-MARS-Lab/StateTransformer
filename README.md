@@ -24,7 +24,8 @@ runner.py --model_name scratch-xl \
 --past_index 2 \
 --dataloader_num_workers 40 \
 --save_total_limit 5 \
---use_nsm True \
+--use_nsm False \
+--with_future_nsm False \
 --predict_trajectory True \
 --predict_trajectory_with_stopflag False \
 --dataloader_drop_last True \
@@ -111,6 +112,14 @@ Create a new yaml file for Hydra at: `script/config/simulation/planner/control_t
         acceleration: [5.0, 5.0]  # x (longitudinal), y (lateral)
         thread_safe: true
 
+Create a new yaml file for Hydra at: `script/config/simulation/planner/rule_based_planner.yaml` with:
+    rule_based_planner:
+        _target_: transformer4planning.submission.rule_based_planner.RuleBasedPlanner
+        horizon_seconds: 10.0
+        sampling_time: 0.1
+        acceleration: [5.0, 5.0]  # x (longitudinal), y (lateral)
+        thread_safe: true
+
 ### Run simulation without yaml changing
 
 
@@ -130,7 +139,15 @@ Create a new yaml file for Hydra at: `script/config/simulation/planner/control_t
 #### Modify the following variables in yaml files
 nuplan/planning/script/config/common/default_experiment.yaml
 
-`job_name: open_loop_boxes`
+`job_name: open_loop_boxes` or
+`job_name: closed_loop_nonreactive_agents` or 
+`job_name: closed_loop_reactive_agents`
+
+nuplan/planning/script/config/common/default_common.yaml
+
+`scenario_builder: nuplan` correspond to the yaml filename in scripts/config/common/scenario_builder
+
+`scenario_filter: all_scenarios` correspond to the yaml filenmae in scripts/config/common/scnario_filter 
 
 nuplan/planning/script/config/common/worker/ray_distributed.yaml
 
@@ -157,6 +174,8 @@ nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
 `num_scenarios_per_type: 1`
 
 `limit_total_scenarios: 5`
+   
+`log_names: []` to filter the db files to run simulation
 
 #### Add the following at the beginning of run_xxx.py
 
@@ -172,6 +191,10 @@ nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
 #### Run the following command from NuPlan-Devkit
 
 `python nuplan/planning/script/run_simulation.py`
+
+to set configs: 
+planner choice: `+planner=control_tf_planner` Optional `[control_tf_planner, rule_based_planner]`
+chanllenge choice: `+simulation=closed_loop_reactive_agents` Optional `[closed_loop_reactive_agents, open_loop_boxes, closed_loop_nonreactive_agents]`
 
 ### Launch nuboard for visualization
 

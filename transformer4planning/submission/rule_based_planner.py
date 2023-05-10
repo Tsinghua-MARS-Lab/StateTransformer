@@ -292,6 +292,7 @@ class RuleBasedPlanner(AbstractPlanner):
         self.planning_to = 0
         self.predict_relations_for_ego = True
         self.planning_interval = 10
+        self.road_dic = None
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -326,12 +327,13 @@ class RuleBasedPlanner(AbstractPlanner):
                               ego_states[-1].waypoint.oriented_box.width])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
-        road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
-
+        if self.road_dic is None:
+            self.road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
+        
         agent_dic = get_agent_dict(ego_states, agents, statics)
         current_state = {
             'agent': agent_dic,
-            'road': road_dic,
+            'road': self.road_dic,
             'route': self.route_roadblock_ids
         }
 
@@ -1504,14 +1506,13 @@ class RuleBasedPlanner(AbstractPlanner):
         assert len(marginal_trajectories) > 0, f'No Available Navigation Paths? {routes}'
 
         return interpolators, marginal_trajectories, routes
-
-    def adjust_speed_for_collision(self, interpolator, distance_to_end, current_v, end_point_v,
-                                   reschedule_speed_profile=False):
+    
+    def adjust_speed_for_collision(self, interpolator, distance_to_end, current_v, end_point_v, reschedule_speed_profile=False):
         # constant deceleration
         time_to_collision = min(self.planning_horizon, distance_to_end / (current_v + end_point_v + 0.0001) * 2)
-        time_to_decelerate = abs(current_v - end_point_v) / (0.1 / self.frame_rate)
+        time_to_decelerate = abs(current_v - end_point_v) / (0.1/self.frame_rate)
         traj_to_return = []
-        desired_deceleration = 0.2 / self.frame_rate
+        desired_deceleration = 0.2 /self.frame_rate
         if time_to_collision < time_to_decelerate:
             # decelerate more than 3m/ss
             deceleration = (end_point_v - current_v) / time_to_collision
@@ -1528,9 +1529,7 @@ class RuleBasedPlanner(AbstractPlanner):
                 current_len = len(traj_to_return)
         else:
             # decelerate with 2.5m/ss
-            time_for_current_speed = np.clip(
-                ((distance_to_end - 3 - (current_v + end_point_v) / 2 * time_to_decelerate) / (current_v + 0.0001)), 0,
-                self.frame_rate * self.frame_rate)
+            time_for_current_speed = np.clip(((distance_to_end - 3 - (current_v+end_point_v)/2*time_to_decelerate) / (current_v + 0.0001)), 0, self.frame_rate*self.frame_rate)
             dist_travelled = 0
             if time_for_current_speed > 1:
                 for i in range(int(time_for_current_speed)):
@@ -1566,7 +1565,7 @@ class RuleBasedPlanner(AbstractPlanner):
             for _ in range(self.planning_horizon):
                 traj_to_return.append(interpolator.interpolate(0))
         return np.array(traj_to_return, ndmin=2)
-
+    
     def make_predictions(self, current_state, current_frame_idx, ego_agent_id):
         other_agent_traj = []
         other_agent_ids = []
@@ -1585,8 +1584,7 @@ class RuleBasedPlanner(AbstractPlanner):
                     # if k = 1
                     k = 6
                     for n in range(k):
-                        pred_traj = \
-                        self.online_predictor.data['predicting']['marginal_trajectory'][each_agent_id]['rst'][n]
+                        pred_traj = self.online_predictor.data['predicting']['marginal_trajectory'][each_agent_id]['rst'][n]
                         total_frames_in_pred = pred_traj.shape[0]
                         pred_traj_with_yaw = np.ones((total_frames_in_pred, 4)) * -1
                         pred_traj_with_yaw[:, :2] = pred_traj[:, :]
@@ -1595,7 +1593,7 @@ class RuleBasedPlanner(AbstractPlanner):
                                 pred_traj_with_yaw[t, 3] = pred_traj_with_yaw[t - 1, 3]
                             else:
                                 pred_traj_with_yaw[t, 3] = get_angle_of_a_line(pt1=pred_traj[t, :2],
-                                                                               pt2=pred_traj[t + 1, :2])
+                                                                                     pt2=pred_traj[t + 1, :2])
                         other_agent_traj.append(pred_traj_with_yaw)
                         other_agent_ids.append(each_agent_id)
             else:
@@ -1692,6 +1690,7 @@ class RuleBasedPlanner(AbstractPlanner):
                         prior_agent_ids.append(each_agent)
                         continue
 
+
                     if each_agent_current_v_per_step > 1 * self.frame_rate:
                         each_agent_current_v_per_step = 0.1 * self.frame_rate
                     # get the route for each agent, you can use your prediction model here
@@ -1714,8 +1713,7 @@ class RuleBasedPlanner(AbstractPlanner):
                         each_agent_pose[current_frame_idx - 1, :2],
                         each_agent_pose[current_frame_idx - 10, :2]) < 3
 
-                    if each_agent_current_v_per_step < 0.05 and (
-                            dist_to_lane is None or dist_to_lane > 2) and steady_in_past:
+                    if each_agent_current_v_per_step < 0.05 and (dist_to_lane is None or dist_to_lane > 2) and steady_in_past:
                         dummy_steady = np.repeat(
                             each_agent_pose[current_frame_idx - 1, :][np.newaxis, :], self.planning_horizon,
                             axis=0)
@@ -1728,8 +1726,7 @@ class RuleBasedPlanner(AbstractPlanner):
                     # random shooting for all possible routes
                     if current_lane in current_state['road'] and 'speed_limit' in current_state['road'][current_lane]:
                         speed_limit = current_state['road'][current_lane]['speed_limit']
-                        my_target_speed = speed_limit if speed_limit is not None else mph_to_meterpersecond(
-                            DEFAULT_SPEED) / self.frame_rate
+                        my_target_speed = speed_limit if speed_limit is not None else mph_to_meterpersecond(DEFAULT_SPEED) / self.frame_rate
                     else:
                         my_target_speed = mph_to_meterpersecond(DEFAULT_SPEED) / self.frame_rate
 
@@ -1738,8 +1735,7 @@ class RuleBasedPlanner(AbstractPlanner):
                         lanes_in_a_route = [current_lane]
                         current_looping = current_lane
                         route_traj_left = np.array(
-                            current_state['road'][current_looping]['xyz'][current_closest_pt_idx + self.frame_rate:,
-                            :2], ndmin=2)
+                            current_state['road'][current_looping]['xyz'][current_closest_pt_idx + self.frame_rate:, :2], ndmin=2)
                         next_lanes = current_state['road'][current_looping]['next_lanes']
                         while len(next_lanes) > 0 and len(lanes_in_a_route) < 5:
                             lanes_in_a_route.append(current_looping)
@@ -1952,8 +1948,9 @@ def get_road_dict(map_api, ego_pose_center):
                 # TRAFFIC_LIGHT = 2
                 # TURN_STOP = 3
                 # YIELD = 4
-                if selected_obj.stop_line_type not in [0, 1]:
-                    continue
+                # if selected_obj.stop_line_type not in [0, 1]:
+                #     continue
+                pass
             elif layer_name in [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]:
                 line_x, line_y = selected_obj.baseline_path.linestring.coords.xy
                 if selected_obj.speed_limit_mps is not None:
