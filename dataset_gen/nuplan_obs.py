@@ -172,7 +172,35 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
     goal_contour_low_res = (low_res_raster_scale * goal_contour).astype(np.int64)
     goal_contour_low_res += observation_kwargs["low_res_raster_shape"][0] // 2
     cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
-
+    
+    cos_, sin_ = math.cos(-ego_pose[3] - math.pi / 2), math.sin(-ego_pose[3] - math.pi / 2)
+    route_ids = data_dic["route"]
+    routes = [data_dic["road"][route_id] for route_id in route_ids]
+    for route in routes:
+        xyz = route["xyz"].copy()
+        xyz[:, :2] -= ego_pose[:2]
+        if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+            abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+            continue
+        pts = list(zip(xyz[:, 0], xyz[:, 1]))
+        line = shapely.geometry.LineString(pts)
+        simplified_xyz_line = line.simplify(1)
+        simplified_x, simplified_y = simplified_xyz_line.xy
+        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+        simplified_xyz[:, 1] *= -1
+        high_res_route = simplified_xyz * high_res_raster_scale
+        low_res_route = simplified_xyz * low_res_raster_scale
+        high_res_route = high_res_route.astype('int32')
+        low_res_route = low_res_route.astype('int32')
+        high_res_route += observation_kwargs["high_res_raster_shape"][0] // 2
+        low_res_route += observation_kwargs["low_res_raster_shape"][0] // 2
+        for j in range(simplified_xyz.shape[0] - 1):
+            cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
+                    tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
+            cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
+                    tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
     # 'map_raster': (n, w, h),  # n is the number of road types and traffic lights types
     cos_, sin_ = math.cos(-ego_pose[3] - math.pi / 2), math.sin(-ego_pose[3] - math.pi / 2)
     for i, key in enumerate(data_dic['road']):
@@ -247,7 +275,7 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
                               np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
 
     for i in range(len(sample_frames) - 1):
-        action = rotated_poses[sample_frames[i + 1]] - rotated_poses[sample_frames[i]]
+        action = rotated_poses[sample_frames[i]]
         context_actions.append(action)
     result_to_return["context_actions"] = np.array(context_actions, dtype=np.float32)
 
@@ -481,8 +509,10 @@ if __name__ == '__main__':
             frame_sample_interval=5,
             action_label_scale=100
         )
-    result = get_observation_for_autoregression_nsm(observation_encode_kwargs, data_dic, 88, total_frames, None)
-    with open("dataset_example.pkl", "wb") as f:
+    # result = get_observation_for_autoregression_nsm(observation_encode_kwargs, data_dic, 88, total_frames, None)
+    # with open("dataset_example.pkl", "wb") as f:
+    #     pickle.dump(result, f)
+    result = get_observation_for_nsm(observation_encode_kwargs, data_dic, 1100, total_frames, None)
+    with open("nonauto_example.pkl", "wb") as f:
         pickle.dump(result, f)
-    
 
