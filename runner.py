@@ -28,7 +28,7 @@ from transformers import (
     TrainerCallback,
     set_seed,
 )
-from models.model import TransfoXLModelNuPlan, GPTModelNuPlan
+from transformer4planning.models.model import TransfoXLModelNuPlan, GPTModelNuPlan
 from transformers import TransfoXLConfig, GPT2Config
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
@@ -238,7 +238,8 @@ def main():
                 print(item)
                 dataset_path = os.path.join(data_args.saved_dataset_folder, item)
                 dataset = Dataset.load_from_disk(dataset_path)
-                dataset.set_format(type='torch')
+                dataset.set_format(type='torch', columns=["intended_maneuver_vector", "current_maneuver_vector", "high_res_raster", "low_res_raster",\
+                                                          "trajectory_label", "context_actions", "intended_maneuver_label", "current_maneuver_label"])
                 print(dataset)
                 concatdatasets.append(dataset)
             concat_dataset = ConcatDataset(concatdatasets)
@@ -254,7 +255,7 @@ def main():
             nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             nuplan_dataset.set_format(type='torch')
             print('Dataset Loaded: ', nuplan_dataset)
-            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=False, seed=training_args.seed)
+            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.01, shuffle=False, seed=training_args.seed)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
