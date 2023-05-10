@@ -22,7 +22,7 @@ runner.py --model_name scratch-xl \
 --save_strategy steps \
 --save_steps 2000 \
 --past_index 2 \
---dataloader_num_workers 40 \
+--dataloader_num_workers 5 \
 --save_total_limit 5 \
 --use_nsm False \
 --with_future_nsm False \
@@ -36,6 +36,7 @@ runner.py --model_name scratch-xl \
 --d_inner 1024 \
 --n_layers 4 \
 --activation_function silu \
+--resume_from_checkpoint None\
 `
 
 
@@ -47,7 +48,7 @@ export CUDA_VISIBLE_DEVICES=3; \
 python -m torch.distributed.run \
 --nproc_per_node=1 \
 --master_port 12345 \
-runner.py --model_name pretrain-gpt \
+runner.py --model_name pretrain-xl \
 --model_pretrain_name_or_path data/example/training_results/checkpoint-xxxxx \
 --saved_dataset_folder /localdata_ssd/nuplan/nsm_autoregressive_rapid \
 --output_dir data/example/prediction_results/checkpoint-xxxxx \
@@ -55,15 +56,16 @@ runner.py --model_name pretrain-gpt \
 --past_index 2 \
 --dataloader_num_workers 40 \
 --use_nsm False \
+--with_future_intend_maneuver False \
+--with_future_current_maneuver False \
 --predict_intended_maneuver False \
 --predict_current_maneuver False \
 --predict_trajectory True \
+--predict_trajectory_with_stopflag False \
 --recover_obs False \
 --do_predict \
 --max_predict_samples 500 \
 --dataloader_drop_last True \
---per_instance_encoding False \
---maneuver_repeat False \
 `
 
 ## To generate dataset:

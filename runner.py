@@ -96,7 +96,10 @@ class ModelArguments:
     predict_trajectory_with_stopflag: Optional[bool] = field(
         default=False
     )
-    with_future_nsm: Optional[bool] = field(
+    with_future_intend_maneuver: Optional[bool] = field(
+        default=False
+    )
+    with_future_current_maneuver: Optional[bool] = field(
         default=False
     )
     mask_history_intended_maneuver: Optional[bool] = field(
@@ -273,6 +276,7 @@ def main():
             config_p.d_embed = model_args.d_embed
             config_p.d_model = model_args.d_model
             config_p.d_inner = model_args.d_inner
+            config_p.activate_function  = model_args.activate_function
             scratch_model = TransfoXLModelNuPlan(config_p, model_args=model_args)
             with tempfile.TemporaryDirectory() as tmp_dir:
                 scratch_model.save_pretrained(tmp_dir)
