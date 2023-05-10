@@ -17,6 +17,7 @@ import copy
 import datasets
 import numpy as np
 from datasets import Dataset
+from datasets.arrow_dataset import _concatenate_map_style_datasets
 from dataclasses import dataclass, field
 
 import transformers
@@ -242,20 +243,16 @@ def main():
                                                           "trajectory_label", "context_actions", "intended_maneuver_label", "current_maneuver_label"])
                 print(dataset)
                 concatdatasets.append(dataset)
-            concat_dataset = ConcatDataset(concatdatasets)
-            nuplan_dataset = dict(
-                train=concat_dataset,
-                validation=None,
-                test=None
-            )
-            print("Dataset size:", len(concat_dataset))
+          
+            concat_dataset = _concatenate_map_style_datasets(concatdatasets)
+            nuplan_dataset = concat_dataset.train_test_split(test_size=0.1, shuffle=False, seed=training_args.seed)
 
         else: # whole hugging face dataset   
             print("loading dataset...")
             nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             nuplan_dataset.set_format(type='torch')
             print('Dataset Loaded: ', nuplan_dataset)
-            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.01, shuffle=False, seed=training_args.seed)
+            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=False, seed=training_args.seed)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
