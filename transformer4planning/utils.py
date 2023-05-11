@@ -54,11 +54,8 @@ class ModelArguments:
     predict_trajectory_with_nsm: Optional[bool] = field(
         default=False,
     )
-    with_future_intend_maneuver: Optional[bool] = field(
-        default=False
-    )
-    with_future_current_maneuver: Optional[bool] = field(
-        default=False
+    with_future_nsm: Optional[bool] = field(
+        default = False
     )
     predict_trajectory_with_stopflag: Optional[bool] = field(
         default=False,

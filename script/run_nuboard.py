@@ -79,10 +79,4 @@ os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.1'
 os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/train_boston'
 
 if __name__ == '__main__':
-    os.environ['USE_PYGEOS'] = '0'
-    os.environ['HYDRA_FULL_ERROR'] = '1'
-    os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan/'
-    os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.1/'
-    os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/train_boston/'
-    os.environ['NUPLAN_MAP_VERSION'] = 'nuplan-maps-v1.0'
     main()

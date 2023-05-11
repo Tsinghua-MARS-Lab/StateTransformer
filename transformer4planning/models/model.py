@@ -26,8 +26,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.transformer = TransfoXLModel(config)
         model_args = kwargs['model_args']
         self.use_nsm = model_args.use_nsm
-        self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
-        self.with_future_current_maneuver = model_args.with_future_current_maneuver
+        self.with_future_nsm = model_args.with_future_nsm
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
 
@@ -54,11 +53,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
 
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
-        if self.with_future_intend_maneuver:
+        if self.with_future_nsm:
             self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.d_embed), nn.Tanh())
-        if self.with_future_current_maneuver:
-            self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.d_embed), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_embed), nn.Tanh())
 
         if self.predict_trajectory_with_nsm:
@@ -86,6 +82,13 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+    def prepare_raster(self, images):
+        # raster_images = np.array(images, dtype=np.float32)
+        # raster_images = torch.tensor(raster_images, device=device, dtype=torch.float32)
+        raster_images = images.permute(0, 3, 1, 2).contiguous().to(torch.float32)
+        # print('debug: ', raster_images.shape)
+        return raster_images
+
     @add_start_docstrings_to_model_forward(TRANSFO_XL_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
@@ -104,7 +107,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         high_res_raster: Optional[torch.LongTensor] = None,
         low_res_raster: Optional[torch.LongTensor] = None,
         intended_maneuver_gt: Optional[torch.LongTensor] = None,
-        current_maneuver_gt: Optional[torch.LongTensor] = None,
+
         mems: Optional[List[torch.FloatTensor]] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         # inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -124,10 +127,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         """
         device = high_res_raster.device
         # with history manuever label input
-        if self.with_future_intend_maneuver:
+        if self.with_future_nsm:
             future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
-        if self.with_future_current_maneuver:
-            future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
         # with history menuever label input
         if self.use_nsm and (self.predict_trajectory_with_stopflag or self.old_model):
             if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
@@ -208,7 +209,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        if self.with_future_intend_maneuver or self.with_future_current_maneuver:
+        if self.with_future_nsm:
             input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
         else:
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
@@ -928,8 +929,7 @@ if  __name__ == '__main__':
     parser.add_argument("--maneuver_repeat", default=False)
     parser.add_argument("--predict_trajectory_with_stopflag", default=False)
     parser.add_argument("--predict_trajectory_with_nsm", default=False)
-    parser.add_argument("--with_future_intend_maneuver", default=True)
-    parser.add_argument("--with_future_current_maneuver", default=False)
+    parser.add_argument("--with_future_nsm", default=True)
     parser.add_argument("--mask_history_intended_maneuver", default=False)
     parser.add_argument("--mask_history_current_maneuver", default=False)
 
@@ -1023,7 +1023,6 @@ if  __name__ == '__main__':
             high_res_raster=example['high_res_raster'].unsqueeze(0),
             low_res_raster=example['low_res_raster'].unsqueeze(0),
             intended_maneuver_gt=example['intended_maneuver_gt'].unsqueeze(0),
-            current_maneuver_gt=example['current_maneuver_gt'].unsqueeze(0),
             mems=None,
             head_mask=None,
             output_attentions=None,
