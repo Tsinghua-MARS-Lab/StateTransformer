@@ -11,7 +11,7 @@ from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
 from dataset_gen.nuplan_obs import get_observation_for_nsm, get_observation_for_autoregression_nsm
 from torch.utils.data import DataLoader
-import os
+import os, time
 import importlib.util
 import logging
 import argparse
@@ -22,7 +22,11 @@ import pickle
 
 def main(args):
     running_mode = args.running_mode
-    data_path = args.data_path
+    data_path = {
+            'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+            'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+            'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        }
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -80,10 +84,12 @@ def main(args):
                             skip = True
                             break    
                     if skip:
-                        continue                    
-                    # if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
-                    #     if np.random.rand() > args.sample_rate:
-                    #         continue
+                        continue
+                    target_goal_maneuver = nsm_result["goal_actions_weights_per_frame"][t][0]['action']        
+                    current_goal_maneuver = nsm_result["goal_actions_weights_per_frame"][t + observation_kwargs["frame_sample_interval"]][0]['action']                
+                    if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
+                        if np.random.rand() > args.balance_rate:#1.0/19
+                            continue
                     if not current_frame_is_valid or not target_frame_is_valid:
                         continue
                     if len(nsm_result['goal_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
@@ -91,11 +97,11 @@ def main(args):
                     if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
                         continue
                     
-                if args.auto_regressive:
-                    observation_dic = get_observation_for_autoregression_nsm(
-                        observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
-                else:
-                    observation_dic = get_observation_for_nsm(
+                # if args.auto_regressive:
+                #     observation_dic = get_observation_for_autoregression_nsm(
+                #         observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
+                # else:
+                observation_dic = get_observation_for_nsm(
                         observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
                 other_info = {
                     'file_name': file_name,
@@ -130,8 +136,10 @@ def main(args):
     # #     loaded_dic = pickle.load(f) 
     
     # total_frames = len(loaded_dic['lidar_pc_tokens'])
+    # s = time.time()
     # observation_dic = get_observation_for_nsm(
     #                 observation_kwargs, loaded_dic, 100, total_frames, nsm_result=nsm_data)
+    # print(time.time() - s)
     # high_res_raster = observation_dic["high_res_raster"]
     # low_res_raster = observation_dic["low_res_raster"]
     # context_actions = observation_dic["context_actions"][:, :2]
@@ -202,11 +210,7 @@ if __name__ == '__main__':
     #             'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
     #             'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
     #         })
-    parser.add_argument("--data_path", type=dict, default={
-             'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-                'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-                'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/train_pittsburgh",
-        })
+    parser.add_argument("--data_path", type=str, default="train_singapore")
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
     parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
 

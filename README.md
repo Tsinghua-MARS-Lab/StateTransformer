@@ -25,7 +25,8 @@ runner.py --model_name scratch-xl \
 --dataloader_num_workers 5 \
 --save_total_limit 5 \
 --use_nsm False \
---with_future_nsm False \
+--with_future_intend_maneuver False \
+--with_future_current_maneuver False \
 --predict_trajectory True \
 --predict_trajectory_with_stopflag False \
 --dataloader_drop_last True \
@@ -195,7 +196,7 @@ nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
 `python nuplan/planning/script/run_simulation.py`
 
 to set configs: 
-planner choice: `+planner=control_tf_planner` Optional `[control_tf_planner, rule_based_planner]`
+planner choice: `planner=control_tf_planner` Optional `[control_tf_planner, rule_based_planner]`
 chanllenge choice: `+simulation=closed_loop_reactive_agents` Optional `[closed_loop_reactive_agents, open_loop_boxes, closed_loop_nonreactive_agents]`
 
 ### Launch nuboard for visualization
