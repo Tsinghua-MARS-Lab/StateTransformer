@@ -94,10 +94,13 @@ class ModelArguments:
         default=False,
     )
     predict_trajectory_with_stopflag: Optional[bool] = field(
-        default=False
+        default=False,
     )
-    with_future_nsm: Optional[bool] = field(
-        default=False
+    with_future_intend_maneuver: Optional[bool] = field(
+        default=False,
+    )
+    with_future_current_maneuver: Optional[bool] = field(
+        default=False,
     )
     mask_history_intended_maneuver: Optional[bool] = field(
         default=False,
@@ -245,14 +248,14 @@ def main():
                 concatdatasets.append(dataset)
           
             concat_dataset = _concatenate_map_style_datasets(concatdatasets)
-            nuplan_dataset = concat_dataset.train_test_split(test_size=0.1, shuffle=False, seed=training_args.seed)
+            nuplan_dataset = concat_dataset.train_test_split(test_size=0.1, shuffle=True, seed=training_args.seed)
 
         else: # whole hugging face dataset   
             print("loading dataset...")
             nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             nuplan_dataset.set_format(type='torch')
             print('Dataset Loaded: ', nuplan_dataset)
-            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=False, seed=training_args.seed)
+            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True, seed=training_args.seed)
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
@@ -399,6 +402,8 @@ def main():
             if model_args.predict_trajectory:
                 end_bias_x = []
                 end_bias_y = []
+                all_bias_x = []
+                all_bias_y = []
                 losses = []
                 loss_fn = torch.nn.MSELoss(reduction="mean")
     
@@ -474,6 +479,8 @@ def main():
                     end_point = traj_pred[:, -1, :]
                     end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])
                     end_bias_y.append(end_trajectory_label[:, 1] - end_point[:, 1])
+                    all_bias_x.append(trajectory_label[:, :, 0] - traj_pred[:, :, 0])
+                    all_bias_y.append(trajectory_label[:, :, 1] - traj_pred[:, :, 1])
                     losses.append(loss)
                     
             
@@ -508,10 +515,13 @@ def main():
             if model_args.predict_trajectory:
                 end_bias_x = torch.stack(end_bias_x, 0).cpu().numpy()
                 end_bias_y = torch.stack(end_bias_y, 0).cpu().numpy()
+                all_bias_x = torch.stack(all_bias_x, 0).reshape(-1).cpu().numpy()
+                all_bias_y = torch.stack(all_bias_y, 0).reshape(-1).cpu().numpy()
                 final_loss = torch.mean(torch.stack(losses, 0)).item()
+                print('Mean L2 loss: ', final_loss)
                 print('End point x offset: ', np.average(np.abs(end_bias_x)))
                 print('End point y offset: ', np.average(np.abs(end_bias_y)))
-                print('ADE', np.sqrt(final_loss))
+                print('ADE', np.average(np.sqrt(np.abs(all_bias_x)**2 + np.abs(all_bias_y)**2)))
                 print('FDE', np.average(np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)))
 
             if training_args.output_dir is not None:
