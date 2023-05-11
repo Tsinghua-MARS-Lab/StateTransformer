@@ -153,7 +153,42 @@ class ControlTFPlanner(AbstractPlanner):
                 pred_traj[i, 0] = new_x
                 pred_traj[i, 1] = new_y
                 pred_traj[i, 2] += ego_trajectory[-1][-1]
-            
+
+            # post-processing
+            low_filter = True
+            low_threshold = 0.01
+            if low_filter:
+                filtered_traj = np.zeros_like(pred_traj)
+                last_pose = None
+                for idx, each_pose in enumerate(pred_traj):
+                    if last_pose is None:
+                        dx, dy = each_pose[:2] - np.zeros(2)
+                        dx = 0 if dx < low_threshold else dx
+                        dy = 0 if dy < low_threshold else dy
+                        last_pose = filtered_traj[idx, :] = [dx, dy, each_pose[2], each_pose[3]]
+                        continue
+                    dx, dy = each_pose[:2] - pred_traj[idx - 1, :2]
+                    dx = 0 if dx < low_threshold else dx
+                    dy = 0 if dy < low_threshold else dy
+                    last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
+                                                         each_pose[3]]
+                pred_traj = filtered_traj
+            moving_average_smooth = True
+            average_n = 5
+            if moving_average_smooth:
+                smoothed_traj = np.zeros_like(pred_traj)
+                for idx, each_pose in enumerate(pred_traj):
+                    # special process for index 0
+                    if idx == 0:
+                        smoothed_traj[idx, :] = np.mean([pred_traj[1, :], np.zeros(4)], axis=0)
+                        continue
+                    if idx < average_n:
+                        smoothed_traj[idx, :] = np.mean(pred_traj[:idx + 1, :], axis=0)
+                    else:
+                        smoothed_traj[idx, :] = np.mean(pred_traj[idx - average_n:idx + 1, :], axis=0)
+                pred_traj = smoothed_traj
+            # end of post_processing
+
             next_world_coor_points = pred_traj.copy()
         elif "gpt" in self.model_type:
             high_res_raster, low_res_raster, trajectory = self.compute_raster_sequence_input(
