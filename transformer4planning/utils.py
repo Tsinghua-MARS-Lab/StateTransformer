@@ -13,7 +13,7 @@ class ModelArguments:
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="transfo-xl-wt103",
+        default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(
@@ -93,6 +93,9 @@ class ModelArguments:
     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
     activation_function: Optional[str] = field(
         default = "silu"
+    )
+    loss_fn: Optional[str] = field(
+        default="mse"
     )
 
     
