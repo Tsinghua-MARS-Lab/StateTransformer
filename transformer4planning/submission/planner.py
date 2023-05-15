@@ -186,29 +186,6 @@ class ControlTFPlanner(AbstractPlanner):
 
         next_world_coor_points = pred_traj.copy()
 
-        # rotate pred_traj
-        next_world_coor_trajectories = list()
-        for idx in range(1, pred_traj.shape[0]):
-            cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-            offset_x = pred_traj[idx, 0] * cos_ + pred_traj[idx, 1] * sin_
-            offset_y = pred_traj[idx, 1] * cos_ - pred_traj[idx, 0] * sin_
-            next_ego_traj = [ego_trajectory[-1][0] + offset_x,
-                                ego_trajectory[-1][1] + offset_y,
-                                ego_trajectory[-1][2] + pred_traj[idx, -1]]
-            ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj).reshape(1, -1)), axis=0)
-            next_world_coor_trajectories.append(next_ego_traj)
-
-        next_world_coor_trajectories = np.array(next_world_coor_trajectories)
-        next_world_coor_points = next_world_coor_trajectories[::2]
-        next_world_coor_x = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
-                                        next_world_coor_points[:, 0])
-        next_world_coor_y = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
-                                        next_world_coor_points[:, 1])
-        next_world_coor_yaw = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
-                                        next_world_coor_points[:, 2])
-        next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
-
-
         # build output
         ego_state = history.ego_states[-1]
         state = EgoState(
