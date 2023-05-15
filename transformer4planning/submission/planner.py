@@ -84,10 +84,11 @@ class ControlTFPlanner(AbstractPlanner):
         parser = HfArgumentParser((ModelArguments))
         model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
         if model_args.model_pretrain_name_or_path is None:
-            model_args.model_pretrain_name_or_path = "/home/zhangsd/project/transformer4planning/data/xl-oa-a-embed1024-block12-goon/training_results/checkpoint-2000"
-            #model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/checkpoint-20000"
+            #model_args.model_pretrain_name_or_path = "/home/zhangsd/project/transformer4planning/data/xl-oa-a-embed1024-block12-goon/training_results/checkpoint-2000"
+            model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1"
         assert model_args.model_pretrain_name_or_path is not None
         if "xl" in model_type:
+            print("load checkpoint from", model_args.model_pretrain_name_or_path)
             self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
                                                               model_args=model_args)
         elif "gpt" in model_type:
@@ -146,15 +147,7 @@ class ControlTFPlanner(AbstractPlanner):
                                     high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
                                     low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
                 pred_traj = output[-1][-1].squeeze(0).detach().numpy()
-            cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-            for i in range(pred_traj.shape[0]):
-                new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
-                new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
-                pred_traj[i, 0] = new_x
-                pred_traj[i, 1] = new_y
-                pred_traj[i, 2] += ego_trajectory[-1][-1]
-
-            # post-processing
+            # # post-processing
             low_filter = True
             low_threshold = 0.01
             if low_filter:
@@ -188,6 +181,15 @@ class ControlTFPlanner(AbstractPlanner):
                         smoothed_traj[idx, :] = np.mean(pred_traj[idx - average_n:idx + 1, :], axis=0)
                 pred_traj = smoothed_traj
             # end of post_processing
+            # convert to world coordinate points
+            
+            cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
+            for i in range(pred_traj.shape[0]):
+                new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
+                new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
+                pred_traj[i, 0] = new_x
+                pred_traj[i, 1] = new_y
+                pred_traj[i, 2] += ego_trajectory[-1][-1]
 
             next_world_coor_points = pred_traj.copy()
         elif "gpt" in self.model_type:

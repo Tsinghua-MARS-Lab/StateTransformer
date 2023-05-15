@@ -29,7 +29,7 @@ from transformers import (
     TrainerCallback,
     set_seed,
 )
-from transformer4planning.models.model import TransfoXLModelNuPlan, GPTModelNuPlan
+from transformer4planning.models.model import build_models
 from transformers import TransfoXLConfig, GPT2Config
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
@@ -133,6 +133,10 @@ class ModelArguments:
     activation_function: Optional[str] = field(
         default = "gelu_new"
     )
+    loss_fn: Optional[str] = field(
+        default="mse",
+    )
+
 @dataclass
 class DataTrainingArguments:
     """
@@ -260,43 +264,7 @@ def main():
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # Load a model's pretrained weights from a path or from hugging face's model base
-    if 'pretrain' in model_args.model_name:
-        # Default pre-trained name for TransfoXL is 'transfo-xl-wt103'
-        if 'xl' in model_args.model_name:
-            model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=True)
-            model.config.pad_token_id = 0
-            model.config.eos_token_id = 0
-        elif 'gpt' in model_args.model_name:
-            model = GPTModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=True)
-            
-    elif 'scratch' in model_args.model_name:
-        if 'xl' in model_args.model_name:
-            config_p = TransfoXLConfig()
-            config_p.n_layer = model_args.n_layers
-            config_p.d_embed = model_args.d_embed
-            config_p.d_model = model_args.d_model
-            config_p.d_inner = model_args.d_inner
-            scratch_model = TransfoXLModelNuPlan(config_p, model_args=model_args)
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                scratch_model.save_pretrained(tmp_dir)
-                model = TransfoXLModelNuPlan.from_pretrained(tmp_dir, model_args=model_args, low_cpu_mem_usage=True)
-                del scratch_model
-            model.config.pad_token_id = 0
-            model.config.eos_token_id = 0
-            print("Scratch TransformerXL model initialized!")
-        elif 'gpt' in model_args.model_name:
-            config_p = GPT2Config()
-            config_p.n_layer = model_args.n_layers
-            config_p.n_embd = model_args.d_embed
-            config_p.n_inner = model_args.d_inner
-            model = GPTModelNuPlan(config_p, model_args=model_args)
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                scratch_model.save_pretrained(tmp_dir)
-                model = GPTModelNuPlan.from_pretrained(tmp_dir, model_args=model_args, low_cpu_mem_usage=True)
-                del scratch_model
-            print("Scratch GPT model initilized!")
-        # model_p.save_pretrained( '../saved_model/transformerxlSml')
-
+    model = build_models(model_args)
 
     if training_args.do_train:
         import multiprocessing
