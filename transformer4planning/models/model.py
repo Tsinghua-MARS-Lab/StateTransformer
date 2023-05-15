@@ -1,7 +1,8 @@
 from transformers.models.xlnet import XLNetConfig, XLNetModel, XLNetPreTrainedModel
 from transformers.models.xlnet.modeling_xlnet import XLNetLMHeadModelOutput
 from transformers.models.t5 import T5Config,T5Model, T5PreTrainedModel
-from transformers.modeling_outputs import Seq2SeqLMOutput
+from transformers.models.deberta_v2 import DebertaV2Config, DebertaV2Model, DebertaV2PreTrainedModel
+from transformers.modeling_outputs import Seq2SeqLMOutput, SequenceClassifierOutput
 
 from transformer4planning.models.TransformerXL.model import *
 from transformer4planning.models.GPT2.models import *
@@ -564,7 +565,7 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         intended_maneuver_gt: Optional[torch.Tensor] = None,
         current_maneuver_gt: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        use_mems: Optional[bool] = None,
+        use_mems: Optional[bool] = True,
         mems: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -671,27 +672,38 @@ class T5ModelNuplan(T5PreTrainedModel):
         self.loss_fn = model_args.loss_fn
         in_channels = 29 # raster: goal + road_type + agent_type
         if self.use_nsm and self.predict_trajectory_with_stopflag:
-            n_embed = config.n_embd // 3 # high res + low res + intented m
+            n_embed = config.d_model // 3 # high res + low res + intented m
         else:
-            n_embed = config.n_embd // 2
+            n_embed = config.d_model // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
         assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
         if self.with_future_intend_maneuver:
-            self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.n_embd), nn.Tanh())
+            self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.d_model), nn.Tanh())
         if self.with_future_current_maneuver:
-            self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.n_embd), nn.Tanh())
-        self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
+            self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.d_model), nn.Tanh())
+        self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_model), nn.Tanh())
 
         if self.predict_trajectory_with_stopflag:
-            self.stop_flag_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=config.n_embd), nn.Tanh())
+            self.stop_flag_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=config.d_model), nn.Tanh())
 
         self.traj_decoder = None
         if self.predict_trajectory:
-            embed_sz = 2 * config.n_embd if self.predict_trajectory_with_stopflag else config.n_embd
-            self.traj_decoder = DecoderResCat(config.n_inner, embed_sz, out_features=4)
-        
+            embed_sz = 2 * config.d_model if self.predict_trajectory_with_stopflag else config.d_model
+            self.traj_decoder = DecoderResCat(config.d_ff, embed_sz, out_features=4)
+        self.model_parallel = False
+        self.device_map = None
         self.post_init()
+    
+    @add_start_docstrings(PARALLELIZE_DOCSTRING)
+    def parallelize(self, device_map=None):
+        self.transformer.parallelize(device_map)
+        self.model_parallel = True
+        self.device_map = self.transformer.device_map
+
+    @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
+    def deparallelize(self):
+        self.transformer.deparallelize()
 
     def forward(
         self,
@@ -714,7 +726,7 @@ class T5ModelNuplan(T5PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-
+        **kwargs
         ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -802,7 +814,136 @@ class T5ModelNuplan(T5PreTrainedModel):
             encoder_last_hidden_state=transformer_outputs.encoder_last_hidden_state,
             encoder_hidden_states=transformer_outputs.encoder_hidden_states
         )
+
+class DeBertaNuplan(DebertaV2PreTrainedModel):
+    def __init__(self, config, **kwargs):
+        super().__init__(config)
+        self.transformer = DebertaV2Model(config)
+        model_args = kwargs["model_args"]
+        self.use_nsm = model_args.use_nsm
+        self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
+        self.with_future_current_maneuver = model_args.with_future_current_maneuver
+        self.predict_trajectory = model_args.predict_trajectory
+        self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
+        self.loss_fn = model_args.loss_fn
+        in_channels = 29 # raster: goal + road_type + agent_type
+        if self.use_nsm and self.predict_trajectory_with_stopflag:
+            n_embed = config.hidden_size // 3 # high res + low res + intented m
+        else:
+            n_embed = config.hidden_size // 2
+        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
+        assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
+        if self.with_future_intend_maneuver:
+            self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.hidden_size), nn.Tanh())
+        if self.with_future_current_maneuver:
+            self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.hidden_size), nn.Tanh())
+        self.action_m_embed = nn.Sequential(nn.Linear(4, config.hidden_size), nn.Tanh())
+
+        if self.predict_trajectory_with_stopflag:
+            self.stop_flag_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=config.hidden_size), nn.Tanh())
+
+        self.traj_decoder = None
+        if self.predict_trajectory:
+            embed_sz = 2 * config.hidden_size if self.predict_trajectory_with_stopflag else config.hidden_size
+            self.traj_decoder = DecoderResCat(config.intermediate_size, embed_sz, out_features=4)
         
+        self.post_init()
+
+    def forward(
+        self,
+        intended_maneuver_vector: Optional[torch.Tensor] = None,
+        trajectory_label: Optional[torch.Tensor] = None,
+        context_actions:Optional[torch.Tensor] = None,
+        intended_maneuver_label: Optional[torch.Tensor] = None,
+        high_res_raster: Optional[torch.Tensor] = None,
+        low_res_raster: Optional[torch.Tensor] = None,
+        intended_maneuver_gt: Optional[torch.Tensor] = None,
+        current_maneuver_gt: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        return_dict: Optional[bool] = None,
+        **kwargs,
+    ):
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        device = high_res_raster.device
+        # with future manuever label input
+        if self.with_future_intend_maneuver:
+            future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
+        if self.with_future_current_maneuver:
+            future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
+        if self.predict_trajectory_with_stopflag and self.use_nsm:
+            stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz,
+            stopflag_embed = self.stop_flag_embed(stopflag.to(device).long())
+        action_embeds = self.action_m_embed(context_actions)
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+        batch_size, context_length, c, h, w = high_res_seq.shape
+        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+        
+        if self.use_nsm and self.predict_trajectory_with_stopflag:
+            intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
+            state_embeds = torch.cat((intended_maneuver_embed,
+                                    high_res_embed,
+                                    low_res_embed), dim=-1)
+        else:
+            state_embeds = torch.cat((high_res_embed,
+                                    low_res_embed), dim=-1).to(torch.float32)
+        trajectory_label = trajectory_label[:, 1::2, :]
+        pred_length = trajectory_label.shape[1]
+        n_embed = action_embeds.shape[-1]
+        input_embeds = torch.zeros(
+            (batch_size, context_length * 2 - 1, n_embed),
+            dtype=torch.float32,
+            device=device
+        )
+        input_embeds[:, ::2, :] = state_embeds
+        input_embeds[:, 1::2, :] = action_embeds
+
+        # to keep input and output at the same dimension
+        if self.with_future_intend_maneuver or self.with_future_current_maneuver:
+            input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
+        else:
+            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+
+        transformer_outputs = self.transformer(
+            inputs_embeds=input_embeds,
+            position_ids=position_ids,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            return_dict=return_dict,
+        )
+        transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+        
+        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length:, :]
+        if self.predict_trajectory_with_stopflag:
+            traj_hidden_state = torch.cat([traj_hidden_state, stopflag_embed.repeat(1, pred_length, 1)], dim=-1)
+        # expected shape for pred trajectory is (b, pred_length, 4)
+        traj_logits = self.traj_decoder(traj_hidden_state)
+        
+        loss = torch.tensor(0, dtype=torch.float32, device=device)
+        if self.training:
+            if 'mse' in self.loss_fn:
+                loss_fct = MSELoss(reduction="mean")
+            elif 'l1' in self.loss_fn:
+                loss_fct = SmoothL1Loss()
+            loss += loss_fct(traj_logits, trajectory_label.to(device))
+        
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=traj_logits,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+        )
+    
 class GPTModelNuPlan(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
@@ -1383,6 +1524,7 @@ def build_models(model_args):
         config_p.n_layer = model_args.n_layers
         config_p.n_embd = model_args.d_embed
         config_p.n_inner = model_args.d_inner
+        config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
         if 'nonauto' in model_args.model_name:
             ModelCls = GPTNonAutoRegressiveModelNuplan
@@ -1410,16 +1552,29 @@ def build_models(model_args):
         tag = 'XLNet'
     elif 't5' in model_args.model_name:
         config_p = T5Config()
+        config_p.d_model = model_args.d_model
+        config_p.d_kv = model_args.d_model//config_p.num_heads
+        config_p.d_ff = model_args.d_inner
+        config_p.num_layers = model_args.n_layers
         ModelCls = T5ModelNuplan
         tag = 'T5'
+    elif 'bert' in model_args.model_name:
+        config_p = DebertaV2Config()
+        config_p.hidden_size = model_args.d_model
+        config_p.intermediate_size = model_args.d_inner
+        config_p.num_hidden_layers = model_args.n_layers
+        config_p.hidden_act = model_args.activation_function
+        config_p.num_attention_heads = model_args.n_heads
+        ModelCls = DeBertaNuplan
+        tag = 'DeBerta'
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:
         model = ModelCls(config_p, model_args=model_args)
         print('Scratch ' + tag + ' Initialized!')
     elif 'pretrain' in model_args.model_name:
-        model = ModelCls.from_pretrained(model_args.pretrained_model_name_or_path, model_args=model_args, low_cpu_mem_usage=True)
-        print('Pretrained ' + tag + 'from {}'.format(model_args.pretrained_model_name_or_path))
+        model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=True)
+        print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model    
 
 if  __name__ == '__main__':
@@ -1430,11 +1585,12 @@ if  __name__ == '__main__':
     from transformer4planning.utils import ModelArguments
     parser = HfArgumentParser((ModelArguments))
     model_args = parser.parse_args()
-    model_args.d_embed = 384
-    model_args.d_model = 384
+    model_args.d_embed = 256
+    model_args.d_model = 256
     model_args.d_inner = 1024
     model_args.n_layers = 4
-    model_args.model_name = "scratch-xlnet"
+    model_args.n_heads = 8
+    model_args.model_name = "scratch-bert"
 
     model = build_models(model_args)
 
