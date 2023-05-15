@@ -11,6 +11,7 @@ from scipy import interpolate
 import numpy.typing as npt
 import shapely
 import torch
+import copy
 from transformers import (HfArgumentParser)
 from transformers.configuration_utils import PretrainedConfig
 from transformers.trainer_utils import get_last_checkpoint
@@ -24,7 +25,7 @@ from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner,
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
 
-from transformer4planning.models.model import TransfoXLModelNuPlan, GPTModelNuPlan
+from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
 
 count = 0
@@ -73,7 +74,6 @@ class ControlTFPlanner(AbstractPlanner):
                  target_velocity=None,
                  min_gap_to_lead_agent=None,
                  steering_angle: float = 0.0,
-                 model_type="xl",
                  **kwargs):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
         self.samping_time = TimePoint(int(sampling_time * 1e6))
@@ -87,14 +87,7 @@ class ControlTFPlanner(AbstractPlanner):
             #model_args.model_pretrain_name_or_path = "/home/zhangsd/project/transformer4planning/data/xl-oa-a-embed1024-block12-goon/training_results/checkpoint-2000"
             model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1"
         assert model_args.model_pretrain_name_or_path is not None
-        if "xl" in model_type:
-            print("load checkpoint from", model_args.model_pretrain_name_or_path)
-            self.model = TransfoXLModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
-                                                              model_args=model_args)
-        elif "gpt" in model_type:
-            self.model = GPTModelNuPlan.from_pretrained(model_args.model_pretrain_name_or_path, \
-                                                        model_args=model_args)
-        self.model_type = model_type
+        self.model = build_models(model_args=model_args)
         self.model.config.pad_token_id = 0
         self.model.config.eos_token_id = 0
 
@@ -128,114 +121,92 @@ class ControlTFPlanner(AbstractPlanner):
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
-        if "xl" in self.model_type:
-            high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-                ego_trajectory, agents, statics, road_dic, ego_shape)
-            if torch.cuda.is_available():
-                self.model.to('cuda')
-                output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
-                                    current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
-                                    context_actions=torch.tensor(context_action).unsqueeze(0).to('cuda'), \
-                                    high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to('cuda'), \
-                                    low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to('cuda'))
-                # pred_traj [80, 4]
-                pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
-            else:
-                output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
-                                    current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
-                                    context_actions=torch.tensor(context_action).unsqueeze(0), \
-                                    high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
-                                    low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
-                pred_traj = output[-1][-1].squeeze(0).detach().numpy()
-            # # post-processing
-            low_filter = True
-            low_threshold = 0.01
-            if low_filter:
-                filtered_traj = np.zeros_like(pred_traj)
-                last_pose = None
-                for idx, each_pose in enumerate(pred_traj):
-                    if last_pose is None:
-                        dx, dy = each_pose[:2] - np.zeros(2)
-                        dx = 0 if dx < low_threshold else dx
-                        dy = 0 if dy < low_threshold else dy
-                        last_pose = filtered_traj[idx, :] = [dx, dy, each_pose[2], each_pose[3]]
-                        continue
-                    dx, dy = each_pose[:2] - pred_traj[idx - 1, :2]
-                    dx = 0 if dx < low_threshold else dx
-                    dy = 0 if dy < low_threshold else dy
-                    last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
-                                                         each_pose[3]]
-                pred_traj = filtered_traj
-            moving_average_smooth = True
-            average_n = 5
-            if moving_average_smooth:
-                smoothed_traj = np.zeros_like(pred_traj)
-                for idx, each_pose in enumerate(pred_traj):
-                    # special process for index 0
-                    if idx == 0:
-                        smoothed_traj[idx, :] = np.mean([pred_traj[1, :], np.zeros(4)], axis=0)
-                        continue
-                    if idx < average_n:
-                        smoothed_traj[idx, :] = np.mean(pred_traj[:idx + 1, :], axis=0)
-                    else:
-                        smoothed_traj[idx, :] = np.mean(pred_traj[idx - average_n:idx + 1, :], axis=0)
-                pred_traj = smoothed_traj
-            # end of post_processing
-            # convert to world coordinate points
+        
+        high_res_raster, low_res_raster, context_action = self.compute_raster_input(
+            ego_trajectory, agents, statics, road_dic, ego_shape)
+        if torch.cuda.is_available():
+            self.model.to('cuda')
+            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
+                                context_actions=torch.tensor(context_action).unsqueeze(0).to('cuda'), \
+                                high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to('cuda'), \
+                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to('cuda'))
+            # pred_traj [80, 4]
+            pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
+        else:
+            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
+                                context_actions=torch.tensor(context_action).unsqueeze(0), \
+                                high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
+                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
+            pred_traj = output[-1][-1].squeeze(0).detach().numpy()
+        # # # post-processing
+        # low_filter = True
+        # low_threshold = 0.01
+        # if low_filter:
+        #     filtered_traj = np.zeros_like(pred_traj)
+        #     last_pose = None
+        #     for idx, each_pose in enumerate(pred_traj):
+        #         if last_pose is None:
+        #             dx, dy = each_pose[:2] - np.zeros(2)
+        #             dx = 0 if dx < low_threshold else dx
+        #             dy = 0 if dy < low_threshold else dy
+        #             last_pose = filtered_traj[idx, :] = [dx, dy, each_pose[2], each_pose[3]]
+        #             continue
+        #         dx, dy = each_pose[:2] - pred_traj[idx - 1, :2]
+        #         dx = 0 if dx < low_threshold else dx
+        #         dy = 0 if dy < low_threshold else dy
+        #         last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
+        #                                                 each_pose[3]]
+        #     pred_traj = filtered_traj
+        # moving_average_smooth = True
+        # average_n = 5
+        # if moving_average_smooth:
+        #     smoothed_traj = np.zeros_like(pred_traj)
+        #     for idx, each_pose in enumerate(pred_traj):
+        #         # special process for index 0
+        #         if idx == 0:
+        #             smoothed_traj[idx, :] = np.mean([pred_traj[1, :], np.zeros(4)], axis=0)
+        #             continue
+        #         if idx < average_n:
+        #             smoothed_traj[idx, :] = np.mean(pred_traj[:idx + 1, :], axis=0)
+        #         else:
+        #             smoothed_traj[idx, :] = np.mean(pred_traj[idx - average_n:idx + 1, :], axis=0)
+        #     pred_traj = smoothed_traj
+        #     # end of post_processing
+        #     # convert to world coordinate points
             
+        cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
+        for i in range(pred_traj.shape[0]):
+            new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
+            new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
+            pred_traj[i, 0] = new_x
+            pred_traj[i, 1] = new_y
+            pred_traj[i, 2] += ego_trajectory[-1][-1]
+
+        next_world_coor_points = pred_traj.copy()
+
+        # rotate pred_traj
+        next_world_coor_trajectories = list()
+        for idx in range(1, pred_traj.shape[0]):
             cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-            for i in range(pred_traj.shape[0]):
-                new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
-                new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
-                pred_traj[i, 0] = new_x
-                pred_traj[i, 1] = new_y
-                pred_traj[i, 2] += ego_trajectory[-1][-1]
+            offset_x = pred_traj[idx, 0] * cos_ + pred_traj[idx, 1] * sin_
+            offset_y = pred_traj[idx, 1] * cos_ - pred_traj[idx, 0] * sin_
+            next_ego_traj = [ego_trajectory[-1][0] + offset_x,
+                                ego_trajectory[-1][1] + offset_y,
+                                ego_trajectory[-1][2] + pred_traj[idx, -1]]
+            ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj).reshape(1, -1)), axis=0)
+            next_world_coor_trajectories.append(next_ego_traj)
 
-            next_world_coor_points = pred_traj.copy()
-        elif "gpt" in self.model_type:
-            high_res_raster, low_res_raster, trajectory = self.compute_raster_sequence_input(
-                ego_trajectory, agents, statics, road_dic, ego_shape)
-            if torch.cuda.is_available():
-                self.model.to('cuda')
-                result = self.model.generate(
-                    intended_maneuver_vector=None,
-                    current_maneuver_vector=None,
-                    high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to(torch.float32).to('cuda'),
-                    low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to(torch.float32).to('cuda'),
-                    trajectory=torch.tensor(trajectory).unsqueeze(0).to(torch.float32).to('cuda')
-                )
-                pred_traj = result["trajectory"].detach().cpu().numpy()[0]
-            else:
-                result = self.model.generate(
-                    intended_maneuver_vector=None,
-                    current_maneuver_vector=None,
-                    high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to(torch.float32),
-                    low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to(torch.float32),
-                    trajectory=torch.tensor(trajectory).unsqueeze(0).to(torch.float32)
-                )
-                pred_traj = result["trajectory"].detach().numpy()[0]
-
-            # rotate pred_traj
-            next_world_coor_trajectories = list()
-            for idx in range(1, pred_traj.shape[0]):
-                cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-                offset_x = pred_traj[idx, 0] * cos_ + pred_traj[idx, 1] * sin_
-                offset_y = pred_traj[idx, 1] * cos_ - pred_traj[idx, 0] * sin_
-                next_ego_traj = [ego_trajectory[-1][0] + offset_x,
-                                 ego_trajectory[-1][1] + offset_y,
-                                 ego_trajectory[-1][2] + pred_traj[idx, -1]]
-                ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj).reshape(1, -1)), axis=0)
-                next_world_coor_trajectories.append(next_ego_traj)
-    
-            next_world_coor_trajectories = np.array(next_world_coor_trajectories)
-            next_world_coor_points = next_world_coor_trajectories[::2]
-            next_world_coor_x = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
-                                          next_world_coor_points[:, 0])
-            next_world_coor_y = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
-                                          next_world_coor_points[:, 1])
-            next_world_coor_yaw = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
-                                            next_world_coor_points[:, 2])
-            next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
+        next_world_coor_trajectories = np.array(next_world_coor_trajectories)
+        next_world_coor_points = next_world_coor_trajectories[::2]
+        next_world_coor_x = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
+                                        next_world_coor_points[:, 0])
+        next_world_coor_y = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
+                                        next_world_coor_points[:, 1])
+        next_world_coor_yaw = np.interp(np.arange(0, 80, 1), np.arange(0, len(next_world_coor_points)),
+                                        next_world_coor_points[:, 2])
+        next_world_coor_points = np.stack([next_world_coor_x, next_world_coor_y, next_world_coor_yaw], axis=1)
 
 
         # build output
@@ -304,6 +275,7 @@ class ControlTFPlanner(AbstractPlanner):
         ego_trajectory = downsample_ego_trajectory
         statics_seq = downsample_statics_seq
         # goal channel
+        ## goal point
         if self.goal is None:
             relative_goal = ego_pose
         else:
@@ -319,7 +291,35 @@ class ControlTFPlanner(AbstractPlanner):
         cv2.drawContours(rasters_high_res_channels[0], [goal_contour_high_res], -1, (255, 255, 255), -1)
         goal_contour_low_res = int(low_res_raster_scale) * goal_contour + 112
         cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
-
+        ## goal route
+        cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        route_ids = self.route_roadblock_ids
+        routes = [road_dic[int(route_id)] for route_id in route_ids]
+        for route in routes:
+            xyz = route["xyz"].copy()
+            xyz[:, :2] -= ego_pose[:2]
+            if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+                abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+                continue
+            pts = list(zip(xyz[:, 0], xyz[:, 1]))
+            line = shapely.geometry.LineString(pts)
+            simplified_xyz_line = line.simplify(1)
+            simplified_x, simplified_y = simplified_xyz_line.xy
+            simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz[:, 1] *= -1
+            high_res_route = simplified_xyz * high_res_raster_scale
+            low_res_route = simplified_xyz * low_res_raster_scale
+            high_res_route = high_res_route.astype('int32')
+            low_res_route = low_res_route.astype('int32')
+            high_res_route += 112
+            low_res_route += 112
+            for j in range(simplified_xyz.shape[0] - 1):
+                cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
+                        tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
+                cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
+                        tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
         # road element computation
         cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
         for i, key in enumerate(road_dic):
@@ -403,7 +403,7 @@ class ControlTFPlanner(AbstractPlanner):
                 cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type * 9 + i],
                                  [rect_pts_low_res], -1, (255, 255, 255), -1)
 
-        for i, pose in enumerate(ego_trajectory):
+        for i, pose in enumerate(copy.deepcopy(ego_trajectory)):
             agent_type = 7  # type EGO is 7
             pose -= ego_pose
             rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
@@ -430,160 +430,11 @@ class ControlTFPlanner(AbstractPlanner):
                                   ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                                   np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
-            action = rotated_poses[i + 1] - rotated_poses[i]
+            action = rotated_poses[i]
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
 
-    def compute_raster_sequence_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None,
-                                      max_dis=500):
-        ## hyper initilization
-        total_road_types = 20
-        total_agent_types = 8
-        high_res_raster_scale = 4
-        low_res_raster_scale = 0.77
-        high_res_raster_shape = (224, 224)
-        low_res_raster_shape = (224, 224)
-
-        total_agents_seq = list()
-        for agents, statics in zip(agents_seq, statics_seq):
-            total_agents = agents + statics
-            total_agents_seq.append(total_agents)
-
-        total_raster_channels = 1 + total_road_types + total_agent_types
-        trajectory_list = list()
-        high_res_rasters_list = list()
-        low_res_rasters_list = list()
-        # TODO: dynamic downsampling
-        #  downsampling from ego_trajectory, agent_seq and statics_seq
-        downsample_indexs = [0, 2, 5, 7, 10, 12, 15, 18, 21]
-
-        for i, frame in enumerate(downsample_indexs):
-            # update ego position
-            ego_pose = ego_trajectory[frame]
-            cos_, sin_ = math.cos(-ego_pose[2]), math.sin(-ego_pose[2])
-
-            # trajectory label
-            if i < len(downsample_indexs) - 1:
-                trajectory_label = ego_trajectory[downsample_indexs[i + 1]].copy()
-                trajectory_label -= ego_pose
-                traj_x = trajectory_label[0].copy()
-                traj_y = trajectory_label[1].copy()
-                trajectory_label[0] = traj_x * cos_ - traj_y * sin_
-                trajectory_label[1] = traj_x * sin_ + traj_y * cos_
-                trajectory_list.append([trajectory_label[0], trajectory_label[1], 0, trajectory_label[2]])
-
-            # raster encoding
-            rasters_high_res = np.zeros([high_res_raster_shape[0],
-                                         high_res_raster_shape[1],
-                                         total_raster_channels], dtype=np.uint8)
-            rasters_low_res = np.zeros([low_res_raster_shape[0],
-                                        low_res_raster_shape[1],
-                                        total_raster_channels], dtype=np.uint8)
-            rasters_high_res_channels = cv2.split(rasters_high_res)
-            rasters_low_res_channels = cv2.split(rasters_low_res)
-
-            # static roads elements drawing
-            cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
-            # sample and draw the goal routes
-            route_ids = self.route_roadblock_ids
-            routes = []
-            for route_id in route_ids:
-                if route_id in road_dic.keys():
-                    routes.append(road_dic[route_id])
-            # routes = [road_dic[route_id] for route_id in route_ids]
-
-            for route in routes:
-                xyz = route["xyz"].copy()
-                xyz[:, :2] -= ego_pose[:2]
-                if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
-                        abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
-                    continue
-                pts = list(zip(xyz[:, 0], xyz[:, 1]))
-                line = shapely.geometry.LineString(pts)
-                simplified_xyz_line = line.simplify(1)
-                simplified_x, simplified_y = simplified_xyz_line.xy
-                simplified_xyz = np.ones((len(simplified_x), 2)) * -1
-                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
-                                                             simplified_xyz[:,0].copy() * sin_ + simplified_xyz[:,1].copy() * cos_
-                simplified_xyz[:, 1] *= -1
-                high_res_route = simplified_xyz * high_res_raster_scale
-                low_res_route = simplified_xyz * low_res_raster_scale
-                high_res_route = high_res_route.astype('int32')
-                low_res_route = low_res_route.astype('int32')
-                high_res_route += high_res_raster_shape[0] // 2
-                low_res_route += low_res_raster_shape[0] // 2
-                for j in range(simplified_xyz.shape[0] - 1):
-                    cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
-                             tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
-                    cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
-                             tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
-
-            # road type channel drawing
-            for i, key in enumerate(road_dic):
-                xyz = road_dic[key]["xyz"].copy()
-                road_type = int(road_dic[key]['type'])
-                xyz[:, :2] -= ego_pose[:2]
-                if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
-                        abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
-                    continue
-                # simplify road vector, can simplify about half of all the points
-                pts = list(zip(xyz[:, 0], xyz[:, 1]))
-                line = shapely.geometry.LineString(pts)
-                simplified_xyz_line = line.simplify(1)
-                simplified_x, simplified_y = simplified_xyz_line.xy
-                simplified_xyz = np.ones((len(simplified_x), 2)) * -1
-                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
-                                                             simplified_xyz[:,0].copy() * sin_ + simplified_xyz[:,1].copy() * cos_
-                simplified_xyz[:, 1] *= -1
-                high_res_road = simplified_xyz * high_res_raster_scale
-                low_res_road = simplified_xyz * low_res_raster_scale
-                high_res_road = high_res_road.astype('int32')
-                low_res_road = low_res_road.astype('int32')
-                high_res_road += high_res_raster_shape[0] // 2
-                low_res_road += low_res_raster_shape[0] // 2
-
-                for j in range(simplified_xyz.shape[0] - 1):
-                    cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
-                             tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
-                    cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
-                             tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
-
-            # draw on agents
-            cos_, sin_ = math.cos(-ego_pose[2]), math.sin(-ego_pose[2])
-            agents = total_agents_seq[frame]
-            for j, agent in enumerate(agents):
-                agent_type = agent.tracked_object_type.value
-                pose = np.array([agent.box.center.point.x, agent.box.center.point.y, agent.box.center.heading])
-                pose -= ego_pose
-                if (abs(pose[0]) > max_dis or abs(pose[1]) > max_dis):
-                    continue
-                rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
-                                pose[0] * sin_ + pose[1] * cos_]
-                shape = np.array([agent.box.height, agent.box.width])
-                rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
-                                                direction=-pose[2])
-                rect_pts = np.array(rect_pts, dtype=np.int32)
-                # draw on high resolution
-                rect_pts_high_res = int(high_res_raster_scale) * rect_pts
-                rect_pts_high_res += high_res_raster_shape[0] // 2
-                cv2.drawContours(rasters_high_res_channels[1 + total_road_types + agent_type],
-                                 [rect_pts_high_res], -1, (255, 255, 255), -1)
-                # draw on low resolution
-                rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64)
-                rect_pts_low_res += low_res_raster_shape[0] // 2
-                cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type],
-                                 [rect_pts_low_res], -1, (255, 255, 255), -1)
-
-            rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
-            rasters_low_res = cv2.merge(rasters_low_res_channels).astype(bool)
-            high_res_rasters_list.append(rasters_high_res)
-            low_res_rasters_list.append(rasters_low_res)
-
-        return np.array(high_res_rasters_list, dtype=bool), np.array(low_res_rasters_list, dtype=bool), np.array(
-            trajectory_list)
 
 
 def get_road_dict(map_api, ego_pose_center):
@@ -708,6 +559,8 @@ if __name__ == "__main__":
                 ego_trajectory, agents, statics, road_dic, ego_shape)
         visulize_raster("visulization/rasters/nuplan", "high_res", high_res_raster)
         visulize_raster("visulization/rasters/nuplan", "low_res", low_res_raster)
+        visulize_trajectory("visulization/rasters/nuplan", trajectory=context_action, scale=4)
+        visulize_trajectory("visulization/rasters/nuplan", trajectory=context_action, scale=0.77)
         print("done")
     test(planner, input)
     # planner.compute_planner_trajectory(input)
