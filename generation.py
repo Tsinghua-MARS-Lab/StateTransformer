@@ -23,10 +23,10 @@ import pickle
 def main(args):
     running_mode = args.running_mode
     data_path = {
-            'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-            'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-            'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
-        }
+        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    }
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -51,7 +51,7 @@ def main(args):
         action_label_scale=100,
     )
 
-    def yield_data(shards, dl):
+    def yield_data(shards, dl, filter_info=None):
         for shard in shards:
             loaded_dic = dl.get_next_file(specify_file_index=shard)
             file_name = dl.file_names[shard]
@@ -67,8 +67,33 @@ def main(args):
                 nsm_result = None
             
             total_frames = len(loaded_dic['lidar_pc_tokens'])
-            for t in range(observation_kwargs['past_frame_num'] + 1,
-                           total_frames - observation_kwargs['future_frame_num'], args.sample_interval):
+
+            frames_to_sample = list(range(observation_kwargs['past_frame_num'] + 1,
+                                          total_frames - observation_kwargs['future_frame_num'], args.sample_interval))
+            if filter_info is not None:
+                if file_name not in filter_info:
+                    print('ERROR, file name not found after filter, ', file_name, list(filter_info.keys())[:10])
+                    continue
+                filter_info_this_file = filter_info[file_name]
+                frames_to_add = []
+                frames = filter_info_this_file['frame_index']
+                ranks = filter_info_this_file['rank']
+                assert len(frames) == len(ranks), f'ERROR, frame and rank length not match, {len(frames)}, {len(ranks)}'
+                for idx, frame_idx in enumerate(frames):
+                    data_rank = ranks[idx]
+                    # loop for current frame
+                    if data_rank < args.filter_rank:
+                        # augment frames
+                        interval = observation_kwargs["frame_sample_interval"]
+                        frames_to_add += list(range(frame_idx - interval,
+                                                    frame_idx + interval,
+                                                    int(interval / args.scaling_factor_for_dagger)))
+
+                frames_to_sample += frames_to_add
+                frames_to_sample = list(set(frames_to_sample))
+
+            for t in frames_to_sample:
+
                 if args.use_nsm:
                     current_frame_is_valid = nsm_result['valid_frames'][t]
                     target_frame_is_valid = nsm_result['valid_frames'][t+observation_kwargs['frame_sample_interval']]
@@ -84,25 +109,23 @@ def main(args):
                             skip = True
                             break    
                     if skip:
-                        continue
-                    target_goal_maneuver = nsm_result["goal_actions_weights_per_frame"][t][0]['action']        
-                    current_goal_maneuver = nsm_result["goal_actions_weights_per_frame"][t + observation_kwargs["frame_sample_interval"]][0]['action']                
-                    if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
-                        if np.random.rand() > args.balance_rate:#1.0/19
-                            continue
+                        continue                    
+                    # if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
+                    #     if np.random.rand() > args.sample_rate:
+                    #         continue
                     if not current_frame_is_valid or not target_frame_is_valid:
                         continue
                     if len(nsm_result['goal_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
                         continue
                     if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
                         continue
-                    
+
                 # if args.auto_regressive:
                 #     observation_dic = get_observation_for_autoregression_nsm(
                 #         observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
                 # else:
                 observation_dic = get_observation_for_nsm(
-                        observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
+                    observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
                 other_info = {
                     'file_name': file_name,
                     'scenario_id': '',  # empty for NuPlan
@@ -173,6 +196,26 @@ def main(args):
         print(f'loaded {len(file_indices)} from {len(nsm_file_names)} as {file_indices}')
     else:
         file_indices = list(range(data_loader.total_file_num))
+
+    total_file_number = len(file_indices)
+    # load filter pickle file
+    if args.filter_pickle_path is not None:
+        with open(args.filter_pickle_path, 'rb') as f:
+            filter_dic = pickle.load(f)
+        assert not args.use_nsm, NotImplementedError
+        # filter file indices for faster loops while genrating dataset
+        file_indices = []
+        for idx, each_file in enumerate(data_loader.file_names):
+            if each_file in filter_dic:
+                print('test: ', filter_dic[each_file])
+                ranks = filter_dic[each_file]['rank']
+                for rank in ranks:
+                    if rank < args.filter_rank:
+                        file_indices.append(idx)
+                        break
+        print(f'Filtered {len(file_indices)} files from {total_file_number} files as {file_indices}')
+    else:
+        filter_dic = None
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
@@ -190,7 +233,8 @@ def main(args):
                          })
     nuplan_dataset = Dataset.from_generator(yield_data, 
                                             #features=features,
-                                            gen_kwargs={'shards': file_indices, 'dl': data_loader},
+                                            gen_kwargs={'shards': file_indices, 'dl': data_loader,
+                                                        'filter_info': filter_dic},
                                             writer_batch_size=2, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
     print('Saving dataset')
@@ -215,7 +259,7 @@ if __name__ == '__main__':
     parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
 
     parser.add_argument('--starting_file_num', type=int, default=0)
-    parser.add_argument('--ending_file_num', type=int, default=1000)
+    parser.add_argument('--ending_file_num', type=int, default=10000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
     parser.add_argument('--cache_folder', type=str, default='/localdata_hdd/nuplan_nsm')
 
@@ -230,6 +274,11 @@ if __name__ == '__main__':
     parser.add_argument('--sample_interval', type=int, default=200)
     parser.add_argument('--dataset_name', type=str, default='nsm')
     parser.add_argument('--auto_regressive', default=True)
+    parser.add_argument('--filter_pickle_path', type=str, default=None)
+    parser.add_argument('--filter_rank', type=float, default=0.1,
+                        help="keep data with rank lower than this value for dagger")
+    parser.add_argument('--scaling_factor_for_dagger', type=float, default=5.0,
+                        help="scale up low performance data by Nx for dagger")
 
     # parser.add_argument('--save_playback', default=True, action='store_true')
     args_p = parser.parse_args()
