@@ -53,8 +53,16 @@ def main(args):
 
     def yield_data(shards, dl, filter_info=None):
         for shard in shards:
-            loaded_dic = dl.get_next_file(specify_file_index=shard)
-            file_name = dl.file_names[shard]
+            # loaded_dic = dl.get_next_file(specify_file_index=shard)
+            # file_name = dl.file_names[shard]
+            dl = NuPlanDL(scenario_to_start=starting_scenario,
+                          file_to_start=shard,
+                          max_file_number=1,
+                          data_path=data_path, db=None, gt_relation_path=None,
+                          road_dic_path=road_path,
+                          running_mode=running_mode)
+            loaded_dic = dl.get_next_file(specify_file_index=0)
+            file_name = dl.file_names[0]
             if args.use_nsm:
                 nsm_result = nsm_labels[file_name] if file_name in nsm_labels else None
                 if args.use_nsm and nsm_result is None:
@@ -137,14 +145,15 @@ def main(args):
                     yield observation_dic
                 else:
                     continue
+            del dl
     
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
-    data_loader = NuPlanDL(scenario_to_start=starting_scenario,
-                            file_to_start=starting_file_num,
-                            max_file_number=max_file_num,
-                            data_path=data_path, db=None, gt_relation_path=None,
-                            road_dic_path=road_path,
-                            running_mode=running_mode)
+    # data_loader = NuPlanDL(scenario_to_start=starting_scenario,
+    #                         file_to_start=starting_file_num,
+    #                         max_file_number=max_file_num,
+    #                         data_path=data_path, db=None, gt_relation_path=None,
+    #                         road_dic_path=road_path,
+    #                         running_mode=running_mode)
     # # data format debug
     # loaded_dic = data_loader.get_next_file(specify_file_index=2)
     # with open("/home/shiduozhang/gt_labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle", "rb")  as f:
@@ -193,7 +202,8 @@ def main(args):
                 file_indices.append(idx)
         print(f'loaded {len(file_indices)} from {len(nsm_file_names)} as {file_indices}')
     else:
-        file_indices = list(range(data_loader.total_file_num))
+        # file_indices = list(range(data_loader.total_file_num))
+        file_indices = list(range(args.starting_file_num, args.ending_file_num))
 
     total_file_number = len(file_indices)
     # load filter pickle file
@@ -230,7 +240,7 @@ def main(args):
                          })
     nuplan_dataset = Dataset.from_generator(yield_data, 
                                             #features=features,
-                                            gen_kwargs={'shards': file_indices, 'dl': data_loader,
+                                            gen_kwargs={'shards': file_indices, 'dl': None,
                                                         'filter_info': filter_dic},
                                             writer_batch_size=2, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
