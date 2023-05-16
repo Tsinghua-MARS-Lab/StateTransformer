@@ -85,10 +85,8 @@ def main(args):
                     if data_rank < args.filter_rank:
                         # augment frames
                         interval = observation_kwargs["frame_sample_interval"]
-                        frames_to_add += list(range(frame_idx - interval,
-                                                    frame_idx + interval,
-                                                    int(interval / args.scaling_factor_for_dagger)))
-
+                        frames_to_add += list(range(frame_idx - interval, frame_idx + interval,
+                                                    2 * int(interval / args.scaling_factor_for_dagger)))
                 frames_to_sample += frames_to_add
                 frames_to_sample = list(set(frames_to_sample))
 
@@ -207,13 +205,12 @@ def main(args):
         file_indices = []
         for idx, each_file in enumerate(data_loader.file_names):
             if each_file in filter_dic:
-                print('test: ', filter_dic[each_file])
                 ranks = filter_dic[each_file]['rank']
                 for rank in ranks:
                     if rank < args.filter_rank:
                         file_indices.append(idx)
                         break
-        print(f'Filtered {len(file_indices)} files from {total_file_number} files as {file_indices}')
+        print(f'Filtered {len(file_indices)} files from {total_file_number} files')
     else:
         filter_dic = None
     total_file_number = len(file_indices)
@@ -274,6 +271,7 @@ if __name__ == '__main__':
     parser.add_argument('--sample_interval', type=int, default=200)
     parser.add_argument('--dataset_name', type=str, default='nsm')
     parser.add_argument('--auto_regressive', default=True)
+    # pass in filter pickle file path to generate augment dataset
     parser.add_argument('--filter_pickle_path', type=str, default=None)
     parser.add_argument('--filter_rank', type=float, default=0.1,
                         help="keep data with rank lower than this value for dagger")
