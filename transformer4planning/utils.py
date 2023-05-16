@@ -13,7 +13,7 @@ class ModelArguments:
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="/home/zhangsd/project/transformer4planning/data/xl-boston-embed1024-block12/training_results/checkpoint-27500/",
+        default="/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/transxl-boston-baseline",
         # default="/home/shiduozhang/Project/transformer4planning/checkpoints/xl/checkpoint-90000",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )

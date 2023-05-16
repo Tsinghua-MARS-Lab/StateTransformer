@@ -9,7 +9,7 @@ import torch, pickle
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-from dataset_gen.nuplan_obs import get_observation_for_nsm, get_observation_for_autoregression_nsm
+from dataset_gen.nuplan_obs import get_observation_for_nsm
 from torch.utils.data import DataLoader
 import os, time
 import importlib.util

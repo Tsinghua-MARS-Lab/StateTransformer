@@ -247,9 +247,10 @@ def main():
         if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[0])): #sub-datasets
             print("concating datasets..")
             concatdatasets = list()
-            for item in items:
-                if os.path.isdir(os.path.join(data_args.saved_dataset_folder, item[0])): # for vegas datasets
-                    for sub_item in item:
+            for i, item in enumerate(items):
+                print(os.path.join(data_args.saved_dataset_folder, items[i]))
+                if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[i])): # for vegas datasets and dagger
+                    for sub_item in os.listdir(os.path.join(data_args.saved_dataset_folder, item)):
                         dataset_path = os.path.join(data_args.saved_dataset_folder, item, sub_item)
                         dataset = Dataset.load_from_disk(dataset_path)
                         print(dataset)

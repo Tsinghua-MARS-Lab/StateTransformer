@@ -8,7 +8,7 @@ model_name consist of ['scratch','pretrain']-['xl','gpt']
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run \
 --nproc_per_node=8 \
-runner.py --model_name scratch-xl \
+runner.py --model_name scratch-transxl \
 --model_pretrain_name_or_path transfo-xl-wt103 \
 --saved_dataset_folder /localdata_ssd/nuplan_nsm/nsm_sparse_balance_new_4seq \
 --output_dir data/example/training_results \
@@ -36,6 +36,7 @@ runner.py --model_name scratch-xl \
 --d_model 256 \
 --d_inner 1024 \
 --n_layers 4 \
+--n_heads 8 \
 --activation_function silu \
 --resume_from_checkpoint None\
 `

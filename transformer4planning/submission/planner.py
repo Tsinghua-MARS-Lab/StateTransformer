@@ -27,6 +27,7 @@ from nuplan.planning.simulation.trajectory.interpolated_trajectory import Interp
 
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
+from transformer4planning.checkratser import *
 
 count = 0
 
@@ -116,8 +117,8 @@ class ControlTFPlanner(AbstractPlanner):
         ego_trajectory = np.array([(ego_states[i].waypoint.center.x, \
                                     ego_states[i].waypoint.center.y, \
                                     ego_states[i].waypoint.heading) for i in range(context_length)])
-        ego_shape = np.array([ego_states[-1].waypoint.oriented_box.height, \
-                              ego_states[-1].waypoint.oriented_box.width])
+        ego_shape = np.array([ego_states[-1].waypoint.oriented_box.width, \
+                              ego_states[-1].waypoint.oriented_box.length])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
@@ -182,10 +183,19 @@ class ControlTFPlanner(AbstractPlanner):
             new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
             pred_traj[i, 0] = new_x
             pred_traj[i, 1] = new_y
-            pred_traj[i, 2] += ego_trajectory[-1][-1]
+            pred_traj[i, 2] = 0
+            pred_traj[i, -1] += ego_trajectory[-1][-1]
 
         next_world_coor_points = pred_traj.copy()
-
+        if count % 10 == 0:
+            if not os.path.exists("/public/MARS/zsd/planner_rasters/frame{}".format(count)):
+                os.mkdir("/public/MARS/zsd/planner_rasters/frame{}".format(count))
+            visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "high", high_res_raster)
+            visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "low", low_res_raster)
+            with open("/public/MARS/zsd/planner_rasters/pred_traj{}.pkl".format(count), "wb") as f:
+                pickle.dump(pred_traj, f)
+            with open("/public/MARS/zsd/planner_rasters/world_traj{}.pkl".format(count), "wb") as f:
+                pickle.dump(next_world_coor_points, f)
         # build output
         ego_state = history.ego_states[-1]
         state = EgoState(
@@ -205,7 +215,7 @@ class ControlTFPlanner(AbstractPlanner):
             state = EgoState.build_from_center(
                 center=StateSE2(next_world_coor_points[i, 0],
                                 next_world_coor_points[i, 1],
-                                next_world_coor_points[i, 2]),
+                                ego_trajectory[-1][-1]),
                 center_velocity_2d=StateVector2D(0, 0),
                 center_acceleration_2d=StateVector2D(0, 0),
                 tire_steering_angle=state.tire_steering_angle,
@@ -242,15 +252,17 @@ class ControlTFPlanner(AbstractPlanner):
         downsample_indexs = [0, 2, 5, 7, 10, 12, 15, 18, 21]
         downsample_agents_seq = list()
         downsample_statics_seq = list()
-        downsample_ego_trajectory = list()
         for i in downsample_indexs:
             downsample_agents_seq.append(agents_seq[i].copy())
             downsample_statics_seq.append(statics_seq[i].copy())
-            downsample_ego_trajectory.append(ego_trajectory[i].copy())
-        del agents_seq, statics_seq, ego_trajectory
+        del agents_seq, statics_seq
         agents_seq = downsample_agents_seq
-        ego_trajectory = downsample_ego_trajectory
         statics_seq = downsample_statics_seq
+        new_ego_trajectory = list()
+        for idx in range(min(20, len(ego_trajectory)-1)):
+            new_ego_trajectory[2 * idx] = ego_trajectory[idx]
+            new_ego_trajectory[2 * idx + 1] = (ego_trajectory[idx] + ego_trajectory[idx]) / 2
+        ego_trajectory = new_ego_trajectory.copy()
         # goal channel
         ## goal point
         if self.goal is None:
@@ -266,7 +278,7 @@ class ControlTFPlanner(AbstractPlanner):
         goal_contour = np.array(goal_contour, dtype=np.int32)
         goal_contour_high_res = int(high_res_raster_scale) * goal_contour + 112
         cv2.drawContours(rasters_high_res_channels[0], [goal_contour_high_res], -1, (255, 255, 255), -1)
-        goal_contour_low_res = int(low_res_raster_scale) * goal_contour + 112
+        goal_contour_low_res = (low_res_raster_scale * goal_contour).astype(np.int64) + 112
         cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
         ## goal route
         cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
@@ -346,7 +358,7 @@ class ControlTFPlanner(AbstractPlanner):
                     continue
                 rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                                 pose[0] * sin_ + pose[1] * cos_]
-                shape = np.array([static.box.height, static.box.width])
+                shape = np.array([static.box.width, static.box.length])
                 rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                                 direction=-pose[2])
                 rect_pts = np.array(rect_pts, dtype=np.int32)
@@ -368,7 +380,7 @@ class ControlTFPlanner(AbstractPlanner):
                     continue
                 rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                                 pose[0] * sin_ + pose[1] * cos_]
-                shape = np.array([agent.box.height, agent.box.width])
+                shape = np.array([agent.box.width, agent.box.length])
                 rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                                 direction=-pose[2])
                 rect_pts = np.array(rect_pts, dtype=np.int32)
@@ -449,8 +461,9 @@ def get_road_dict(map_api, ego_pose_center):
                 # TRAFFIC_LIGHT = 2
                 # TURN_STOP = 3
                 # YIELD = 4
-                if selected_obj.stop_line_type not in [0, 1]:
-                    continue
+                line_x, line_y = selected_obj.polygon.exterior.coords.xy
+                # if selected_obj.stop_line_type not in [0, 1]:
+                #     continue
             elif layer_name in [SemanticMapLayer.LANE, SemanticMapLayer.LANE_CONNECTOR]:
                 line_x, line_y = selected_obj.baseline_path.linestring.coords.xy
                 if selected_obj.speed_limit_mps is not None:
@@ -525,8 +538,8 @@ if __name__ == "__main__":
         ego_trajectory = np.array([(ego_states[i].waypoint.center.x, \
                                     ego_states[i].waypoint.center.y, \
                                     ego_states[i].waypoint.heading) for i in range(context_length)])
-        ego_shape = np.array([ego_states[-1].waypoint.oriented_box.height, \
-                              ego_states[-1].waypoint.oriented_box.width])
+        ego_shape = np.array([ego_states[-1].waypoint.oriented_box.width, \
+                              ego_states[-1].waypoint.oriented_box.length])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         #road_dic = get_road_dict(planner.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
