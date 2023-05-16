@@ -9,8 +9,9 @@ import os
 import sys
 import pickle
 import copy
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple, Union
 import torch
+from torch import nn
 from tqdm import tqdm
 import copy
 
@@ -30,11 +31,12 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
-from transformers import TransfoXLConfig, GPT2Config
+# from transformers.trainer import smp_forward_only
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
 from transformers.utils.versions import require_version
-from torch.utils.data.dataset import ConcatDataset
+from torch.utils.data import DataLoader
+from torch.utils.data._utils.collate import default_collate
 from torch.utils.data import random_split
 import tempfile
 
@@ -128,6 +130,9 @@ class ModelArguments:
     )
     n_layers: Optional[int] = field(
         default=4,
+    )
+    n_heads: Optional[int] = field(
+        default=8,
     )
     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
     activation_function: Optional[str] = field(
@@ -236,30 +241,43 @@ def main():
     set_seed(training_args.seed)
 
     # Pass in the directory to load a saved dataset
-    # See xxx.py to process and save a dataset from the NuPlan Dataset
+    # See generation.py to process and save a dataset from the NuPlan Dataset
     if os.path.isdir(data_args.saved_dataset_folder):
         items = os.listdir(data_args.saved_dataset_folder)
         if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[0])): #sub-datasets
             print("concating datasets..")
             concatdatasets = list()
             for item in items:
-                print(item)
-                dataset_path = os.path.join(data_args.saved_dataset_folder, item)
-                dataset = Dataset.load_from_disk(dataset_path)
-                dataset.set_format(type='torch', columns=["intended_maneuver_vector", "current_maneuver_vector", "high_res_raster", "low_res_raster",\
-                                                          "trajectory_label", "context_actions", "intended_maneuver_label", "current_maneuver_label"])
-                print(dataset)
-                concatdatasets.append(dataset)
+                if os.path.isdir(os.path.join(data_args.saved_dataset_folder, item[0])): # for vegas datasets
+                    for sub_item in item:
+                        dataset_path = os.path.join(data_args.saved_dataset_folder, item, sub_item)
+                        dataset = Dataset.load_from_disk(dataset_path)
+                        print(dataset)
+                        concatdatasets.append(dataset)
+                else: # for boston, pittsburgh and singapore datasets
+                    dataset_path = os.path.join(data_args.saved_dataset_folder, item)
+                    dataset = Dataset.load_from_disk(dataset_path)
+                    # dataset.set_format(type='torch', columns=["intended_maneuver_vector", "current_maneuver_vector", "high_res_raster", "low_res_raster",\
+                    #                                         "trajectory_label", "context_actions", "intended_maneuver_label", "current_maneuver_label"])
+                    print(dataset)
+                    concatdatasets.append(dataset)
           
             concat_dataset = _concatenate_map_style_datasets(concatdatasets)
-            nuplan_dataset = concat_dataset.train_test_split(test_size=0.1, shuffle=True, seed=training_args.seed)
+            concat_dataset.set_format(type='torch')
+            nuplan_dataset = dict(
+                train=concat_dataset,
+                test=concat_dataset
+            )
 
         else: # whole hugging face dataset   
             print("loading dataset...")
-            nuplan_dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
-            nuplan_dataset.set_format(type='torch')
-            print('Dataset Loaded: ', nuplan_dataset)
-            nuplan_dataset = nuplan_dataset.train_test_split(test_size=0.1, shuffle=True, seed=training_args.seed)
+            dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
+            dataset.set_format(type='torch')
+            print('Dataset Loaded: ', dataset)
+            nuplan_dataset = dict(
+                train=dataset,
+                test=dataset.shuffle()
+            )
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
@@ -331,6 +349,13 @@ def main():
         """
         model.eval()
         with torch.no_grad():
+            dagger_results = {
+                'file_name':[],
+                'frame_index':[],
+                'rank':[],
+                'ADE':[],
+                'FDE':[],
+            }
             prediction_results = {
                 'file_names': [],
                 'current_frame': [],
@@ -376,25 +401,33 @@ def main():
                 loss_fn = torch.nn.MSELoss(reduction="mean")
     
             # initialize intended maneuver metrics
-            per_batch_size = training_args.per_device_eval_batch_size
-            for input in tqdm(predict_dataset.iter(training_args.per_device_eval_batch_size)):
-                if "xl" in model_args.model_name:
-                    input_length = len(input['intended_maneuver_label'])
-                elif "gpt" in model_args.model_name:
-                    input_length = len(input['intended_maneuver_vector'])
-                if per_batch_size is None:
-                    per_batch_size = len(input['intended_maneuver_label'])
-                elif input_length != per_batch_size:
-                    continue
+            def nuplan_collate_fn(batch):
+                import collections
+                expect_keys = ["file_name", "frame_index", "high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
+                elem = batch[0]
+                if isinstance(elem, collections.abc.Mapping):
+                    return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
+
+            test_dataloader = DataLoader(
+                dataset=predict_dataset,
+                batch_size=training_args.per_device_eval_batch_size,
+                num_workers=training_args.per_device_eval_batch_size,
+                collate_fn=nuplan_collate_fn,
+                pin_memory=True,
+                drop_last=True
+            )
+            for itr, input in enumerate(tqdm(test_dataloader)):
+                # if "xl" in model_args.model_name:
+                #     input_length = len(input['intended_maneuver_label'])
+                # elif "gpt" in model_args.model_name:
+                #     input_length = len(input['intended_maneuver_vector'])
+                # if per_batch_size is None:
+                #     per_batch_size = len(input['intended_maneuver_label'])
+                # elif input_length != per_batch_size:
+                #     continue
                 input = preprocess_data(input)
-                if "xl" in model_args.model_name:
-                    output = model(**copy.deepcopy(input))
-                    intended_m_logits, current_m_logits, traj_pred = output.all_logits
-                    file_name = input['file_name']
-                    current_frame_idx = input['frame_index']
-                    prediction_results['file_names'].append(file_name)
-                    prediction_results['current_frame'].append(current_frame_idx.cpu().numpy())
-                elif "gpt" in model_args.model_name:
+                input_length = training_args.per_device_eval_batch_size
+                if "autogpt" in model_args.model_name:
                     actual_input = dict()
                     actual_input["intended_maneuver_vector"] = input["intended_maneuver_vector"][:, :8] if input["intended_maneuver_vector"][0] is not None else None 
                     actual_input["current_maneuver_vector"] = input["current_maneuver_vector"][:, :8] if input["current_maneuver_vector"][0] is not None else None 
@@ -405,12 +438,27 @@ def main():
                     intended_m_logits = output["intend_maneuver"]
                     current_m_logits = output["current_maneuver"]
                     traj_pred = output["trajectory"]
-               
+                else:
+                    output = model(**copy.deepcopy(input))
+                    try:
+                        intended_m_logits, current_m_logits, traj_pred = output.all_logits
+                    except:
+                        traj_pred = output.logits                   
+                    try:
+                        file_name = input['file_name']
+                        current_frame_idx = input['frame_index']
+                    except:
+                        file_name = ["null"] * input_length
+                        current_frame_idx = -1 * torch.ones(input_length)
+                    prediction_results['file_names'].extend(file_name)
+                    prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
+                    dagger_results['file_name'].extend(file_name)
+                    dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
                 if model_args.predict_intended_maneuver or model_args.predict_current_maneuver:
-                    if "xl" in model_args.model_name:
-                        intended_m_label.append(input['intended_maneuver_label'])  # tensor
-                    elif "gpt" in model_args.model_name:
+                    if "autogpt" in model_args.model_name:
                         intended_m_label.append(input['intended_maneuver_vector'][:, 8:])
+                    else:
+                        intended_m_label.append(input['intended_maneuver_label'])  # tensor
                     intended_m_vector.append(input['intended_maneuver_vector'])  # tensor
 
                     if model_args.predict_intended_maneuver:
@@ -418,10 +466,11 @@ def main():
                     if model_args.predict_current_maneuver:
                         current_c_confifence = torch.softmax(current_m_logits, dim=-1)
                         current_m_weights_prediction.append(current_c_confifence)
-                        if "xl" in model_args.model_name:
-                            current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))
-                        elif "gpt" in model_args.model_name:
+                        if "autogpt" in model_args.model_name:
                             current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_vector'][:, 8:, :] - current_c_confifence), dim=1))
+                        else:
+                            current_m_weights_bias.append(torch.sum(abs(input['current_maneuver_label'] - current_c_confifence), dim=1))
+                        
                     for i in range(training_args.per_device_eval_batch_size):
                         if len(intended_m_vector[-1].shape) == 2 and intended_m_vector[-1].shape[1] > 1:
                             # new version multi time steps in vector
@@ -437,11 +486,11 @@ def main():
                                 not_same_current_m_weights_bias.append(current_m_weights_bias[-1][i])
                 
                 if model_args.predict_trajectory:
-                    if "xl" in model_args.model_name:
-                        trajectory_label = input["trajectory_label"][:, 1::2, :]
-                    elif "gpt" in model_args.model_name:
+                    if "autogpt" in model_args.model_name:
                         trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
+                    else:
+                        trajectory_label = input["trajectory_label"][:, 1::2, :]
                     loss = loss_fn(trajectory_label, traj_pred)
                     end_trajectory_label = trajectory_label[:, -1, :]
                     end_point = traj_pred[:, -1, :]
@@ -489,15 +538,58 @@ def main():
                 print('Mean L2 loss: ', final_loss)
                 print('End point x offset: ', np.average(np.abs(end_bias_x)))
                 print('End point y offset: ', np.average(np.abs(end_bias_y)))
-                print('ADE', np.average(np.sqrt(np.abs(all_bias_x)**2 + np.abs(all_bias_y)**2)))
-                print('FDE', np.average(np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)))
+                distance_error = np.sqrt(np.abs(all_bias_x)**2 + np.abs(all_bias_y)**2).reshape(-1, 80)
+                final_distance_error = np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)
+                dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
+                dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
+                print('ADE', np.average(distance_error))
+                print('FDE', np.average(final_distance_error))
+            
+            # print(dagger_results)
+            def compute_dagger_dict(dic):
+                tuple_list = list()
+                result_dict = dict()
+                for filename, id, ade, fde in zip(dic["file_name"], dic["frame_index"], dic["ADE"], dic["FDE"]):
+                    if filename == "null":
+                        continue
+                    tuple_list.append((filename, id, ade, fde))
+                tuple_list.sort(key=lambda x:x[3], reverse=True)
+                for idx, tp in enumerate(tuple_list): 
+                    if tp[0] in result_dict.keys():
+                        result_dict[tp[0]]["frame_index"].append(tp[1])
+                        result_dict[tp[0]]["ade"].append(tp[2])
+                        result_dict[tp[0]]["fde"].append(tp[3])
+                        result_dict[tp[0]]["rank"].append((idx+1)/len(tuple_list))
+                    else:
+                        result_dict[tp[0]] = dict(
+                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], rank=[(idx+1)/len(tuple_list)]
+                        )
+                return result_dict
+            
+            def draw_histogram_graph(data, title, savepath):
+                import matplotlib.pyplot as plt
+                plt.hist(data, bins=range(20), edgecolor='black')
+                plt.title(title)
+                plt.xlabel("Value")
+                plt.ylabel("Frequency")
+                plt.savefig(os.path.join(savepath, "{}.png".format(title)))
+
+            draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
+            draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
+
+            dagger_dic = compute_dagger_dict(dagger_results)
+            #print(dagger_dic)
 
             if training_args.output_dir is not None:
                 # save results
                 output_file_path = os.path.join(training_args.output_dir, 'generated_predictions.pickle')
                 with open(output_file_path, 'wb') as handle:
                     pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
+                
+                dagger_result_path = os.path.join(training_args.output_dir, "dagger.pkl")
+                with open(dagger_result_path, 'wb') as handle:
+                    pickle.dump(dagger_dic, handle)
+                print("dagger results save to {}".format(dagger_result_path))
         # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         # metrics = predict_results.metrics
         # max_predict_samples = (

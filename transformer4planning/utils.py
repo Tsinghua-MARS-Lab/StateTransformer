@@ -9,11 +9,12 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="TransfoXLModelNuPlan_Config",
+        default="pretrain-transxl",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default=None,
+        default="/home/zhangsd/project/transformer4planning/data/xl-boston-embed1024-block12/training_results/checkpoint-27500/",
+        # default="/home/shiduozhang/Project/transformer4planning/checkpoints/xl/checkpoint-90000",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(
