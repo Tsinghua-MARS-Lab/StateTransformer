@@ -357,6 +357,7 @@ def main():
                 'rank':[],
                 'ADE':[],
                 'FDE':[],
+                'y_bias':[]
             }
             prediction_results = {
                 'file_names': [],
@@ -544,29 +545,46 @@ def main():
                 final_distance_error = np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)
                 dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
                 dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
+                dagger_results['y_bias'].extend(list(np.average(all_bias_y.reshape(-1, 80), axis=1).reshape(-1)))
                 print('ADE', np.average(distance_error))
                 print('FDE', np.average(final_distance_error))
             
             # print(dagger_results)
             def compute_dagger_dict(dic):
                 tuple_list = list()
-                result_dict = dict()
-                for filename, id, ade, fde in zip(dic["file_name"], dic["frame_index"], dic["ADE"], dic["FDE"]):
+                fde_result_list = dict()
+                y_bias_result_list = dict()
+                for filename, id, ade, fde, y_bias in zip(dic["file_name"], dic["frame_index"], dic["ADE"], dic["FDE"], dic["y_bias"]):
                     if filename == "null":
                         continue
-                    tuple_list.append((filename, id, ade, fde))
-                tuple_list.sort(key=lambda x:x[3], reverse=True)
-                for idx, tp in enumerate(tuple_list): 
-                    if tp[0] in result_dict.keys():
-                        result_dict[tp[0]]["frame_index"].append(tp[1])
-                        result_dict[tp[0]]["ade"].append(tp[2])
-                        result_dict[tp[0]]["fde"].append(tp[3])
-                        result_dict[tp[0]]["rank"].append((idx+1)/len(tuple_list))
+                    tuple_list.append((filename, id, ade, fde, abs(y_bias)))
+    
+                fde_sorted_list = sorted(tuple_list, key=lambda x:x[3], reverse=True)
+                for idx, tp in enumerate(fde_sorted_list): 
+                    if tp[0] in fde_result_list.keys():
+                        fde_result_list[tp[0]]["frame_index"].append(tp[1])
+                        fde_result_list[tp[0]]["ade"].append(tp[2])
+                        fde_result_list[tp[0]]["fde"].append(tp[3])
+                        fde_result_list[tp[0]]["y_bias"].append(tp[4])
+                        fde_result_list[tp[0]]["rank"].append((idx+1)/len(fde_sorted_list))
+                        
                     else:
-                        result_dict[tp[0]] = dict(
-                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], rank=[(idx+1)/len(tuple_list)]
+                        fde_result_list[tp[0]] = dict(
+                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(fde_sorted_list)]
                         )
-                return result_dict
+                y_bias_sorted_list = sorted(tuple_list, key=lambda x:x[-1], reverse=True)
+                for idx, tp in enumerate(y_bias_sorted_list): 
+                    if tp[0] in y_bias_result_list.keys():
+                        y_bias_result_list[tp[0]]["frame_index"].append(tp[1])
+                        y_bias_result_list[tp[0]]["ade"].append(tp[2])
+                        y_bias_result_list[tp[0]]["fde"].append(tp[3])
+                        y_bias_result_list[tp[0]]["y_bias"].append(tp[4])
+                        y_bias_result_list[tp[0]]["rank"].append((idx+1)/len(y_bias_sorted_list))
+                    else:
+                        y_bias_result_list[tp[0]] = dict(
+                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(y_bias_sorted_list)]
+                        )
+                return fde_result_list, y_bias_result_list
             
             def draw_histogram_graph(data, title, savepath):
                 import matplotlib.pyplot as plt
@@ -578,9 +596,10 @@ def main():
 
             draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
             draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
-
-            dagger_dic = compute_dagger_dict(dagger_results)
-            #print(dagger_dic)
+            draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
+            fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
+            print(fde_dagger_dic)
+            print(y_bias_dagger_dic)
 
             if training_args.output_dir is not None:
                 # save results
@@ -588,9 +607,12 @@ def main():
                 with open(output_file_path, 'wb') as handle:
                     pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
                 
-                dagger_result_path = os.path.join(training_args.output_dir, "dagger.pkl")
+                dagger_result_path = os.path.join(training_args.output_dir, "fde_dagger.pkl")
                 with open(dagger_result_path, 'wb') as handle:
-                    pickle.dump(dagger_dic, handle)
+                    pickle.dump(fde_dagger_dic, handle)
+                dagger_result_path = os.path.join(training_args.output_dir, "ybias_dagger.pkl")
+                with open(dagger_result_path, 'wb') as handle:
+                    pickle.dump(y_bias_dagger_dic, handle)
                 print("dagger results save to {}".format(dagger_result_path))
         # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         # metrics = predict_results.metrics
