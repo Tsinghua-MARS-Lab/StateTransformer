@@ -141,41 +141,25 @@ class ControlTFPlanner(AbstractPlanner):
                                 high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
                                 low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
             pred_traj = output[-1][-1].squeeze(0).detach().numpy()
-        # # # post-processing
-        # low_filter = True
-        # low_threshold = 0.01
-        # if low_filter:
-        #     filtered_traj = np.zeros_like(pred_traj)
-        #     last_pose = None
-        #     for idx, each_pose in enumerate(pred_traj):
-        #         if last_pose is None:
-        #             dx, dy = each_pose[:2] - np.zeros(2)
-        #             dx = 0 if dx < low_threshold else dx
-        #             dy = 0 if dy < low_threshold else dy
-        #             last_pose = filtered_traj[idx, :] = [dx, dy, each_pose[2], each_pose[3]]
-        #             continue
-        #         dx, dy = each_pose[:2] - pred_traj[idx - 1, :2]
-        #         dx = 0 if dx < low_threshold else dx
-        #         dy = 0 if dy < low_threshold else dy
-        #         last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
-        #                                                 each_pose[3]]
-        #     pred_traj = filtered_traj
-        # moving_average_smooth = True
-        # average_n = 5
-        # if moving_average_smooth:
-        #     smoothed_traj = np.zeros_like(pred_traj)
-        #     for idx, each_pose in enumerate(pred_traj):
-        #         # special process for index 0
-        #         if idx == 0:
-        #             smoothed_traj[idx, :] = np.mean([pred_traj[1, :], np.zeros(4)], axis=0)
-        #             continue
-        #         if idx < average_n:
-        #             smoothed_traj[idx, :] = np.mean(pred_traj[:idx + 1, :], axis=0)
-        #         else:
-        #             smoothed_traj[idx, :] = np.mean(pred_traj[idx - average_n:idx + 1, :], axis=0)
-        #     pred_traj = smoothed_traj
-        #     # end of post_processing
-        #     # convert to world coordinate points
+        # # post-processing
+        low_filter = True
+        low_threshold = 0.01
+        if low_filter:
+            filtered_traj = np.zeros_like(pred_traj)
+            last_pose = None
+            for idx, each_pose in enumerate(pred_traj):
+                if last_pose is None:
+                    dx, dy = each_pose[:2] - np.zeros(2)
+                    dx = 0 if dx < low_threshold else dx
+                    dy = 0 if dy < low_threshold else dy
+                    last_pose = filtered_traj[idx, :] = [dx, dy, each_pose[2], each_pose[3]]
+                    continue
+                dx, dy = each_pose[:2] - pred_traj[idx - 1, :2]
+                dx = 0 if dx < low_threshold else dx
+                dy = 0 if dy < low_threshold else dy
+                last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
+                                                        each_pose[3]]
+            pred_traj = filtered_traj
             
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
         for i in range(pred_traj.shape[0]):
@@ -188,14 +172,18 @@ class ControlTFPlanner(AbstractPlanner):
 
         next_world_coor_points = pred_traj.copy()
         if count % 10 == 0:
-            if not os.path.exists("/public/MARS/zsd/planner_rasters/frame{}".format(count)):
-                os.mkdir("/public/MARS/zsd/planner_rasters/frame{}".format(count))
-            visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "high", high_res_raster)
-            visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "low", low_res_raster)
-            with open("/public/MARS/zsd/planner_rasters/pred_traj{}.pkl".format(count), "wb") as f:
-                pickle.dump(pred_traj, f)
-            with open("/public/MARS/zsd/planner_rasters/world_traj{}.pkl".format(count), "wb") as f:
-                pickle.dump(next_world_coor_points, f)
+            with open("/public/MARS/zsd/planner_context/history{}.pkl".format(count), "wb") as f:
+                pickle.dump(history, f)
+            # print("x:", context_action[:, 0])
+            # print("y:", context_action[:, 1])
+            # if not os.path.exists("/public/MARS/zsd/planner_rasters/frame{}".format(count)):
+            #     os.mkdir("/public/MARS/zsd/planner_rasters/frame{}".format(count))
+            # visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "high", high_res_raster)
+            # visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "low", low_res_raster)
+            # with open("/public/MARS/zsd/planner_rasters/pred_traj{}.pkl".format(count), "wb") as f:
+            #     pickle.dump(pred_traj, f)
+            # with open("/public/MARS/zsd/planner_rasters/world_traj{}.pkl".format(count), "wb") as f:
+            #     pickle.dump(next_world_coor_points, f)
         # build output
         ego_state = history.ego_states[-1]
         state = EgoState(
@@ -249,7 +237,7 @@ class ControlTFPlanner(AbstractPlanner):
         rasters_high_res_channels = cv2.split(rasters_high_res)
         rasters_low_res_channels = cv2.split(rasters_low_res)
         # downsampling from ego_trajectory, agent_seq and statics_seq
-        downsample_indexs = [0, 2, 5, 7, 10, 12, 15, 18, 21]
+        downsample_indexs = [0, 2, 5, 7, 10, 12, 15, 17, 20]
         downsample_agents_seq = list()
         downsample_statics_seq = list()
         for i in downsample_indexs:
@@ -259,10 +247,11 @@ class ControlTFPlanner(AbstractPlanner):
         agents_seq = downsample_agents_seq
         statics_seq = downsample_statics_seq
         new_ego_trajectory = list()
-        for idx in range(min(20, len(ego_trajectory)-1)):
-            new_ego_trajectory[2 * idx] = ego_trajectory[idx]
-            new_ego_trajectory[2 * idx + 1] = (ego_trajectory[idx] + ego_trajectory[idx]) / 2
-        ego_trajectory = new_ego_trajectory.copy()
+        for idx in range(0, len(ego_trajectory)-1):
+            new_ego_trajectory.append(ego_trajectory[idx])
+            new_ego_trajectory.append((ego_trajectory[idx] + ego_trajectory[idx + 1]) / 2)
+        new_ego_trajectory.append(ego_pose)
+        ego_trajectory = np.array(new_ego_trajectory)[::5].copy()
         # goal channel
         ## goal point
         if self.goal is None:
@@ -419,7 +408,7 @@ class ControlTFPlanner(AbstractPlanner):
                                   ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                                   np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
-            action = rotated_poses[i]
+            action = rotated_poses[i+1]
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
