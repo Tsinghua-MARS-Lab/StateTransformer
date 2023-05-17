@@ -47,7 +47,7 @@ def main(args):
         low_res_raster_scale=0.77,
         past_frame_num=40,
         future_frame_num=160,
-        frame_sample_interval=5,
+        frame_sample_interval=4,
         action_label_scale=100,
     )
 
