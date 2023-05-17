@@ -163,27 +163,16 @@ class ControlTFPlanner(AbstractPlanner):
             
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
         for i in range(pred_traj.shape[0]):
+            delta_heading = math.atan(pred_traj[i, 1]/pred_traj[i, 0])
             new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
             new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
             pred_traj[i, 0] = new_x
             pred_traj[i, 1] = new_y
             pred_traj[i, 2] = 0
-            pred_traj[i, -1] += ego_trajectory[-1][-1]
+            pred_traj[i, -1] = ego_trajectory[-1][-1] + delta_heading
 
         next_world_coor_points = pred_traj.copy()
-        if count % 10 == 0:
-            with open("/public/MARS/zsd/planner_context/history{}.pkl".format(count), "wb") as f:
-                pickle.dump(history, f)
-            # print("x:", context_action[:, 0])
-            # print("y:", context_action[:, 1])
-            # if not os.path.exists("/public/MARS/zsd/planner_rasters/frame{}".format(count)):
-            #     os.mkdir("/public/MARS/zsd/planner_rasters/frame{}".format(count))
-            # visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "high", high_res_raster)
-            # visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "low", low_res_raster)
-            # with open("/public/MARS/zsd/planner_rasters/pred_traj{}.pkl".format(count), "wb") as f:
-            #     pickle.dump(pred_traj, f)
-            # with open("/public/MARS/zsd/planner_rasters/world_traj{}.pkl".format(count), "wb") as f:
-            #     pickle.dump(next_world_coor_points, f)
+
         # build output
         ego_state = history.ego_states[-1]
         state = EgoState(
@@ -203,7 +192,7 @@ class ControlTFPlanner(AbstractPlanner):
             state = EgoState.build_from_center(
                 center=StateSE2(next_world_coor_points[i, 0],
                                 next_world_coor_points[i, 1],
-                                ego_trajectory[-1][-1]),
+                                next_world_coor_points[i][-1]),
                 center_velocity_2d=StateVector2D(0, 0),
                 center_acceleration_2d=StateVector2D(0, 0),
                 tire_steering_angle=state.tire_steering_angle,
