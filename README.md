@@ -72,8 +72,7 @@ runner.py --model_name pretrain-xl \
 
 ## To generate dataset:
 `
-python generation.py \ 
---num_proc 1 \
+python generation.py --num_proc 1 \ 
 --sample_interval 20 \
 --dataset_name single_test \
 --starting_file_num 0 \
@@ -191,6 +190,8 @@ nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
     os.environ['NUPLAN_DB_FILES'] = ''
     os.environ['NUPLAN_MAP_VERSION'] = ''
 
+#### Filter log files or maps
+set `scenario_builder` `scenario_filter` to correspond scenario_builder yaml file and scenario_filter yaml file in `script/config/common/default_common.yaml`. scenario_builder path is `script/config/common/scenario_builder` and scenario_filter path is `script/config/common/scenario_filter`. For example, choose builder yaml as nuplan, and filter yaml as all_scenarios, if you want to filter specify logs or maps, please add `[log_name1, ..., log_namen]` to log_names.
 
 #### Run the following command from NuPlan-Devkit
 
