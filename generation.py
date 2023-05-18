@@ -22,11 +22,13 @@ import pickle
 
 def main(args):
     running_mode = args.running_mode
+
     data_path = {
         'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
         'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
         'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
     }
+
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -47,7 +49,7 @@ def main(args):
         low_res_raster_scale=0.77,
         past_frame_num=40,
         future_frame_num=160,
-        frame_sample_interval=5,
+        frame_sample_interval=4,
         action_label_scale=100,
     )
 
@@ -203,6 +205,9 @@ def main(args):
         print(f'loaded {len(file_indices)} from {len(nsm_file_names)} as {file_indices}')
     else:
         # file_indices = list(range(data_loader.total_file_num))
+        total_file_num = len(os.listdir(data_path['NUPLAN_DB_FILES']))
+        if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
+            args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
 
     total_file_number = len(file_indices)
@@ -212,15 +217,16 @@ def main(args):
             filter_dic = pickle.load(f)
         assert not args.use_nsm, NotImplementedError
         # filter file indices for faster loops while genrating dataset
-        file_indices = []
-        for idx, each_file in enumerate(data_loader.file_names):
+        file_indices_filtered = []
+        for idx, each_file in enumerate(file_indices):
             if each_file in filter_dic:
                 ranks = filter_dic[each_file]['rank']
                 for rank in ranks:
                     if rank < args.filter_rank:
-                        file_indices.append(idx)
+                        file_indices_filtered.append(idx)
                         break
-        print(f'Filtered {len(file_indices)} files from {total_file_number} files')
+        print(f'Filtered {len(file_indices_filtered)} files from {total_file_number} files')
+        file_indices = file_indices_filtered
     else:
         filter_dic = None
     total_file_number = len(file_indices)
@@ -242,7 +248,7 @@ def main(args):
                                             #features=features,
                                             gen_kwargs={'shards': file_indices, 'dl': None,
                                                         'filter_info': filter_dic},
-                                            writer_batch_size=2, cache_dir=args.cache_folder,
+                                            writer_batch_size=10, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
