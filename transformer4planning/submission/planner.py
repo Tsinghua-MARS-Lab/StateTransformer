@@ -182,7 +182,8 @@ class ControlTFPlanner(AbstractPlanner):
             new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
             pred_traj[i, 0] = new_x
             pred_traj[i, 1] = new_y
-            pred_traj[i, 2] += ego_trajectory[-1][-1]
+            pred_traj[i, 2] = 0
+            pred_traj[i, 3] += ego_trajectory[-1][-1]
 
         next_world_coor_points = pred_traj.copy()
 
@@ -200,6 +201,44 @@ class ControlTFPlanner(AbstractPlanner):
             time_point=ego_state.time_point
         )
         trajectory: List[EgoState] = [state]
+
+
+        use_backup_planner = False
+        if use_backup_planner:
+            # check if out of boundary
+            out_of_route = False
+            planning_interval = self.env_config.env.planning_interval
+            # for i in range(pred_traj.shape[0]):
+            out_pts = 0
+            for i in range(100):
+                all_nearby_map_instances = self.map_api.get_proximal_map_objects(
+                    Point2D(pred_traj[i, 0], pred_traj[i, 1]),
+                    1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
+                all_nearby_map_instances_ids = []
+                for each_type in all_nearby_map_instances:
+                    for each_ins in all_nearby_map_instances[each_type]:
+                        all_nearby_map_instances_ids.append(each_ins.id)
+                any_in = False
+                for each in all_nearby_map_instances_ids:
+                    if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
+                        any_in = True
+                        break
+                if not any_in:
+                    out_pts += 1
+
+            if out_pts > 10:
+                out_of_route = True
+                print('OUT OF ROUTE, Use Previous ', i)
+
+            if out_of_route and self.previous_planning_traj is not None and self.previous_planning_traj.shape[0] > planning_interval:
+                pred_traj = np.zeros_like(pred_traj)
+                total_frames = min(pred_traj.shape[0], self.previous_planning_traj.shape[0])
+                pred_traj[:total_frames - planning_interval, :] = self.previous_planning_traj[
+                                                                  planning_interval:total_frames, :]
+            # end of post_processing
+
+
+
         for i in range(0, next_world_coor_points.shape[0]):
             new_time_point = TimePoint(state.time_point.time_us + 1e5)
             state = EgoState.build_from_center(
