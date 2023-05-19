@@ -9,7 +9,7 @@ import torch, pickle
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-from dataset_gen.nuplan_obs import get_observation_for_nsm, get_observation_for_autoregression_nsm
+from dataset_gen.nuplan_obs import get_observation_for_nsm
 from torch.utils.data import DataLoader
 import os, time
 import importlib.util
@@ -29,9 +29,9 @@ def main(args):
     #     'NUPLAN_DB_FILES': "/localdata_sdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
     # }
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan-v1.1/",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan-v1.1/nuplan-maps-v1.1",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
     }
     road_path = args.road_dic_path
     if args.use_nsm:
