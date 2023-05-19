@@ -9,7 +9,7 @@ import torch, pickle
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-from dataset_gen.nuplan_obs import get_observation_for_nsm, get_observation_for_autoregression_nsm
+from dataset_gen.nuplan_obs import get_observation_for_nsm
 from torch.utils.data import DataLoader
 import os, time
 import importlib.util
@@ -23,9 +23,9 @@ import pickle
 def main(args):
     running_mode = args.running_mode
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
     }
     road_path = args.road_dic_path
     if args.use_nsm:
@@ -47,7 +47,7 @@ def main(args):
         low_res_raster_scale=0.77,
         past_frame_num=40,
         future_frame_num=160,
-        frame_sample_interval=5,
+        frame_sample_interval=4,
         action_label_scale=100,
     )
 
@@ -246,7 +246,7 @@ def main(args):
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
-    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name))
+    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
     print('Dataset saved')
     exit()
 
