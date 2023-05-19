@@ -22,6 +22,12 @@ import pickle
 
 def main(args):
     running_mode = args.running_mode
+
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    # }
     data_path = {
         'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
         'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
@@ -203,6 +209,9 @@ def main(args):
         print(f'loaded {len(file_indices)} from {len(nsm_file_names)} as {file_indices}')
     else:
         # file_indices = list(range(data_loader.total_file_num))
+        total_file_num = len(os.listdir(data_path['NUPLAN_DB_FILES']))
+        if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
+            args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
 
     total_file_number = len(file_indices)
@@ -212,15 +221,16 @@ def main(args):
             filter_dic = pickle.load(f)
         assert not args.use_nsm, NotImplementedError
         # filter file indices for faster loops while genrating dataset
-        file_indices = []
-        for idx, each_file in enumerate(data_loader.file_names):
+        file_indices_filtered = []
+        for idx, each_file in enumerate(file_indices):
             if each_file in filter_dic:
                 ranks = filter_dic[each_file]['rank']
                 for rank in ranks:
                     if rank < args.filter_rank:
-                        file_indices.append(idx)
+                        file_indices_filtered.append(idx)
                         break
-        print(f'Filtered {len(file_indices)} files from {total_file_number} files')
+        print(f'Filtered {len(file_indices_filtered)} files from {total_file_number} files')
+        file_indices = file_indices_filtered
     else:
         filter_dic = None
     total_file_number = len(file_indices)
@@ -238,13 +248,29 @@ def main(args):
                         'map_name': Value(dtype='string', id=None), 
                         'lidar_token': Value(dtype='string', id=None)
                          })
+
+
+    # sort by file size
+    NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
+    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES) if each_path[0] != '.']
+    sorted_file_names = sorted(all_file_names, key=lambda x: os.stat(x).st_size)
+    sorted_file_indices = []
+    for i, each_file_name in enumerate(sorted_file_names):
+        sorted_file_indices.append(all_file_names.index(each_file_name))
+    # order by processes
+    file_indices = []
+    for i in range(args.num_proc):
+        file_indices += sorted_file_indices[i::args.num_proc]
+    # end of sorting
+
+
     nuplan_dataset = Dataset.from_generator(yield_data, 
                                             #features=features,
                                             gen_kwargs={'shards': file_indices, 'dl': None,
                                                         'filter_info': filter_dic},
-                                            writer_batch_size=2, cache_dir=args.cache_folder,
+                                            writer_batch_size=10, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
-    print('Saving dataset')
+    print('Saving dataset with ', args.num_proc)
     nuplan_dataset.set_format(type="torch")
     nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
     print('Dataset saved')
