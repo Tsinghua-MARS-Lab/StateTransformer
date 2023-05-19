@@ -246,7 +246,6 @@ class ControlTFPlanner(AbstractPlanner):
             time_point=ego_state.time_point
         )
         trajectory: List[EgoState] = [state]
-
         for i in range(0, next_world_coor_points.shape[0]):
             new_time_point = TimePoint(state.time_point.time_us + 1e5)
             state = EgoState.build_from_center(
