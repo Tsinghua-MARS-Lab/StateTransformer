@@ -215,6 +215,9 @@ def main(args):
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
 
     total_file_number = len(file_indices)
+    NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
+    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES) if each_path[0] != '.']
+    all_file_names = sorted(all_file_names)
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:
@@ -222,12 +225,13 @@ def main(args):
         assert not args.use_nsm, NotImplementedError
         # filter file indices for faster loops while genrating dataset
         file_indices_filtered = []
-        for idx, each_file in enumerate(file_indices):
+        for idx, each_file_index in enumerate(file_indices):
+            each_file = all_file_names[each_file_index]
             if each_file in filter_dic:
                 ranks = filter_dic[each_file]['rank']
                 for rank in ranks:
                     if rank < args.filter_rank:
-                        file_indices_filtered.append(idx)
+                        file_indices_filtered.append(each_file_index)
                         break
         print(f'Filtered {len(file_indices_filtered)} files from {total_file_number} files')
         file_indices = file_indices_filtered
@@ -251,8 +255,6 @@ def main(args):
 
 
     # sort by file size
-    NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
-    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES) if each_path[0] != '.']
     sorted_file_names = sorted(all_file_names, key=lambda x: os.stat(x).st_size)
     sorted_file_indices = []
     for i, each_file_name in enumerate(sorted_file_names):
