@@ -462,8 +462,8 @@ class ControlTFPlanner(AbstractPlanner):
                                   ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                                   np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
-            action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
-            # action = rotated_poses[i]
+            # action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
+            action = rotated_poses[i]
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
