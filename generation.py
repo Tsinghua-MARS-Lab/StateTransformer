@@ -23,9 +23,9 @@ import pickle
 def main(args):
     running_mode = args.running_mode
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
     }
     road_path = args.road_dic_path
     if args.use_nsm:
@@ -246,7 +246,7 @@ def main(args):
                                             num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
-    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name))
+    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
     print('Dataset saved')
     exit()
 

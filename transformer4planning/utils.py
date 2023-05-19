@@ -13,7 +13,8 @@ class ModelArguments:
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/transxl-boston-baseline",
+        # default="/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/transxl-boston-baseline",
+        default = "/public/MARS/zsd/exp_data/nuplan/xl-oa-a-silu-baseline-goon/training_results/checkpoint-76000/",
         # default="/home/shiduozhang/Project/transformer4planning/checkpoints/xl/checkpoint-90000",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
@@ -90,6 +91,9 @@ class ModelArguments:
     )
     n_layers: Optional[int] = field(
         default=4,
+    )
+    n_heads: Optional[int] = field(
+        default=8
     )
     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
     activation_function: Optional[str] = field(

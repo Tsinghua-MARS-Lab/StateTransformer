@@ -24,7 +24,9 @@ from nuplan.planning.simulation.observation.observation_type import DetectionsTr
 from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner, PlannerInitialization, PlannerInput
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
-
+from nuplan.planning.simulation.planner.idm_planner import IDMPlanner
+from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
+from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
 from transformer4planning.checkratser import *
@@ -73,24 +75,41 @@ class ControlTFPlanner(AbstractPlanner):
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
                  use_backup_planner = True,
+                 planning_interval = 1,
                  steering_angle: float = 0.0,
                  **kwargs):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
-        self.samping_time = TimePoint(int(sampling_time * 1e6))
+        self.sampling_time = TimePoint(int(sampling_time * 1e6))
         self.acceleration = StateVector2D(acceleration[0], acceleration[1])
         self.max_velocity = max_velocity
         self.steering_angle = steering_angle
-        self.use_backup_planner = True
+        self.use_backup_planner = use_backup_planner
+        self.planning_interval = planning_interval
+        self.idm_planner = IDMPlanner(
+            target_velocity=10,
+            min_gap_to_lead_agent=1.0,
+            headway_time=1.5,
+            accel_max=1.0,
+            decel_max=3.0,
+            planned_trajectory_samples=16,
+            planned_trajectory_sample_interval=0.5,
+            occupancy_map_radius=40
+        )
+        self.vehicle = get_pacifica_parameters()
+        self.motion_model = KinematicBicycleModel(self.vehicle)
         # model initialization and configuration
         parser = HfArgumentParser((ModelArguments))
         model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
         if model_args.model_pretrain_name_or_path is None:
-            #model_args.model_pretrain_name_or_path = "/home/zhangsd/project/transformer4planning/data/xl-oa-a-embed1024-block12-goon/training_results/checkpoint-2000"
             model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1"
         assert model_args.model_pretrain_name_or_path is not None
         self.model = build_models(model_args=model_args)
         self.model.config.pad_token_id = 0
         self.model.config.eos_token_id = 0
+        if "5hz" in model_args.model_pretrain_name_or_path:
+            self.frequency = 5
+        else:
+            self.frequency = 4
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -98,6 +117,7 @@ class ControlTFPlanner(AbstractPlanner):
         self.goal = initialization.mission_goal
         self.route_roadblock_ids = initialization.route_roadblock_ids
         self.map_api = initialization.map_api
+        self.idm_planner.initialize(initialization)
 
     def name(self) -> str:
         """ Inherited, see superclass. """
@@ -124,23 +144,31 @@ class ControlTFPlanner(AbstractPlanner):
         road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
         
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-            ego_trajectory, agents, statics, road_dic, ego_shape)
+            ego_trajectory, agents, statics, road_dic, ego_shape, self.frequency)
         if torch.cuda.is_available():
             self.model.to('cuda')
             output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
                                 current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
                                 context_actions=torch.tensor(context_action).unsqueeze(0).to('cuda'), \
                                 high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to('cuda'), \
-                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to('cuda'))
+                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to('cuda'),
+                                trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
             # pred_traj [80, 4]
-            pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
+            try:
+                pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
+            except:
+                pred_traj = output.logits.squeeze(0).detach().cpu().numpy()
         else:
             output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
                                 current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
                                 context_actions=torch.tensor(context_action).unsqueeze(0), \
                                 high_res_raster=torch.tensor(high_res_raster).unsqueeze(0), \
-                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0))
-            pred_traj = output[-1][-1].squeeze(0).detach().numpy()
+                                low_res_raster=torch.tensor(low_res_raster).unsqueeze(0),
+                                trajectory_label=torch.zeros((1, 160, 4)))
+            try:
+                pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
+            except:
+                pred_traj = output.logits.squeeze(0).detach().cpu().numpy()
         # # post-processing
         low_filter = True
         low_threshold = 0.01
@@ -163,60 +191,47 @@ class ControlTFPlanner(AbstractPlanner):
             
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
         for i in range(pred_traj.shape[0]):
-            delta_heading = math.atan(pred_traj[i, 1]/pred_traj[i, 0])
+            if i == 0:
+                delta_heading = get_angle_of_a_line(ego_pose[:2], pred_traj[i, :2])
+                heading = ego_pose[-1] + delta_heading
+            else:
+                delta_heading = get_angle_of_a_line(pred_traj[i - 1, :2], pred_traj[i, :2]) 
+                heading += delta_heading
             new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
             new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
             pred_traj[i, 0] = new_x
             pred_traj[i, 1] = new_y
             pred_traj[i, 2] = 0
-            pred_traj[i, -1] = ego_trajectory[-1][-1] + delta_heading
+            pred_traj[i, -1] = heading
 
         next_world_coor_points = pred_traj.copy()
-        if count % 10 == 0:
-            # with open("/public/MARS/zsd/planner_context/history{}.pkl".format(count), "wb") as f:
-            #     pickle.dump(history, f)
-            # print("x:", context_action[:, 0])
-            # print("y:", context_action[:, 1])
-            if not os.path.exists("/public/MARS/zsd/planner_rasters/frame{}".format(count)):
-                os.mkdir("/public/MARS/zsd/planner_rasters/frame{}".format(count))
-            visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "high", high_res_raster, context_length=11)
-            visulize_raster("/public/MARS/zsd/planner_rasters/frame{}".format(count), "low", low_res_raster, context_length=11)
-            with open("/public/MARS/zsd/planner_rasters/pred_traj{}.pkl".format(count), "wb") as f:
-                pickle.dump(pred_traj, f)
-            # with open("/public/MARS/zsd/planner_rasters/world_traj{}.pkl".format(count), "wb") as f:
-            #     pickle.dump(next_world_coor_points, f)
-        # if self.use_backup_planner:
-        #     # check if out of boundary
-        #     out_of_route = False
-        #     planning_interval = self.env_config.env.planning_interval
-        #     # for i in range(pred_traj.shape[0]):
-        #     out_pts = 0
-        #     for i in range(100):
-        #         all_nearby_map_instances = self.map_api.get_proximal_map_objects(
-        #             Point2D(pred_traj[i, 0], pred_traj[i, 1]),
-        #             1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
-        #         all_nearby_map_instances_ids = []
-        #         for each_type in all_nearby_map_instances:
-        #             for each_ins in all_nearby_map_instances[each_type]:
-        #                 all_nearby_map_instances_ids.append(each_ins.id)
-        #         any_in = False
-        #         for each in all_nearby_map_instances_ids:
-        #             if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
-        #                 any_in = True
-        #                 break
-        #         if not any_in:
-        #             out_pts += 1
+        if self.use_backup_planner:
+            # check if out of boundary
+            out_of_route = False
+            # for i in range(pred_traj.shape[0]):
+            out_pts = 0
+            for i in range(pred_traj.shape[0]):
+                all_nearby_map_instances = self.map_api.get_proximal_map_objects(
+                    Point2D(pred_traj[i, 0], pred_traj[i, 1]),
+                    1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
+                all_nearby_map_instances_ids = []
+                for each_type in all_nearby_map_instances:
+                    for each_ins in all_nearby_map_instances[each_type]:
+                        all_nearby_map_instances_ids.append(each_ins.id)
+                any_in = False
+                for each in all_nearby_map_instances_ids:
+                    if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
+                        any_in = True
+                        break
+                if not any_in:
+                    out_pts += 1
 
-        #     if out_pts > 10:
-        #         out_of_route = True
-        #         print('OUT OF ROUTE, Use Previous ', i)
-
-        #     if out_of_route and self.previous_planning_traj is not None and self.previous_planning_traj.shape[0] > planning_interval:
-        #         pred_traj = np.zeros_like(pred_traj)
-        #         total_frames = min(pred_traj.shape[0], self.previous_planning_traj.shape[0])
-        #         pred_traj[:total_frames - planning_interval, :] = self.previous_planning_traj[
-        #                                                           planning_interval:total_frames, :]
-
+            if out_pts > 10:
+                out_of_route = True
+                print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
+                trajectory = self.idm_planner.compute_planner_trajectory(current_input)
+                return trajectory
+           
         # build output
         ego_state = history.ego_states[-1]
         state = EgoState(
@@ -246,7 +261,9 @@ class ControlTFPlanner(AbstractPlanner):
                 angular_vel=state.dynamic_car_state.angular_velocity,
                 angular_accel=state.dynamic_car_state.angular_acceleration
             )
+            state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
             trajectory.append(state)
+            
         return InterpolatedTrajectory(trajectory)
 
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=500, context_frequency=5):
@@ -445,7 +462,8 @@ class ControlTFPlanner(AbstractPlanner):
                                   ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                                   np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
-            action = rotated_poses[i]
+            action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
+            # action = rotated_poses[i]
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
