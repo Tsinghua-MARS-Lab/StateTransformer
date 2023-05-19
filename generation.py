@@ -23,12 +23,16 @@ import pickle
 def main(args):
     running_mode = args.running_mode
 
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    # }
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan-v1.1/",
+        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan-v1.1/nuplan-maps-v1.1",
+        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan-v1.1/{}".format(args.data_path),
     }
-
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -244,15 +248,31 @@ def main(args):
                         'map_name': Value(dtype='string', id=None), 
                         'lidar_token': Value(dtype='string', id=None)
                          })
+
+
+    # sort by file size
+    NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
+    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES) if each_path[0] != '.']
+    sorted_file_names = sorted(all_file_names, key=lambda x: os.stat(x).st_size)
+    sorted_file_indices = []
+    for i, each_file_name in enumerate(sorted_file_names):
+        sorted_file_indices.append(all_file_names.index(each_file_name))
+    # order by processes
+    file_indices = []
+    for i in range(args.num_proc):
+        file_indices += sorted_file_indices[i::args.num_proc]
+    # end of sorting
+
+
     nuplan_dataset = Dataset.from_generator(yield_data, 
                                             #features=features,
                                             gen_kwargs={'shards': file_indices, 'dl': None,
                                                         'filter_info': filter_dic},
                                             writer_batch_size=10, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
-    print('Saving dataset')
+    print('Saving dataset with ', args.num_proc)
     nuplan_dataset.set_format(type="torch")
-    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name))
+    nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
     print('Dataset saved')
     exit()
 
