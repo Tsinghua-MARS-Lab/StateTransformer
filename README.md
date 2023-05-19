@@ -8,7 +8,7 @@ model_name consist of ['scratch','pretrain']-['xl','gpt']
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run \
 --nproc_per_node=8 \
-runner.py --model_name scratch-xl \
+runner.py --model_name scratch-transxl \
 --model_pretrain_name_or_path transfo-xl-wt103 \
 --saved_dataset_folder /localdata_ssd/nuplan_nsm/nsm_sparse_balance_new_4seq \
 --output_dir data/example/training_results \
@@ -36,6 +36,7 @@ runner.py --model_name scratch-xl \
 --d_model 256 \
 --d_inner 1024 \
 --n_layers 4 \
+--n_heads 8 \
 --activation_function silu \
 --resume_from_checkpoint None\
 `
@@ -71,8 +72,7 @@ runner.py --model_name pretrain-xl \
 
 ## To generate dataset:
 `
-python generation.py \ 
---num_proc 1 \
+python generation.py --num_proc 1 \ 
 --sample_interval 20 \
 --dataset_name single_test \
 --starting_file_num 0 \
@@ -190,6 +190,8 @@ nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
     os.environ['NUPLAN_DB_FILES'] = ''
     os.environ['NUPLAN_MAP_VERSION'] = ''
 
+#### Filter log files or maps
+set `scenario_builder` `scenario_filter` to correspond scenario_builder yaml file and scenario_filter yaml file in `script/config/common/default_common.yaml`. scenario_builder path is `script/config/common/scenario_builder` and scenario_filter path is `script/config/common/scenario_filter`. For example, choose builder yaml as nuplan, and filter yaml as all_scenarios, if you want to filter specify logs or maps, please add `[log_name1, ..., log_namen]` to log_names.
 
 #### Run the following command from NuPlan-Devkit
 
