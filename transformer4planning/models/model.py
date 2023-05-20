@@ -16,12 +16,11 @@ from transformers import GPT2Model,GPT2PreTrainedModel
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
-def cat_raster_seq(raster:Optional[torch.LongTensor]):
+def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9):
     """
     input raster can be either high resolution raster or low resolution raster
     expected input size: [bacthsize, channel, h, w], and channel is consisted of goal(1d)+roadtype(20d)+agenttype*time(8*9d)
     """
-    framenum = 9 # default for 2s and 5hz sampling
     b, c, h, w = raster.shape
     agent_type = 8
     road_type = 20
@@ -181,9 +180,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         batch_size, h, w, total_channels = high_res_raster.shape
         ## action embedding
         action_embeds = self.action_m_embed(context_actions)
-
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+        context_length = context_actions.shape[1] + 1
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
         # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
         high_res_embed = self.cnn_downsample(
@@ -447,8 +446,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz,
             stopflag_embed = self.stop_flag_embed(stopflag.to(device).long())
         action_embeds = self.action_m_embed(context_actions)
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+        context_length = context_actions.shape[1] + 1
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
@@ -1590,7 +1590,7 @@ if  __name__ == '__main__':
     model_args.d_inner = 1024
     model_args.n_layers = 4
     model_args.n_heads = 8
-    model_args.model_name = "scratch-bert"
+    model_args.model_name = "scratch-nonauto-gpt"
 
     model = build_models(model_args)
 
@@ -1614,25 +1614,18 @@ if  __name__ == '__main__':
         next_world_coor_y = next_world_coor_trajectories[:,1]
         return next_world_coor_x - yaw, next_world_coor_y - yaw
     
-    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/nonauto_nsm_balance/")
+    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/5hz_boston/")
     # print(dataset.features)
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
-    example = dataset['test'][3]
+    example = dataset['train'][0]
     result = model(
-        intended_maneuver_label=example['intended_maneuver_label'].unsqueeze(0),
-        intended_maneuver_vector=example['intended_maneuver_vector'].unsqueeze(0).unsqueeze(0),
-        current_maneuver_label=example['current_maneuver_label'].unsqueeze(0),
-        current_maneuver_vector=example['current_maneuver_vector'].unsqueeze(0).unsqueeze(0),
-        action_label=None,
         trajectory_label=example['trajectory_label'].unsqueeze(0),
         context_actions=example['context_actions'].unsqueeze(0),
         high_res_raster=example['high_res_raster'].unsqueeze(0),
         low_res_raster=example['low_res_raster'].unsqueeze(0),
-        intended_maneuver_gt=example['intended_maneuver_gt'].unsqueeze(0),
-        current_maneuver_gt=example['current_maneuver_gt'].unsqueeze(0),
         return_dict=True,
     )
-    pred_traj = result[-1][-1]
+    pred_traj = result.logits
     gt_traj = example['trajectory_label'][1::2].cpu().numpy()
     loss_fn = nn.MSELoss()
     loss = loss_fn(pred_traj, example['trajectory_label'][1::2])
