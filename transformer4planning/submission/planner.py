@@ -74,7 +74,7 @@ class ControlTFPlanner(AbstractPlanner):
                  sampling_time: float,
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
-                 use_backup_planner = True,
+                 use_backup_planner = False,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
                  **kwargs):
@@ -106,10 +106,14 @@ class ControlTFPlanner(AbstractPlanner):
         self.model = build_models(model_args=model_args)
         self.model.config.pad_token_id = 0
         self.model.config.eos_token_id = 0
-        if "5hz" in model_args.model_pretrain_name_or_path:
-            self.frequency = 5
-        else:
-            self.frequency = 4
+        self.frequency = 5
+        # if "5hz" in model_args.model_pretrain_name_or_path:
+        #     self.frequency = 5
+        # else:
+        #     self.frequency = 4
+        self.last_velocity = np.zeros(2)
+        self.curret_velocity = np.zeros(2)
+        
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -192,8 +196,8 @@ class ControlTFPlanner(AbstractPlanner):
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
         for i in range(pred_traj.shape[0]):
             if i == 0:
-                delta_heading = get_angle_of_a_line(ego_pose[:2], pred_traj[i, :2])
-                heading = ego_pose[-1] + delta_heading
+                delta_heading = get_angle_of_a_line(ego_trajectory[-1, :2], pred_traj[i, :2])
+                heading = ego_trajectory[-1, -1] + delta_heading
             else:
                 delta_heading = get_angle_of_a_line(pred_traj[i - 1, :2], pred_traj[i, :2]) 
                 heading += delta_heading
@@ -248,10 +252,19 @@ class ControlTFPlanner(AbstractPlanner):
         trajectory: List[EgoState] = [state]
         for i in range(0, next_world_coor_points.shape[0]):
             new_time_point = TimePoint(state.time_point.time_us + 1e5)
+            # velocity and acceleration computation
+            # self.last_velocity = self.curret_velocity
+            # if i == 0:
+            #     self.current_velocity = next_world_coor_points[0, :2] - ego_trajectory[-1][:2]
+            # else:
+            #     self.current_velocity = next_world_coor_points[i, :2] - next_world_coor_points[i-1, :2] 
+            # self.acceleration = (self.curret_velocity - self.last_velocity)/0.1
             state = EgoState.build_from_center(
                 center=StateSE2(next_world_coor_points[i, 0],
                                 next_world_coor_points[i, 1],
-                                next_world_coor_points[i][-1]),
+                                ego_trajectory[-1, -1]
+                                # next_world_coor_points[i][-1]
+                                ),
                 center_velocity_2d=StateVector2D(0, 0),
                 center_acceleration_2d=StateVector2D(0, 0),
                 tire_steering_angle=state.tire_steering_angle,
@@ -262,6 +275,7 @@ class ControlTFPlanner(AbstractPlanner):
                 angular_accel=state.dynamic_car_state.angular_acceleration
             )
             state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
+            state._time_point = new_time_point
             trajectory.append(state)
             
         return InterpolatedTrajectory(trajectory)
@@ -287,7 +301,7 @@ class ControlTFPlanner(AbstractPlanner):
         rasters_low_res_channels = cv2.split(rasters_low_res)
         # downsampling from ego_trajectory, agent_seq and statics_seq in 4 hz case
         if context_frequency == 4:
-            downsample_indexs = [0, 2, 5, 7, 10, 12, 15, 17, 20]
+            downsample_indexs = [2, 5, 7, 10, 12, 15, 18, 20, 22]
             downsample_agents_seq = list()
             downsample_statics_seq = list()
             for i in downsample_indexs:
@@ -301,7 +315,7 @@ class ControlTFPlanner(AbstractPlanner):
                 new_ego_trajectory.append(ego_trajectory[idx])
                 new_ego_trajectory.append((ego_trajectory[idx] + ego_trajectory[idx + 1]) / 2)
             new_ego_trajectory.append(ego_pose)
-            ego_trajectory = np.array(new_ego_trajectory)[::5].copy()
+            ego_trajectory = np.array(new_ego_trajectory)[-41::][::5].copy()
         elif context_frequency == 5:
             agents_seq = agents_seq[2::2]
             statics_seq = statics_seq[2::2]
