@@ -63,6 +63,11 @@ def get_angle_of_a_line(pt1, pt2):
     angle = math.atan2(y2 - y1, x2 - x1)
     return angle
 
+def euclidean_distance(pt1, pt2):
+    x_1, y_1 = pt1
+    x_2, y_2 = pt2
+    return math.sqrt((x_1-x_2)**2+(y_1-y_2)**2)
+
 
 class ControlTFPlanner(AbstractPlanner):
     """
@@ -175,7 +180,7 @@ class ControlTFPlanner(AbstractPlanner):
                 pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
             except:
                 pred_traj = output.logits.squeeze(0).detach().cpu().numpy()
-        relative_traj = pred_traj.copy()
+        
         # # post-processing
         low_filter = True
         low_threshold = 0.01
@@ -195,14 +200,23 @@ class ControlTFPlanner(AbstractPlanner):
                 last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
                                                         each_pose[3]]
             pred_traj = filtered_traj
-            
+        relative_traj = pred_traj.copy()
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
+        heading = ego_trajectory[-1, -1]
         for i in range(pred_traj.shape[0]):
-            if i == 0:
-                delta_heading = get_angle_of_a_line(np.zeros(2), relative_traj[i, :2])
+            if i < 10:
+                if euclidean_distance(np.zeros(2), relative_traj[i, :2]) < 1:
+                    delta_heading = 0
+                else:
+                    delta_heading = get_angle_of_a_line(np.zeros(2), relative_traj[i, :2])
             else:
-                delta_heading = get_angle_of_a_line(relative_traj[i - 1, :2], relative_traj[i, :2]) 
-            heading = ego_trajectory[-1, -1] + delta_heading
+                if euclidean_distance(relative_traj[i-10, :2], relative_traj[i, :2]) < 1:
+                    delta_heading = 0
+                else:
+                    delta_heading = get_angle_of_a_line(relative_traj[i - 10, :2], relative_traj[i, :2]) 
+            if delta_heading > 1e-2:
+                heading = ego_trajectory[-1, -1] + delta_heading
+            
             new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
             new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
             pred_traj[i, 0] = new_x
