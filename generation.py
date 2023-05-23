@@ -47,9 +47,11 @@ def main(args):
 
     observation_kwargs = dict(
         max_dis=500,
-        high_res_raster_shape=[224, 224],  # for high resolution image, we cover 50 meters for delicated short-term actions
+        high_res_raster_shape=[224, 224], # for high resolution image, we cover 50 meters for delicated short-term actions
+        # for high resolution image, we cover 50 meters for delicated short-term actions
         high_res_raster_scale=4.0,
-        low_res_raster_shape=[224, 224],  # for low resolution image, we cover 300 meters enough for 8 seconds straight line actions
+        low_res_raster_shape=[224, 224], # for low resolution image, we cover 300 meters enough for 8 seconds straight line actions
+        # for low resolution image, we cover 300 meters enough for 8 seconds straight line actions
         low_res_raster_scale=0.77,
         past_frame_num=40,
         future_frame_num=160,
@@ -79,17 +81,18 @@ def main(args):
                     break
             else:
                 nsm_result = None
-            
             total_frames = len(loaded_dic['lidar_pc_tokens'])
 
             frames_to_sample = list(range(observation_kwargs['past_frame_num'] + 1,
                                           total_frames - observation_kwargs['future_frame_num'], args.sample_interval))
             if filter_info is not None:
+                # only generate data for filtered frames
+                frames_to_sample = []
+
                 if file_name not in filter_info:
                     print('ERROR, file name not found after filter, ', file_name, list(filter_info.keys())[:10])
                     continue
                 filter_info_this_file = filter_info[file_name]
-                frames_to_add = []
                 frames = filter_info_this_file['frame_index']
                 ranks = filter_info_this_file['rank']
                 assert len(frames) == len(ranks), f'ERROR, frame and rank length not match, {len(frames)}, {len(ranks)}'
@@ -99,16 +102,19 @@ def main(args):
                     if data_rank < args.filter_rank:
                         # augment frames
                         interval = observation_kwargs["frame_sample_interval"]
-                        frames_to_add += list(range(frame_idx - interval, frame_idx + interval,
-                                                    2 * int(interval / args.scaling_factor_for_dagger)))
-                frames_to_sample += frames_to_add
+                        frames_to_sample += list(range(frame_idx - interval, frame_idx + interval,
+                                                       int(interval * 2 / args.scaling_factor_for_dagger)))
+                        if len(frames_to_sample) == 0:
+                            print('test: ', frame_idx, interval, args.scaling_factor_for_dagger)
+                if len(frames_to_sample) == 0:
+                    print('ERROR, no frames to add, ', frames, ranks)
                 frames_to_sample = list(set(frames_to_sample))
 
             for t in frames_to_sample:
 
                 if args.use_nsm:
                     current_frame_is_valid = nsm_result['valid_frames'][t]
-                    target_frame_is_valid = nsm_result['valid_frames'][t+observation_kwargs['frame_sample_interval']]
+                    target_frame_is_valid = nsm_result['valid_frames'][t + observation_kwargs['frame_sample_interval']]
                     # sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1, observation_kwargs["frame_sample_interval"]))
                     # include future frames
                     sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1 + 80))
@@ -119,17 +125,19 @@ def main(args):
                             break
                         if len(nsm_result['current_actions_weights_per_frame'][frame]) == 0:
                             skip = True
-                            break    
+                            break
                     if skip:
-                        continue                    
-                    # if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
+                        continue
+                        # if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
                     #     if np.random.rand() > args.sample_rate:
                     #         continue
                     if not current_frame_is_valid or not target_frame_is_valid:
                         continue
-                    if len(nsm_result['goal_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
+                    if len(nsm_result['goal_actions_weights_per_frame']) < t - observation_kwargs[
+                        'frame_sample_interval'] - 1:
                         continue
-                    if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs['frame_sample_interval'] - 1:
+                    if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs[
+                        'frame_sample_interval'] - 1:
                         continue
 
                 # if args.auto_regressive:
@@ -152,7 +160,7 @@ def main(args):
                 else:
                     continue
             del dl
-    
+
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
     # data_loader = NuPlanDL(scenario_to_start=starting_scenario,
     #                         file_to_start=starting_file_num,
@@ -169,8 +177,8 @@ def main(args):
     # # # with open("data_dic.pkl", "wb") as f:
     # # #     pickle.dump(loaded_dic, f)
     # # with open("data_dic.pkl", "rb") as f:
-    # #     loaded_dic = pickle.load(f) 
-    
+    # #     loaded_dic = pickle.load(f)
+
     # total_frames = len(loaded_dic['lidar_pc_tokens'])
     # s = time.time()
     # observation_dic = get_observation_for_nsm(
@@ -216,7 +224,8 @@ def main(args):
 
     total_file_number = len(file_indices)
     NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
-    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES) if each_path[0] != '.']
+    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES) if
+                      each_path[0] != '.']
     all_file_names = sorted(all_file_names)
     # load filter pickle file
     if args.filter_pickle_path is not None:
@@ -227,47 +236,58 @@ def main(args):
         file_indices_filtered = []
         for idx, each_file_index in enumerate(file_indices):
             each_file = all_file_names[each_file_index]
+            each_file = each_file.split('/')[-1].split('.db')[0]
             if each_file in filter_dic:
                 ranks = filter_dic[each_file]['rank']
                 for rank in ranks:
                     if rank < args.filter_rank:
                         file_indices_filtered.append(each_file_index)
                         break
-        print(f'Filtered {len(file_indices_filtered)} files from {total_file_number} files')
+            else:
+                print(f'file {each_file} not found in evaluation result pkl')
+        print(
+            f'Filtered {len(file_indices_filtered)} files from {total_file_number} files and {len(list(filter_dic.keys()))} keys')
         file_indices = file_indices_filtered
+        print(file_indices)
     else:
         filter_dic = None
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
-    features = Features({'trajectory': Sequence(feature=Sequence(feature=Value(dtype='float64', id=None), length=-1, id=None), length=-1, id=None), 
-                        'high_res_raster': Sequence(feature=Sequence(feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None),  
-                        'low_res_raster': Sequence(feature=Sequence(feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1, id=None), length=-1, id=None),  
-                        'intended_maneuver_vector': Sequence(feature=Value(dtype='int32', id=None), length=-1, id=None), 
-                        'current_maneuver_vector': Sequence(feature=Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None), length=-1, id=None), 
-                        'file_name': Value(dtype='string', id=None), 
-                        'scenario_id': Value(dtype='string', id=None), 
-                        'time_stamp': Value(dtype='int64', id=None), 
-                        'frame_index': Value(dtype='int64', id=None), 
-                        'map_name': Value(dtype='string', id=None), 
-                        'lidar_token': Value(dtype='string', id=None)
+    features = Features({'trajectory': Sequence(
+        feature=Sequence(feature=Value(dtype='float64', id=None), length=-1, id=None), length=-1, id=None),
+                         'high_res_raster': Sequence(feature=Sequence(
+                             feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1,
+                             id=None), length=-1, id=None),
+                         'low_res_raster': Sequence(feature=Sequence(
+                             feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1,
+                             id=None), length=-1, id=None),
+                         'intended_maneuver_vector': Sequence(feature=Value(dtype='int32', id=None), length=-1,
+                                                              id=None),
+                         'current_maneuver_vector': Sequence(
+                             feature=Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None), length=-1,
+                             id=None),
+                         'file_name': Value(dtype='string', id=None),
+                         'scenario_id': Value(dtype='string', id=None),
+                         'time_stamp': Value(dtype='int64', id=None),
+                         'frame_index': Value(dtype='int64', id=None),
+                         'map_name': Value(dtype='string', id=None),
+                         'lidar_token': Value(dtype='string', id=None)
                          })
 
-
     # sort by file size
-    sorted_file_names = sorted(all_file_names, key=lambda x: os.stat(x).st_size)
-    sorted_file_indices = []
-    for i, each_file_name in enumerate(sorted_file_names):
-        sorted_file_indices.append(all_file_names.index(each_file_name))
-    # order by processes
-    file_indices = []
-    for i in range(args.num_proc):
-        file_indices += sorted_file_indices[i::args.num_proc]
+    # sorted_file_names = sorted(all_file_names, key=lambda x: os.stat(x).st_size)
+    # sorted_file_indices = []
+    # for i, each_file_name in enumerate(sorted_file_names):
+    #     sorted_file_indices.append(all_file_names.index(each_file_name))
+    # # order by processes
+    # file_indices = []
+    # for i in range(args.num_proc):
+    #     file_indices += sorted_file_indices[i::args.num_proc]
     # end of sorting
 
-
-    nuplan_dataset = Dataset.from_generator(yield_data, 
-                                            #features=features,
+    nuplan_dataset = Dataset.from_generator(yield_data,
+                                            # features=features,
                                             gen_kwargs={'shards': file_indices, 'dl': None,
                                                         'filter_info': filter_dic},
                                             writer_batch_size=10, cache_dir=args.cache_folder,
@@ -278,8 +298,10 @@ def main(args):
     print('Dataset saved')
     exit()
 
+
 if __name__ == '__main__':
     from pathlib import Path
+
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
     parser = argparse.ArgumentParser('Parse configuration file')
@@ -291,7 +313,8 @@ if __name__ == '__main__':
     #         })
     parser.add_argument("--data_path", type=str, default="train_singapore")
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
-    parser.add_argument("--nsm_label_path", type=str, default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
+    parser.add_argument("--nsm_label_path", type=str,
+                        default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
 
     parser.add_argument('--starting_file_num', type=int, default=0)
     parser.add_argument('--ending_file_num', type=int, default=10000)
@@ -305,7 +328,8 @@ if __name__ == '__main__':
     parser.add_argument('--model_name', type=str, default=None)
 
     parser.add_argument('--use_nsm', default=False, action='store_true')
-    parser.add_argument('--balance_rate', type=float, default=1.0, help="balance sample rate of simple scenarios in nsm case")
+    parser.add_argument('--balance_rate', type=float, default=1.0,
+                        help="balance sample rate of simple scenarios in nsm case")
     parser.add_argument('--sample_interval', type=int, default=200)
     parser.add_argument('--dataset_name', type=str, default='nsm')
     parser.add_argument('--auto_regressive', default=True)
@@ -313,7 +337,7 @@ if __name__ == '__main__':
     parser.add_argument('--filter_pickle_path', type=str, default=None)
     parser.add_argument('--filter_rank', type=float, default=0.1,
                         help="keep data with rank lower than this value for dagger")
-    parser.add_argument('--scaling_factor_for_dagger', type=float, default=5.0,
+    parser.add_argument('--scaling_factor_for_dagger', type=float, default=4.0,
                         help="scale up low performance data by Nx for dagger")
 
     # parser.add_argument('--save_playback', default=True, action='store_true')
