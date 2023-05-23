@@ -75,6 +75,7 @@ class ControlTFPlanner(AbstractPlanner):
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
                  use_backup_planner = False,
+                 model = None,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
                  **kwargs):
@@ -98,14 +99,15 @@ class ControlTFPlanner(AbstractPlanner):
         self.vehicle = get_pacifica_parameters()
         self.motion_model = KinematicBicycleModel(self.vehicle)
         # model initialization and configuration
-        parser = HfArgumentParser((ModelArguments))
-        model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
-        if model_args.model_pretrain_name_or_path is None:
-            model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1"
-        assert model_args.model_pretrain_name_or_path is not None
-        self.model = build_models(model_args=model_args)
-        self.model.config.pad_token_id = 0
-        self.model.config.eos_token_id = 0
+        if model is None:
+            parser = HfArgumentParser((ModelArguments))
+            model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
+            if model_args.model_pretrain_name_or_path is None:
+                model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1"
+            assert model_args.model_pretrain_name_or_path is not None
+            self.model = build_models(model_args=model_args)
+        else:
+            self.model = model
         self.frequency = 5
         # if "5hz" in model_args.model_pretrain_name_or_path:
         #     self.frequency = 5
@@ -133,14 +135,14 @@ class ControlTFPlanner(AbstractPlanner):
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
         global count
         count += 1
-        print("count: ", count)
+        print("count: ", count, torch.cuda.is_available())
         history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
         # trajectory as format of [(x, y, yaw)]
-        ego_trajectory = np.array([(ego_states[i].waypoint.center.x, \
-                                    ego_states[i].waypoint.center.y, \
-                                    ego_states[i].waypoint.heading) for i in range(context_length)])
+        ego_trajectory = np.array([(ego_states[i].rear_axle.x, \
+                                    ego_states[i].rear_axle.y, \
+                                    ego_states[i].rear_axle.heading) for i in range(context_length)])
         ego_shape = np.array([ego_states[-1].waypoint.oriented_box.width, \
                               ego_states[-1].waypoint.oriented_box.length])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
@@ -148,7 +150,7 @@ class ControlTFPlanner(AbstractPlanner):
         road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
         
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-            ego_trajectory, agents, statics, road_dic, ego_shape, self.frequency)
+            ego_trajectory, agents, statics, road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
         if torch.cuda.is_available():
             self.model.to('cuda')
             output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
@@ -173,6 +175,7 @@ class ControlTFPlanner(AbstractPlanner):
                 pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
             except:
                 pred_traj = output.logits.squeeze(0).detach().cpu().numpy()
+        relative_traj = pred_traj.copy()
         # # post-processing
         low_filter = True
         low_threshold = 0.01
@@ -196,11 +199,10 @@ class ControlTFPlanner(AbstractPlanner):
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
         for i in range(pred_traj.shape[0]):
             if i == 0:
-                delta_heading = get_angle_of_a_line(ego_trajectory[-1, :2], pred_traj[i, :2])
-                heading = ego_trajectory[-1, -1] + delta_heading
+                delta_heading = get_angle_of_a_line(np.zeros(2), relative_traj[i, :2])
             else:
-                delta_heading = get_angle_of_a_line(pred_traj[i - 1, :2], pred_traj[i, :2]) 
-                heading += delta_heading
+                delta_heading = get_angle_of_a_line(relative_traj[i - 1, :2], relative_traj[i, :2]) 
+            heading = ego_trajectory[-1, -1] + delta_heading
             new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
             new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
             pred_traj[i, 0] = new_x
@@ -259,14 +261,14 @@ class ControlTFPlanner(AbstractPlanner):
             # else:
             #     self.current_velocity = next_world_coor_points[i, :2] - next_world_coor_points[i-1, :2] 
             # self.acceleration = (self.curret_velocity - self.last_velocity)/0.1
-            state = EgoState.build_from_center(
-                center=StateSE2(next_world_coor_points[i, 0],
+            state = EgoState.build_from_rear_axle(
+                rear_axle_pose=StateSE2(next_world_coor_points[i, 0],
                                 next_world_coor_points[i, 1],
-                                ego_trajectory[-1, -1]
-                                # next_world_coor_points[i][-1]
+                                #ego_trajectory[-1, -1]
+                                next_world_coor_points[i][-1]
                                 ),
-                center_velocity_2d=StateVector2D(0, 0),
-                center_acceleration_2d=StateVector2D(0, 0),
+                rear_axle_velocity_2d=StateVector2D(0, 0),
+                rear_axle_acceleration_2d=StateVector2D(0, 0),
                 tire_steering_angle=state.tire_steering_angle,
                 time_point=new_time_point,
                 vehicle_parameters=state.car_footprint.vehicle_parameters,
@@ -274,8 +276,10 @@ class ControlTFPlanner(AbstractPlanner):
                 angular_vel=state.dynamic_car_state.angular_velocity,
                 angular_accel=state.dynamic_car_state.angular_acceleration
             )
+            print("after building x, y", state.rear_axle.x, state.rear_axle.y)
             state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
             state._time_point = new_time_point
+            print("after propagate x, y", state.rear_axle.x, state.rear_axle.y)
             trajectory.append(state)
             
         return InterpolatedTrajectory(trajectory)
@@ -406,26 +410,26 @@ class ControlTFPlanner(AbstractPlanner):
         # total_agents.extend(statics)
         # total_agents_seq.append(total_agents)
         cos_, sin_ = math.cos(-ego_pose[2]), math.sin(-ego_pose[2])
-        for i, statics in enumerate(statics_seq):
-            for j, static in enumerate(statics):
-                static_type = static.tracked_object_type.value
-                pose = np.array([static.box.center.point.x, static.box.center.point.y, static.box.center.heading])
-                pose -= ego_pose
-                if abs(pose[0]) > max_dis or abs(pose[1]) > max_dis:
-                    continue
-                rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
-                                pose[0] * sin_ + pose[1] * cos_]
-                shape = np.array([static.box.width, static.box.length])
-                rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
-                                                direction=-pose[2])
-                rect_pts = np.array(rect_pts, dtype=np.int32)
-                rect_pts_high_res = int(high_res_raster_scale) * rect_pts + 112
-                cv2.drawContours(rasters_high_res_channels[1 + total_road_types + static_type * context_length + i],
-                                 [rect_pts_high_res], -1, (255, 255, 255), -1)
-                # draw on low resolution
-                rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64) + 112
-                cv2.drawContours(rasters_low_res_channels[1 + total_road_types + static_type * context_length + i],
-                                 [rect_pts_low_res], -1, (255, 255, 255), -1)
+        # for i, statics in enumerate(statics_seq):
+        #     for j, static in enumerate(statics):
+        #         static_type = static.tracked_object_type.value
+        #         pose = np.array([static.box.center.point.x, static.box.center.point.y, static.box.center.heading])
+        #         pose -= ego_pose
+        #         if abs(pose[0]) > max_dis or abs(pose[1]) > max_dis:
+        #             continue
+        #         rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
+        #                         pose[0] * sin_ + pose[1] * cos_]
+        #         shape = np.array([static.box.width, static.box.length])
+        #         rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
+        #                                         direction=-pose[2])
+        #         rect_pts = np.array(rect_pts, dtype=np.int32)
+        #         rect_pts_high_res = int(high_res_raster_scale) * rect_pts + 112
+        #         cv2.drawContours(rasters_high_res_channels[1 + total_road_types + static_type * context_length + i],
+        #                          [rect_pts_high_res], -1, (255, 255, 255), -1)
+        #         # draw on low resolution
+        #         rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64) + 112
+        #         cv2.drawContours(rasters_low_res_channels[1 + total_road_types + static_type * context_length + i],
+        #                          [rect_pts_low_res], -1, (255, 255, 255), -1)
 
         ## agent includes VEHICLE, PEDESTRIAN, BICYCLE, EGO(except)
         for i, agents in enumerate(agents_seq):
@@ -481,9 +485,7 @@ class ControlTFPlanner(AbstractPlanner):
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
-
-
-
+    
 def get_road_dict(map_api, ego_pose_center):
     road_dic = {}
     # Collect lane information, following nuplan.planning.training.preprocessing.feature_builders.vector_builder_utils.get_neighbor_vector_map
