@@ -276,10 +276,8 @@ class ControlTFPlanner(AbstractPlanner):
                 angular_vel=state.dynamic_car_state.angular_velocity,
                 angular_accel=state.dynamic_car_state.angular_acceleration
             )
-            print("after building x, y", state.rear_axle.x, state.rear_axle.y)
             state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
             state._time_point = new_time_point
-            print("after propagate x, y", state.rear_axle.x, state.rear_axle.y)
             trajectory.append(state)
             
         return InterpolatedTrajectory(trajectory)
