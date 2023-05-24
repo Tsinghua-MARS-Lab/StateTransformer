@@ -82,6 +82,7 @@ class ControlTFPlanner(AbstractPlanner):
                  model = None,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
+                 controller=None,
                  **kwargs):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
         self.horizon_seconds_time = horizon_seconds
@@ -105,16 +106,13 @@ class ControlTFPlanner(AbstractPlanner):
         self.vehicle = get_pacifica_parameters()
         self.motion_model = KinematicBicycleModel(self.vehicle)
         # model initialization and configuration
-        if model is None:
-            parser = HfArgumentParser((ModelArguments))
-            model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
-            if model_args.model_pretrain_name_or_path is None:
-                model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1"
-            assert model_args.model_pretrain_name_or_path is not None
-            self.model = build_models(model_args=model_args)
+        assert model is not None
+        self.model = model
+        self.frequency = 5
+        if "PerfectTrackingController" in controller:
+            self.mode = "openloop"
         else:
-            self.model = model
-        self.frequency = 5        
+            self.mode = "closedloop"         
         
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
@@ -125,12 +123,13 @@ class ControlTFPlanner(AbstractPlanner):
         self.map_api = initialization.map_api
         self.idm_planner.initialize(initialization)
         self.road_dic = get_road_dict(self.map_api, ego_pose_center=Point2D(0, 0))
-        warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
-                            current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
-                            context_actions=torch.zeros((1, 10, 4), device='cuda'), \
-                            high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                            low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                            trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
+        if torch.cuda.is_available():
+            warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
+                                context_actions=torch.zeros((1, 10, 4), device='cuda'), \
+                                high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
 
     def name(self) -> str:
         """ Inherited, see superclass. """
@@ -142,9 +141,10 @@ class ControlTFPlanner(AbstractPlanner):
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
         import time
         global count
+        use_backup_planner = self.use_backup_planner
         count += 1
         start=time.time()
-        print("count: ", count, torch.cuda.is_available())
+        print("count: ", count, "cuda:", torch.cuda.is_available(), "mode:", self.mode)
         history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
@@ -158,8 +158,11 @@ class ControlTFPlanner(AbstractPlanner):
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
             ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
-        print(high_res_raster.shape, low_res_raster.shape, context_action.shape, context_length)
-        print("time after ratser build", time.time() - start)
+        time_after_input = time.time() - start
+        print("time after ratser build", time_after_input)
+        if time_after_input > 0.65:
+            use_backup_planner = False
+            print("forbid idm planner")
         if torch.cuda.is_available():
             output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
                                 current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
@@ -212,14 +215,26 @@ class ControlTFPlanner(AbstractPlanner):
             absolute_traj[i, 0] = new_x
             absolute_traj[i, 1] = new_y
             absolute_traj[i, 2] = pred_traj[i, -1]
-
-        if self.use_backup_planner:
+        
+        idm_threshold = 1
+        traffic_stop_threshold = 5
+        agent_stop_threshold = 3
+        if use_backup_planner:
+            # compute idm trajectory and scenario flag
+            trajectory, flag, relative_distance = self.idm_planner.compute_planner_trajectory(current_input)
+            
+            if flag == "redlight" and relative_distance < traffic_stop_threshold and self.mode == "closedloop":
+                return trajectory
+            elif flag == "leadagent" and relative_distance < agent_stop_threshold and self.mode == "closedloop": 
+                return trajectory
             # check if out of boundary
             out_pts = 0
-            for i in range(absolute_traj.shape[0]):
+            sample_frames = list(range(10)) + list(range(10, absolute_traj.shape[0], 5)) 
+            # TODO: open loop & close loop
+            for i in sample_frames:
                 all_nearby_map_instances = self.map_api.get_proximal_map_objects(
                     Point2D(absolute_traj[i, 0], absolute_traj[i, 1]),
-                    1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
+                    0.1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
                 all_nearby_map_instances_ids = []
                 for each_type in all_nearby_map_instances:
                     for each_ins in all_nearby_map_instances[each_type]:
@@ -231,11 +246,14 @@ class ControlTFPlanner(AbstractPlanner):
                         break
                 if not any_in:
                     out_pts += 1
-
-            if out_pts > 10:
+                if out_pts > idm_threshold:
+                    break
+            
+            if out_pts > idm_threshold:
                 out_of_route = True
-                print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
-                trajectory = self.idm_planner.compute_planner_trajectory(current_input)
+                print('OUT OF ROUTE, Use IDM Planner to correct trajectory')
+                
+                print(time.time() - start)
                 return trajectory
 
         relative_traj = pred_traj.copy()
@@ -412,12 +430,16 @@ class ControlTFPlanner(AbstractPlanner):
                         tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
         # road element computation
         cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        # road_key_to_del = list()
         for i, key in enumerate(road_dic):
             xyz = road_dic[key]["xyz"].copy()
             road_type = int(road_dic[key]['type'])
             xyz[:, :2] -= ego_pose[:2]
             if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
                     abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+                # if (abs(xyz[0, 0]) > 2 * max_dis and abs(xyz[-1, 0]) > 2 * max_dis) or (
+                #     abs(xyz[0, 1]) > 2 * max_dis and abs(xyz[-1, 1]) > 2 * max_dis):
+                #     road_key_to_del.append(key)               
                 continue
             # simplify road vector, can simplify about half of all the points
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
@@ -439,16 +461,11 @@ class ControlTFPlanner(AbstractPlanner):
                          tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
                 cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
                          tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
-
+        
+        # for key in road_key_to_del:
+        #     del road_dic[key]
         # agent element computation
         ## statics include CZONE_SIGN,BARRIER,TRAFFIC_CONE,GENERIC_OBJECT,
-        # TODO:merge the statics，agents and ego agents
-        # total_agents_seq = list()
-        # for agents, statics in zip(agents_seq, statics_seq):
-        # total_agents = list()
-        # total_agents.extend(agents)
-        # total_agents.extend(statics)
-        # total_agents_seq.append(total_agents)
         cos_, sin_ = math.cos(-ego_pose[2]), math.sin(-ego_pose[2])
         # for i, statics in enumerate(statics_seq):
         #     for j, static in enumerate(statics):
