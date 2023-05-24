@@ -109,7 +109,8 @@ class ControlTFPlanner(AbstractPlanner):
         assert model is not None
         self.model = model
         self.frequency = 5
-        if "PerfectTrackingController" in controller:
+        print(controller)
+        if "LogPlaybackController" in controller:
             self.mode = "openloop"
         else:
             self.mode = "closedloop"         
