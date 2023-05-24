@@ -114,14 +114,7 @@ class ControlTFPlanner(AbstractPlanner):
             self.model = build_models(model_args=model_args)
         else:
             self.model = model
-        self.frequency = 5
-        # if "5hz" in model_args.model_pretrain_name_or_path:
-        #     self.frequency = 5
-        # else:
-        #     self.frequency = 4
-        self.last_velocity = np.zeros(2)
-        self.curret_velocity = np.zeros(2)
-        
+        self.frequency = 5        
         
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
@@ -163,7 +156,6 @@ class ControlTFPlanner(AbstractPlanner):
                               ego_states[-1].waypoint.oriented_box.length])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
-        print("time after data process", time.time() - start)
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
             ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
         print(high_res_raster.shape, low_res_raster.shape, context_action.shape, context_length)
