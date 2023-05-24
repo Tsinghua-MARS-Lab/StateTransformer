@@ -122,6 +122,7 @@ class ControlTFPlanner(AbstractPlanner):
         self.last_velocity = np.zeros(2)
         self.curret_velocity = np.zeros(2)
         
+        
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
         """ Inherited, see superclass. """
@@ -130,6 +131,13 @@ class ControlTFPlanner(AbstractPlanner):
         self.route_roadblock_ids = initialization.route_roadblock_ids
         self.map_api = initialization.map_api
         self.idm_planner.initialize(initialization)
+        self.road_dic = get_road_dict(self.map_api, ego_pose_center=Point2D(0, 0))
+        warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                            current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
+                            context_actions=torch.zeros((1, 10, 4), device='cuda'), \
+                            high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                            low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                            trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
 
     def name(self) -> str:
         """ Inherited, see superclass. """
@@ -139,8 +147,10 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
+        import time
         global count
         count += 1
+        start=time.time()
         print("count: ", count, torch.cuda.is_available())
         history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
@@ -153,14 +163,14 @@ class ControlTFPlanner(AbstractPlanner):
                               ego_states[-1].waypoint.oriented_box.length])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
-        road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
-        
+        print("time after data process", time.time() - start)
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-            ego_trajectory, agents, statics, road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
+            ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
+        print(high_res_raster.shape, low_res_raster.shape, context_action.shape, context_length)
+        print("time after ratser build", time.time() - start)
         if torch.cuda.is_available():
-            self.model.to('cuda')
-            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
-                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
+            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
                                 context_actions=torch.tensor(context_action).unsqueeze(0).to('cuda'), \
                                 high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to('cuda'), \
                                 low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to('cuda'),
@@ -181,7 +191,7 @@ class ControlTFPlanner(AbstractPlanner):
                 pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
             except:
                 pred_traj = output.logits.squeeze(0).detach().cpu().numpy()
-        
+        print("time after gpt", time.time() - start)
         # # post-processing
         low_filter = True
         low_threshold = 0.01
@@ -267,12 +277,13 @@ class ControlTFPlanner(AbstractPlanner):
         # print('test: ', self.planning_interval, self.horizon_seconds_time)
         planned_time_points = []
         for i in range(0, relative_traj.shape[0]):
-            planned_time_points.append(TimePoint(ego_states[-1].time_point.time_us + 1e5 * i).time_s)
+            planned_time_points.append(TimePoint(ego_states[-1].time_point.time_us + 1e5 * i ).time_s)
 
         states = _get_absolute_agent_states_from_numpy_poses(poses=relative_traj,
                                                              ego_history=ego_states,
                                                              timesteps=planned_time_points)
         trajectory = InterpolatedTrajectory(states)
+        print("time consumed", time.time()-start)
         return trajectory
 
         # DEPERATED CODES BELOW !!
@@ -360,7 +371,7 @@ class ControlTFPlanner(AbstractPlanner):
         elif context_frequency == 5:
             agents_seq = agents_seq[2::2]
             statics_seq = statics_seq[2::2]
-            ego_trajectory = ego_trajectory[2::2]
+            ego_trajectory = ego_trajectory[-21::2]
         # goal channel
         ## goal point
         if self.goal is None:
@@ -533,7 +544,7 @@ def get_road_dict(map_api, ego_pose_center):
     selected_objs += [SemanticMapLayer.INTERSECTION, SemanticMapLayer.STOP_LINE, SemanticMapLayer.CROSSWALK]
     selected_objs += [SemanticMapLayer.WALKWAYS, SemanticMapLayer.CARPARK_AREA]
 
-    all_selected_map_instances = map_api.get_proximal_map_objects(ego_pose_center, 999999,
+    all_selected_map_instances = map_api.get_proximal_map_objects(ego_pose_center, 1e8,
                                                                   selected_objs)
 
     all_selected_objs_to_render = []
