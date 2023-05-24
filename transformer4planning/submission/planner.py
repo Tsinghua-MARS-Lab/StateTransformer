@@ -262,7 +262,7 @@ class ControlTFPlanner(AbstractPlanner):
             new[:, -1] = relative_traj[:, -1]
             relative_traj = new
         print('test shape: ', relative_traj.shape)
-        timesteps = _get_fixed_timesteps(ego_state, self.horizon_seconds.time_us, self.planning_interval)
+        timesteps = _get_fixed_timesteps(ego_states[-1], self.horizon_seconds.time_us, self.planning_interval)
         states = _get_absolute_agent_states_from_numpy_poses(ego_poses=relative_traj,
                                                              ego_history=ego_states,
                                                              timesteps=timesteps)
