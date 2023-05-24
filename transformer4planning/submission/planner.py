@@ -29,7 +29,6 @@ from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
-from transformer4planning.checkratser import *
 
 count = 0
 
@@ -63,6 +62,11 @@ def get_angle_of_a_line(pt1, pt2):
     angle = math.atan2(y2 - y1, x2 - x1)
     return angle
 
+def euclidean_distance(pt1, pt2):
+    x_1, y_1 = pt1
+    x_2, y_2 = pt2
+    return math.sqrt((x_1-x_2)**2+(y_1-y_2)**2)
+
 
 class ControlTFPlanner(AbstractPlanner):
     """
@@ -74,13 +78,15 @@ class ControlTFPlanner(AbstractPlanner):
                  sampling_time: float,
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
-                 use_backup_planner = False,
+                 use_backup_planner = True,
                  model = None,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
                  **kwargs):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
+        self.horizon_seconds_time = horizon_seconds
         self.sampling_time = TimePoint(int(sampling_time * 1e6))
+        self.sampling_time_time = sampling_time
         self.acceleration = StateVector2D(acceleration[0], acceleration[1])
         self.max_velocity = max_velocity
         self.steering_angle = steering_angle
@@ -108,13 +114,7 @@ class ControlTFPlanner(AbstractPlanner):
             self.model = build_models(model_args=model_args)
         else:
             self.model = model
-        self.frequency = 5
-        # if "5hz" in model_args.model_pretrain_name_or_path:
-        #     self.frequency = 5
-        # else:
-        #     self.frequency = 4
-        self.last_velocity = np.zeros(2)
-        self.curret_velocity = np.zeros(2)
+        self.frequency = 5        
         
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
@@ -124,6 +124,13 @@ class ControlTFPlanner(AbstractPlanner):
         self.route_roadblock_ids = initialization.route_roadblock_ids
         self.map_api = initialization.map_api
         self.idm_planner.initialize(initialization)
+        self.road_dic = get_road_dict(self.map_api, ego_pose_center=Point2D(0, 0))
+        warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                            current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
+                            context_actions=torch.zeros((1, 10, 4), device='cuda'), \
+                            high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                            low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                            trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
 
     def name(self) -> str:
         """ Inherited, see superclass. """
@@ -133,8 +140,10 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
+        import time
         global count
         count += 1
+        start=time.time()
         print("count: ", count, torch.cuda.is_available())
         history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
@@ -147,14 +156,13 @@ class ControlTFPlanner(AbstractPlanner):
                               ego_states[-1].waypoint.oriented_box.length])
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
-        road_dic = get_road_dict(self.map_api, Point2D(ego_trajectory[-1][0], ego_trajectory[-1][1]))
-        
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-            ego_trajectory, agents, statics, road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
+            ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
+        print(high_res_raster.shape, low_res_raster.shape, context_action.shape, context_length)
+        print("time after ratser build", time.time() - start)
         if torch.cuda.is_available():
-            self.model.to('cuda')
-            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32), \
-                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32), \
+            output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
                                 context_actions=torch.tensor(context_action).unsqueeze(0).to('cuda'), \
                                 high_res_raster=torch.tensor(high_res_raster).unsqueeze(0).to('cuda'), \
                                 low_res_raster=torch.tensor(low_res_raster).unsqueeze(0).to('cuda'),
@@ -175,7 +183,7 @@ class ControlTFPlanner(AbstractPlanner):
                 pred_traj = output[-1][-1].squeeze(0).detach().cpu().numpy()
             except:
                 pred_traj = output.logits.squeeze(0).detach().cpu().numpy()
-        relative_traj = pred_traj.copy()
+        print("time after gpt", time.time() - start)
         # # post-processing
         low_filter = True
         low_threshold = 0.01
@@ -195,30 +203,22 @@ class ControlTFPlanner(AbstractPlanner):
                 last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
                                                         each_pose[3]]
             pred_traj = filtered_traj
-            
+
+        absolute_traj = np.zeros_like(pred_traj)
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
         for i in range(pred_traj.shape[0]):
-            if i == 0:
-                delta_heading = get_angle_of_a_line(np.zeros(2), relative_traj[i, :2])
-            else:
-                delta_heading = get_angle_of_a_line(relative_traj[i - 1, :2], relative_traj[i, :2]) 
-            heading = ego_trajectory[-1, -1] + delta_heading
             new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
             new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
-            pred_traj[i, 0] = new_x
-            pred_traj[i, 1] = new_y
-            pred_traj[i, 2] = 0
-            pred_traj[i, -1] = heading
+            absolute_traj[i, 0] = new_x
+            absolute_traj[i, 1] = new_y
+            absolute_traj[i, 2] = pred_traj[i, -1]
 
-        next_world_coor_points = pred_traj.copy()
         if self.use_backup_planner:
             # check if out of boundary
-            out_of_route = False
-            # for i in range(pred_traj.shape[0]):
             out_pts = 0
-            for i in range(pred_traj.shape[0]):
+            for i in range(absolute_traj.shape[0]):
                 all_nearby_map_instances = self.map_api.get_proximal_map_objects(
-                    Point2D(pred_traj[i, 0], pred_traj[i, 1]),
+                    Point2D(absolute_traj[i, 0], absolute_traj[i, 1]),
                     1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
                 all_nearby_map_instances_ids = []
                 for each_type in all_nearby_map_instances:
@@ -237,50 +237,92 @@ class ControlTFPlanner(AbstractPlanner):
                 print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
                 trajectory = self.idm_planner.compute_planner_trajectory(current_input)
                 return trajectory
-           
-        # build output
-        ego_state = history.ego_states[-1]
-        state = EgoState(
-            car_footprint=ego_state.car_footprint,
-            dynamic_car_state=DynamicCarState.build_from_rear_axle(
-                ego_state.car_footprint.rear_axle_to_center_dist,
-                ego_state.dynamic_car_state.rear_axle_velocity_2d,
-                self.acceleration,
-            ),
-            tire_steering_angle=self.steering_angle,
-            is_in_auto_mode=True,
-            time_point=ego_state.time_point
-        )
-        trajectory: List[EgoState] = [state]
-        for i in range(0, next_world_coor_points.shape[0]):
-            new_time_point = TimePoint(state.time_point.time_us + 1e5)
-            # velocity and acceleration computation
-            # self.last_velocity = self.curret_velocity
-            # if i == 0:
-            #     self.current_velocity = next_world_coor_points[0, :2] - ego_trajectory[-1][:2]
-            # else:
-            #     self.current_velocity = next_world_coor_points[i, :2] - next_world_coor_points[i-1, :2] 
-            # self.acceleration = (self.curret_velocity - self.last_velocity)/0.1
-            state = EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(next_world_coor_points[i, 0],
-                                next_world_coor_points[i, 1],
-                                #ego_trajectory[-1, -1]
-                                next_world_coor_points[i][-1]
-                                ),
-                rear_axle_velocity_2d=StateVector2D(0, 0),
-                rear_axle_acceleration_2d=StateVector2D(0, 0),
-                tire_steering_angle=state.tire_steering_angle,
-                time_point=new_time_point,
-                vehicle_parameters=state.car_footprint.vehicle_parameters,
-                is_in_auto_mode=True,
-                angular_vel=state.dynamic_car_state.angular_velocity,
-                angular_accel=state.dynamic_car_state.angular_acceleration
-            )
-            state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
-            state._time_point = new_time_point
-            trajectory.append(state)
-            
-        return InterpolatedTrajectory(trajectory)
+
+        relative_traj = pred_traj.copy()
+        # generating yaw angle from points
+        yaw_change_upper_threshold = 0.1
+        prev_delta_heading = 0
+        prev_pt = np.zeros(2)
+        scrolling_frame_idx = 0
+        for i in range(pred_traj.shape[0]):
+            if i <= scrolling_frame_idx and i != 0:
+                relative_traj[i, -1] = prev_delta_heading
+            else:
+                # scrolling forward
+                for j in range(pred_traj.shape[0] - i):
+                    dist = euclidean_distance(prev_pt, relative_traj[i + j, :2])
+                    delta_heading = get_angle_of_a_line(prev_pt, relative_traj[i + j, :2])
+                    if dist > low_threshold and delta_heading - prev_delta_heading < yaw_change_upper_threshold:
+                        prev_pt = relative_traj[i + j, :2]
+                        prev_delta_heading = delta_heading
+                        scrolling_frame_idx = i + j
+                        relative_traj[i, -1] = delta_heading
+                        break
+        # change relative poses to absolute states
+        from nuplan.planning.simulation.planner.ml_planner.transform_utils import _get_absolute_agent_states_from_numpy_poses,_get_fixed_timesteps
+        if relative_traj.shape[1] == 4:
+            new = np.zeros((relative_traj.shape[0], 3))
+            new[:, :2] = relative_traj[:, :2]
+            new[:, -1] = relative_traj[:, -1]
+            relative_traj = new
+
+        # print('test: ', self.planning_interval, self.horizon_seconds_time)
+        planned_time_points = []
+        for i in range(0, relative_traj.shape[0]):
+            planned_time_points.append(TimePoint(ego_states[-1].time_point.time_us + 1e5 * i ).time_s)
+
+        states = _get_absolute_agent_states_from_numpy_poses(poses=relative_traj,
+                                                             ego_history=ego_states,
+                                                             timesteps=planned_time_points)
+        trajectory = InterpolatedTrajectory(states)
+        print("time consumed", time.time()-start)
+        return trajectory
+
+        # DEPERATED CODES BELOW !!
+        #
+        # # build output
+        # ego_state = history.ego_states[-1]
+        # state = EgoState(
+        #     car_footprint=ego_state.car_footprint,
+        #     dynamic_car_state=DynamicCarState.build_from_rear_axle(
+        #         ego_state.car_footprint.rear_axle_to_center_dist,
+        #         ego_state.dynamic_car_state.rear_axle_velocity_2d,
+        #         self.acceleration,
+        #     ),
+        #     tire_steering_angle=self.steering_angle,
+        #     is_in_auto_mode=True,
+        #     time_point=ego_state.time_point
+        # )
+        # trajectory: List[EgoState] = [state]
+        # for i in range(0, next_world_coor_points.shape[0]):
+        #     new_time_point = TimePoint(state.time_point.time_us + 1e5)
+        #     # velocity and acceleration computation
+        #     # self.last_velocity = self.curret_velocity
+        #     # if i == 0:
+        #     #     self.current_velocity = next_world_coor_points[0, :2] - ego_trajectory[-1][:2]
+        #     # else:
+        #     #     self.current_velocity = next_world_coor_points[i, :2] - next_world_coor_points[i-1, :2]
+        #     # self.acceleration = (self.curret_velocity - self.last_velocity)/0.1
+        #     state = EgoState.build_from_rear_axle(
+        #         rear_axle_pose=StateSE2(next_world_coor_points[i, 0],
+        #                         next_world_coor_points[i, 1],
+        #                         #ego_trajectory[-1, -1]
+        #                         next_world_coor_points[i][-1]
+        #                         ),
+        #         rear_axle_velocity_2d=StateVector2D(0, 0),
+        #         rear_axle_acceleration_2d=StateVector2D(0, 0),
+        #         tire_steering_angle=state.tire_steering_angle,
+        #         time_point=new_time_point,
+        #         vehicle_parameters=state.car_footprint.vehicle_parameters,
+        #         is_in_auto_mode=True,
+        #         angular_vel=state.dynamic_car_state.angular_velocity,
+        #         angular_accel=state.dynamic_car_state.angular_acceleration
+        #     )
+        #     state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
+        #     state._time_point = new_time_point
+        #     trajectory.append(state)
+        #
+        # return InterpolatedTrajectory(trajectory)
 
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=500, context_frequency=5):
         """
@@ -321,7 +363,7 @@ class ControlTFPlanner(AbstractPlanner):
         elif context_frequency == 5:
             agents_seq = agents_seq[2::2]
             statics_seq = statics_seq[2::2]
-            ego_trajectory = ego_trajectory[2::2]
+            ego_trajectory = ego_trajectory[-21::2]
         # goal channel
         ## goal point
         if self.goal is None:
@@ -494,7 +536,7 @@ def get_road_dict(map_api, ego_pose_center):
     selected_objs += [SemanticMapLayer.INTERSECTION, SemanticMapLayer.STOP_LINE, SemanticMapLayer.CROSSWALK]
     selected_objs += [SemanticMapLayer.WALKWAYS, SemanticMapLayer.CARPARK_AREA]
 
-    all_selected_map_instances = map_api.get_proximal_map_objects(ego_pose_center, 999999,
+    all_selected_map_instances = map_api.get_proximal_map_objects(ego_pose_center, 1e8,
                                                                   selected_objs)
 
     all_selected_objs_to_render = []
