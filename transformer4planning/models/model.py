@@ -1573,7 +1573,7 @@ def build_models(model_args):
         model = ModelCls(config_p, model_args=model_args)
         print('Scratch ' + tag + ' Initialized!')
     elif 'pretrain' in model_args.model_name:
-        model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, low_cpu_mem_usage=True)
+        model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model    
 
