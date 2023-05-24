@@ -202,37 +202,39 @@ class ControlTFPlanner(AbstractPlanner):
                                                         each_pose[3]]
             pred_traj = filtered_traj
 
-        # relative_traj = pred_traj.copy()
-        # cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-        # heading = ego_trajectory[-1, -1]
-        # # generating yaw angle from points
-        # yaw_change_upper_threshold = 0.1
-        # prev_delta_heading = 0
-        # prev_pt = np.zeros(2)
-        # scrolling_frame_idx = 0
-        # for i in range(pred_traj.shape[0]):
-        #     if i <= scrolling_frame_idx and i != 0:
-        #         heading = ego_trajectory[-1, -1] + prev_delta_heading
-        #     else:
-        #         # scrolling forward
-        #         for j in range(pred_traj.shape[0] - i):
-        #             dist = euclidean_distance(prev_pt, relative_traj[i + j, :2])
-        #             delta_heading = get_angle_of_a_line(prev_pt, relative_traj[i + j, :2])
-        #             if dist > low_threshold and delta_heading - prev_delta_heading < yaw_change_upper_threshold:
-        #                 prev_pt = relative_traj[i + j, :2]
-        #                 prev_delta_heading = delta_heading
-        #                 scrolling_frame_idx = i + j
-        #                 heading = ego_trajectory[-1, -1] + delta_heading
-        #                 break
-        #
-        #     new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
-        #     new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
-        #     pred_traj[i, 0] = new_x
-        #     pred_traj[i, 1] = new_y
-        #     pred_traj[i, 2] = 0
-        #     pred_traj[i, -1] = heading
+        absolute_traj = np.zeros_like(pred_traj)
+        cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
+        for i in range(pred_traj.shape[0]):
+            new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
+            new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
+            absolute_traj[i, 0] = new_x
+            absolute_traj[i, 1] = new_y
+            absolute_traj[i, 2] = pred_traj[i, -1]
 
+        if self.use_backup_planner:
+            # check if out of boundary
+            out_pts = 0
+            for i in range(absolute_traj.shape[0]):
+                all_nearby_map_instances = self.map_api.get_proximal_map_objects(
+                    Point2D(absolute_traj[i, 0], absolute_traj[i, 1]),
+                    1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
+                all_nearby_map_instances_ids = []
+                for each_type in all_nearby_map_instances:
+                    for each_ins in all_nearby_map_instances[each_type]:
+                        all_nearby_map_instances_ids.append(each_ins.id)
+                any_in = False
+                for each in all_nearby_map_instances_ids:
+                    if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
+                        any_in = True
+                        break
+                if not any_in:
+                    out_pts += 1
 
+            if out_pts > 10:
+                out_of_route = True
+                print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
+                trajectory = self.idm_planner.compute_planner_trajectory(current_input)
+                return trajectory
 
         relative_traj = pred_traj.copy()
         # generating yaw angle from points
@@ -261,89 +263,59 @@ class ControlTFPlanner(AbstractPlanner):
             new[:, :2] = relative_traj[:, :2]
             new[:, -1] = relative_traj[:, -1]
             relative_traj = new
-        print('test shape: ', relative_traj.shape)
         timesteps = _get_fixed_timesteps(ego_states[-1], self.horizon_seconds.time_us, self.planning_interval)
-        states = _get_absolute_agent_states_from_numpy_poses(ego_poses=relative_traj,
+        states = _get_absolute_agent_states_from_numpy_poses(predicted_poses, ego_history, timesteps)
+        states = _get_absolute_agent_states_from_numpy_poses(poses=relative_traj,
                                                              ego_history=ego_states,
                                                              timesteps=timesteps)
         trajectory = InterpolatedTrajectory(states)
         return trajectory
 
-
-
-
-
-        # next_world_coor_points = pred_traj.copy()
-        # if self.use_backup_planner:
-        #     # check if out of boundary
-        #     out_of_route = False
-        #     # for i in range(pred_traj.shape[0]):
-        #     out_pts = 0
-        #     for i in range(pred_traj.shape[0]):
-        #         all_nearby_map_instances = self.map_api.get_proximal_map_objects(
-        #             Point2D(pred_traj[i, 0], pred_traj[i, 1]),
-        #             1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
-        #         all_nearby_map_instances_ids = []
-        #         for each_type in all_nearby_map_instances:
-        #             for each_ins in all_nearby_map_instances[each_type]:
-        #                 all_nearby_map_instances_ids.append(each_ins.id)
-        #         any_in = False
-        #         for each in all_nearby_map_instances_ids:
-        #             if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
-        #                 any_in = True
-        #                 break
-        #         if not any_in:
-        #             out_pts += 1
+        # DEPERATED CODES BELOW !!
         #
-        #     if out_pts > 10:
-        #         out_of_route = True
-        #         print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
-        #         trajectory = self.idm_planner.compute_planner_trajectory(current_input)
-        #         return trajectory
-           
-        # build output
-        ego_state = history.ego_states[-1]
-        state = EgoState(
-            car_footprint=ego_state.car_footprint,
-            dynamic_car_state=DynamicCarState.build_from_rear_axle(
-                ego_state.car_footprint.rear_axle_to_center_dist,
-                ego_state.dynamic_car_state.rear_axle_velocity_2d,
-                self.acceleration,
-            ),
-            tire_steering_angle=self.steering_angle,
-            is_in_auto_mode=True,
-            time_point=ego_state.time_point
-        )
-        trajectory: List[EgoState] = [state]
-        for i in range(0, next_world_coor_points.shape[0]):
-            new_time_point = TimePoint(state.time_point.time_us + 1e5)
-            # velocity and acceleration computation
-            # self.last_velocity = self.curret_velocity
-            # if i == 0:
-            #     self.current_velocity = next_world_coor_points[0, :2] - ego_trajectory[-1][:2]
-            # else:
-            #     self.current_velocity = next_world_coor_points[i, :2] - next_world_coor_points[i-1, :2] 
-            # self.acceleration = (self.curret_velocity - self.last_velocity)/0.1
-            state = EgoState.build_from_rear_axle(
-                rear_axle_pose=StateSE2(next_world_coor_points[i, 0],
-                                next_world_coor_points[i, 1],
-                                #ego_trajectory[-1, -1]
-                                next_world_coor_points[i][-1]
-                                ),
-                rear_axle_velocity_2d=StateVector2D(0, 0),
-                rear_axle_acceleration_2d=StateVector2D(0, 0),
-                tire_steering_angle=state.tire_steering_angle,
-                time_point=new_time_point,
-                vehicle_parameters=state.car_footprint.vehicle_parameters,
-                is_in_auto_mode=True,
-                angular_vel=state.dynamic_car_state.angular_velocity,
-                angular_accel=state.dynamic_car_state.angular_acceleration
-            )
-            state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
-            state._time_point = new_time_point
-            trajectory.append(state)
-            
-        return InterpolatedTrajectory(trajectory)
+        # # build output
+        # ego_state = history.ego_states[-1]
+        # state = EgoState(
+        #     car_footprint=ego_state.car_footprint,
+        #     dynamic_car_state=DynamicCarState.build_from_rear_axle(
+        #         ego_state.car_footprint.rear_axle_to_center_dist,
+        #         ego_state.dynamic_car_state.rear_axle_velocity_2d,
+        #         self.acceleration,
+        #     ),
+        #     tire_steering_angle=self.steering_angle,
+        #     is_in_auto_mode=True,
+        #     time_point=ego_state.time_point
+        # )
+        # trajectory: List[EgoState] = [state]
+        # for i in range(0, next_world_coor_points.shape[0]):
+        #     new_time_point = TimePoint(state.time_point.time_us + 1e5)
+        #     # velocity and acceleration computation
+        #     # self.last_velocity = self.curret_velocity
+        #     # if i == 0:
+        #     #     self.current_velocity = next_world_coor_points[0, :2] - ego_trajectory[-1][:2]
+        #     # else:
+        #     #     self.current_velocity = next_world_coor_points[i, :2] - next_world_coor_points[i-1, :2]
+        #     # self.acceleration = (self.curret_velocity - self.last_velocity)/0.1
+        #     state = EgoState.build_from_rear_axle(
+        #         rear_axle_pose=StateSE2(next_world_coor_points[i, 0],
+        #                         next_world_coor_points[i, 1],
+        #                         #ego_trajectory[-1, -1]
+        #                         next_world_coor_points[i][-1]
+        #                         ),
+        #         rear_axle_velocity_2d=StateVector2D(0, 0),
+        #         rear_axle_acceleration_2d=StateVector2D(0, 0),
+        #         tire_steering_angle=state.tire_steering_angle,
+        #         time_point=new_time_point,
+        #         vehicle_parameters=state.car_footprint.vehicle_parameters,
+        #         is_in_auto_mode=True,
+        #         angular_vel=state.dynamic_car_state.angular_velocity,
+        #         angular_accel=state.dynamic_car_state.angular_acceleration
+        #     )
+        #     state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
+        #     state._time_point = new_time_point
+        #     trajectory.append(state)
+        #
+        # return InterpolatedTrajectory(trajectory)
 
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=500, context_frequency=5):
         """
