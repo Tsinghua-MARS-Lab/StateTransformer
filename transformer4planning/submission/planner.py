@@ -29,7 +29,6 @@ from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
-from transformer4planning.checkratser import *
 
 count = 0
 
@@ -85,7 +84,9 @@ class ControlTFPlanner(AbstractPlanner):
                  steering_angle: float = 0.0,
                  **kwargs):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
+        self.horizon_seconds_time = horizon_seconds
         self.sampling_time = TimePoint(int(sampling_time * 1e6))
+        self.sampling_time_time = sampling_time
         self.acceleration = StateVector2D(acceleration[0], acceleration[1])
         self.max_velocity = max_velocity
         self.steering_angle = steering_angle
@@ -200,57 +201,105 @@ class ControlTFPlanner(AbstractPlanner):
                 last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2],
                                                         each_pose[3]]
             pred_traj = filtered_traj
+
+        # relative_traj = pred_traj.copy()
+        # cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
+        # heading = ego_trajectory[-1, -1]
+        # # generating yaw angle from points
+        # yaw_change_upper_threshold = 0.1
+        # prev_delta_heading = 0
+        # prev_pt = np.zeros(2)
+        # scrolling_frame_idx = 0
+        # for i in range(pred_traj.shape[0]):
+        #     if i <= scrolling_frame_idx and i != 0:
+        #         heading = ego_trajectory[-1, -1] + prev_delta_heading
+        #     else:
+        #         # scrolling forward
+        #         for j in range(pred_traj.shape[0] - i):
+        #             dist = euclidean_distance(prev_pt, relative_traj[i + j, :2])
+        #             delta_heading = get_angle_of_a_line(prev_pt, relative_traj[i + j, :2])
+        #             if dist > low_threshold and delta_heading - prev_delta_heading < yaw_change_upper_threshold:
+        #                 prev_pt = relative_traj[i + j, :2]
+        #                 prev_delta_heading = delta_heading
+        #                 scrolling_frame_idx = i + j
+        #                 heading = ego_trajectory[-1, -1] + delta_heading
+        #                 break
+        #
+        #     new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
+        #     new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
+        #     pred_traj[i, 0] = new_x
+        #     pred_traj[i, 1] = new_y
+        #     pred_traj[i, 2] = 0
+        #     pred_traj[i, -1] = heading
+
+
+
         relative_traj = pred_traj.copy()
-        cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-        heading = ego_trajectory[-1, -1]
+        # generating yaw angle from points
+        yaw_change_upper_threshold = 0.1
+        prev_delta_heading = 0
+        prev_pt = np.zeros(2)
+        scrolling_frame_idx = 0
         for i in range(pred_traj.shape[0]):
-            if i < 10:
-                if euclidean_distance(np.zeros(2), relative_traj[i, :2]) < 1:
-                    delta_heading = 0
-                else:
-                    delta_heading = get_angle_of_a_line(np.zeros(2), relative_traj[i, :2])
+            if i <= scrolling_frame_idx and i != 0:
+                relative_traj[i, -1] = prev_delta_heading
             else:
-                if euclidean_distance(relative_traj[i-10, :2], relative_traj[i, :2]) < 1:
-                    delta_heading = 0
-                else:
-                    delta_heading = get_angle_of_a_line(relative_traj[i - 10, :2], relative_traj[i, :2]) 
-            if delta_heading > 1e-2:
-                heading = ego_trajectory[-1, -1] + delta_heading
-            
-            new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
-            new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
-            pred_traj[i, 0] = new_x
-            pred_traj[i, 1] = new_y
-            pred_traj[i, 2] = 0
-            pred_traj[i, -1] = heading
-
-        next_world_coor_points = pred_traj.copy()
-        if self.use_backup_planner:
-            # check if out of boundary
-            out_of_route = False
-            # for i in range(pred_traj.shape[0]):
-            out_pts = 0
-            for i in range(pred_traj.shape[0]):
-                all_nearby_map_instances = self.map_api.get_proximal_map_objects(
-                    Point2D(pred_traj[i, 0], pred_traj[i, 1]),
-                    1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
-                all_nearby_map_instances_ids = []
-                for each_type in all_nearby_map_instances:
-                    for each_ins in all_nearby_map_instances[each_type]:
-                        all_nearby_map_instances_ids.append(each_ins.id)
-                any_in = False
-                for each in all_nearby_map_instances_ids:
-                    if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
-                        any_in = True
+                # scrolling forward
+                for j in range(pred_traj.shape[0] - i):
+                    dist = euclidean_distance(prev_pt, relative_traj[i + j, :2])
+                    delta_heading = get_angle_of_a_line(prev_pt, relative_traj[i + j, :2])
+                    if dist > low_threshold and delta_heading - prev_delta_heading < yaw_change_upper_threshold:
+                        prev_pt = relative_traj[i + j, :2]
+                        prev_delta_heading = delta_heading
+                        scrolling_frame_idx = i + j
+                        relative_traj[i, -1] = delta_heading
                         break
-                if not any_in:
-                    out_pts += 1
+        # change relative poses to absolute states
+        from nuplan.planning.simulation.planner.ml_planner.transform_utils import _get_absolute_agent_states_from_numpy_poses,_get_fixed_timesteps
+        if relative_traj.shape[1] == 4:
+            new = np.zeros((relative_traj.shape[0], 3))
+            new[:, :2] = relative_traj[:, :2]
+            new[:, -1] = relative_traj[:, -1]
+            relative_traj = new
+        print('test shape: ', relative_traj.shape)
+        timesteps = _get_fixed_timesteps(ego_state, self.horizon_seconds.time_us, self.planning_interval)
+        states = _get_absolute_agent_states_from_numpy_poses(ego_poses=relative_traj,
+                                                             ego_history=ego_states,
+                                                             timesteps=timesteps)
+        trajectory = InterpolatedTrajectory(states)
+        return trajectory
 
-            if out_pts > 10:
-                out_of_route = True
-                print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
-                trajectory = self.idm_planner.compute_planner_trajectory(current_input)
-                return trajectory
+
+
+
+
+        # next_world_coor_points = pred_traj.copy()
+        # if self.use_backup_planner:
+        #     # check if out of boundary
+        #     out_of_route = False
+        #     # for i in range(pred_traj.shape[0]):
+        #     out_pts = 0
+        #     for i in range(pred_traj.shape[0]):
+        #         all_nearby_map_instances = self.map_api.get_proximal_map_objects(
+        #             Point2D(pred_traj[i, 0], pred_traj[i, 1]),
+        #             1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
+        #         all_nearby_map_instances_ids = []
+        #         for each_type in all_nearby_map_instances:
+        #             for each_ins in all_nearby_map_instances[each_type]:
+        #                 all_nearby_map_instances_ids.append(each_ins.id)
+        #         any_in = False
+        #         for each in all_nearby_map_instances_ids:
+        #             if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
+        #                 any_in = True
+        #                 break
+        #         if not any_in:
+        #             out_pts += 1
+        #
+        #     if out_pts > 10:
+        #         out_of_route = True
+        #         print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
+        #         trajectory = self.idm_planner.compute_planner_trajectory(current_input)
+        #         return trajectory
            
         # build output
         ego_state = history.ego_states[-1]
