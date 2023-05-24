@@ -264,13 +264,10 @@ class ControlTFPlanner(AbstractPlanner):
             new[:, -1] = relative_traj[:, -1]
             relative_traj = new
 
-        print('test: ', self.planning_interval, self.horizon_seconds_time)
-
-        timesteps = _get_fixed_timesteps(ego_states[-1], self.horizon_seconds_time, self.planning_interval)
-
+        # print('test: ', self.planning_interval, self.horizon_seconds_time)
         planned_time_points = []
         for i in range(0, relative_traj.shape[0]):
-            planned_time_points.append(TimePoint(state.time_point.time_us + 1e5).time_s)
+            planned_time_points.append(TimePoint(ego_states[-1].time_point.time_us + 1e5 * i).time_s)
 
         states = _get_absolute_agent_states_from_numpy_poses(poses=relative_traj,
                                                              ego_history=ego_states,
