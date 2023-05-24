@@ -79,7 +79,7 @@ class ControlTFPlanner(AbstractPlanner):
                  sampling_time: float,
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
-                 use_backup_planner = False,
+                 use_backup_planner = True,
                  model = None,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
