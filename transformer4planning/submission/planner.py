@@ -30,6 +30,8 @@ from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
 
+import time
+
 count = 0
 
 def generate_contour_pts(center_pt, w, l, direction):
@@ -140,7 +142,6 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        import time
         global count
         use_backup_planner = self.use_backup_planner
         count += 1
@@ -158,7 +159,7 @@ class ControlTFPlanner(AbstractPlanner):
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-            ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
+            ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=300, context_frequency=self.frequency)
         time_after_input = time.time() - start
         print("time after ratser build", time_after_input)
         if time_after_input > 0.65:
@@ -343,7 +344,7 @@ class ControlTFPlanner(AbstractPlanner):
         #
         # return InterpolatedTrajectory(trajectory)
 
-    def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=500, context_frequency=5):
+    def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=300, context_frequency=5):
         """
         the first dimension is the sequence length, each timestep include n-items.
         agent_seq and statics_seq are both agents in raster definition
@@ -402,6 +403,7 @@ class ControlTFPlanner(AbstractPlanner):
         cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
         ## goal route
         cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
         route_ids = self.route_roadblock_ids
         routes = [road_dic[int(route_id)] for route_id in route_ids]
         for route in routes:
@@ -416,7 +418,8 @@ class ControlTFPlanner(AbstractPlanner):
             simplified_x, simplified_y = simplified_xyz_line.xy
             simplified_xyz = np.ones((len(simplified_x), 2)) * -1
             simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
             simplified_xyz[:, 1] *= -1
             high_res_route = simplified_xyz * high_res_raster_scale
             low_res_route = simplified_xyz * low_res_raster_scale
@@ -430,7 +433,8 @@ class ControlTFPlanner(AbstractPlanner):
                 cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
                         tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
         # road element computation
-        cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        # cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        # rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
         # road_key_to_del = list()
         for i, key in enumerate(road_dic):
             xyz = road_dic[key]["xyz"].copy()
@@ -449,8 +453,10 @@ class ControlTFPlanner(AbstractPlanner):
             simplified_x, simplified_y = simplified_xyz_line.xy
             simplified_xyz = np.ones((len(simplified_x), 2)) * -1
             simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
-                                                        simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
+            #                                             simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
+            # simplified_xyz = simplified_xyz.copy() @ rotation_matrix
             simplified_xyz[:, 1] *= -1
             high_res_road = simplified_xyz * high_res_raster_scale
             low_res_road = simplified_xyz * low_res_raster_scale
