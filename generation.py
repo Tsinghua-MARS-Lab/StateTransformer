@@ -176,6 +176,8 @@ def main(args):
             file_name = dl.file_names[0]
             while not dl.end:
                 loaded_dic, _ = dl.get_next(seconds_in_future=8)
+                if loaded_dic is None:
+                    continue
                 if loaded_dic["skip"]:
                     continue
                 if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:

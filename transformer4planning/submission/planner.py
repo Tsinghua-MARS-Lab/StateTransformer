@@ -118,7 +118,8 @@ class ControlTFPlanner(AbstractPlanner):
         if "LogPlaybackController" in controller:
             self.mode = "openloop"
         else: # TwoStageController
-            self.mode = "closedloop"         
+            self.mode = "closedloop"  
+        self.warm_up = False       
         
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
@@ -145,14 +146,17 @@ class ControlTFPlanner(AbstractPlanner):
                 self.model = self.model["vegas"]
             else:
                 raise ValueError("Map is not invalid")
+    
+    def warmup(self):
         if torch.cuda.is_available():
-            if not self.multi_city:
-                warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
-                                    current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
-                                    context_actions=torch.zeros((1, 10, 4), device='cuda'), \
-                                    high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                                    low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                                    trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
+            self.model.to("cuda")
+            warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
+                                context_actions=torch.zeros((1, 10, 4), device='cuda'), \
+                                high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
+            self.warm_up = True
 
     def name(self) -> str:
         """ Inherited, see superclass. """
