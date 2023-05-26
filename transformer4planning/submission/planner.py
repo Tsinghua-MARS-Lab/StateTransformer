@@ -537,9 +537,10 @@ class ControlTFPlanner(AbstractPlanner):
                 cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type * context_length + i],
                                  [rect_pts_low_res], -1, (255, 255, 255), -1)
 
-        for i, pose in enumerate(copy.deepcopy(ego_trajectory)):
+        recentered_ego_trajectory = ego_trajectory - ego_pose
+        for i, pose in enumerate(copy.deepcopy(recentered_ego_trajectory)):
             agent_type = 7  # type EGO is 7
-            pose -= ego_pose
+            # pose -= ego_pose
             rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                             pose[0] * sin_ + pose[1] * cos_]
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]),
@@ -559,10 +560,10 @@ class ControlTFPlanner(AbstractPlanner):
 
         # context_actions computation
         context_actions = list()
-        ego_poses = ego_trajectory - ego_pose
-        rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
-                                  ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
-                                  np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
+        # ego_poses = ego_trajectory - ego_pose
+        rotated_poses = np.array([recentered_ego_trajectory[:, 0] * cos_ - recentered_ego_trajectory[:, 1] * sin_,
+                                  recentered_ego_trajectory[:, 0] * sin_ + recentered_ego_trajectory[:, 1] * cos_,
+                                  np.zeros(recentered_ego_trajectory.shape[0]), recentered_ego_trajectory[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
             if not self.multi_city:
                 action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
