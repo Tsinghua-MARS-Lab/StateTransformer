@@ -105,7 +105,6 @@ def main(cfg: DictConfig) -> None:
         Already contains the changes merged from the experiment's config to default config.
     """
     assert cfg.simulation_log_main_path is None, 'Simulation_log_main_path must not be set when running simulation.'
-
     # Execute simulation with preconfigured planner(s).
     run_simulation(cfg=cfg)
 
@@ -113,8 +112,11 @@ def main(cfg: DictConfig) -> None:
 if __name__ == '__main__':
     os.environ['USE_PYGEOS'] = '0'
     os.environ['HYDRA_FULL_ERROR'] = '1'
-    os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan/'
-    os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.1/'
-    os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/train_boston/'
-    os.environ['NUPLAN_MAP_VERSION'] = 'nuplan-maps-v1.0'
+    # os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan/'
+    # os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.1/'
+    # os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/test/'
+    os.environ['NUPLAN_DATA_ROOT'] = '/localdata_hdd/nuplan/dataset'
+    os.environ['NUPLAN_MAPS_ROOT'] = '/localdata_hdd/nuplan/dataset/maps'
+    os.environ['NUPLAN_DB_FILES'] = '/localdata_hdd/nuplan/dataset/nuplan-v1.1/test/'
+    # os.environ['NUPLAN_MAP_VERSION'] = 'nuplan-maps-v1.0'
     main()
