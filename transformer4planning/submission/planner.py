@@ -96,7 +96,7 @@ class ControlTFPlanner(AbstractPlanner):
         self.use_backup_planner = use_backup_planner
         self.planning_interval = planning_interval
         self.idm_planner = IDMPlanner(
-            target_velocity=10,
+            target_velocity=8,
             min_gap_to_lead_agent=1.0,
             headway_time=1.5,
             accel_max=1.0,
@@ -232,11 +232,12 @@ class ControlTFPlanner(AbstractPlanner):
         absolute_traj = np.zeros_like(pred_traj)
         cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
         for i in range(pred_traj.shape[0]):
-            new_x = pred_traj[i, 0].copy() * cos_ + pred_traj[i, 1].copy() * sin_ + ego_trajectory[-1][0]
-            new_y = pred_traj[i, 1].copy() * cos_ - pred_traj[i, 0].copy() * sin_ + ego_trajectory[-1][1]
+            new_x = pred_traj[i, 0] * cos_ + pred_traj[i, 1] * sin_ + ego_trajectory[-1][0]
+            new_y = pred_traj[i, 1] * cos_ - pred_traj[i, 0] * sin_ + ego_trajectory[-1][1]
             absolute_traj[i, 0] = new_x
             absolute_traj[i, 1] = new_y
-            absolute_traj[i, 2] = pred_traj[i, -1]
+            absolute_traj[i, 2] = 0
+            absolute_traj[i, -1] = ego_trajectory[-1][-1]
         
         idm_threshold = 3
         traffic_stop_threshold = 5
@@ -288,6 +289,7 @@ class ControlTFPlanner(AbstractPlanner):
                 relative_traj[i, -1] = prev_delta_heading
             else:
                 # scrolling forward
+                relative_traj[i, -1] = prev_delta_heading
                 for j in range(pred_traj.shape[0] - i):
                     dist = euclidean_distance(prev_pt, relative_traj[i + j, :2])
                     delta_heading = get_angle_of_a_line(prev_pt, relative_traj[i + j, :2])
@@ -297,6 +299,7 @@ class ControlTFPlanner(AbstractPlanner):
                         scrolling_frame_idx = i + j
                         relative_traj[i, -1] = delta_heading
                         break
+        absolute_traj[:, -1] += relative_traj[:, -1]
         # change relative poses to absolute states
         from nuplan.planning.simulation.planner.ml_planner.transform_utils import _get_absolute_agent_states_from_numpy_poses,_get_fixed_timesteps
         if relative_traj.shape[1] == 4:
@@ -306,13 +309,16 @@ class ControlTFPlanner(AbstractPlanner):
             relative_traj = new
 
         # print('test: ', self.planning_interval, self.horizon_seconds_time)
-        planned_time_points = []
-        for i in range(0, relative_traj.shape[0]):
-            planned_time_points.append(TimePoint(ego_states[-1].time_point.time_us + 1e5 * i ).time_s)
+        planned_time_points = _get_fixed_timesteps(ego_states[-1], 8, 0.1)
+        # planned_time_points = []
+        # for i in range(0, relative_traj.shape[0]-1):
+        #     planned_time_points.append(TimePoint(ego_states[-1].time_point.time_us + 1e5 * (i+1)).time_s)
+            # print("time diff:", gt_planned_time_points[i] - planned_time_points[i])
 
         states = _get_absolute_agent_states_from_numpy_poses(poses=relative_traj,
                                                              ego_history=ego_states,
                                                              timesteps=planned_time_points)
+        states.insert(0, ego_states[-1])
         trajectory = InterpolatedTrajectory(states)
         print("time consumed", time.time()-start)
         return trajectory
@@ -333,7 +339,7 @@ class ControlTFPlanner(AbstractPlanner):
         #     time_point=ego_state.time_point
         # )
         # trajectory: List[EgoState] = [state]
-        # for i in range(0, next_world_coor_points.shape[0]):
+        # for i in range(0, absolute_traj.shape[0]):
         #     new_time_point = TimePoint(state.time_point.time_us + 1e5)
         #     # velocity and acceleration computation
         #     # self.last_velocity = self.curret_velocity
@@ -343,10 +349,10 @@ class ControlTFPlanner(AbstractPlanner):
         #     #     self.current_velocity = next_world_coor_points[i, :2] - next_world_coor_points[i-1, :2]
         #     # self.acceleration = (self.curret_velocity - self.last_velocity)/0.1
         #     state = EgoState.build_from_rear_axle(
-        #         rear_axle_pose=StateSE2(next_world_coor_points[i, 0],
-        #                         next_world_coor_points[i, 1],
+        #         rear_axle_pose=StateSE2(absolute_traj[i, 0],
+        #                         absolute_traj[i, 1],
         #                         #ego_trajectory[-1, -1]
-        #                         next_world_coor_points[i][-1]
+        #                         absolute_traj[i][-1]
         #                         ),
         #         rear_axle_velocity_2d=StateVector2D(0, 0),
         #         rear_axle_acceleration_2d=StateVector2D(0, 0),
@@ -357,10 +363,10 @@ class ControlTFPlanner(AbstractPlanner):
         #         angular_vel=state.dynamic_car_state.angular_velocity,
         #         angular_accel=state.dynamic_car_state.angular_acceleration
         #     )
-        #     state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
-        #     state._time_point = new_time_point
+        #     # state = self.motion_model.propagate_state(state, state.dynamic_car_state, self.sampling_time)
+        #     # state._time_point = new_time_point
         #     trajectory.append(state)
-        #
+        
         # return InterpolatedTrajectory(trajectory)
 
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=300, context_frequency=5):
@@ -439,7 +445,7 @@ class ControlTFPlanner(AbstractPlanner):
                 simplified_xyz = np.ones((len(simplified_x), 2)) * -1
                 simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
                 # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-                simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
+                simplified_xyz = (simplified_xyz @ rotation_matrix.transpose())
                 simplified_xyz[:, 1] *= -1
                 high_res_route = simplified_xyz * high_res_raster_scale
                 low_res_route = simplified_xyz * low_res_raster_scale
@@ -475,7 +481,7 @@ class ControlTFPlanner(AbstractPlanner):
             simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
             # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
             #                                             simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
+            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose())
             # simplified_xyz = simplified_xyz.copy() @ rotation_matrix
             simplified_xyz[:, 1] *= -1
             high_res_road = simplified_xyz * high_res_raster_scale
