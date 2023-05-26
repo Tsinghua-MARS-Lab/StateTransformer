@@ -29,7 +29,7 @@ from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
-
+from omegaconf import DictConfig
 import time
 
 count = 0
@@ -109,12 +109,15 @@ class ControlTFPlanner(AbstractPlanner):
         self.motion_model = KinematicBicycleModel(self.vehicle)
         # model initialization and configuration
         assert model is not None
+        if isinstance(model, dict) or isinstance(model, DictConfig):
+            self.multi_city = True
+        else:
+            self.multi_city = False
         self.model = model
         self.frequency = 5
-        print(controller)
         if "LogPlaybackController" in controller:
             self.mode = "openloop"
-        else:
+        else: # TwoStageController
             self.mode = "closedloop"         
         
 
@@ -126,13 +129,30 @@ class ControlTFPlanner(AbstractPlanner):
         self.map_api = initialization.map_api
         self.idm_planner.initialize(initialization)
         self.road_dic = get_road_dict(self.map_api, ego_pose_center=Point2D(0, 0))
+        print("map_name", self.map_api.map_name, self.multi_city)
+        if self.multi_city: 
+            if "boston" in self.map_api.map_name:#us-ma-boston
+                print("boston")
+                self.model = self.model["boston"]
+            elif "pittsburgh" in self.map_api.map_name:#us-pa-pittsburgh-hazelwood
+                print("pittsburgh")
+                self.model = self.model["pittsburgh"]
+            elif "sg" in self.map_api.map_name:#sg-one-north
+                print("singapore")
+                self.model = self.model["singapore"]
+            elif "vegas" in self.map_api.map_name:#us-nv-las-vegas-strip 
+                print("vegas")
+                self.model = self.model["vegas"]
+            else:
+                raise ValueError("Map is not invalid")
         if torch.cuda.is_available():
-            warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
-                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
-                                context_actions=torch.zeros((1, 10, 4), device='cuda'), \
-                                high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                                low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                                trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
+            if not self.multi_city:
+                warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                                    current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
+                                    context_actions=torch.zeros((1, 10, 4), device='cuda'), \
+                                    high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                    low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                    trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
 
     def name(self) -> str:
         """ Inherited, see superclass. """
@@ -230,6 +250,8 @@ class ControlTFPlanner(AbstractPlanner):
             elif flag == "leadagent" and relative_distance < agent_stop_threshold and self.mode == "closedloop": 
                 return trajectory
             # check if out of boundary
+            if self.mode == "openloop":
+                idm_threshold = 2
             out_pts = 0
             sample_frames = list(range(10)) + list(range(10, absolute_traj.shape[0], 5)) 
             # TODO: open loop & close loop
@@ -405,33 +427,34 @@ class ControlTFPlanner(AbstractPlanner):
         cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
         rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
         route_ids = self.route_roadblock_ids
-        routes = [road_dic[int(route_id)] for route_id in route_ids]
-        for route in routes:
-            xyz = route["xyz"].copy()
-            xyz[:, :2] -= ego_pose[:2]
-            if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
-                abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
-                continue
-            pts = list(zip(xyz[:, 0], xyz[:, 1]))
-            line = shapely.geometry.LineString(pts)
-            simplified_xyz_line = line.simplify(1)
-            simplified_x, simplified_y = simplified_xyz_line.xy
-            simplified_xyz = np.ones((len(simplified_x), 2)) * -1
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
-            simplified_xyz[:, 1] *= -1
-            high_res_route = simplified_xyz * high_res_raster_scale
-            low_res_route = simplified_xyz * low_res_raster_scale
-            high_res_route = high_res_route.astype('int32')
-            low_res_route = low_res_route.astype('int32')
-            high_res_route += 112
-            low_res_route += 112
-            for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
-                        tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
-                        tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
+        if self.multi_city:
+            routes = [road_dic[int(route_id)] for route_id in route_ids]
+            for route in routes:
+                xyz = route["xyz"].copy()
+                xyz[:, :2] -= ego_pose[:2]
+                if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+                    abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+                    continue
+                pts = list(zip(xyz[:, 0], xyz[:, 1]))
+                line = shapely.geometry.LineString(pts)
+                simplified_xyz_line = line.simplify(1)
+                simplified_x, simplified_y = simplified_xyz_line.xy
+                simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+                # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+                simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
+                simplified_xyz[:, 1] *= -1
+                high_res_route = simplified_xyz * high_res_raster_scale
+                low_res_route = simplified_xyz * low_res_raster_scale
+                high_res_route = high_res_route.astype('int32')
+                low_res_route = low_res_route.astype('int32')
+                high_res_route += 112
+                low_res_route += 112
+                for j in range(simplified_xyz.shape[0] - 1):
+                    cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
+                            tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
+                    cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
+                            tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
         # road element computation
         # cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
         # rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
@@ -544,8 +567,10 @@ class ControlTFPlanner(AbstractPlanner):
                                   ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                                   np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
-            # action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
-            action = rotated_poses[i]
+            if not self.multi_city:
+                action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
+            else:
+                action = rotated_poses[i]
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
