@@ -81,7 +81,7 @@ class ControlTFPlanner(AbstractPlanner):
                  sampling_time: float,
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
-                 use_backup_planner = False,
+                 use_backup_planner = True,
                  model = None,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
@@ -238,7 +238,7 @@ class ControlTFPlanner(AbstractPlanner):
             absolute_traj[i, 1] = new_y
             absolute_traj[i, 2] = pred_traj[i, -1]
         
-        idm_threshold = 1
+        idm_threshold = 3
         traffic_stop_threshold = 5
         agent_stop_threshold = 3
         if use_backup_planner:
