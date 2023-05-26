@@ -26,6 +26,7 @@ from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTr
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
 from nuplan.planning.simulation.planner.idm_planner import IDMPlanner
 from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
+from nuplan.planning.simulation.planner.planner_report import PlannerReport
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
@@ -80,7 +81,7 @@ class ControlTFPlanner(AbstractPlanner):
                  sampling_time: float,
                  acceleration: npt.NDArray[np.float32],
                  max_velocity: float = 5.0,
-                 use_backup_planner = True,
+                 use_backup_planner = False,
                  model = None,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
@@ -570,6 +571,19 @@ class ControlTFPlanner(AbstractPlanner):
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
+    
+    def generate_planner_report(self, clear_stats: bool = True) -> PlannerReport:
+        """
+        Generate a report containing runtime stats from the planner.
+        By default, returns a report containing the time-series of compute_trajectory runtimes.
+        :param clear_stats: whether or not to clear stored stats after creating report.
+        :return: report containing planner runtime stats.
+        """
+        report = PlannerReport(compute_trajectory_runtimes=self._compute_trajectory_runtimes)
+        self.model.to("cpu")
+        if clear_stats:
+            self._compute_trajectory_runtimes: List[float] = []
+        return report
     
 def get_road_dict(map_api, ego_pose_center):
     road_dic = {}
