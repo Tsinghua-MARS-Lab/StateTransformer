@@ -84,7 +84,6 @@ class ControlTFPlanner(AbstractPlanner):
                  model = None,
                  planning_interval = 1,
                  steering_angle: float = 0.0,
-                 controller=None,
                  **kwargs):
         self.horizon_seconds = TimePoint(int(horizon_seconds * 1e6))
         self.horizon_seconds_time = horizon_seconds
@@ -111,11 +110,6 @@ class ControlTFPlanner(AbstractPlanner):
         assert model is not None
         self.model = model
         self.frequency = 5
-        print(controller)
-        if "LogPlaybackController" in controller:
-            self.mode = "openloop"
-        else:
-            self.mode = "closedloop"         
         
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
@@ -146,7 +140,7 @@ class ControlTFPlanner(AbstractPlanner):
         use_backup_planner = self.use_backup_planner
         count += 1
         start=time.time()
-        print("count: ", count, "cuda:", torch.cuda.is_available(), "mode:", self.mode)
+        print("count: ", count, "cuda:", torch.cuda.is_available())
         history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
@@ -225,9 +219,9 @@ class ControlTFPlanner(AbstractPlanner):
             # compute idm trajectory and scenario flag
             trajectory, flag, relative_distance = self.idm_planner.compute_planner_trajectory(current_input)
             
-            if flag == "redlight" and relative_distance < traffic_stop_threshold and self.mode == "closedloop":
+            if flag == "redlight" and relative_distance < traffic_stop_threshold:
                 return trajectory
-            elif flag == "leadagent" and relative_distance < agent_stop_threshold and self.mode == "closedloop": 
+            elif flag == "leadagent" and relative_distance < agent_stop_threshold:
                 return trajectory
             # check if out of boundary
             out_pts = 0
