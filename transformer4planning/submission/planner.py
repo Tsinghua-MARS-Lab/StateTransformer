@@ -30,7 +30,6 @@ from nuplan.planning.simulation.planner.planner_report import PlannerReport
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
-from transformer4planning.checkratser import visulize_raster, visulize_trajectory
 from omegaconf import DictConfig
 import time
 
