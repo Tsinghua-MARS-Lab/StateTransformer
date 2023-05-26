@@ -26,9 +26,12 @@ from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTr
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
 from nuplan.planning.simulation.planner.idm_planner import IDMPlanner
 from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
+from nuplan.planning.simulation.planner.planner_report import PlannerReport
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
 from transformer4planning.utils import ModelArguments
+from omegaconf import DictConfig
+import time
 
 count = 0
 
@@ -105,16 +108,14 @@ class ControlTFPlanner(AbstractPlanner):
         self.vehicle = get_pacifica_parameters()
         self.motion_model = KinematicBicycleModel(self.vehicle)
         # model initialization and configuration
-        if model is None:
-            parser = HfArgumentParser((ModelArguments))
-            model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
-            if model_args.model_pretrain_name_or_path is None:
-                model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1"
-            assert model_args.model_pretrain_name_or_path is not None
-            self.model = build_models(model_args=model_args)
+        assert model is not None
+        if isinstance(model, dict) or isinstance(model, DictConfig):
+            self.multi_city = True
         else:
-            self.model = model
-        self.frequency = 5        
+            self.multi_city = False
+        self.model = model
+        self.frequency = 5
+        self.warm_up = False       
         
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
@@ -125,12 +126,33 @@ class ControlTFPlanner(AbstractPlanner):
         self.map_api = initialization.map_api
         self.idm_planner.initialize(initialization)
         self.road_dic = get_road_dict(self.map_api, ego_pose_center=Point2D(0, 0))
-        warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
-                            current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
-                            context_actions=torch.zeros((1, 10, 4), device='cuda'), \
-                            high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                            low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
-                            trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
+        print("map_name", self.map_api.map_name, self.multi_city)
+        if self.multi_city: 
+            if "boston" in self.map_api.map_name:#us-ma-boston
+                print("boston")
+                self.model = self.model["boston"]
+            elif "pittsburgh" in self.map_api.map_name:#us-pa-pittsburgh-hazelwood
+                print("pittsburgh")
+                self.model = self.model["pittsburgh"]
+            elif "sg" in self.map_api.map_name:#sg-one-north
+                print("singapore")
+                self.model = self.model["singapore"]
+            elif "vegas" in self.map_api.map_name:#us-nv-las-vegas-strip 
+                print("vegas")
+                self.model = self.model["vegas"]
+            else:
+                raise ValueError("Map is not invalid")
+    
+    def warmup(self):
+        if torch.cuda.is_available():
+            self.model.to("cuda")
+            warmup = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
+                                current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
+                                context_actions=torch.zeros((1, 10, 4), device='cuda'), \
+                                high_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                low_res_raster=torch.zeros((1, 224, 224, 109), device='cuda'), \
+                                trajectory_label=torch.zeros((1, 160, 4)).to('cuda'))
+            self.warm_up = True
 
     def name(self) -> str:
         """ Inherited, see superclass. """
@@ -140,11 +162,11 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
-        import time
         global count
+        use_backup_planner = self.use_backup_planner
         count += 1
         start=time.time()
-        print("count: ", count, torch.cuda.is_available())
+        print("count: ", count, "cuda:", torch.cuda.is_available())
         history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
@@ -157,9 +179,12 @@ class ControlTFPlanner(AbstractPlanner):
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-            ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=500, context_frequency=self.frequency)
-        print(high_res_raster.shape, low_res_raster.shape, context_action.shape, context_length)
-        print("time after ratser build", time.time() - start)
+            ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=300, context_frequency=self.frequency)
+        time_after_input = time.time() - start
+        print("time after ratser build", time_after_input)
+        if time_after_input > 0.65:
+            use_backup_planner = False
+            print("forbid idm planner")
         if torch.cuda.is_available():
             output = self.model(intended_maneuver_vector=torch.zeros((1), dtype=torch.int32).to('cuda'), \
                                 current_maneuver_vector=torch.zeros((1, 12), dtype=torch.float32).to('cuda'), \
@@ -212,14 +237,25 @@ class ControlTFPlanner(AbstractPlanner):
             absolute_traj[i, 0] = new_x
             absolute_traj[i, 1] = new_y
             absolute_traj[i, 2] = pred_traj[i, -1]
+        
+        idm_threshold = 3
+        traffic_stop_threshold = 5
+        agent_stop_threshold = 3
+        if use_backup_planner:
+            # compute idm trajectory and scenario flag
+            trajectory, flag, relative_distance = self.idm_planner.compute_planner_trajectory(current_input)
+            
+            if flag == "redlight" and relative_distance < traffic_stop_threshold:
+                return trajectory
+            elif flag == "leadagent" and relative_distance < agent_stop_threshold:
+                return trajectory
 
-        if self.use_backup_planner:
-            # check if out of boundary
             out_pts = 0
-            for i in range(absolute_traj.shape[0]):
+            sample_frames = list(range(10)) + list(range(10, absolute_traj.shape[0], 5)) 
+            for i in sample_frames:
                 all_nearby_map_instances = self.map_api.get_proximal_map_objects(
                     Point2D(absolute_traj[i, 0], absolute_traj[i, 1]),
-                    1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
+                    0.1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
                 all_nearby_map_instances_ids = []
                 for each_type in all_nearby_map_instances:
                     for each_ins in all_nearby_map_instances[each_type]:
@@ -231,11 +267,14 @@ class ControlTFPlanner(AbstractPlanner):
                         break
                 if not any_in:
                     out_pts += 1
-
-            if out_pts > 10:
+                if out_pts > idm_threshold:
+                    break
+            
+            if out_pts > idm_threshold:
                 out_of_route = True
-                print('OUT OF ROUTE, Use IDM Planner to correct trajectory', )
-                trajectory = self.idm_planner.compute_planner_trajectory(current_input)
+                print('OUT OF ROUTE, Use IDM Planner to correct trajectory')
+                
+                print(time.time() - start)
                 return trajectory
 
         relative_traj = pred_traj.copy()
@@ -324,7 +363,7 @@ class ControlTFPlanner(AbstractPlanner):
         #
         # return InterpolatedTrajectory(trajectory)
 
-    def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=500, context_frequency=5):
+    def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=300, context_frequency=5):
         """
         the first dimension is the sequence length, each timestep include n-items.
         agent_seq and statics_seq are both agents in raster definition
@@ -383,41 +422,49 @@ class ControlTFPlanner(AbstractPlanner):
         cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
         ## goal route
         cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
         route_ids = self.route_roadblock_ids
-        routes = [road_dic[int(route_id)] for route_id in route_ids]
-        for route in routes:
-            xyz = route["xyz"].copy()
-            xyz[:, :2] -= ego_pose[:2]
-            if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
-                abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
-                continue
-            pts = list(zip(xyz[:, 0], xyz[:, 1]))
-            line = shapely.geometry.LineString(pts)
-            simplified_xyz_line = line.simplify(1)
-            simplified_x, simplified_y = simplified_xyz_line.xy
-            simplified_xyz = np.ones((len(simplified_x), 2)) * -1
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-            simplified_xyz[:, 1] *= -1
-            high_res_route = simplified_xyz * high_res_raster_scale
-            low_res_route = simplified_xyz * low_res_raster_scale
-            high_res_route = high_res_route.astype('int32')
-            low_res_route = low_res_route.astype('int32')
-            high_res_route += 112
-            low_res_route += 112
-            for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
-                        tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
-                        tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
+        if self.multi_city:
+            routes = [road_dic[int(route_id)] for route_id in route_ids]
+            for route in routes:
+                xyz = route["xyz"].copy()
+                xyz[:, :2] -= ego_pose[:2]
+                if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+                    abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+                    continue
+                pts = list(zip(xyz[:, 0], xyz[:, 1]))
+                line = shapely.geometry.LineString(pts)
+                simplified_xyz_line = line.simplify(1)
+                simplified_x, simplified_y = simplified_xyz_line.xy
+                simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+                # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+                simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
+                simplified_xyz[:, 1] *= -1
+                high_res_route = simplified_xyz * high_res_raster_scale
+                low_res_route = simplified_xyz * low_res_raster_scale
+                high_res_route = high_res_route.astype('int32')
+                low_res_route = low_res_route.astype('int32')
+                high_res_route += 112
+                low_res_route += 112
+                for j in range(simplified_xyz.shape[0] - 1):
+                    cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
+                            tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
+                    cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
+                            tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
         # road element computation
-        cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        # cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
+        # rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
+        # road_key_to_del = list()
         for i, key in enumerate(road_dic):
             xyz = road_dic[key]["xyz"].copy()
             road_type = int(road_dic[key]['type'])
             xyz[:, :2] -= ego_pose[:2]
             if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
                     abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+                # if (abs(xyz[0, 0]) > 2 * max_dis and abs(xyz[-1, 0]) > 2 * max_dis) or (
+                #     abs(xyz[0, 1]) > 2 * max_dis and abs(xyz[-1, 1]) > 2 * max_dis):
+                #     road_key_to_del.append(key)               
                 continue
             # simplify road vector, can simplify about half of all the points
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
@@ -426,8 +473,10 @@ class ControlTFPlanner(AbstractPlanner):
             simplified_x, simplified_y = simplified_xyz_line.xy
             simplified_xyz = np.ones((len(simplified_x), 2)) * -1
             simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
-                                                        simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
+            #                                             simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose()).transpose()
+            # simplified_xyz = simplified_xyz.copy() @ rotation_matrix
             simplified_xyz[:, 1] *= -1
             high_res_road = simplified_xyz * high_res_raster_scale
             low_res_road = simplified_xyz * low_res_raster_scale
@@ -439,16 +488,11 @@ class ControlTFPlanner(AbstractPlanner):
                          tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
                 cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
                          tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
-
+        
+        # for key in road_key_to_del:
+        #     del road_dic[key]
         # agent element computation
         ## statics include CZONE_SIGN,BARRIER,TRAFFIC_CONE,GENERIC_OBJECT,
-        # TODO:merge the statics，agents and ego agents
-        # total_agents_seq = list()
-        # for agents, statics in zip(agents_seq, statics_seq):
-        # total_agents = list()
-        # total_agents.extend(agents)
-        # total_agents.extend(statics)
-        # total_agents_seq.append(total_agents)
         cos_, sin_ = math.cos(-ego_pose[2]), math.sin(-ego_pose[2])
         # for i, statics in enumerate(statics_seq):
         #     for j, static in enumerate(statics):
@@ -493,9 +537,10 @@ class ControlTFPlanner(AbstractPlanner):
                 cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type * context_length + i],
                                  [rect_pts_low_res], -1, (255, 255, 255), -1)
 
-        for i, pose in enumerate(copy.deepcopy(ego_trajectory)):
+        recentered_ego_trajectory = ego_trajectory - ego_pose
+        for i, pose in enumerate(copy.deepcopy(recentered_ego_trajectory)):
             agent_type = 7  # type EGO is 7
-            pose -= ego_pose
+            # pose -= ego_pose
             rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                             pose[0] * sin_ + pose[1] * cos_]
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]),
@@ -515,16 +560,31 @@ class ControlTFPlanner(AbstractPlanner):
 
         # context_actions computation
         context_actions = list()
-        ego_poses = ego_trajectory - ego_pose
-        rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
-                                  ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
-                                  np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
+        # ego_poses = ego_trajectory - ego_pose
+        rotated_poses = np.array([recentered_ego_trajectory[:, 0] * cos_ - recentered_ego_trajectory[:, 1] * sin_,
+                                  recentered_ego_trajectory[:, 0] * sin_ + recentered_ego_trajectory[:, 1] * cos_,
+                                  np.zeros(recentered_ego_trajectory.shape[0]), recentered_ego_trajectory[:, -1]]).transpose((1, 0))
         for i in range(len(rotated_poses) - 1):
-            # action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
-            action = rotated_poses[i]
+            if not self.multi_city:
+                action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
+            else:
+                action = rotated_poses[i]
             context_actions.append(action)
 
         return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
+    
+    def generate_planner_report(self, clear_stats: bool = True) -> PlannerReport:
+        """
+        Generate a report containing runtime stats from the planner.
+        By default, returns a report containing the time-series of compute_trajectory runtimes.
+        :param clear_stats: whether or not to clear stored stats after creating report.
+        :return: report containing planner runtime stats.
+        """
+        report = PlannerReport(compute_trajectory_runtimes=self._compute_trajectory_runtimes)
+        self.model.to("cpu")
+        if clear_stats:
+            self._compute_trajectory_runtimes: List[float] = []
+        return report
     
 def get_road_dict(map_api, ego_pose_center):
     road_dic = {}

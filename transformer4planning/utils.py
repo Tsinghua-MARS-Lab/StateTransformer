@@ -13,11 +13,14 @@ class ModelArguments:
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        #default="/public/MARS/datasets/nuPlanCache/checkpoint/gpt-1.5B/boston-loss0.15",
+        #default="/public/MARS/datasets/nuPlanCache/checkpoint/submission/test",
         #default = "/public/MARS/zsd/exp_data/nuplan/gpt-boston-1.5B-5hz/training_results/checkpoint-53000/",
-        #default="/localdata_ssd/nuplan/checkpoint-gpt-boston-loss0.5",
-        default="/home/shiduozhang/nuplan/checkpoint-gpt-boston-loss0.5",
+        default="/localdata_hdd/nuplan/test_checkpoint",
+        # default="/home/shiduozhang/nuplan/checkpoint-gpt-boston-loss0.5",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
+    )
+    use_multi_city:bool = field(
+        default=True,
     )
     model_revision: str = field(
         default="main",
