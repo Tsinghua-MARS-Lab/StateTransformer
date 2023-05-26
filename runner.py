@@ -303,6 +303,7 @@ def main():
 
     if training_args.do_predict:
         predict_dataset = nuplan_dataset["test"]
+        predict_dataset.shuffle()
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
             predict_dataset = predict_dataset.select(range(max_predict_samples))
@@ -598,8 +599,8 @@ def main():
             draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
             draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
             fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
-            print(fde_dagger_dic)
-            print(y_bias_dagger_dic)
+            # print(fde_dagger_dic)
+            # print(y_bias_dagger_dic)
 
             if training_args.output_dir is not None:
                 # save results

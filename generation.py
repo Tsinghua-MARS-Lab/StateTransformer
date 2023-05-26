@@ -23,9 +23,9 @@ import pickle
 def main(args):
     running_mode = args.running_mode
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
     }
     road_path = args.road_dic_path
     if args.use_nsm:
@@ -146,6 +146,39 @@ def main(args):
                 else:
                     continue
             del dl
+        
+    filter_scenario = ["starting_straight_traffic_light_intersection_traversal","high_lateral_acceleration",
+    "changing_lane", "high_magnitude_speed", "low_magnitude_speed", "starting_left_turn",
+    "starting_right_turn", "stopping_with_lead", "following_lane_with_lead","near_multiple_vehicles",
+    "traversing_pickup_dropoff", "behind_long_vehicle", "waiting_for_pedestrian_to_cross", "stationary_in_traffic"]  
+    def yield_data_by_scenario(shards):
+        for shard in shards:
+            dl = NuPlanDL(scenario_to_start=0,
+                            file_to_start=shard,
+                            max_file_number=1,
+                            data_path=data_path, db=None, gt_relation_path=None,
+                            road_dic_path=None,
+                            running_mode=running_mode)
+            file_name = dl.file_names[0]
+            while not dl.end:
+                loaded_dic, _ = dl.get_next(seconds_in_future=8)
+                if loaded_dic["skip"]:
+                    continue
+                if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
+                    continue
+                if loaded_dic["type"] not in filter_scenario:
+                    continue
+                observation_dic = get_observation_for_nsm(
+                    observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
+                other_info = {
+                    'file_name':file_name,
+                    'scnario_type':loaded_dic["type"],
+                    'time_stamp': loaded_dic['lidar_pc_tokens'][40].timestamp,
+                    'lidar_token': loaded_dic['lidar_pc_tokens'][40].token,
+                }
+                observation_dic.update(other_info)
+                yield observation_dic
+            del dl
     
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
     # data_loader = NuPlanDL(scenario_to_start=starting_scenario,
@@ -238,12 +271,20 @@ def main(args):
                         'map_name': Value(dtype='string', id=None), 
                         'lidar_token': Value(dtype='string', id=None)
                          })
-    nuplan_dataset = Dataset.from_generator(yield_data, 
-                                            #features=features,
-                                            gen_kwargs={'shards': file_indices, 'dl': None,
-                                                        'filter_info': filter_dic},
-                                            writer_batch_size=2, cache_dir=args.cache_folder,
-                                            num_proc=args.num_proc)
+    if args.by_scenario:
+        nuplan_dataset = Dataset.from_generator(yield_data_by_scenario,
+                                                gen_kwargs={'shards': file_indices},
+                                                writer_batch_size=2, cache_dir=args.cache_folder,
+                                                num_proc=args.num_proc
+                                                )
+
+    else:
+        nuplan_dataset = Dataset.from_generator(yield_data, 
+                                                #features=features,
+                                                gen_kwargs={'shards': file_indices, 'dl': None,
+                                                            'filter_info': filter_dic},
+                                                writer_batch_size=2, cache_dir=args.cache_folder,
+                                                num_proc=args.num_proc)
     print('Saving dataset')
     nuplan_dataset.set_format(type="torch")
     nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
@@ -255,7 +296,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument("--running_mode", type=int, default=1)
+    parser.add_argument("--running_mode", type=int, default=None)
     # parser.add_argument("--data_path", type=dict, default={
     #             'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
     #             'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
@@ -280,13 +321,14 @@ if __name__ == '__main__':
     parser.add_argument('--balance_rate', type=float, default=1.0, help="balance sample rate of simple scenarios in nsm case")
     parser.add_argument('--sample_interval', type=int, default=200)
     parser.add_argument('--dataset_name', type=str, default='nsm')
-    parser.add_argument('--auto_regressive', default=True)
+    parser.add_argument('--auto_regressive', default=False)
     # pass in filter pickle file path to generate augment dataset
     parser.add_argument('--filter_pickle_path', type=str, default=None)
     parser.add_argument('--filter_rank', type=float, default=0.1,
                         help="keep data with rank lower than this value for dagger")
     parser.add_argument('--scaling_factor_for_dagger', type=float, default=5.0,
                         help="scale up low performance data by Nx for dagger")
+    parser.add_argument('--by_scenario', default=False, action='store_true')
 
     # parser.add_argument('--save_playback', default=True, action='store_true')
     args_p = parser.parse_args()
