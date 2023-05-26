@@ -348,16 +348,16 @@ class NuPlanDL:
         #         available_scenario_types[tag.type].append((log_db, tag.lidar_pc_token))
 
         self.total_file_num = len(self.current_dataset.log_dbs)
-        self.current_file_index = 0
-        # self.current_file_index = FILE_TO_START
-        # if file_to_start is not None and file_to_start >= 0:
-        #     self.current_file_index = file_to_start
+        self.current_file_index = FILE_TO_START
+        if file_to_start is not None and file_to_start >= 0:
+            # self.current_file_index = file_to_start
+            self.current_file_index = 0
 
         self.file_names = [nuplanDB.name for nuplanDB in self.current_dataset.log_dbs]
         if self.current_file_index >= self.total_file_num:
             self.current_file_total_scenario = 0
             self.end = True
-            print("Init with index out of max file number")
+            print("Init with index out of max file number ", self.current_file_index, self.total_file_num)
         else:
             self.current_file_total_scenario = len(db.log_dbs[self.current_file_index].scenario_tag)
             self.end = False
