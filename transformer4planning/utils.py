@@ -9,18 +9,12 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="pretrain-nonauto-gpt",
+        default="TransfoXLModelNuPlan_Config",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        #default="/public/MARS/datasets/nuPlanCache/checkpoint/submission/test",
-        #default = "/public/MARS/zsd/exp_data/nuplan/gpt-boston-1.5B-5hz/training_results/checkpoint-53000/",
-        default="/localdata_hdd/nuplan/test_checkpoint",
-        # default="/home/shiduozhang/nuplan/checkpoint-gpt-boston-loss0.5",
+        default="transfo-xl-wt103",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    use_multi_city:bool = field(
-        default=True,
     )
     model_revision: str = field(
         default="main",
@@ -60,13 +54,13 @@ class ModelArguments:
     predict_trajectory_with_nsm: Optional[bool] = field(
         default=False,
     )
-    with_future_intend_maneuver: Optional[bool] = field(
-        default=False
-    )
-    with_future_current_maneuver: Optional[bool] = field(
-        default=False
-    )
     predict_trajectory_with_stopflag: Optional[bool] = field(
+        default=False,
+    )
+    with_future_intend_maneuver_with_encoder: Optional[bool] = field(
+        default=False,
+    )
+    with_future_intend_maneuver_with_decoder: Optional[bool] = field(
         default=False,
     )
     mask_history_intended_maneuver: Optional[bool] = field(
@@ -85,10 +79,10 @@ class ModelArguments:
         default=False,
     )
     d_embed: Optional[int] = field(
-        default=384,
+        default=256,
     )
     d_model: Optional[int] = field(
-        default=384,
+        default=256,
     )
     d_inner: Optional[int] = field(
         default=1024,
@@ -97,14 +91,14 @@ class ModelArguments:
         default=4,
     )
     n_heads: Optional[int] = field(
-        default=8
+        default=8,
     )
     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
     activation_function: Optional[str] = field(
-        default = "silu"
+        default = "gelu_new"
     )
     loss_fn: Optional[str] = field(
-        default="mse"
+        default="mse",
     )
 
     
