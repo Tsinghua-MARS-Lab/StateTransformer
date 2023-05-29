@@ -238,6 +238,9 @@ def main(args):
     all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path).split('/')[-1].split('.db')[0] for each_path in os.listdir(NUPLAN_DB_FILES) if
                       each_path[0] != '.']
     all_file_names = sorted(all_file_names)
+    all_file_path = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES) if
+                     each_path[0] != '.']
+    all_file_path = sorted(all_file_path)
 
     if args.use_nsm:
         nsm_file_names = nsm_labels['file_names']
@@ -312,16 +315,25 @@ def main(args):
                          'map_name': Value(dtype='string', id=None),
                          'lidar_token': Value(dtype='string', id=None)
                          })
-    # # sort by file size
-    # sorted_file_names = sorted(all_file_names, key=lambda x: os.stat(x).st_size)
-    # sorted_file_indices = []
-    # for i, each_file_name in enumerate(sorted_file_names):
-    #     sorted_file_indices.append(all_file_names.index(each_file_name))
-    # # order by processes
-    # file_indices = []
-    # for i in range(args.num_proc):
-    #     file_indices += sorted_file_indices[i::args.num_proc]
-    # # end of sorting
+    # sort by file size
+    sorted_file_indices = []
+    if args.city is not None:
+        sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
+        for i, each_file_name in enumerate(sorted_file_names):
+            if int(each_file_name.split('/')[-1][24:26]) in vehicle_set:
+                sorted_file_indices.append(all_file_path.index(each_file_name))
+        print(f"after sort, {len(sorted_file_indices)} files are chosen")
+    else:
+        sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
+        for i, each_file_name in enumerate(sorted_file_names):
+            if all_file_path.index(each_file_name) in file_indices:
+                sorted_file_indices.append(all_file_path.index(each_file_name))
+    # order by processes
+    file_indices = []
+    for i in range(args.num_proc):
+        file_indices += sorted_file_indices[i::args.num_proc]
+    # end of sorting
+
     if args.by_scenario:
         nuplan_dataset = Dataset.from_generator(yield_data_by_scenario,
                                                 gen_kwargs={'shards': file_indices},
