@@ -92,10 +92,10 @@ class ModelArguments:
     predict_trajectory_with_stopflag: Optional[bool] = field(
         default=False,
     )
-    with_future_intend_maneuver: Optional[bool] = field(
+    with_future_intend_maneuver_with_encoder: Optional[bool] = field(
         default=False,
     )
-    with_future_current_maneuver: Optional[bool] = field(
+    with_future_intend_maneuver_with_decoder: Optional[bool] = field(
         default=False,
     )
     mask_history_intended_maneuver: Optional[bool] = field(

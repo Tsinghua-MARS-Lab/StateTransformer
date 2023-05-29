@@ -198,10 +198,15 @@ def main(args):
     
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
 
+    NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
+    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path).split('/')[-1].split('.db')[0] for each_path in os.listdir(NUPLAN_DB_FILES) if
+                      each_path[0] != '.']
+    all_file_names = sorted(all_file_names)
+
     if args.use_nsm:
         nsm_file_names = nsm_labels['file_names']
         file_indices = []
-        for idx, each_file in enumerate(data_loader.file_names):
+        for idx, each_file in enumerate(all_file_names):
             if each_file in nsm_file_names:
                 # check file is valid?
                 if each_file not in nsm_labels:
@@ -222,10 +227,6 @@ def main(args):
             args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
     total_file_number = len(file_indices)
-    NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
-    all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path) for each_path in os.listdir(NUPLAN_DB_FILES)[:total_file_number] if
-                      each_path[0] != '.']
-    all_file_names = sorted(all_file_names)
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:
@@ -235,7 +236,7 @@ def main(args):
         file_indices_filtered = []
         for idx, each_file_index in enumerate(file_indices):
             each_file = all_file_names[each_file_index]
-            each_file = each_file.split('/')[-1].split('.db')[0]
+            # each_file = each_file.split('/')[-1].split('.db')[0]
             if each_file in filter_dic:
                 ranks = filter_dic[each_file]['rank']
                 for rank in ranks:
@@ -248,6 +249,7 @@ def main(args):
             f'Filtered {len(file_indices_filtered)} files from {total_file_number} files and {len(list(filter_dic.keys()))} keys')
         file_indices = file_indices_filtered
         print(file_indices)
+        total_file_number = len(file_indices)
     else:
         filter_dic = None
     # filter test set by city
