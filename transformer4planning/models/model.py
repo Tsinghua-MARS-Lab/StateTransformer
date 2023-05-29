@@ -335,7 +335,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
         self.use_nsm = model_args.use_nsm
-        self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
+        self.with_future_intend_maneuver_with_encoder = model_args.with_future_intend_maneuver_with_encoder
         self.with_future_current_maneuver = model_args.with_future_current_maneuver
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
@@ -347,11 +347,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
-        if self.with_future_intend_maneuver:
+        assert not (self.with_future_intend_maneuver_with_encoder and self.with_future_intend_maneuver_with_decoder) # choose up to one of intend and weights m
+        if self.with_future_intend_maneuver_with_encoder or self.with_future_intend_maneuver_with_decoder:
             self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.n_embd), nn.Tanh())
-        if self.with_future_current_maneuver:
-            self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.n_embd), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         if self.predict_trajectory_with_stopflag:
@@ -359,8 +357,12 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
         self.traj_decoder = None
         if self.predict_trajectory:
-            embed_sz = 2 * config.n_embd if self.predict_trajectory_with_stopflag else config.n_embd
-            self.traj_decoder = DecoderResCat(config.n_inner, embed_sz, out_features=4)
+            if self.predict_trajectory_with_stopflag or self.with_future_intend_maneuver_with_decoder:
+                self.traj_decoder_double = DecoderResCat(config.n_inner, config.n_embd * 2, out_features=4)
+            else:
+                self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=4)
+            # embed_sz = 2 * config.n_embd if self.predict_trajectory_with_stopflag or self.with_future_intend_maneuver_with_decoder else config.n_embd
+            # self.traj_decoder = DecoderResCat(config.n_inner, embed_sz, out_features=4)
 
         # end of added
         # Initialize weights and apply final processing
@@ -438,10 +440,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         # with future manuever label input
-        if self.with_future_intend_maneuver:
+        if self.with_future_intend_maneuver_with_encoder or self.with_future_intend_maneuver_with_decoder:
             future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
-        if self.with_future_current_maneuver:
-            future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
         if self.predict_trajectory_with_stopflag and self.use_nsm:
             stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz,
             stopflag_embed = self.stop_flag_embed(stopflag.to(device).long())
@@ -475,7 +475,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        if self.with_future_intend_maneuver or self.with_future_current_maneuver:
+        if self.with_future_intend_maneuver_with_encoder:
             input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
         else:
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
@@ -499,8 +499,13 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length:, :]
         if self.predict_trajectory_with_stopflag:
             traj_hidden_state = torch.cat([traj_hidden_state, stopflag_embed.repeat(1, pred_length, 1)], dim=-1)
-        # expected shape for pred trajectory is (b, pred_length, 4)
-        traj_logits = self.traj_decoder(traj_hidden_state)
+            traj_logits = self.traj_decoder_double(traj_hidden_state)
+        elif self.with_future_intend_maneuver_with_decoder:
+            traj_hidden_state = torch.cat([traj_hidden_state, future_maneuver_embed.repeat(1, pred_length, 1)], dim=-1)
+            traj_logits = self.traj_decoder_double(traj_hidden_state)
+        else:
+            # expected shape for pred trajectory is (b, pred_length, 4)
+            traj_logits = self.traj_decoder(traj_hidden_state)
         
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         if self.training:
