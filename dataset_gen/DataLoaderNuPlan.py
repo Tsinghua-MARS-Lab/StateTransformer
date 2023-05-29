@@ -75,9 +75,9 @@ from nuplan.common.maps.maps_datatypes import SemanticMapLayer, TrafficLightStat
 from nuplan.planning.simulation.observation.observation_type import DetectionsTracks
 from nuplan.planning.scenario_builder.nuplan_db.nuplan_scenario_utils import extract_tracked_objects
 
-# from nuplan.database.nuplan_db.nuplan_db_utils import (
-#     SensorDataSource,
-# )
+from nuplan.database.nuplan_db.nuplan_db_utils import (
+    SensorDataSource,
+)
 
 import interactive_sim.envs.util as util
 
@@ -638,7 +638,22 @@ class NuPlanDL:
             print("Invalid Scenario Loaded: ", agent_dic is None, road_dic is None, traffic_dic is None)
             skip = True
 
-        route_road_ids = starting_scenario.get_route_roadblock_ids()
+        # loop route road ids from all scenarios in this file
+        route_road_ids = []
+        log_db = self.current_dataset.log_dbs[file_index]
+        sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
+        for each_scenario_tag in log_db.scenario_tag:
+            # fetch lidar token (as time stamp) from scenario tag
+            each_lidar_token = each_scenario_tag.lidar_pc_token
+            # get scenario from lidar_token
+            lidar_token_timestamp = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(log_db.load_path,
+                                                                                                    sensor_data_source,
+                                                                                                    each_lidar_token)
+            scenario = get_default_scenario_from_token(log_db, each_lidar_token, lidar_token_timestamp)
+            route_road_ids += scenario.get_route_roadblock_ids()
+
+        # route_road_ids = starting_scenario.get_route_roadblock_ids()
+
         # handle '' empty string in route_road_ids
         road_ids_processed = []
         for each_id in route_road_ids:
