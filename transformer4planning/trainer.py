@@ -1,6 +1,6 @@
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers.trainer_pt_utils import  nested_detach
-from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, TrainerCallback
+from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
 from typing import List, Optional, Dict, Any, Tuple, Union
@@ -9,21 +9,24 @@ import torch
 import torch.nn as nn
 
 
-class CustomCallback(TrainerCallback):
+class CustomCallback(DefaultFlowCallback):
     """
     A [`TrainerCallback`] that handles the default flow of the training loop for logs, evaluation and checkpoints.
     """
 
     def on_epoch_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         # Log
+        # control.should_log = False
         if args.logging_strategy == IntervalStrategy.EPOCH and state.epoch % args.eval_interval == 0:
             control.should_log = True
 
         # Evaluate
+        # control.should_evaluate = False
         if args.evaluation_strategy == IntervalStrategy.EPOCH and args.eval_delay <= state.epoch and state.epoch % args.eval_interval == 0:
             control.should_evaluate = True
 
         # Save
+        # control.should_save = False
         if args.save_strategy == IntervalStrategy.EPOCH and state.epoch % args.eval_interval == 0:
             control.should_save = True
 
@@ -122,7 +125,7 @@ class PlanningTrainer(Trainer):
                     with self.compute_loss_context_manager():
                         loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
                     loss = loss.mean().detach()
-                    
+
                     if isinstance(outputs, dict):
                         logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
                     else:

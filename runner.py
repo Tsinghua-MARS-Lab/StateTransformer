@@ -32,6 +32,7 @@ from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArgume
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data import random_split
+from transformers.trainer_callback import DefaultFlowCallback
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -274,6 +275,7 @@ def main():
                 print(test_dataset)
             nuplan_dataset = dict(
                 train=train_dataset,
+                validation=test_dataset.shuffle(seed=training_args.seed),
                 test=test_dataset.shuffle(seed=training_args.seed)
             )
 
@@ -295,7 +297,7 @@ def main():
             
             nuplan_dataset = dict(
                 train=train_dataset,
-                validation=test_dataset,
+                validation=test_dataset.shuffle(seed=training_args.seed),
                 test=test_dataset.shuffle(seed=training_args.seed),
             )
     else:
@@ -334,6 +336,8 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
     )
+    
+    trainer.pop_callback(DefaultFlowCallback)
     
     # if training_args.do_eval:
     #     trainer.evaluate()
