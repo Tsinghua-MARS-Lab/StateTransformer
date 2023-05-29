@@ -1,9 +1,3 @@
-# from transformers import Pipeline
-
-# from datasets import load_dataset, load_metric
-
-
-# from transformers import TransfoXLTokenizer, TransfoXLModel
 from transformers import TrainingArguments, Trainer, TrainerCallback
 import torch, pickle
 
@@ -23,16 +17,16 @@ import pickle
 def main(args):
     running_mode = args.running_mode
 
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
-    # }
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
     }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    # }
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -40,6 +34,12 @@ def main(args):
             # Load the object from the pickle file
             nsm_labels = pickle.load(f)
             print(f'NSM Labels loaded with {len(list(nsm_labels.keys()))} keys')
+    
+    if args.city is not None:
+        with open(args.vehicle_pickle_path, 'rb') as f:
+            vehicle_sets = pickle.load(f)
+            vehicle_set = vehicle_sets[args.city]
+            print(f"{args.city} city vehicle set is {vehicle_set}")
 
     # check starting or ending number
     starting_file_num = args.starting_file_num if args.starting_file_num != -1 else None
@@ -197,42 +197,6 @@ def main(args):
             del dl
     
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
-    # data_loader = NuPlanDL(scenario_to_start=starting_scenario,
-    #                         file_to_start=starting_file_num,
-    #                         max_file_number=max_file_num,
-    #                         data_path=data_path, db=None, gt_relation_path=None,
-    #                         road_dic_path=road_path,
-    #                         running_mode=running_mode)
-    # # data format debug
-    # loaded_dic = data_loader.get_next_file(specify_file_index=2)
-    # with open("/home/shiduozhang/gt_labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle", "rb")  as f:
-    #     nsm = pickle.load(f)
-    # filename = loaded_dic["scenario"]
-    # nsm_data = nsm[filename]
-    # # # with open("data_dic.pkl", "wb") as f:
-    # # #     pickle.dump(loaded_dic, f)
-    # # with open("data_dic.pkl", "rb") as f:
-    # #     loaded_dic = pickle.load(f)
-
-    # total_frames = len(loaded_dic['lidar_pc_tokens'])
-    # s = time.time()
-    # observation_dic = get_observation_for_nsm(
-    #                 observation_kwargs, loaded_dic, 100, total_frames, nsm_result=nsm_data)
-    # print(time.time() - s)
-    # high_res_raster = observation_dic["high_res_raster"]
-    # low_res_raster = observation_dic["low_res_raster"]
-    # context_actions = observation_dic["context_actions"][:, :2]
-    # trajectory = observation_dic["trajectory_label"][:, :2]
-    # high_res_raster = np.transpose(high_res_raster, (2, 0, 1))
-    # low_res_raster = np.transpose(low_res_raster, (2, 0, 1))
-    # if not os.path.exists("visulization/debug_raster"):
-    #     os.makedirs("visulization/debug_raster")
-    # visulize_raster("visulization/debug_raster", "high_res",  high_res_raster)
-    # visulize_raster("visulization/debug_raster", "low_res", low_res_raster)
-    # # visulize_context_trajectory("visulization/debug_raster",  context_actions)
-    # visulize_trajectory("visulization/debug_raster", trajectory, context_actions)
-    # exit()
-    # dataset generation
 
     NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
     all_file_names = [os.path.join(NUPLAN_DB_FILES, each_path).split('/')[-1].split('.db')[0] for each_path in os.listdir(NUPLAN_DB_FILES) if
@@ -265,7 +229,6 @@ def main(args):
         if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
             args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
-
     total_file_number = len(file_indices)
     # load filter pickle file
     if args.filter_pickle_path is not None:
@@ -292,7 +255,16 @@ def main(args):
         total_file_number = len(file_indices)
     else:
         filter_dic = None
-
+    # filter test set by city
+    if args.city is not None:
+        specific_city_indices = []
+        for idx, file_name in enumerate(all_file_names):
+            if int(file_name.split('/')[-1][24:26]) in vehicle_set:
+                specific_city_indices.append(idx)
+        file_indices = specific_city_indices
+        print(f'{args.city} city has {len(file_indices)} files in testset! total {len(all_file_names)}')
+    
+    total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
     features = Features({'trajectory': Sequence(
@@ -315,6 +287,7 @@ def main(args):
                          'map_name': Value(dtype='string', id=None),
                          'lidar_token': Value(dtype='string', id=None)
                          })
+
     # sort by file size
     sorted_file_indices = []
     if args.city is not None:
@@ -396,7 +369,8 @@ if __name__ == '__main__':
     parser.add_argument('--scaling_factor_for_dagger', type=float, default=4.0,
                         help="scale up low performance data by Nx for dagger")
     parser.add_argument('--by_scenario', default=False, action='store_true')
-
+    parser.add_argument('--city', type=str, default=None)
+    parser.add_argument('--vehicle_pickle_path', default="vehicle.pkl")
     # parser.add_argument('--save_playback', default=True, action='store_true')
     args_p = parser.parse_args()
     main(args_p)
