@@ -9,11 +9,14 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="TransfoXLModelNuPlan_Config",
+        default="pretrain-nonauto-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="transfo-xl-wt103",
+        default="/public/MARS/datasets/nuPlanCache/checkpoint/submission/test",
+        #default = "/public/MARS/zsd/exp_data/nuplan/gpt-boston-1.5B-5hz/training_results/checkpoint-53000/",
+        # default="/localdata_hdd/nuplan/test_checkpoint",
+        # default="/home/shiduozhang/nuplan/checkpoint-gpt-boston-loss0.5",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(

@@ -23,22 +23,17 @@ from dataclasses import dataclass, field
 
 import transformers
 from transformers import (
-    AutoConfig,
     HfArgumentParser,
-    TrainingArguments,
-    Trainer, 
-    TrainerCallback,
     set_seed,
 )
 from transformer4planning.models.model import build_models
-# from transformers.trainer import smp_forward_only
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
-from transformers.utils.versions import require_version
+from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data import random_split
-import tempfile
+from transformers.trainer_callback import DefaultFlowCallback
+
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -49,7 +44,7 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="TransfoXLModelNuPlan_Config",
+        default="non-auto-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
@@ -149,6 +144,9 @@ class DataTrainingArguments:
     saved_dataset_folder: Optional[str] = field(
         default=None, metadata={"help": "The path of a pre-saved dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
     )
+    saved_valid_dataset_folder: Optional[str] = field(
+        default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
+    )
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
@@ -182,14 +180,16 @@ class DataTrainingArguments:
     dataset_name: Optional[str] = field(
         default=None, metadata={"help": "The dataset name from hugging face used to push the model."}
     )
-
+    dataset_scale: Optional[str] = field(
+        default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
+    )
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, PlanningTrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     # Set up pytorch backend
@@ -260,24 +260,45 @@ def main():
                     dataset = Dataset.load_from_disk(dataset_path)
                     # dataset.set_format(type='torch', columns=["intended_maneuver_vector", "current_maneuver_vector", "high_res_raster", "low_res_raster",\
                     #                                         "trajectory_label", "context_actions", "intended_maneuver_label", "current_maneuver_label"])
+                    
                     print(dataset)
                     concatdatasets.append(dataset)
           
             concat_dataset = _concatenate_map_style_datasets(concatdatasets)
             concat_dataset.set_format(type='torch')
+            concat_dataset.shuffle(seed=training_args.seed)
+            train_samples = int(len(concat_dataset) * float(data_args.dataset_scale))
+            train_dataset = concat_dataset.select(range(train_samples))
+            if training_args.do_eval:
+                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
+                test_dataset.set_format(type='torch')
+                print(test_dataset)
             nuplan_dataset = dict(
-                train=concat_dataset,
-                test=concat_dataset
+                train=train_dataset,
+                validation=test_dataset.shuffle(seed=training_args.seed),
+                test=test_dataset.shuffle(seed=training_args.seed)
             )
 
         else: # whole hugging face dataset   
             print("loading dataset...")
             dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             dataset.set_format(type='torch')
+            dataset.shuffle(seed=training_args.seed)
+            train_samples = int(len(dataset) * float(data_args.dataset_scale))
+            train_dataset = dataset.select(range(train_samples))
             print('Dataset Loaded: ', dataset)
+            
+            if training_args.do_eval:
+                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
+                test_dataset.set_format(type='torch')
+                print(test_dataset)
+            else:
+                test_dataset = dataset
+            
             nuplan_dataset = dict(
-                train=dataset,
-                test=dataset.shuffle()
+                train=train_dataset,
+                validation=test_dataset.shuffle(seed=training_args.seed),
+                test=test_dataset.shuffle(seed=training_args.seed),
             )
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
@@ -308,12 +329,18 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    trainer = Trainer(
+    trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
+        callbacks=[CustomCallback,],
     )
+    
+    trainer.pop_callback(DefaultFlowCallback)
+    
+    # if training_args.do_eval:
+    #     trainer.evaluate()
 
     # Training
     if training_args.do_train:
@@ -328,15 +355,6 @@ def main():
 
     # Evaluation
     results = {}
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
-        raise NotImplemented
-        metrics = trainer.evaluate(metric_key_prefix="eval")
-        max_eval_samples = data_args.max_eval_samples if data_args.max_eval_samples is not None else len(eval_dataset)
-        metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
-
-        trainer.log_metrics("eval", metrics)
-        trainer.save_metrics("eval", metrics)
 
     if training_args.do_predict:
         from sklearn.metrics import classification_report
