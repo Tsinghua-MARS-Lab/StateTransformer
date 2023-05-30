@@ -138,9 +138,9 @@ class PlanningTrainer(Trainer):
                         logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
                     else:
                         logits = outputs
-                    # TODO: this needs to be fixed and made cleaner later.
-                    if self.args.past_index >= 0:
-                        self._past = outputs[self.args.past_index - 1]
+                    # # TODO: this needs to be fixed and made cleaner later.
+                    # if self.args.past_index >= 0:
+                    #     self._past = outputs[self.args.past_index - 1]
         if prediction_loss_only:
             return (loss, None, None)
 
