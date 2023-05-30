@@ -9,14 +9,11 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="pretrain-nonauto-gpt",
+        default="non-auto-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="/public/MARS/datasets/nuPlanCache/checkpoint/submission/test",
-        #default = "/public/MARS/zsd/exp_data/nuplan/gpt-boston-1.5B-5hz/training_results/checkpoint-53000/",
-        # default="/localdata_hdd/nuplan/test_checkpoint",
-        # default="/home/shiduozhang/nuplan/checkpoint-gpt-boston-loss0.5",
+        default="transfo-xl-wt103",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     use_multi_city: bool = field(
@@ -39,49 +36,10 @@ class ModelArguments:
         default=False,
         metadata={"help": "The target folder to save prediction results."},
     )
-    use_nsm: Optional[bool] = field(
-        default=False,
-    )
-    predict_intended_maneuver: Optional[bool] = field(
-        default=False,
-    )
-    predict_current_maneuver: Optional[bool] = field(
-        default=False,
-    )
     predict_trajectory: Optional[bool] = field(
         default=True,
     )
     recover_obs: Optional[bool] = field(
-        default=False,
-    )
-    maneuver_repeat: Optional[bool] = field(
-        default=False,
-    )
-    predict_trajectory_with_nsm: Optional[bool] = field(
-        default=False,
-    )
-    predict_trajectory_with_stopflag: Optional[bool] = field(
-        default=False,
-    )
-    with_future_intend_maneuver_with_encoder: Optional[bool] = field(
-        default=False,
-    )
-    with_future_intend_maneuver_with_decoder: Optional[bool] = field(
-        default=False,
-    )
-    mask_history_intended_maneuver: Optional[bool] = field(
-        default=False,
-    )
-    mask_history_current_maneuver: Optional[bool] = field(
-        default=False,
-    )
-    predict_intended_maneuver_change: Optional[bool] = field(
-        default=False,
-    )
-    predict_intended_maneuver_change_non_persuasive: Optional[bool] = field(
-        default=False,
-    )
-    predict_current_maneuver_change: Optional[bool] = field(
         default=False,
     )
     d_embed: Optional[int] = field(

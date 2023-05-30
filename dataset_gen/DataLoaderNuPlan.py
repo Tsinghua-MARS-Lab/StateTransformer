@@ -670,6 +670,8 @@ class NuPlanDL:
             scenario = get_default_scenario_from_token(log_db, each_lidar_token, lidar_token_timestamp)
             route_road_ids += scenario.get_route_roadblock_ids()
 
+        route_road_ids = list(set(route_road_ids))
+
         # route_road_ids = starting_scenario.get_route_roadblock_ids()
 
         # handle '' empty string in route_road_ids
