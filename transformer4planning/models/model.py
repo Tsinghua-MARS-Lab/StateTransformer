@@ -336,7 +336,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         model_args = kwargs["model_args"]
         self.use_nsm = model_args.use_nsm
         self.with_future_intend_maneuver_with_encoder = model_args.with_future_intend_maneuver_with_encoder
-        self.with_future_current_maneuver = model_args.with_future_current_maneuver
+        self.with_future_intend_maneuver_with_decoder = model_args.with_future_intend_maneuver_with_decoder
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
         self.loss_fn = model_args.loss_fn
@@ -531,7 +531,6 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         model_args = kwargs["model_args"]
         self.use_nsm = model_args.use_nsm
         self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
-        self.with_future_current_maneuver = model_args.with_future_current_maneuver
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
         self.loss_fn = model_args.loss_fn
@@ -670,8 +669,8 @@ class T5ModelNuplan(T5PreTrainedModel):
         self.transformer = T5Model(config)
         model_args = kwargs["model_args"]
         self.use_nsm = model_args.use_nsm
-        self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
-        self.with_future_current_maneuver = model_args.with_future_current_maneuver
+        # self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
+        # self.with_future_current_maneuver = model_args.with_future_current_maneuver
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
         self.loss_fn = model_args.loss_fn
@@ -683,10 +682,10 @@ class T5ModelNuplan(T5PreTrainedModel):
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
         assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
-        if self.with_future_intend_maneuver:
-            self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.d_model), nn.Tanh())
-        if self.with_future_current_maneuver:
-            self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.d_model), nn.Tanh())
+        # if self.with_future_intend_maneuver:
+        #     self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.d_model), nn.Tanh())
+        # if self.with_future_current_maneuver:
+        #     self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.d_model), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_model), nn.Tanh())
 
         if self.predict_trajectory_with_stopflag:
@@ -1557,6 +1556,7 @@ def build_models(model_args):
         tag = 'XLNet'
     elif 't5' in model_args.model_name:
         config_p = T5Config()
+        config_p.num_heads=model_args.n_heads
         config_p.d_model = model_args.d_model
         config_p.d_kv = model_args.d_model//config_p.num_heads
         config_p.d_ff = model_args.d_inner
