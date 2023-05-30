@@ -43,8 +43,8 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.transformer = TransfoXLModel(config)
         model_args = kwargs['model_args']
         self.use_nsm = model_args.use_nsm
-        self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
-        self.with_future_current_maneuver = model_args.with_future_current_maneuver
+        self.with_future_intend_maneuver_with_encoder = model_args.with_future_intend_maneuver_with_encoder
+        self.with_future_intend_maneuver_with_decoder = model_args.with_future_intend_maneuver_with_decoder
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
 
@@ -71,10 +71,10 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
 
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
-        if self.with_future_intend_maneuver:
+        assert not (self.with_future_intend_maneuver_with_encoder and self.with_future_intend_maneuver_with_decoder) # choose up to one of intend and weights m
+        if self.with_future_intend_maneuver_with_encoder:
             self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.d_embed), nn.Tanh())
-        if self.with_future_current_maneuver:
+        if self.with_future_intend_maneuver_with_decoder:
             self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.d_embed), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_embed), nn.Tanh())
 
@@ -140,10 +140,9 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         """
         device = high_res_raster.device
         # with future manuever label input
-        if self.with_future_intend_maneuver:
+        if self.with_future_intend_maneuver_with_encoder:
             future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
-        if self.with_future_current_maneuver:
-            future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
+
         # with history menuever label input
         if self.use_nsm and (self.predict_trajectory_with_stopflag or self.old_model):
             if len(intended_maneuver_vector.shape) == 2 and len(current_maneuver_vector.shape) == 3:
@@ -192,7 +191,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
         low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
 
-        if intended_maneuver_embed is not None and not self.with_future_current_maneuver and not self.with_future_current_maneuver:
+        if intended_maneuver_embed is not None and not self.with_future_intend_maneuver_with_encoder and not self.with_future_intend_maneuver_with_decoder:
             if self.old_model:
                 state_embeds = torch.cat((intended_maneuver_embed,
                                           torch.zeros_like(intended_maneuver_embed),
@@ -224,7 +223,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        if self.with_future_intend_maneuver or self.with_future_current_maneuver:
+        if self.with_future_intend_maneuver_with_decoder or self.with_future_intend_maneuver_with_encoder:
             input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
         else:
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
@@ -530,7 +529,7 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         self.transformer = XLNetModel(config)
         model_args = kwargs["model_args"]
         self.use_nsm = model_args.use_nsm
-        self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
+        self.with_future_intend_maneuver_with_encoder = model_args.with_future_intend_maneuver_with_encoder
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
         self.loss_fn = model_args.loss_fn
@@ -541,11 +540,10 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
             n_embed = config.d_model // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
-        if self.with_future_intend_maneuver:
+        assert not (self.with_future_intend_maneuver_with_encoder) # choose up to one of intend and weights m
+        if self.with_future_intend_maneuver_with_encoder:
             self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.d_model), nn.Tanh())
-        if self.with_future_current_maneuver:
-            self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.d_model), nn.Tanh())
+
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_model), nn.Tanh())
 
         if self.predict_trajectory_with_stopflag:
@@ -584,10 +582,8 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         # with future manuever label input
-        if self.with_future_intend_maneuver:
+        if self.with_future_intend_maneuver_with_encoder:
             future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
-        if self.with_future_current_maneuver:
-            future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
         if self.predict_trajectory_with_stopflag and self.use_nsm:
             stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz,
             stopflag_embed = self.stop_flag_embed(stopflag.to(device).long())
@@ -620,7 +616,7 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        if self.with_future_intend_maneuver or self.with_future_current_maneuver:
+        if self.with_future_intend_maneuver_with_encoder:
             input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
         else:
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
@@ -735,10 +731,10 @@ class T5ModelNuplan(T5PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         # with future manuever label input
-        if self.with_future_intend_maneuver:
-            future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
-        if self.with_future_current_maneuver:
-            future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
+        # if self.with_future_intend_maneuver:
+        #     future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
+        # if self.with_future_current_maneuver:
+        #     future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
         if self.predict_trajectory_with_stopflag and self.use_nsm:
             stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz,
             stopflag_embed = self.stop_flag_embed(stopflag.to(device).long())
@@ -771,10 +767,10 @@ class T5ModelNuplan(T5PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        if self.with_future_intend_maneuver or self.with_future_current_maneuver:
-            input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
-        else:
-            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+        # if self.with_future_intend_maneuver or self.with_future_current_maneuver:
+        #     input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
+        # else:
+        input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         # TODO: what's decoder_input_embeds
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
@@ -825,8 +821,8 @@ class DeBertaNuplan(DebertaV2PreTrainedModel):
         self.transformer = DebertaV2Model(config)
         model_args = kwargs["model_args"]
         self.use_nsm = model_args.use_nsm
-        self.with_future_intend_maneuver = model_args.with_future_intend_maneuver
-        self.with_future_current_maneuver = model_args.with_future_current_maneuver
+        self.with_future_intend_maneuver_with_encoder = model_args.with_future_intend_maneuver_with_encoder
+        self.with_future_intend_maneuver_with_decoder = model_args.with_future_intend_maneuver_with_decoder
         self.predict_trajectory = model_args.predict_trajectory
         self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
         self.loss_fn = model_args.loss_fn
@@ -837,10 +833,10 @@ class DeBertaNuplan(DebertaV2PreTrainedModel):
             n_embed = config.hidden_size // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        assert not (self.with_future_intend_maneuver and self.with_future_current_maneuver) # choose up to one of intend and weights m
-        if self.with_future_intend_maneuver:
+        assert not (self.with_future_intend_maneuver_with_encoder and self.with_future_intend_maneuver_with_decoder) # choose up to one of intend and weights m
+        if self.with_future_intend_maneuver_with_encoder:
             self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.hidden_size), nn.Tanh())
-        if self.with_future_current_maneuver:
+        if self.with_future_intend_maneuver_with_decoder:
             self.future_current_m_embed = nn.Sequential(nn.Linear(12, config.hidden_size), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.hidden_size), nn.Tanh())
 
@@ -875,9 +871,9 @@ class DeBertaNuplan(DebertaV2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         # with future manuever label input
-        if self.with_future_intend_maneuver:
+        if self.with_future_intend_maneuver_with_encoder:
             future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
-        if self.with_future_current_maneuver:
+        if self.with_future_intend_maneuver_with_decoder:
             future_maneuver_embed = self.future_current_m_embed(current_maneuver_gt.to(device).to(torch.float32))
         if self.predict_trajectory_with_stopflag and self.use_nsm:
             stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz,
@@ -911,7 +907,7 @@ class DeBertaNuplan(DebertaV2PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        if self.with_future_intend_maneuver or self.with_future_current_maneuver:
+        if self.with_future_intend_maneuver_with_encoder or self.with_future_intend_maneuver_with_decoder:
             input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
         else:
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
