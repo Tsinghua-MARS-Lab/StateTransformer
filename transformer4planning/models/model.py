@@ -1572,6 +1572,16 @@ def build_models(model_args):
         config_p.num_attention_heads = model_args.n_heads
         ModelCls = DeBertaNuplan
         tag = 'DeBerta'
+    elif 'mmtransformer' in model_args.model_name:
+        config_p = GPT2Config()
+        config_p.n_layer = model_args.n_layers
+        config_p.n_embd = model_args.d_embed
+        config_p.n_inner = model_args.d_inner
+        config_p.n_head = model_args.n_heads
+        config_p.activation_function = model_args.activation_function
+        from .mmtransformer.model import MMTransformer
+        ModelCls = MMTransformer
+        tag = 'mmtransformer'
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:
