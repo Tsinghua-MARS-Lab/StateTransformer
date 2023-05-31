@@ -16,6 +16,9 @@ class ModelArguments:
         default="transfo-xl-wt103",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
+    use_multi_city: bool = field(
+        default=True
+    )
     model_revision: str = field(
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
