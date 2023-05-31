@@ -174,7 +174,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
 
         return TransfoXLNuPlanNSMOutput(
             loss=loss,
-            logits=current_m_logits.cpu() if current_m_logits is not None else 0,
+            logits=traj_pred,
             mems=transformer_outputs.mems,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
@@ -371,8 +371,9 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+        context_length = context_actions.shape[1] + 1
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device),context_length)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device),context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
@@ -484,8 +485,9 @@ class T5ModelNuplan(T5PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+        context_length = context_actions.shape[1] + 1
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device),context_length)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device),context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
@@ -583,8 +585,9 @@ class DeBertaNuplan(DebertaV2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device))
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device))
+        context_length = context_actions.shape[1] + 1
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device),context_length)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device),context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
