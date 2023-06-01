@@ -117,7 +117,7 @@ class WaymoDL:
             angle=-center_heading
         ).reshape(num_objects, num_timestamps, 2)
 
-        obj_trajs[:, heading_index] -= center_heading[None, None]
+        obj_trajs[:, :, heading_index] -= center_heading
 
         # rotate direction of velocity
         if rot_vel_index is not None:
@@ -143,12 +143,12 @@ class WaymoDL:
             map[:, 0:3] -= center_object[None, 0:3]
             map[:, 0:2] = rotate_points_along_z(
                 points=map[:, 0:2],
-                angle=center_object[6]+math.pi/2
+                angle=-center_object[6] - math.pi/2
             )
-            map[:, 3:5] = rotate_points_along_z(
-                points=map[:, 3:5],
-                angle=center_object[6]+math.pi/2
-            )
+            # map[:, 3:5] = rotate_points_along_z(
+            #     points=map[:, 3:5],
+            #     angle=-center_object[6] - math.pi/2
+            # )
 
             return map
 

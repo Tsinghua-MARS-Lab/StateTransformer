@@ -76,7 +76,7 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     goal_point = data_dic['agent']['ego']['pose'][goal_sample_frame, :].copy()
     shape = data_dic['agent']['ego']['shape'][scenario_frame_number, :]
 
-    goal_contour = generate_contour_pts((goal_point[1], goal_point[0]), w=shape[0], l=shape[1],
+    goal_contour = generate_contour_pts((goal_point[1], goal_point[0]), w=shape[1], l=shape[2],
                                     direction=goal_point[3])
     goal_contour = np.array(goal_contour, dtype=np.int32)
     goal_contour_high_res = int(high_res_raster_scale) * goal_contour
@@ -108,7 +108,7 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
             shape = data_dic['agent'][key]['shape'][scenario_frame_number, :]
             # rect_pts = cv2.boxPoints(((rotated_pose[0], rotated_pose[1]),
             #   (shape[1], shape[0]), np.rad2deg(pose[3])))
-            rect_pts = generate_contour_pts((pose[1], pose[0]), w=shape[0], l=shape[1],
+            rect_pts = generate_contour_pts((pose[1], pose[0]), w=shape[1], l=shape[0],
                                             direction=pose[3])
             rect_pts = np.array(rect_pts, dtype=np.int32)
             # draw on high resolution
@@ -128,7 +128,9 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     result_to_return['high_res_raster'] = np.array(rasters_high_res, dtype=bool)
     result_to_return['low_res_raster'] = np.array(rasters_low_res, dtype=bool)
     # context action computation
-    result_to_return["context_actions"] = np.array(trajectory_label[:10, :])
+    context_action = data_dic['agent']['ego']['pose'][:10]
+    context_action[:, 2] = 0 
+    result_to_return["context_actions"] = np.array(context_action)
 
     return result_to_return
 
@@ -167,9 +169,9 @@ def main(args):
                     continue
     
     data_loader = WaymoDL(data_path=data_path)
-    # data_dic = data_loader.get_next_file(0)
-    # example_dic = get_observation_for_waymo(observation_kwargs, data_dic[0], 10, 91, None)
-    # print("here")
+    data_dic = data_loader.get_next_file(0)
+    example_dic = get_observation_for_waymo(observation_kwargs, data_dic[0], 10, 91, None)
+    print("here")
     file_indices = list(range(data_loader.total_file_num))
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
