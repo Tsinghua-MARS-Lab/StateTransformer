@@ -55,7 +55,7 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     total_agent_types = 6
     sample_frames = list(range(scenario_frame_number - past_frames_number, scenario_frame_number, frame_sample_interval))
     sample_frames.append(scenario_frame_number)
-    total_raster_channels = 1 + total_road_types + total_agent_types * len(sample_frames)
+    total_raster_channels = total_road_types + total_agent_types * len(sample_frames)
     rasters_high_res = np.zeros([high_res_raster_shape[0],
                                  high_res_raster_shape[1],
                                  total_raster_channels], dtype=np.uint8)
@@ -71,21 +71,6 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     trajectory_label[:, 2] = 0
     result_to_return['trajectory_label'] = np.array(trajectory_label)
 
-    # sample and draw the goal
-    goal_sample_frame = total_frames - 1
-    goal_point = data_dic['agent']['ego']['pose'][goal_sample_frame, :].copy()
-    shape = data_dic['agent']['ego']['shape'][scenario_frame_number, :]
-
-    goal_contour = generate_contour_pts((goal_point[1], goal_point[0]), w=shape[1], l=shape[2],
-                                    direction=goal_point[3])
-    goal_contour = np.array(goal_contour, dtype=np.int32)
-    goal_contour_high_res = int(high_res_raster_scale) * goal_contour
-    goal_contour_high_res += observation_kwargs["high_res_raster_shape"][0] // 2
-    cv2.drawContours(rasters_high_res_channels[0], [goal_contour_high_res], -1, (255, 255, 255), -1)
-    goal_contour_low_res = (low_res_raster_scale * goal_contour).astype(np.int64)
-    goal_contour_low_res += observation_kwargs["low_res_raster_shape"][0] // 2
-    cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
-
     # 'map_raster': (n, w, h),  # n is the number of road types and traffic lights types
     xyz = data_dic["road"]["xyz"].copy()
     road_type = data_dic['road']['type'].astype('int32')
@@ -96,8 +81,8 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     for j, pt in enumerate(xyz):
         if abs(pt[0]) > max_dis or abs(pt[1]) > max_dis:
             continue
-        cv2.circle(rasters_high_res_channels[road_type[j] + 1], tuple(high_res_road[j, :2]), 1, (255, 255, 255), -1)
-        cv2.circle(rasters_low_res_channels[road_type[j] + 1], tuple(low_res_road[j, :2]), 1, (255, 255, 255), -1)
+        cv2.circle(rasters_high_res_channels[road_type[j]], tuple(high_res_road[j, :2]), 1, (255, 255, 255), -1)
+        cv2.circle(rasters_low_res_channels[road_type[j]], tuple(low_res_road[j, :2]), 1, (255, 255, 255), -1)
 
     for i, key in enumerate(data_dic['agent']):
         for j, sample_frame in enumerate(sample_frames):
@@ -114,12 +99,12 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
             # draw on high resolution
             rect_pts_high_res = int(high_res_raster_scale) * rect_pts
             rect_pts_high_res += observation_kwargs["high_res_raster_shape"][0] // 2
-            cv2.drawContours(rasters_high_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j],
+            cv2.drawContours(rasters_high_res_channels[total_road_types + agent_type * len(sample_frames) + j],
                              [rect_pts_high_res], -1, (255, 255, 255), -1)
             # draw on low resolution
             rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64)
             rect_pts_low_res += observation_kwargs["low_res_raster_shape"][0] // 2
-            cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j],
+            cv2.drawContours(rasters_low_res_channels[total_road_types + agent_type * len(sample_frames) + j],
                              [rect_pts_low_res], -1, (255, 255, 255), -1)
 
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
