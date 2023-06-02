@@ -78,6 +78,8 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     low_res_road = (xyz * low_res_raster_scale).astype('int32')
     high_res_road += observation_kwargs["high_res_raster_shape"][0] // 2
     low_res_road += observation_kwargs["low_res_raster_shape"][0] // 2
+    high_res_road[:, 0] = 224 - high_res_road[:, 0]
+    low_res_road[:, 0] = 224 - low_res_road[:, 0]
     for j, pt in enumerate(xyz):
         if abs(pt[0]) > max_dis or abs(pt[1]) > max_dis:
             continue
@@ -93,17 +95,19 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
             shape = data_dic['agent'][key]['shape'][scenario_frame_number, :]
             # rect_pts = cv2.boxPoints(((rotated_pose[0], rotated_pose[1]),
             #   (shape[1], shape[0]), np.rad2deg(pose[3])))
-            rect_pts = generate_contour_pts((pose[1], pose[0]), w=shape[1], l=shape[0],
+            rect_pts = generate_contour_pts((pose[1], pose[0]), w=3, l=3,
                                             direction=pose[3])
             rect_pts = np.array(rect_pts, dtype=np.int32)
             # draw on high resolution
             rect_pts_high_res = int(high_res_raster_scale) * rect_pts
             rect_pts_high_res += observation_kwargs["high_res_raster_shape"][0] // 2
+            rect_pts_high_res[:, 0] = 224 - rect_pts_high_res[:, 0]
             cv2.drawContours(rasters_high_res_channels[total_road_types + agent_type * len(sample_frames) + j],
                              [rect_pts_high_res], -1, (255, 255, 255), -1)
             # draw on low resolution
             rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64)
             rect_pts_low_res += observation_kwargs["low_res_raster_shape"][0] // 2
+            rect_pts_low_res[:, 0] = 224 - rect_pts_low_res[:, 0] 
             cv2.drawContours(rasters_low_res_channels[total_road_types + agent_type * len(sample_frames) + j],
                              [rect_pts_low_res], -1, (255, 255, 255), -1)
 
