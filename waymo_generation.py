@@ -174,10 +174,14 @@ if __name__ == '__main__':
     from pathlib import Path
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
+    # script demo
+    # python waymo_generation.py --cache_folder /public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/cache --num_proc 100
+
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument("--running_mode", type=int, default=1)
     parser.add_argument("--data_path", type=dict, default={
-            "WAYMO_DATA_ROOT": "/home/shiduozhang/waymo",
+            # "WAYMO_DATA_ROOT": "/home/shiduozhang/waymo",
+            "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/processed/",
             "SPLIT_DIR": {
                     'train': "processed_scenarios_training", 
                     'test': "processed_scenarios_validation"

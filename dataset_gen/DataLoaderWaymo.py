@@ -32,7 +32,7 @@ class WaymoDL:
         self.data_root = data_path["WAYMO_DATA_ROOT"]
         self.data_path = os.path.join(self.data_root, data_path["SPLIT_DIR"][mode])
 
-        self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])[:10]
+        self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])
         self.total_file_num = len(self.global_file_names)
 
     def get_next_file(self, specify_file_index=None):
@@ -46,9 +46,10 @@ class WaymoDL:
             print('index exceed total file number', file_index, self.total_file_num)
             self.end = True
             return None
-        
-        with open(self.global_file_names[file_index], 'rb') as f:
-            info = pickle.load(f)
+
+        if os.path.getsize(self.global_file_names[file_index]) > 0:
+            with open(self.global_file_names[file_index], 'rb') as f:
+                info = pickle.load(f)
             
         track_infos = info['track_infos']
         trajs = track_infos['trajs']
