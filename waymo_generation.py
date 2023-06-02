@@ -107,7 +107,7 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
             # draw on low resolution
             rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64)
             rect_pts_low_res += observation_kwargs["low_res_raster_shape"][0] // 2
-            rect_pts_low_res = 224 - rect_pts_low_res[:, 0] 
+            rect_pts_low_res[:, 0] = 224 - rect_pts_low_res[:, 0] 
             cv2.drawContours(rasters_low_res_channels[total_road_types + agent_type * len(sample_frames) + j],
                              [rect_pts_low_res], -1, (255, 255, 255), -1)
 
