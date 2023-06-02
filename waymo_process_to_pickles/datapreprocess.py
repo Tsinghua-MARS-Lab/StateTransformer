@@ -137,7 +137,7 @@ def decode_map_features_from_proto(map_features):
         else:
             # print('unkown type data', cur_data)
             continue
-            # using 1.0.0, there exists unkown type data
+            # using 1.0.0, there exists unknown type data
             # raise ValueError
 
         polylines.append(cur_polyline)
