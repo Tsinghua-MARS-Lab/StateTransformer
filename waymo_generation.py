@@ -141,6 +141,8 @@ def main(args):
     def yield_data(shards, dl):
         for shard in shards:
             loaded_dic_list = dl.get_next_file(specify_file_index=shard)
+            if loaded_dic_list is None:
+                continue
             file_name = dl.global_file_names[shard]
             for loaded_dic in loaded_dic_list:                
                 total_frames = loaded_dic['total_frames']
