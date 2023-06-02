@@ -1022,7 +1022,7 @@ def build_models(model_args):
         config_p.n_inner = model_args.d_inner
         config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
-        from .mmtransformer.model import MMTransformer
+        from transformer4planning.models.mmtransformer.model import MMTransformer
         ModelCls = MMTransformer
         tag = 'mmtransformer'
     else:
@@ -1048,7 +1048,8 @@ if  __name__ == '__main__':
     model_args.d_inner = 1024
     model_args.n_layers = 4
     model_args.n_heads = 8
-    model_args.model_name = "scratch-nonauto-gpt"
+    model_args.model_name = "scratch-mmtransformer"
+    model_args.task = "waymo"
 
     model = build_models(model_args)
 
@@ -1072,7 +1073,8 @@ if  __name__ == '__main__':
         next_world_coor_y = next_world_coor_trajectories[:,1]
         return next_world_coor_x - yaw, next_world_coor_y - yaw
     
-    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/5hz_boston/")
+    # dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/5hz_boston/")
+    dataset = datasets.load_from_disk("/home/shiduozhang/waymo/t4p_waymo")
     # print(dataset.features)
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]

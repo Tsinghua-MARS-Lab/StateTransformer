@@ -41,9 +41,12 @@ class Loss(torch.nn.Module):
         # self.top_K = 4
         self.top_K = 1
 
-        if cfg['loss_params']['MultiTask'] and auxiliary_params is not None:
+        if MultiTask and auxiliary_params is not None:
             self.auxiliary_params = auxiliary_params
         self.weight = torch.ones(self.K).cuda()
+        
+        self.MultiTask = MultiTask
+        self.loss_params = dict()
 
 
     def forward(self, pred, data:dict):
@@ -218,8 +221,8 @@ class Loss(torch.nn.Module):
         # miss_rate = self.cal_miss_rate(y_endpoint, pred_endpoint, endpoint_exist_mask)
         miss_rate = self.cal_ego_miss_rate(y_endpoint, pred_endpoint, endpoint_exist_mask) if verbose else 0
         miss_rate = {'MR':miss_rate,'CMR':None}
-        losses = {'reg_loss':{'loss':reg_loss, 'kpi': miss_rate['MR']}}
-        # losses = {'reg_loss':{'loss':reg_loss, 'kpi': miss_rate['MR']}, 'cls_loss':{'loss':cls_loss, 'kpi': None}}
+        # losses = {'reg_loss':{'loss':reg_loss, 'kpi': miss_rate['MR']}}
+        losses = {'reg_loss':{'loss':reg_loss, 'kpi': miss_rate['MR']}, 'cls_loss':{'loss':cls_loss, 'kpi': None}}
         return losses, miss_rate
 
     def prepare_groundtruth(self, data, ego_only=False):
@@ -251,7 +254,7 @@ class Loss(torch.nn.Module):
         # y, y_mask = self.prepare_groundtruth(data, ego_only)
         bs = future_traj.shape[0] 
         y = future_traj.view(bs, -1, 1, self.future_frames_num, 2)
-        y_mask = (y!=-1).sum(-1).view(bs, -1, self.future_frames_num)
+        y_mask = ((y!=-1).sum(-1)>0).view(bs, -1, self.future_frames_num)
         
         # par_conf = model_outputs['precls'] if 'precls' in model_outputs else None
         # inner_product = model_outputs['inner_product'] if 'inner_product' in model_outputs else None        
@@ -315,7 +318,7 @@ class Loss(torch.nn.Module):
         return region_index, proposal_mask
     
     def schedule_training(self, losses):
-        _cfg = self.cfg['loss_params']
+        _cfg = self.loss_params
         if 'cls_loss_switch' in _cfg:
             losses['cls_loss']['loss'] = losses['cls_loss']['loss']*_cfg['cls_loss_switch']
         if 'reg_loss_switch' in _cfg:
@@ -329,12 +332,12 @@ class Loss(torch.nn.Module):
         losses = self.schedule_training(losses)
         total_loss = 0
         # Total Loss
-        if self.cfg['loss_params']['MultiTask']:
+        if self.MultiTask:
             for i, loss in enumerate(losses.values()):
                 loss = loss['loss']
                 # ? which kinds of multi task loss suits our task.s
                 total_loss+= (2*self.auxiliary_params[i])**-2*loss + torch.log(self.auxiliary_params[i]**2+1)
-        elif 'KPI' in self.cfg['loss_params'] and self.cfg['loss_params']['KPI']:
+        elif 'KPI' in self.loss_params and self.loss_params['KPI']:
             for i, loss in enumerate(losses.values()):
                 loss, kpi = loss['loss'], loss['kpi']
                 # ! since the kpi is to measure how bad the model. unlike noraml is how good of the model.

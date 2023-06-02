@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from TF_utils import (Decoder, DecoderLayer, GeneratorWithParallelHeads626, MultiHeadAttention,
+from .TF_utils import (Decoder, DecoderLayer, GeneratorWithParallelHeads626, MultiHeadAttention,
                       PointerwiseFeedforward, PositionalEncoding)
 
 
@@ -22,7 +22,6 @@ class STF(nn.Module):
         h = 2
         dropout = 0
 
-        c = copy.deepcopy
         dropout_atten = dropout
         #dropout_atten = 0.1
         attn = MultiHeadAttention(h, d_model, dropout=dropout_atten)
@@ -31,13 +30,12 @@ class STF(nn.Module):
         self.pos_emb = PositionalEncoding(d_model, dropout)
 
         self.cross_attn = Decoder(DecoderLayer(
-            d_model, c(attn), c(attn), c(ff), dropout), num_layers)
+            d_model, attn, attn, ff, dropout), num_layers)
 
         # self.g = Generator(d_model*2, dec_out_size)
         self.prediction_header = GeneratorWithParallelHeads626(
             d_model, dec_out_size, dropout)
         self.num_queries = num_queries
-        self.query_embed = nn.Embedding(num_queries, d_model)
 
         # This was important from their code.
         # Initialize parameters with Glorot / fan_avg.

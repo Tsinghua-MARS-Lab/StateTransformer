@@ -19,33 +19,55 @@ _CONFIG_FOR_DOC = "TransfoXLConfig"
 
 from .stacked_transformer import STF
 from .criterion import Loss
+from dataclasses import dataclass, field
 
+def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9):
+    """
+    input raster can be either high resolution raster or low resolution raster
+    expected input size: [bacthsize, channel, h, w], and channel is consisted of goal(1d)+roadtype(20d)+agenttype*time(8*9d)
+    """
+    b, c, h, w = raster.shape
+    agent_type = 8
+    road_type = 20
+
+    goal_raster = raster[:, 0, :, :].reshape(b, 1, h, w)
+    road_ratser = raster[:, 1:21, :, :]
+    result = torch.zeros((b, framenum, agent_type + road_type + 1, h, w), device=raster.device)
+    for i in range(framenum):
+        agent_raster = raster[:, 1 + road_type + i::framenum, :, :]
+        raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim = 1) # expected format (b, 1+20+8, h, w)
+        result[:, i, :, :, :] = raster_i
+    # return format (batchsize, history_frame_number, channels_per_frame, h, w)
+    return result
+
+def cat_raster_seq_for_waymo(raster, framenum=11):
+    b, c, h, w = raster.shape
+    agent_type = 6
+    road_type = 20
+    road_raster = raster[:, :road_type, :, :]
+    result = torch.zeros((b, framenum, agent_type + road_type, h, w), device=raster.device)
+    for i in range(framenum):
+        agent_raster = raster[:, road_type + i::framenum, :, :]
+        raster_i = torch.cat([road_raster, agent_raster], dim=1)
+        assert raster_i.shape[1] == agent_type + road_type
+        result[:, i, :, :, :] = raster_i
+    return result
 
 class MMTransformer(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
         self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
-        self.use_nsm = model_args.use_nsm
-        self.with_future_intend_maneuver_with_encoder = model_args.with_future_intend_maneuver_with_encoder
-        self.with_future_current_maneuver = model_args.with_future_current_maneuver
         self.predict_trajectory = model_args.predict_trajectory
-        self.predict_trajectory_with_stopflag = model_args.predict_trajectory_with_stopflag
         self.loss_fn = model_args.loss_fn
-        in_channels = 29 # raster: goal + road_type + agent_type
-        if self.use_nsm and self.predict_trajectory_with_stopflag:
-            n_embed = config.n_embd // 3 # high res + low res + intented m
+        self.task = model_args.task
+        if model_args.task == 'nuplan':
+            in_channels = 29  # raster: goal + road_type + agent_type
         else:
-            n_embed = config.n_embd // 2
+            in_channels = 26 # raster: road_type(20) + agent_type(6)
+        n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
-        self.intended_m_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=n_embed), nn.Tanh())
-        assert not (self.with_future_intend_maneuver_with_encoder and self.with_future_intend_maneuver_with_decoder) # choose up to one of intend and weights m
-        if self.with_future_intend_maneuver_with_encoder or self.with_future_intend_maneuver_with_decoder:
-            self.future_intended_m_embed = nn.Sequential(nn.Linear(1, config.n_embd), nn.Tanh())
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
-
-        if self.predict_trajectory_with_stopflag:
-            self.stop_flag_embed = nn.Sequential(nn.Embedding(num_embeddings=30, embedding_dim=config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
         if self.predict_trajectory:
@@ -76,10 +98,6 @@ class MMTransformer(GPT2PreTrainedModel):
         assert_device_map(self.device_map, len(self.transformer.h))
         self.transformer.parallelize(self.device_map)
         self.cnn_downsample = self.cnn_downsample.to(self.transformer.first_device)
-        self.intended_m_embed = self.intended_m_embed.to(self.transformer.first_device)
-        self.intended_m_decoder = self.intended_m_decoder.to(self.transformer.first_device)
-        self.current_m_decoder = self.current_m_decoder.to(self.transformer.first_device)
-        self.nsm_decoder = self.nsm_decoder.to(self.transformer.first_device)
         self.traj_decoder = self.traj_decoder.to(self.transformer.first_device)
         self.model_parallel = True
 
@@ -92,26 +110,16 @@ class MMTransformer(GPT2PreTrainedModel):
         self.transformer.deparallelize()
         self.transformer = self.transformer.to("cpu")
         self.cnn_downsample = self.cnn_downsample.to("cpu")
-        self.intended_m_embed = self.intended_m_embed.to("cpu")
-        self.intended_m_decoder = self.intended_m_decoder.to("cpu")
-        self.current_m_decoder = self.current_m_decoder.to("cpu")
-        self.nsm_decoder = self.nsm_decoder.to("cpu")
         self.traj_decoder = self.traj_decoder.to("cpu")
         self.model_parallel = False
         torch.cuda.empty_cache()
-    
-
 
     def forward(
             self,
-            intended_maneuver_vector: Optional[torch.LongTensor] = None,
             trajectory_label: Optional[torch.LongTensor] = None,
             context_actions:Optional[torch.LongTensor] = None,
-            intended_maneuver_label: Optional[torch.LongTensor] = None,
             high_res_raster: Optional[torch.LongTensor] = None,
             low_res_raster: Optional[torch.LongTensor] = None,
-            intended_maneuver_gt: Optional[torch.LongTensor] = None,
-            current_maneuver_gt: Optional[torch.LongTensor] = None,
             past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
             attention_mask: Optional[torch.FloatTensor] = None,
             token_type_ids: Optional[torch.LongTensor] = None,
@@ -128,31 +136,24 @@ class MMTransformer(GPT2PreTrainedModel):
             # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
-        # with future manuever label input
-        if self.with_future_intend_maneuver_with_encoder or self.with_future_intend_maneuver_with_decoder:
-            future_maneuver_embed = self.future_intended_m_embed(intended_maneuver_gt.unsqueeze(-1).to(device).to(torch.float32))
-        if self.predict_trajectory_with_stopflag and self.use_nsm:
-            stopflag = torch.eq(intended_maneuver_label, 1) # bsz,  -> bsz,
-            stopflag_embed = self.stop_flag_embed(stopflag.to(device).long())
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1] + 1
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+        if self.task == "nuplan":
+            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+        elif self.task == "waymo":
+            high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+            low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
         low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-        
-        if self.use_nsm and self.predict_trajectory_with_stopflag:
-            intended_maneuver_embed = self.intended_m_embed(intended_maneuver_vector.to(device))  # [bsz, hidden_size]
-            state_embeds = torch.cat((intended_maneuver_embed,
-                                    high_res_embed,
-                                    low_res_embed), dim=-1)
-        else:
-            state_embeds = torch.cat((high_res_embed,
-                                    low_res_embed), dim=-1).to(torch.float32)
-        trajectory_label = trajectory_label[:, 1::2, :]
+
+        state_embeds = torch.cat((high_res_embed,
+                                  low_res_embed), dim=-1).to(torch.float32)
+
+        trajectory_label = trajectory_label[:, :, :2]
         pred_length = trajectory_label.shape[1]
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
@@ -164,10 +165,7 @@ class MMTransformer(GPT2PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # to keep input and output at the same dimension
-        if self.with_future_intend_maneuver_with_encoder:
-            input_embeds = torch.cat([input_embeds, future_maneuver_embed], dim=1)
-        else:
-            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+        input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
         transformer_outputs = self.transformer(
             past_key_values=past_key_values,
@@ -190,10 +188,12 @@ class MMTransformer(GPT2PreTrainedModel):
         
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         
-        loss += self.loss((traj_coords, traj_logits), trajectory_label.to(device))
+        _loss, _, _ = self.loss((traj_coords, traj_logits), trajectory_label.to(device))
+        
+        loss += _loss
         traj_coords, traj_logits = traj_coords[:,0], traj_logits[:,0] # a hack
         
-        return custom_output(
+        return CustomOutput(
             loss=loss,
             logits=traj_coords,
             scores=traj_logits,
@@ -203,5 +203,15 @@ class MMTransformer(GPT2PreTrainedModel):
             cross_attentions=transformer_outputs.cross_attentions,
         )
 
-class custom_output(CausalLMOutputWithCrossAttentions):
-    scores = None
+@dataclass
+class CustomOutput(ModelOutput):
+    scores: Optional[torch.FloatTensor] = None
+    loss: Optional[torch.FloatTensor] = None
+    logits: torch.FloatTensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
+
+
+    

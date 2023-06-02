@@ -96,6 +96,9 @@ class ModelArguments:
     loss_fn: Optional[str] = field(
         default="mse",
     )
+    task: Optional[str] = field(
+        default="waymo" # only for mmtransformer
+    )
 
 @dataclass
 class DataTrainingArguments:
