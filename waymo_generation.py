@@ -121,6 +121,23 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     context_action[:, 2] = 0 
     result_to_return["context_actions"] = np.array(context_action)
 
+    # inspect actions
+    max_action = np.max(result_to_return['context_actions'][:, :2])
+    min_action = np.min(result_to_return['context_actions'][:, :2])
+    if abs(max_action) > 1000 or abs(min_action) > 1000:
+        print(result_to_return['context_actions'].shape)
+        print(result_to_return['context_actions'][:10, :])
+        assert False, f'Invalid actions to filter: {max_action}, {min_action}'
+
+    # inspect labels
+    max_label = np.max(result_to_return['trajectory_label'][:, :2])
+    min_label = np.min(result_to_return['trajectory_label'][:, :2])
+    if abs(max_label) > 1000 or abs(min_label) > 1000:
+        print()
+        print(result_to_return['trajectory_label'].shape)
+        print(result_to_return['trajectory_label'][:80, :])
+        assert False, f'Invalid labels to filter: {max_label}, {min_label}'
+
     return result_to_return
 
 
@@ -188,6 +205,7 @@ if __name__ == '__main__':
     parser.add_argument("--data_path", type=dict, default={
             # "WAYMO_DATA_ROOT": "/home/shiduozhang/waymo",
             "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/processed/",
+            # "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/processed_sequencial",
             "SPLIT_DIR": {
                     'train': "processed_scenarios_training", 
                     'test': "processed_scenarios_validation"
@@ -197,7 +215,6 @@ if __name__ == '__main__':
                     'test': "processed_scenarios_val_infos.pkl"
                 }
         })
-    
     parser.add_argument('--starting_file_num', type=int, default=0)
     parser.add_argument('--ending_file_num', type=int, default=1000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
