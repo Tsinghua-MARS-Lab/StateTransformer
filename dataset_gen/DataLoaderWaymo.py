@@ -33,6 +33,7 @@ class WaymoDL:
         self.data_path = os.path.join(self.data_root, data_path["SPLIT_DIR"][mode])
 
         self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])
+        # self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])[:100]
         self.total_file_num = len(self.global_file_names)
 
     def get_next_file(self, specify_file_index=None):
@@ -66,8 +67,14 @@ class WaymoDL:
             # init agent dic
             agent_dic = {}
             ego_frame = trajs[ego_index, curr_frame_index].copy()
+            if ego_frame[0] in [0, -1] or ego_frame[1] in [0, -1] or ego_frame[9] == 0:
+                return None
             # transforme to the ego cooridinate
             trajs_at_ego = self.transform_trajs_to_ego(trajs.copy(), ego_frame[0:2], ego_frame[6])
+
+            # check ego is invalid by frame
+            invalid_indices = trajs[ego_index, :, 9] == 0
+            trajs_at_ego[ego_index, invalid_indices, :8] = -1
             # pack ego
             agent_dic["ego"] = {
                     'pose': trajs_at_ego[ego_index, :, [0,1,2,6]].transpose(1,0),
@@ -80,6 +87,10 @@ class WaymoDL:
             
             for agent_index in range(A):
                 if agent_index == ego_index: continue
+
+                # check agent is invalid by frame
+                invalid_indices = trajs[agent_index, :, 9] == 0
+                trajs_at_ego[agent_index, invalid_indices, :8] = -1
 
                 agent_dic[agent_index] = {
                     'pose': trajs_at_ego[agent_index, :, [0,1,2,6]].transpose(1,0),
