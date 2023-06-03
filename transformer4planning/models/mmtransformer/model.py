@@ -67,10 +67,13 @@ class MMTransformer(GPT2PreTrainedModel):
             in_channels = 26 # raster: road_type(20) + agent_type(6)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        print('loading pretrained model')
         state_dict = torch.load("/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity/pytorch_model.bin")
         state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
+        print('loading weights to each block')
         self.cnn_downsample.load_state_dict(state_dict, strict=False)
         self.transformer.load_state_dict(state_dict, strict=False)
+        print('pretrained model loaded')
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
