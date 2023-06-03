@@ -67,6 +67,10 @@ class MMTransformer(GPT2PreTrainedModel):
             in_channels = 26 # raster: road_type(20) + agent_type(6)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        state_dict = torch.load("/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity/pytorch_model.bin")
+        state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
+        self.cnn_downsample.load_state_dict(state_dict, strict=False)
+        self.transformer.load_state_dict(state_dict, strict=False)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
@@ -149,11 +153,14 @@ class MMTransformer(GPT2PreTrainedModel):
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
         low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-
+        assert not high_res_embed.isnan().any(), "high embedding is NAN"
+        assert not low_res_embed.isnan().any(), "low embedding is NAN"
         state_embeds = torch.cat((high_res_embed,
                                   low_res_embed), dim=-1).to(torch.float32)
-
-        trajectory_label = trajectory_label[:, :, :2]
+        if self.task == "waymo":
+            trajectory_label = trajectory_label[:, :, :2]
+        else:
+            trajectory_label = trajectory_label[:, 1::2, :2]
         pred_length = trajectory_label.shape[1]
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
@@ -163,10 +170,11 @@ class MMTransformer(GPT2PreTrainedModel):
         )
         input_embeds[:, ::2, :] = state_embeds
         input_embeds[:, 1::2, :] = action_embeds
+        assert not state_embeds.isnan().any(), "state embedding is NAN"
+        assert not action_embeds.isnan().any(), "action embedding is NAN"
 
         # to keep input and output at the same dimension
         input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-
         transformer_outputs = self.transformer(
             past_key_values=past_key_values,
             attention_mask=attention_mask,
@@ -182,7 +190,7 @@ class MMTransformer(GPT2PreTrainedModel):
             return_dict=return_dict,
         )
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
-        
+        assert not transformer_outputs_hidden_state.isnan().any(), "Hidden state is NAN"
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length:, :]
         traj_coords, traj_logits = self.traj_decoder(traj_hidden_state)
         
