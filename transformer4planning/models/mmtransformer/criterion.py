@@ -260,8 +260,8 @@ class Loss(torch.nn.Module):
         # inner_product = model_outputs['inner_product'] if 'inner_product' in model_outputs else None        
         losses, miss_rate = self.loss_function(y, pred, self.K, y_mask, conf=conf, par_conf=None, inner_product=None) #target and neighbours loss
 
-        if not self.training:
-            return losses['reg_loss']['loss'], None, None 
+        # if not self.training:
+        #     return losses['reg_loss']['loss'], None, None
 
         total_loss, loss_text  = self.multi_task_gather(losses)
         return total_loss, loss_text, miss_rate
