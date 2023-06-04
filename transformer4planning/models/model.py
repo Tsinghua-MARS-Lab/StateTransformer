@@ -1067,7 +1067,7 @@ if  __name__ == '__main__':
             next_ego_traj = [ego_trajectory[-1][0] + offset_x,
                             ego_trajectory[-1][1] + offset_y,
                             ego_trajectory[-1][2] + pred_traj[idx, -1]]
-            ego_trajectory = np.conwacatenate((ego_trajectory, np.array(next_ego_traj.copy()).reshape(1, -1)), axis=0)
+            ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj.copy()).reshape(1, -1)), axis=0)
             next_world_coor_trajectories.append(next_ego_traj)
 
         next_world_coor_trajectories = np.array(next_world_coor_trajectories)
