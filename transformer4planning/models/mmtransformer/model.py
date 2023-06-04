@@ -72,6 +72,13 @@ class MMTransformer(GPT2PreTrainedModel):
             in_channels = 26 # raster: road_type(20) + agent_type(6)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        # print('loading pretrained model')
+        # state_dict = torch.load("/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity/pytorch_model.bin")
+        # state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
+        # print('loading weights to each block')
+        # self.cnn_downsample.load_state_dict(state_dict, strict=False)
+        # self.transformer.load_state_dict(state_dict, strict=False)
+        # print('pretrained model loaded')
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
@@ -140,6 +147,24 @@ class MMTransformer(GPT2PreTrainedModel):
             ):
             # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        # inspect actions
+        max_action = torch.max(context_actions[:, :, :2])
+        min_action = torch.min(context_actions[:, :, :2])
+        if abs(max_action) > 1000 or abs(min_action) > 1000:
+            print(context_actions.shape)
+            print(context_actions[:10, :])
+            assert False, f'Invalid actions to filter: {max_action}, {min_action}'
+
+        # inspect labels
+        max_label = torch.max(trajectory_label[:, :, :2])
+        min_label = torch.min(trajectory_label[:, :, :2])
+        if abs(max_label) > 1000 or abs(min_label) > 1000:
+            print(trajectory_label.shape)
+            print(trajectory_label[:80, :])
+            assert False, f'Invalid labels to filter: {max_label}, {min_label}'
+
+
         device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1] + 1
