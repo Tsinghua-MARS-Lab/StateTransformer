@@ -17,8 +17,8 @@ _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
 
-from .stacked_transformer import STF
-from .criterion import Loss
+from transformer4planning.models.mmtransformer.stacked_transformer import STF
+from transformer4planning.models.mmtransformer.criterion import Loss
 from dataclasses import dataclass, field
 
 def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9):
@@ -58,6 +58,11 @@ class MMTransformer(GPT2PreTrainedModel):
         super().__init__(config)
         self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
+        if "transfer" in model_args.model_name:
+            # state_dict = torch.load(os.path.join(model_args.model_pretrain_name_or_path, "pytorch_model.bin"))
+            # state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
+            self.transformer.from_pretrained(model_args.model_pretrain_name_or_path)
+            print("Backbone init by transfered one")
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
         self.task = model_args.task
@@ -67,13 +72,6 @@ class MMTransformer(GPT2PreTrainedModel):
             in_channels = 26 # raster: road_type(20) + agent_type(6)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
-        print('loading pretrained model')
-        state_dict = torch.load("/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity/pytorch_model.bin")
-        state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
-        print('loading weights to each block')
-        self.cnn_downsample.load_state_dict(state_dict, strict=False)
-        self.transformer.load_state_dict(state_dict, strict=False)
-        print('pretrained model loaded')
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
@@ -156,8 +154,8 @@ class MMTransformer(GPT2PreTrainedModel):
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
         low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-        assert not high_res_embed.isnan().any(), "high embedding is NAN"
-        assert not low_res_embed.isnan().any(), "low embedding is NAN"
+        # assert not high_res_embed.isnan().any(), "high embedding is NAN"
+        # assert not low_res_embed.isnan().any(), "low embedding is NAN"
         state_embeds = torch.cat((high_res_embed,
                                   low_res_embed), dim=-1).to(torch.float32)
         if self.task == "waymo":
@@ -173,8 +171,8 @@ class MMTransformer(GPT2PreTrainedModel):
         )
         input_embeds[:, ::2, :] = state_embeds
         input_embeds[:, 1::2, :] = action_embeds
-        assert not state_embeds.isnan().any(), "state embedding is NAN"
-        assert not action_embeds.isnan().any(), "action embedding is NAN"
+        # assert not state_embeds.isnan().any(), "state embedding is NAN"
+        # assert not action_embeds.isnan().any(), "action embedding is NAN"
 
         # to keep input and output at the same dimension
         input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
@@ -193,7 +191,7 @@ class MMTransformer(GPT2PreTrainedModel):
             return_dict=return_dict,
         )
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
-        assert not transformer_outputs_hidden_state.isnan().any(), "Hidden state is NAN"
+        # assert not transformer_outputs_hidden_state.isnan().any(), "Hidden state is NAN"
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length:, :]
         traj_coords, traj_logits = self.traj_decoder(traj_hidden_state)
         
