@@ -133,7 +133,6 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
     max_label = np.max(result_to_return['trajectory_label'][:, :2])
     min_label = np.min(result_to_return['trajectory_label'][:, :2])
     if abs(max_label) > 1000 or abs(min_label) > 1000:
-        print()
         print(result_to_return['trajectory_label'].shape)
         print(result_to_return['trajectory_label'][:80, :])
         assert False, f'Invalid labels to filter: {max_label}, {min_label}'
@@ -190,7 +189,7 @@ def main(args):
                                             num_proc=args.num_proc)
     print('Saving dataset')
     waymo_dataset.set_format(type="torch")
-    waymo_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name))
+    waymo_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
     print('Dataset saved')
 
 if __name__ == '__main__':
