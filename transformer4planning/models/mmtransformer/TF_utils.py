@@ -235,8 +235,8 @@ def attention(query, key, value, mask=None, dropout=None):
         p_attn = dropout(p_attn)
     results = torch.matmul(p_attn, value)
     attention_weight = p_attn
-    if results.isnan().any():
-        import ipdb; ipdb.set_trace()
+    # if results.isnan().any():
+    #     import ipdb; ipdb.set_trace()
     return results, attention_weight
 
 
