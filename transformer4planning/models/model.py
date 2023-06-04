@@ -1034,10 +1034,7 @@ def build_models(model_args):
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     elif 'transfer' in model_args.model_name:
-        state_dict = torch.load(os.path.join(model_args.model_pretrain_name_or_path, "pytorch_model.bin"))
-        state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
         model = ModelCls(config_p, model_args=model_args)
-        model.load_state_dict(state_dict, strict=False)
         print('Transfer' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model    
 

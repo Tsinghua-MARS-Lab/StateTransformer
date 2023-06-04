@@ -58,6 +58,11 @@ class MMTransformer(GPT2PreTrainedModel):
         super().__init__(config)
         self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
+        if "transfer" in model_args.model_name:
+            state_dict = torch.load(os.path.join(model_args.model_pretrain_name_or_path, "pytorch_model.bin"))
+            # state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
+            self.transformer.load_state_dict(state_dict, strict=False)
+            print("Backbone init by transfered one")
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
         self.task = model_args.task
