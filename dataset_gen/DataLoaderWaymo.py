@@ -32,8 +32,8 @@ class WaymoDL:
         self.data_root = data_path["WAYMO_DATA_ROOT"]
         self.data_path = os.path.join(self.data_root, data_path["SPLIT_DIR"][mode])
 
-        # self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])
-        self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])[:12000]
+        self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])
+        # self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])[:12000]
         self.total_file_num = len(self.global_file_names)
 
     def get_next_file(self, specify_file_index=None):
@@ -67,10 +67,14 @@ class WaymoDL:
             # WARNING: if only vehicle, obj_types are string, comment to use all types
             if obj_types[ego_index] not in ['TYPE_VEHICLE', 'EGO']:
                 continue
+            if trajs[ego_index, -1, 0] in [0, -1] or trajs[ego_index, -1, 1] in [0, -1] or trajs[ego_index, -1, 9] == 0:
+                # skip data if ego last frame is invalid
+                continue
             # init agent dic
             agent_dic = {}
             ego_frame = trajs[ego_index, curr_frame_index].copy()
             if ego_frame[0] in [0, -1] or ego_frame[1] in [0, -1] or ego_frame[9] == 0:
+                # skip data if ego current frame is invalid
                 return None
             # transforme to the ego cooridinate
             trajs_at_ego = self.transform_trajs_to_ego(trajs.copy(), ego_frame[0:2], ego_frame[6])

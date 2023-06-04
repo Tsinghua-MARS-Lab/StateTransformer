@@ -1033,6 +1033,9 @@ def build_models(model_args):
     elif 'pretrain' in model_args.model_name:
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
+    elif 'transfer' in model_args.model_name:
+        model = ModelCls(config_p, model_args=model_args)
+        print('Transfer' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model    
 
 if  __name__ == '__main__':

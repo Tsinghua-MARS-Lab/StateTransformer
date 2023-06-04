@@ -46,6 +46,7 @@ class Loss(torch.nn.Module):
         self.weight = torch.ones(self.K).cuda()
         
         self.MultiTask = MultiTask
+        assert self.MultiTask == False, 'MultiTask is not supported now'
         self.loss_params = dict()
 
 
@@ -217,6 +218,8 @@ class Loss(torch.nn.Module):
         index = torch.argmin(dis_mat, dim=-1) #[batch, nbrs_num+1, 1]
         # cls_loss = self.margin_loss(conf, dis_mat, index, endpoint_exist_mask) if conf is not None else None # Margin Loss
         cls_loss = self.maxEntropyLoss(conf, dis_mat, endpoint_exist_mask)# MaxEntropyLoss
+        if cls_loss.isnan().any():
+            import ipdb; ipdb.set_trace()
         reg_loss = self.huber_loss(pred, y, index, mask) # Huber Loss
         # miss_rate = self.cal_miss_rate(y_endpoint, pred_endpoint, endpoint_exist_mask)
         miss_rate = self.cal_ego_miss_rate(y_endpoint, pred_endpoint, endpoint_exist_mask) if verbose else 0
@@ -270,9 +273,14 @@ class Loss(torch.nn.Module):
         '''
         ground_truth:[batchsize, agents number, 1/6, future num frame, 2]
         '''
-        traj_data_index = (traj_data!=0).sum(dim=-1) #[batchsize, agents number, K, future number frames]
-        non_zero_index = (traj_data_index!=0).sum(dim=-1) - 1 #index start from 0 [batchsize, agents number, K]
+        # traj_data_index = (traj_data!=0).sum(dim=-1) #[batchsize, agents number, K, future number frames]
+        # non_zero_index = (traj_data_index!=0).sum(dim=-1) - 1 #index start from 0 [batchsize, agents number, K]
+        # endpoint_exist_mask = (non_zero_index>=0) #the endpoint exist mask
+
+        traj_data_index = (traj_data!=-1).sum(dim=-1) #[batchsize, agents number, K, future number frames]
+        non_zero_index = (traj_data_index!=-1).sum(dim=-1) - 1 #index start from 0 [batchsize, agents number, K]
         endpoint_exist_mask = (non_zero_index>=0) #the endpoint exist mask
+
         non_zero_index = non_zero_index*endpoint_exist_mask
         non_zero_index = non_zero_index.view(*non_zero_index.shape,1,1).repeat((1,1,1,1,2))
         endpoint = torch.gather(traj_data, dim=-2, index=non_zero_index).squeeze(-2)
@@ -336,19 +344,23 @@ class Loss(torch.nn.Module):
         total_loss = 0
         # Total Loss
         if self.MultiTask:
+            assert False, 'MultiTask is not implemented'
             for i, loss in enumerate(losses.values()):
                 loss = loss['loss']
                 # ? which kinds of multi task loss suits our task.s
                 total_loss+= (2*self.auxiliary_params[i])**-2*loss + torch.log(self.auxiliary_params[i]**2+1)
         elif 'KPI' in self.loss_params and self.loss_params['KPI']:
+            assert False, 'KPI loss is not implemented'
             for i, loss in enumerate(losses.values()):
                 loss, kpi = loss['loss'], loss['kpi']
                 # ! since the kpi is to measure how bad the model. unlike noraml is how good of the model.
                 total_loss+= -(kpi)**self.gamma*torch.log(1-kpi+self.eps)*loss 
         elif len(losses) < 2:
+            assert False, 'the number of loss is less than 2'
             for i, loss in enumerate(losses.values()):
                 total_loss = loss['loss']
         else:
+            # print('inspect loss in cri.py: ', 5*losses['reg_loss']['loss'], 0.1*losses['cls_loss']['loss'])
             total_loss = 5*losses['reg_loss']['loss'] + 0.1*losses['cls_loss']['loss']
 
         losses_text = ''
