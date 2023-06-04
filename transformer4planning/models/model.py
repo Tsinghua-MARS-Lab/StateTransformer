@@ -1033,6 +1033,12 @@ def build_models(model_args):
     elif 'pretrain' in model_args.model_name:
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args)
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
+    elif 'transfer' in model_args.model_name:
+        state_dict = torch.load(os.path.join(model_args.model_pretrain_name_or_path, "pytorch_model.bin"))
+        state_dict["cnn_downsample.layer1.0.weight"] = state_dict["cnn_downsample.layer1.0.weight"][:, 3:, :, :]
+        model = ModelCls(config_p, model_args=model_args)
+        model.load_state_dict(state_dict, strict=False)
+        print('Transfer' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model    
 
 if  __name__ == '__main__':
@@ -1064,7 +1070,7 @@ if  __name__ == '__main__':
             next_ego_traj = [ego_trajectory[-1][0] + offset_x,
                             ego_trajectory[-1][1] + offset_y,
                             ego_trajectory[-1][2] + pred_traj[idx, -1]]
-            ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj.copy()).reshape(1, -1)), axis=0)
+            ego_trajectory = np.conwacatenate((ego_trajectory, np.array(next_ego_traj.copy()).reshape(1, -1)), axis=0)
             next_world_coor_trajectories.append(next_ego_traj)
 
         next_world_coor_trajectories = np.array(next_world_coor_trajectories)
