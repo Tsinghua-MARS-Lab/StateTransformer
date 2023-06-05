@@ -257,7 +257,9 @@ def main():
                 test_dataset.set_format(type='torch')
                 print(test_dataset)
             else:
-                test_dataset = dataset
+                test_dataset = dataset.select(range(train_samples, len(dataset)))
+                test_dataset.set_format(type='torch')
+                print(test_dataset)
             
             nuplan_dataset = dict(
                 train=train_dataset,
@@ -287,7 +289,6 @@ def main():
 
     if training_args.do_predict:
         predict_dataset = nuplan_dataset["test"]
-        predict_dataset.shuffle()
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
             predict_dataset = predict_dataset.select(range(max_predict_samples))
@@ -304,8 +305,8 @@ def main():
     trainer.pop_callback(DefaultFlowCallback)
 
     # to run eval one time without the trainner
-    if not training_args.do_train and training_args.do_eval:
-        trainer.evaluate()
+    # if not training_args.do_train and training_args.do_eval:
+    #     trainer.evaluate()
 
     # Training
     if training_args.do_train:
