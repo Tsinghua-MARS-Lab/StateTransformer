@@ -260,11 +260,19 @@ class Loss(torch.nn.Module):
         y_mask = ((y!=-1).sum(-1)>0).view(bs, -1, self.future_frames_num)
         
         # par_conf = model_outputs['precls'] if 'precls' in model_outputs else None
-        # inner_product = model_outputs['inner_product'] if 'inner_product' in model_outputs else None        
+        # inner_product = model_outputs['inner_product'] if 'inner_product' in model_outputs else None 
         losses, miss_rate = self.loss_function(y, pred, self.K, y_mask, conf=conf, par_conf=None, inner_product=None) #target and neighbours loss
-
-        # if not self.training:
-        #     return losses['reg_loss']['loss'], None, None
+        
+        
+        if not self.training:
+            traj_ade = torch.norm(pred[:,0]-y[:,0],dim=-1)*y_mask
+            traj_ade = traj_ade.sum(-1)/(y_mask.sum(-1)+1e-7)
+            # traj_ade = torch.norm(pred[:,0]-y[:,0],dim=-1).mean(-1)
+            idx = conf[:,0].argmax(-1)
+            # ADE = traj_ade.gather(-1,idx[:,None]).mean()
+            minADE = traj_ade.min(-1)[0].mean()
+            
+            return minADE, None, None
 
         total_loss, loss_text  = self.multi_task_gather(losses)
         return total_loss, loss_text, miss_rate
