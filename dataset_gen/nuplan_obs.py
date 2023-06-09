@@ -81,7 +81,7 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
 
     total_road_types = 20
     total_agent_types = 8
-    total_traffic_types = 2
+    total_traffic_types = 4
     sample_frames = list(range(scenario_frame_number - past_frames_number, scenario_frame_number, frame_sample_interval))
     sample_frames.append(scenario_frame_number)
     total_raster_channels = 1 + total_road_types + total_traffic_types + total_agent_types * len(sample_frames) 
@@ -245,7 +245,7 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
             abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
             continue
-        traffic_state = data_dic['traffic_light'][key]['state'][0]
+        traffic_state = data_dic['traffic_light'][key]['state']
         pts = list(zip(xyz[:, 0], xyz[:, 1]))
         line = shapely.geometry.LineString(pts)
         simplified_xyz_line = line.simplify(1)
@@ -258,22 +258,14 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         low_res_traffic = simplified_xyz * low_res_raster_scale
         high_res_traffic = high_res_traffic.astype('int32') + observation_kwargs["high_res_raster_shape"][0] // 2
         low_res_traffic = low_res_traffic.astype('int32') + observation_kwargs["high_res_raster_shape"][0] // 2
-        if traffic_state == 4:# Red Light
-            for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[1 + total_road_types], \
-                        tuple(high_res_traffic[j, :2]),
-                        tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[1 + total_road_types + 1], \
-                        tuple(low_res_traffic[j, :2]),
-                        tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
-        elif traffic_state == 6: # Green Light
-            for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[1 + total_road_types], \
-                        tuple(high_res_traffic[j, :2]),
-                        tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[1 + total_road_types + 1], \
-                        tuple(low_res_traffic[j, :2]),
-                        tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+        # traffic state order is GREEN, RED, YELLOW, UNKNOWN
+        for j in range(simplified_xyz.shape[0] - 1):
+            cv2.line(rasters_high_res_channels[1 + total_road_types + traffic_state], \
+                    tuple(high_res_traffic[j, :2]),
+                    tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+            cv2.line(rasters_low_res_channels[1 + total_road_types + traffic_state], \
+                    tuple(low_res_traffic[j, :2]),
+                    tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
                 
     cos_, sin_ = math.cos(-ego_pose[3]), math.sin(-ego_pose[3])
     for i, key in enumerate(data_dic['agent']):
