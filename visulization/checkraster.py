@@ -8,10 +8,12 @@ from pathlib import Path
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
 from dataset_gen.nuplan_obs import get_observation_for_autoregression_nsm
 
-def visulize_raster(savepath, name, raster, vis_id=0):
+def visulize_raster(savepath, name, raster, context_length=9):
     """
     raster shape: (224, 224, 93)
     """
+    if not os.path.exists(savepath):
+        os.makedirs(savepath)
     if isinstance(raster, torch.Tensor):
         raster = raster.numpy()
     # agents_rasters = raster[:, 21:, :, :,]
@@ -25,14 +27,14 @@ def visulize_raster(savepath, name, raster, vis_id=0):
     
     for i in range(8):
         historic_channel = np.zeros_like(channel)
-        for j in range(9):
-            historic_channel += agents_rasters[:, :, i*9 + j]
+        for j in range(context_length):
+            historic_channel += agents_rasters[:, :, i*context_length + j]
         for w in range(historic_channel.shape[0]):
             for h in range(historic_channel.shape[1]):
                 if historic_channel[w, h] > 0:
                     historic_channel[w, h] = 1        
         historic_channel = 255 - 255*historic_channel.astype(np.uint8)
-        cv2.imwrite(os.path.join(savepath, f"{name}_agenttype{i}.png"), historic_channel)          
+        cv2.imwrite(os.path.join(savepath, f"{name}_agenttype{i}.png"), historic_channel)        
         
 def visulize_trajectory(savepath, trajectory, scale=0.77):
     if isinstance(trajectory, torch.Tensor):
@@ -50,8 +52,16 @@ def visulize_trajectory(savepath, trajectory, scale=0.77):
         name = "high"
     cv2.imwrite(os.path.join(savepath, name + "_trajectory.png"), future_raster)
 
+def visulize_raster_perchannel(savepath, raster):
+    if not os.path.exists(savepath):
+        os.makedirs(savepath)
+    if isinstance(raster, torch.Tensor):
+        raster = raster.numpy()
+    for i in range(raster.shape[-1]):
+        channel = 255 - 255*raster[:, :, i].astype(np.uint8)
+        cv2.imwrite(os.path.join(savepath, f"channel_{i}.png"), channel)
+
 def main(args):
-    import pickle
     if not os.path.exists(args.path_to_save):
         os.makedirs(args.path_to_save)
     data_path={'NUPLAN_DATA_ROOT': str(Path.home()) + "/nuplan/dataset",
@@ -81,34 +91,24 @@ def main(args):
     #                     observation_kwargs, loaded_dic, args.frame_id, total_frames, nsm_result=None)
 
     dataset = datasets.load_from_disk(args.dataset_disk_path)
-    example = dataset[2]
-    high_rasters = example["high_res_raster"]
-    low_rasters = example["low_res_raster"]
-    trajectory = np.concatenate([example["context_actions"], example["trajectory_label"]], axis=0)
-    # visulize_raster(args.path_to_save, "high_res_channel", high_res_raster)
-    # visulize_raster(args.path_to_save, "low_res_channel", low_res_raster)
-    # # visulize_trajectory(args.path_to_save, trajectory, context_actions)
-    # # visulize_context_trajectory(args.path_to_save, context_actions)
-    #with open("autoregressive_data_3d.pkl","rb") as f:
-    # with open("nonauto_example.pkl","rb") as f:
-    #     example = pickle.load(f)
-    #     high_rasters = example["high_res_raster"].reshape(224, 224, -1)
-    #     low_rasters = example["low_res_raster"].reshape(224, 224, -1)
-    #     trajectory = np.concatenate([example["context_actions"], example["trajectory_label"]], axis=0)
-    # high_rasters = observation_dic["high_res_raster"].transpose(0, 3, 1, 2)
-    # low_rasters = observation_dic["low_res_raster"].transpose(0, 3, 1, 2)
-    visulize_raster(args.path_to_save, "high_res_channel", high_rasters, args.vis_id)
-    visulize_raster(args.path_to_save, "low_res_channel", low_rasters, args.vis_id) 
-    visulize_trajectory(args.path_to_save, trajectory, 0.77)
-    visulize_trajectory(args.path_to_save, trajectory, 4)
-    print("done!")
+    for i in range(len(dataset)):
+        example = dataset[i]
+        high_rasters = example["high_res_raster"]
+        low_rasters = example["low_res_raster"]
+        trajectory = np.concatenate([example["context_actions"], example["trajectory_label"]], axis=0)
+    
+        visulize_raster_perchannel(os.path.join(args.path_to_save + f"_{i}","high_res_channel"), high_rasters)
+        visulize_raster_perchannel(os.path.join(args.path_to_save + f"_{i}", "low_res_channel"), low_rasters) 
+        visulize_trajectory(args.path_to_save, trajectory, 0.77)
+        visulize_trajectory(args.path_to_save, trajectory, 4)
+        print("done!")
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_disk_path", default="/home/shiduozhang/nuplan/dataset/boston_test")  
-    parser.add_argument("--path_to_save", default="visulization/rasters/rasters/example-boston")
+    parser.add_argument("--dataset_disk_path", default="/home/shiduozhang/nuplan/dataset/Example/vegas")  
+    parser.add_argument("--path_to_save", default="visulization/rasters/5hz-vegas-fix")
     parser.add_argument("--vis_id",type=int, default=0)
     parser.add_argument("--frame_id", type=int, default=80)
     args = parser.parse_args()

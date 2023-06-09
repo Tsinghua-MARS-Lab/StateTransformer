@@ -373,15 +373,29 @@ def main():
             def nuplan_collate_fn(batch):
                 import collections
                 expect_keys = ["file_name", "frame_index", "high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
+                
                 elem = batch[0]
                 if isinstance(elem, collections.abc.Mapping):
                     return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
+            
+            def waymo_collate_fn(batch):
+                import collections
+                expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
+                
+                elem = batch[0]
+                if isinstance(elem, collections.abc.Mapping):
+                    return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
+            
+            if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
+                collate_fn = waymo_collate_fn
+            else:
+                collate_fn = nuplan_collate_fn
 
             test_dataloader = DataLoader(
                 dataset=predict_dataset,
                 batch_size=training_args.per_device_eval_batch_size,
                 num_workers=training_args.per_device_eval_batch_size,
-                collate_fn=nuplan_collate_fn,
+                collate_fn=collate_fn,
                 pin_memory=True,
                 drop_last=True
             )
@@ -417,8 +431,15 @@ def main():
                         trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
                     else:
-                        trajectory_label = input["trajectory_label"][:, 1::2, :]
-                    loss = loss_fn(trajectory_label, traj_pred)
+                        if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
+                            trajectory_label = input["trajectory_label"][:, :, :2]
+                            trajectory_label = torch.where(trajectory_label != -1, trajectory_label, traj_pred)
+                        else:
+                            trajectory_label = input["trajectory_label"][:, 1::2, :]
+
+                    # print("trajectory_label", trajectory_label[0, :, :2])
+                    # print("traj_pred", traj_pred[0, :, :2])
+                    loss = loss_fn(trajectory_label[:, :, :2], traj_pred[:, :, :2])
                     end_trajectory_label = trajectory_label[:, -1, :]
                     end_point = traj_pred[:, -1, :]
                     end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])

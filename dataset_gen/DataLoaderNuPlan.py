@@ -507,6 +507,7 @@ class NuPlanDL:
 
         scenario_id = scenario.token
         self.timestamp = lidar_token_timestamp
+        self.total_frames = scenario.get_number_of_iterations()
         data_to_return = self.get_datadic(scenario=scenario,
                                           scenario_id=scenario_id, agent_only=agent_only,
                                           detect_gt_relation=detect_gt_relation,
@@ -937,15 +938,13 @@ class NuPlanDL:
 
                 if traffic_light_status != 0:
                     total_frames = self.total_frames
-                    try:
-                        valid_np = np.ones((total_frames, 1))
-                        state_np = np.ones((total_frames, 1)) * traffic_light_status
-                        traffic_dic[int(map_obj_id)] = {
-                            'valid': valid_np,
-                            'state': state_np
+                    valid_np = np.ones((total_frames, 1))
+                    state_np = np.ones((total_frames, 1)) * traffic_light_status
+                    traffic_dic[int(map_obj_id)] = {
+                        'valid': valid_np,
+                        'state': state_np
                         }
-                    except:
-                        pass
+
 
             # print("Road loaded with ", len(list(road_dic.keys())), " road elements.")
         print("Traffic loaded with ", len(list(traffic_dic.keys())), " traffic elements.")
@@ -1072,14 +1071,6 @@ class NuPlanDL:
                 else:
                     line_x, line_y = selected_obj.polygon.exterior.coords.xy
 
-                # Add traffic light data.
-                traffic_light_status = 0
-                # status follow waymo's data coding
-                if map_obj_id in green_lane_connectors:
-                    traffic_light_status = 6
-                elif map_obj_id in red_lane_connectors:
-                    traffic_light_status = 4
-
                 num_of_pts = len(line_x)
 
                 road_xy_np = np.ones([num_of_pts, 3]) * -1
@@ -1103,17 +1094,23 @@ class NuPlanDL:
                 }
                 road_dic[int(map_obj_id)] = new_dic
 
+                # Add traffic light data.
+                traffic_light_status = 0
+                # status follow waymo's data coding
+                if map_obj_id in green_lane_connectors:
+                    traffic_light_status = 6
+                elif map_obj_id in red_lane_connectors:
+                    traffic_light_status = 4
+
                 if traffic_light_status != 0:
                     total_frames = self.total_frames
-                    try:
-                        valid_np = np.ones((total_frames, 1))
-                        state_np = np.ones((total_frames, 1)) * traffic_light_status
-                        traffic_dic[int(map_obj_id)] = {
-                            'valid': valid_np,
-                            'state': state_np
-                        }
-                    except:
-                        pass
+                    valid_np = np.ones((total_frames, 1))
+                    state_np = np.ones((total_frames, 1)) * traffic_light_status
+                    traffic_dic[int(map_obj_id)] = {
+                        'valid': valid_np,
+                        'state': state_np
+                    }
+
 
         # print("Road loaded with ", len(list(road_dic.keys())), " road elements.")
         return road_dic, traffic_dic
@@ -1294,13 +1291,14 @@ class NuPlanDL:
 
         if not agent_only:
             if self.running_mode == 1:
-                if self.road_dic_path is not None:
-                    loading_file_name = self.road_dic_path
-                    # print(loading_file_name)
-                    with open(loading_file_name, 'rb') as f:
-                        road_dic = pickle.load(f)
-                        # print(road_dic)
-                traffic_dic = self.pack_scenario_to_trafficdic(scenario)
+                    # if self.road_dic_path is not None:
+                    #     loading_file_name = self.road_dic_path
+                    #     # print(loading_file_name)
+                    #     with open(loading_file_name, 'rb') as f:
+                    #         road_dic = pickle.load(f)
+                    #         # print(road_dic)
+                road_dic, traffic_dic = self.pack_scenario_to_roaddic(scenario)
+                # traffic_dic = self.pack_scenario_to_trafficdic(scenario)
                 # route_road_ids = scenario.get_route_roadblock_ids()
                 # # handle '' empty string in route_road_ids
                 # road_ids_processed = []
@@ -1313,22 +1311,10 @@ class NuPlanDL:
                 # route_road_ids = road_ids_processed
             else:
                 road_dic, traffic_dic = self.pack_scenario_to_roaddic(scenario)
-                # route_road_ids = scenario.get_route_roadblock_ids()
-                #
-                # # handle '' empty string in route_road_ids
-                # road_ids_processed = []
-                # for each_id in route_road_ids:
-                #     if each_id != '':
-                #         try:
-                #             road_ids_processed.append(int(each_id))
-                #         except:
-                #             print(f"Invalid road id in route {each_id}")
-                # route_road_ids = road_ids_processed
-                # route_road_ids = [int(each_id) for each_id in route_road_ids]
 
             # loop route road ids from all scenarios in this file
             route_road_ids = []
-            log_db = self.current_dataset.log_dbs[file_index]
+            log_db = self.current_dataset.log_dbs[self.current_scenario_index]
             sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
             for each_scenario_tag in log_db.scenario_tag:
                 # fetch lidar token (as time stamp) from scenario tag
@@ -1341,6 +1327,7 @@ class NuPlanDL:
                 scenario = get_default_scenario_from_token(log_db, each_lidar_token, lidar_token_timestamp)
                 route_road_ids += scenario.get_route_roadblock_ids()
 
+            road_ids_processed = list()
             for each_id in route_road_ids:
                 if each_id != '':
                     try:

@@ -81,9 +81,10 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
 
     total_road_types = 20
     total_agent_types = 8
+    total_traffic_types = 2
     sample_frames = list(range(scenario_frame_number - past_frames_number, scenario_frame_number, frame_sample_interval))
     sample_frames.append(scenario_frame_number)
-    total_raster_channels = 1 + total_road_types + total_agent_types * len(sample_frames)
+    total_raster_channels = 1 + total_road_types + total_traffic_types + total_agent_types * len(sample_frames) 
 
     rasters_high_res = np.zeros([high_res_raster_shape[0],
                                  high_res_raster_shape[1],
@@ -231,7 +232,43 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
                      tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
             cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
                      tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
-
+    
+    for i, key in enumerate(data_dic['traffic_light']):
+        xyz = data_dic["road"][key]["xyz"].copy()
+        xyz[:, :2] -= ego_pose[:2]
+        if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+            abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+            continue
+        traffic_state = data_dic['traffic_light'][key]['state'][0]
+        pts = list(zip(xyz[:, 0], xyz[:, 1]))
+        line = shapely.geometry.LineString(pts)
+        simplified_xyz_line = line.simplify(1)
+        simplified_x, simplified_y = simplified_xyz_line.xy
+        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+        simplified_xyz[:, 1] *= -1
+        high_res_traffic = simplified_xyz * high_res_raster_scale
+        low_res_traffic = simplified_xyz * low_res_raster_scale
+        high_res_traffic = high_res_traffic.astype('int32') + observation_kwargs["high_res_raster_shape"][0] // 2
+        low_res_traffic = low_res_traffic.astype('int32') + observation_kwargs["high_res_raster_shape"][0] // 2
+        if traffic_state == 4:# Red Light
+            for j in range(simplified_xyz.shape[0] - 1):
+                cv2.line(rasters_high_res_channels[1 + total_road_types], \
+                        tuple(high_res_traffic[j, :2]),
+                        tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                cv2.line(rasters_low_res_channels[1 + total_road_types + 1], \
+                        tuple(low_res_traffic[j, :2]),
+                        tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+        elif traffic_state == 6: # Green Light
+            for j in range(simplified_xyz.shape[0] - 1):
+                cv2.line(rasters_high_res_channels[1 + total_road_types], \
+                        tuple(high_res_traffic[j, :2]),
+                        tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                cv2.line(rasters_low_res_channels[1 + total_road_types + 1], \
+                        tuple(low_res_traffic[j, :2]),
+                        tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                
     cos_, sin_ = math.cos(-ego_pose[3]), math.sin(-ego_pose[3])
     for i, key in enumerate(data_dic['agent']):
         for j, sample_frame in enumerate(sample_frames):
@@ -254,14 +291,14 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
             # draw on high resolution
             rect_pts_high_res = int(high_res_raster_scale) * rect_pts
             rect_pts_high_res += observation_kwargs["high_res_raster_shape"][0] // 2
-            cv2.drawContours(rasters_high_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j],
+            cv2.drawContours(rasters_high_res_channels[1 + total_road_types + total_traffic_types + agent_type * len(sample_frames) + j],
                              [rect_pts_high_res], -1, (255, 255, 255), -1)
             # draw on low resolution
             rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64)
             rect_pts_low_res += observation_kwargs["low_res_raster_shape"][0] // 2
-            cv2.drawContours(rasters_low_res_channels[1 + total_road_types + agent_type * len(sample_frames) + j],
+            cv2.drawContours(rasters_low_res_channels[1 + total_road_types + total_traffic_types + agent_type * len(sample_frames) + j],
                              [rect_pts_low_res], -1, (255, 255, 255), -1)
-
+                
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
     rasters_low_res = cv2.merge(rasters_low_res_channels).astype(bool)
 
