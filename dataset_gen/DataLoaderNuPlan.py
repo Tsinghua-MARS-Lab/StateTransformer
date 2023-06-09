@@ -1003,6 +1003,12 @@ class NuPlanDL:
         red_lane_connectors = [
             str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.RED
         ]
+        yellow_lane_connectors = [
+            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.YELLOW
+        ]
+        unknown_lane_connectors = [
+            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.UNKNOWN
+        ]
 
         ego_state = scenario.get_ego_state_at_iteration(0)
         all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 999999,
@@ -1095,20 +1101,20 @@ class NuPlanDL:
                 road_dic[int(map_obj_id)] = new_dic
 
                 # Add traffic light data.
-                traffic_light_status = 0
+                traffic_light_status = -1
                 # status follow waymo's data coding
                 if map_obj_id in green_lane_connectors:
-                    traffic_light_status = 6
+                    traffic_light_status = 0
                 elif map_obj_id in red_lane_connectors:
-                    traffic_light_status = 4
+                    traffic_light_status = 1
+                elif map_obj_id in yellow_lane_connectors:
+                    traffic_light_status = 2
+                elif map_obj_id in unknown_lane_connectors:
+                    traffic_light_status = 3
 
-                if traffic_light_status != 0:
-                    total_frames = self.total_frames
-                    valid_np = np.ones((total_frames, 1))
-                    state_np = np.ones((total_frames, 1)) * traffic_light_status
+                if traffic_light_status != -1:
                     traffic_dic[int(map_obj_id)] = {
-                        'valid': valid_np,
-                        'state': state_np
+                        'state': traffic_light_status
                     }
 
 
@@ -1314,7 +1320,7 @@ class NuPlanDL:
 
             # loop route road ids from all scenarios in this file
             route_road_ids = []
-            log_db = self.current_dataset.log_dbs[self.current_scenario_index]
+            log_db = self.current_dataset.log_dbs[self.current_file_index]
             sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
             for each_scenario_tag in log_db.scenario_tag:
                 # fetch lidar token (as time stamp) from scenario tag
