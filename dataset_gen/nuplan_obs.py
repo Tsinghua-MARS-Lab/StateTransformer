@@ -197,11 +197,13 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         low_res_route = low_res_route.astype('int32')
         high_res_route += observation_kwargs["high_res_raster_shape"][0] // 2
         low_res_route += observation_kwargs["low_res_raster_shape"][0] // 2
-        for j in range(simplified_xyz.shape[0] - 1):
-            cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
-                    tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
-            cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
-                    tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
+        cv2.fillPoly(rasters_high_res_channels[0], np.int32([high_res_route[:, :2]]), (255, 255, 255))
+        cv2.fillPoly(rasters_low_res_channels[0], np.int32([low_res_route[:, :2]]), (255, 255, 255))
+        # for j in range(simplified_xyz.shape[0] - 1):
+        #     cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
+        #             tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
+        #     cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
+        #             tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
     # 'map_raster': (n, w, h),  # n is the number of road types and traffic lights types
     cos_, sin_ = math.cos(-ego_pose[3] - math.pi / 2), math.sin(-ego_pose[3] - math.pi / 2)
     for i, key in enumerate(data_dic['road']):
@@ -227,11 +229,15 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
         high_res_road += observation_kwargs["high_res_raster_shape"][0] // 2
         low_res_road += observation_kwargs["low_res_raster_shape"][0] // 2
 
-        for j in range(simplified_xyz.shape[0] - 1):
-            cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
-                     tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
-            cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
-                     tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
+        if road_type in [5, 17, 18, 19]:
+            cv2.fillPoly(rasters_high_res_channels[road_type + 1], np.int32([high_res_road[:, :2]]), (255, 255, 255))
+            cv2.fillPoly(rasters_low_res_channels[road_type + 1], np.int32([low_res_road[:, :2]]), (255, 255, 255))
+        else:
+            for j in range(simplified_xyz.shape[0] - 1):
+                cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
+                         tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
+                cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
+                         tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
     
     for i, key in enumerate(data_dic['traffic_light']):
         xyz = data_dic["road"][key]["xyz"].copy()
