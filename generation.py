@@ -176,6 +176,7 @@ def main(args):
             file_name = dl.file_names[0]
             while not dl.end:
                 loaded_dic, _ = dl.get_next(seconds_in_future=8)
+                loaded_dic["agent"]["ego"]["type"] = 7 # Fix Ego Type to 7
                 if loaded_dic is None:
                     continue
                 if loaded_dic["skip"]:
@@ -267,27 +268,6 @@ def main(args):
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
-    features = Features({'trajectory': Sequence(
-        feature=Sequence(feature=Value(dtype='float64', id=None), length=-1, id=None), length=-1, id=None),
-                         'high_res_raster': Sequence(feature=Sequence(
-                             feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1,
-                             id=None), length=-1, id=None),
-                         'low_res_raster': Sequence(feature=Sequence(
-                             feature=Sequence(feature=Value(dtype='bool', id=None), length=-1, id=None), length=-1,
-                             id=None), length=-1, id=None),
-                         'intended_maneuver_vector': Sequence(feature=Value(dtype='int32', id=None), length=-1,
-                                                              id=None),
-                         'current_maneuver_vector': Sequence(
-                             feature=Sequence(feature=Value(dtype='float32', id=None), length=-1, id=None), length=-1,
-                             id=None),
-                         'file_name': Value(dtype='string', id=None),
-                         'scenario_id': Value(dtype='string', id=None),
-                         'time_stamp': Value(dtype='int64', id=None),
-                         'frame_index': Value(dtype='int64', id=None),
-                         'map_name': Value(dtype='string', id=None),
-                         'lidar_token': Value(dtype='string', id=None)
-                         })
-
     # sort by file size
     sorted_file_indices = []
     if args.city is not None:
@@ -301,12 +281,12 @@ def main(args):
         for i, each_file_name in enumerate(sorted_file_names):
             if all_file_path.index(each_file_name) in file_indices:
                 sorted_file_indices.append(all_file_path.index(each_file_name))
+    sorted_file_indices = sorted_file_indices[:total_file_num]
     # order by processes
     file_indices = []
     for i in range(args.num_proc):
         file_indices += sorted_file_indices[i::args.num_proc]
     # end of sorting
-
     if args.by_scenario:
         nuplan_dataset = Dataset.from_generator(yield_data_by_scenario,
                                                 gen_kwargs={'shards': file_indices},
@@ -316,7 +296,6 @@ def main(args):
 
     else:
         nuplan_dataset = Dataset.from_generator(yield_data,
-                                                # features=features,
                                                 gen_kwargs={'shards': file_indices, 'dl': None,
                                                             'filter_info': filter_dic},
                                                 writer_batch_size=10, cache_dir=args.cache_folder,
