@@ -176,15 +176,15 @@ def main(args):
             file_name = dl.file_names[0]
             while not dl.end:
                 loaded_dic, _ = dl.get_next(seconds_in_future=8)
-                loaded_dic["agent"]["ego"]["type"] = 7 # Fix Ego Type to 7
                 if loaded_dic is None:
                     continue
                 if loaded_dic["skip"]:
                     continue
                 if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
                     continue
-                if loaded_dic["type"] not in filter_scenario:
-                    continue
+                # if loaded_dic["type"] not in filter_scenario:
+                #     continue
+                loaded_dic["agent"]["ego"]["type"] = 7 # Fix Ego Type to 7
                 observation_dic = get_observation_for_nsm(
                     observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
                 other_info = {
@@ -329,12 +329,7 @@ if __name__ == '__main__':
     parser.add_argument('--starting_scenario', type=int, default=-1)
     parser.add_argument('--cache_folder', type=str, default='/localdata_hdd/nuplan_nsm')
 
-    parser.add_argument('--train', default=False, action='store_true')
-    parser.add_argument('--local_rank', type=int, default=-1)
     parser.add_argument('--num_proc', type=int, default=1)
-    parser.add_argument('--deepspeed', type=str, default=None)
-    parser.add_argument('--model_name', type=str, default=None)
-
     parser.add_argument('--use_nsm', default=False, action='store_true')
     parser.add_argument('--balance_rate', type=float, default=1.0,
                         help="balance sample rate of simple scenarios in nsm case")

@@ -363,6 +363,7 @@ class NuPlanDL:
             print("Init with index out of max file number ", self.current_file_index, self.total_file_num)
         else:
             self.current_file_total_scenario = len(db.log_dbs[self.current_file_index].scenario_tag)
+            print(f"{self.current_file_total_scenario} scenarios are initialized!")
             self.end = False
 
         self.max_file_number = max_file_number
@@ -380,7 +381,8 @@ class NuPlanDL:
         # self.traffic_dic_path = traffic_dic_path
         self.gt_relation_path = gt_relation_path
         self.timestamp = None
-
+        self.road_dic_mem = None
+        self.route_idx_mem = None
         print("Data Loader Initialized NuPlan: ", self.file_names[0],
               self.start_file_number, FILE_TO_START, self.current_file_index, file_to_start,
               self.current_scenario_index, self.current_file_total_scenario, self.max_file_number, self.total_file_num)
@@ -470,6 +472,8 @@ class NuPlanDL:
             self.current_file_index += 1
             self.load_new_file()
             new_files_loaded = True
+            self.road_dic_mem = None
+            self.route_idx_mem = None
 
         if self.end:
             return None, new_files_loaded
@@ -642,8 +646,10 @@ class NuPlanDL:
                 current_pc = current_pc.next
                 current_ego_pose = current_pc.ego_pose
 
-        road_dic, traffic_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,
+        road_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,
                                                               scenario_list=scenario_list)
+        traffic_dic = self.pack_scenario_to_trafficdic(starting_scenario, map_radius=100,
+                                                            scenario_list=scenario_list)
         # road_dic = {}
         # traffic_dic = {}
         data_to_return = {
@@ -731,7 +737,7 @@ class NuPlanDL:
             past_ego_states = scenario.get_ego_past_trajectory(0, total_frames_past, num_samples=total_frames_past * 20)
             past_ego_states = [each_obj for each_obj in past_ego_states]
         except:
-            print("Skipping invalid past trajectory with ", total_frames_past)
+            # print("Skipping invalid past trajectory with ", total_frames_past)
             return None
 
         short = max(0, total_frames_past * 20 - len(past_ego_states))
@@ -759,7 +765,7 @@ class NuPlanDL:
                                                                    num_samples=total_frames_future * 20)
             future_ego_states = [each_obj for each_obj in future_ego_states]
         except:
-            print("Skipping invalid future trajectory with ", total_frames_future)
+            # print("Skipping invalid future trajectory with ", total_frames_future)
             return None
 
         for current_t in range(total_frames_future * 20):
@@ -782,7 +788,7 @@ class NuPlanDL:
             # past_tracked_obj is a generator
             past_tracked_obj = [each_obj for each_obj in past_tracked_obj]
         except:
-            print("Skipping invalid past trajectory with ", total_frames_past)
+            # print("Skipping invalid past trajectory with ", total_frames_past)
             return None
 
         short = max(0, total_frames_past * 20 - len(past_tracked_obj))
@@ -843,7 +849,7 @@ class NuPlanDL:
             # AttributeError: 'NoneType' object has no attribute 'hex'
             future_tracked_obj = [each_obj for each_obj in future_tracked_obj]
         except:
-            print("Skipping invalid future trajectory with ", total_frames_future)
+            # print("Skipping invalid future trajectory with ", total_frames_future)
             return None
 
         # future_tracked_obj = [each_obj for t, each_obj in enumerate(future_tracked_obj)]
@@ -896,6 +902,12 @@ class NuPlanDL:
         red_lane_connectors = [
             str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.RED
         ]
+        yellow_lane_connectors = [
+            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.YELLOW
+        ]
+        unknown_lane_connectors = [
+            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.UNKNOWN
+        ]
 
         ego_state = scenario.get_ego_state_at_iteration(0)
         all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 999999,
@@ -929,25 +941,24 @@ class NuPlanDL:
                 map_obj_id = selected_obj.id
 
                 # Add traffic light data.
-                traffic_light_status = 0
+                traffic_light_status = -1
                 # status follow waymo's data coding
                 if map_obj_id in green_lane_connectors:
-                    traffic_light_status = 6
+                    traffic_light_status = 0
                 elif map_obj_id in red_lane_connectors:
-                    traffic_light_status = 4
+                    traffic_light_status = 1
+                elif map_obj_id in yellow_lane_connectors:
+                    traffic_light_status = 2
+                elif map_obj_id in unknown_lane_connectors:
+                    traffic_light_status = 3
 
-                if traffic_light_status != 0:
-                    total_frames = self.total_frames
-                    valid_np = np.ones((total_frames, 1))
-                    state_np = np.ones((total_frames, 1)) * traffic_light_status
+                if traffic_light_status != -1:
                     traffic_dic[int(map_obj_id)] = {
-                        'valid': valid_np,
-                        'state': state_np
-                        }
-
+                        'state': traffic_light_status
+                    }
 
             # print("Road loaded with ", len(list(road_dic.keys())), " road elements.")
-        print("Traffic loaded with ", len(list(traffic_dic.keys())), " traffic elements.")
+        # print("Traffic loaded with ", len(list(traffic_dic.keys())), " traffic elements.")
         return traffic_dic
 
     def pack_scenario_to_roaddic(self, scenario, map_radius=MAP_RADIUS, scenario_list=None):
@@ -976,7 +987,6 @@ class NuPlanDL:
         """
 
         road_dic = {}
-        traffic_dic = {}
         map_api = scenario.map_api
         self.map_api = map_api
         all_map_obj = map_api.get_available_map_objects()
@@ -995,20 +1005,6 @@ class NuPlanDL:
         #         # lanes
         #         selected_objs.append(each_obj)
 
-        traffic_light_data = scenario.get_traffic_light_status_at_iteration(0)
-
-        green_lane_connectors = [
-            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.GREEN
-        ]
-        red_lane_connectors = [
-            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.RED
-        ]
-        yellow_lane_connectors = [
-            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.YELLOW
-        ]
-        unknown_lane_connectors = [
-            str(data.lane_connector_id) for data in traffic_light_data if data.status == TrafficLightStatusType.UNKNOWN
-        ]
 
         ego_state = scenario.get_ego_state_at_iteration(0)
         all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 999999,
@@ -1100,26 +1096,9 @@ class NuPlanDL:
                 }
                 road_dic[int(map_obj_id)] = new_dic
 
-                # Add traffic light data.
-                traffic_light_status = -1
-                # status follow waymo's data coding
-                if map_obj_id in green_lane_connectors:
-                    traffic_light_status = 0
-                elif map_obj_id in red_lane_connectors:
-                    traffic_light_status = 1
-                elif map_obj_id in yellow_lane_connectors:
-                    traffic_light_status = 2
-                elif map_obj_id in unknown_lane_connectors:
-                    traffic_light_status = 3
-
-                if traffic_light_status != -1:
-                    traffic_dic[int(map_obj_id)] = {
-                        'state': traffic_light_status
-                    }
-
 
         # print("Road loaded with ", len(list(road_dic.keys())), " road elements.")
-        return road_dic, traffic_dic
+        return road_dic
 
     def get_datadic(self, scenario: AbstractScenario,
                     scenario_id,
@@ -1316,40 +1295,42 @@ class NuPlanDL:
                 #             print(f"Invalid road id in route {each_id}")
                 # route_road_ids = road_ids_processed
             else:
-                road_dic, traffic_dic = self.pack_scenario_to_roaddic(scenario)
-
-            # loop route road ids from all scenarios in this file
-            route_road_ids = []
-            log_db = self.current_dataset.log_dbs[self.current_file_index]
-            sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
-            for each_scenario_tag in log_db.scenario_tag:
-                # fetch lidar token (as time stamp) from scenario tag
-                each_lidar_token = each_scenario_tag.lidar_pc_token
-                # get scenario from lidar_token
-                lidar_token_timestamp = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(
-                    log_db.load_path,
-                    sensor_data_source,
-                    each_lidar_token)
-                scenario = get_default_scenario_from_token(log_db, each_lidar_token, lidar_token_timestamp)
-                route_road_ids += scenario.get_route_roadblock_ids()
-
-            road_ids_processed = list()
-            for each_id in route_road_ids:
-                if each_id != '':
-                    try:
-                        road_ids_processed.append(int(each_id))
-                    except:
-                        print(f"Invalid road id in route {each_id}")
-            route_road_ids = road_ids_processed
-
+                if self.road_dic_mem is None:
+                    self.road_dic_mem = self.pack_scenario_to_roaddic(scenario, map_radius=9999)
+                if self.route_idx_mem is None:
+                     # loop route road ids from all scenarios in this file
+                    route_road_ids = []
+                    log_db = self.current_dataset.log_dbs[self.current_file_index]
+                    sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
+                    for each_scenario_tag in log_db.scenario_tag:
+                        # fetch lidar token (as time stamp) from scenario tag
+                        each_lidar_token = each_scenario_tag.lidar_pc_token
+                        # get scenario from lidar_token
+                        lidar_token_timestamp = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(
+                            log_db.load_path,
+                            sensor_data_source,
+                            each_lidar_token)
+                        scenario = get_default_scenario_from_token(log_db, each_lidar_token, lidar_token_timestamp)
+                        route_road_ids += scenario.get_route_roadblock_ids()
+                    route_road_ids = list(set(route_road_ids))
+                    road_ids_processed = list()
+                    for each_id in route_road_ids:
+                        if each_id != '':
+                            try:
+                                road_ids_processed.append(int(each_id))
+                            except:
+                                print(f"Invalid road id in route {each_id}")
+                    self.route_idx_mem = road_ids_processed
+                traffic_dic = self.pack_scenario_to_trafficdic(scenario, map_radius=200)
+           
         else:
             road_dic = {}
             traffic_dic = {}
 
-        if road_dic is None or traffic_dic is None:
+        if self.road_dic_mem is None or traffic_dic is None:
             return None
 
-        if len(route_road_ids) == 0:
+        if len(self.route_idx_mem) == 0:
             print("Invalid route given, Skipping")
             return None
 
@@ -1365,7 +1346,7 @@ class NuPlanDL:
             agent_dic[agent_id]['still_in_past'] = is_still
 
         data_to_return = {
-            "road": road_dic,
+            "road": self.road_dic_mem,
             "agent": agent_dic,
             "traffic_light": traffic_dic,
         }
@@ -1378,7 +1359,7 @@ class NuPlanDL:
             skip = True
 
         # sanity check
-        if agent_dic is None or road_dic is None or traffic_dic is None:
+        if agent_dic is None or self.road_dic_mem is None or traffic_dic is None:
             print("Invalid Scenario Loaded: ", agent_dic is None, road_dic is None, traffic_dic is None)
             skip = True
 
@@ -1390,10 +1371,6 @@ class NuPlanDL:
         data_to_return['skip'] = skip
         data_to_return['edge_type'] = edge_type
 
-        data_to_return['route'] = route_road_ids
-
-        # if process_intersection:
-        #     intersection_dic = get_intersection(data_to_return)
-        #     data_to_return["intersection"] = intersection_dic
+        data_to_return['route'] = self.route_idx_mem
 
         return data_to_return
