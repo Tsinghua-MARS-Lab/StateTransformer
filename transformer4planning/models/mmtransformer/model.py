@@ -16,7 +16,8 @@ from transformers import GPT2Model,GPT2PreTrainedModel
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
-
+from torch.distributions.multivariate_normal import MultivariateNormal
+from transformer4planning.models.mmtransformer.simple_decoder import SimpleTrajectoryDecoder
 from transformer4planning.models.mmtransformer.stacked_transformer import STF
 from transformer4planning.models.mmtransformer.criterion import Loss
 from dataclasses import dataclass, field
@@ -75,8 +76,6 @@ class MMTransformer(GPT2PreTrainedModel):
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
-        if self.predict_trajectory:
-            self.traj_decoder = STF(config.n_embd, 6, future_num_frames=80)
         
         self.loss = Loss(K=6, future_num_frames=80)
 
@@ -85,6 +84,16 @@ class MMTransformer(GPT2PreTrainedModel):
         self.model_parallel = False
         self.device_map = None
         self.post_init()
+        
+        self.K = 6
+        self.modality_embeds = nn.Embedding(self.K, config.n_embd)
+        self.mmT = model_args.mmTransformer
+        nn.init.orthogonal_(self.modality_embeds.weight)
+        if self.predict_trajectory:
+            if self.mmT:
+                self.traj_decoder = STF(config.n_embd, 6, future_num_frames=80)
+            else:
+                self.traj_decoder = SimpleTrajectoryDecoder(config.n_embd)
     
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -140,7 +149,8 @@ class MMTransformer(GPT2PreTrainedModel):
             ):
             # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        if self.task == "waymo":
+            context_actions[:, :, -1] = 0
         # inspect actions
         max_action = torch.max(context_actions[:, :, :2])
         min_action = torch.min(context_actions[:, :, :2])
@@ -191,9 +201,21 @@ class MMTransformer(GPT2PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
         # assert not state_embeds.isnan().any(), "state embedding is NAN"
         # assert not action_embeds.isnan().any(), "action embedding is NAN"
-
+        
         # to keep input and output at the same dimension
-        input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+        if self.mmT:
+            decode_embeds = torch.zeros((batch_size, pred_length, n_embed), device=device)
+            input_embeds = torch.cat([input_embeds, decode_embeds], dim=1)
+        else:
+            modality_embeds = self.modality_embeds.weight
+            m = MultivariateNormal(modality_embeds,torch.eye(modality_embeds.shape[-1],device=device)[None].repeat(self.K,1,1)*0.01)
+            modality_embeds = m.sample((batch_size,)).view(batch_size*self.K,1,n_embed)
+            
+            decode_embeds = torch.zeros((batch_size*self.K, pred_length+1, n_embed), device=device)
+            input_embeds = input_embeds.repeat_interleave(self.K, dim=0)
+            # input_embeds = torch.cat([modality_embeds, input_embeds, decode_embeds], dim=1)
+            input_embeds = torch.cat([input_embeds, modality_embeds, decode_embeds], dim=1)
+         
         transformer_outputs = self.transformer(
             past_key_values=past_key_values,
             attention_mask=attention_mask,
@@ -210,16 +232,27 @@ class MMTransformer(GPT2PreTrainedModel):
         )
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
         # assert not transformer_outputs_hidden_state.isnan().any(), "Hidden state is NAN"
-        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length:, :]
+        if not self.mmT:
+            traj_hidden_state = transformer_outputs_hidden_state[:, -(pred_length+1):, :]
+        else:
+            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length:, :]
+        
         traj_coords, traj_logits = self.traj_decoder(traj_hidden_state)
+        
+        # simple version
+        if not self.mmT:
+            traj_coords, traj_logits = \
+                traj_coords.view(batch_size,self.K,pred_length,2)[:,None], traj_logits.view(batch_size,self.K)[:,None]
         
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         
-        _loss, _, _ = self.loss((traj_coords, traj_logits), trajectory_label.to(device))
+        _loss, _, _ = self.loss((traj_coords, traj_logits[:,None]), trajectory_label.to(device))
         
         loss += _loss
         traj_coords, traj_logits = traj_coords[:,0], traj_logits[:,0] # a hack
-        
+        # get the coords with highest score
+        # idx_highest = torch.argmax(traj_logits, dim=-1).detach().cpu().numpy()
+        # traj_coords = traj_coords[list(np.arange(traj_coords.shape[0])), list(idx_highest), :]
         return CustomOutput(
             loss=loss,
             logits=traj_coords,
