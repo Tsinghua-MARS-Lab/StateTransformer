@@ -99,6 +99,9 @@ class ModelArguments:
     task: Optional[str] = field(
         default="waymo" # only for mmtransformer
     )
+    with_traffic_light: Optional[str] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -237,6 +240,8 @@ def main():
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
                 test_dataset.set_format(type='torch')
                 print(test_dataset)
+            else:
+                test_dataset = train_dataset
             nuplan_dataset = dict(
                 train=train_dataset,
                 validation=test_dataset.shuffle(seed=training_args.seed),
@@ -257,7 +262,7 @@ def main():
                 test_dataset.set_format(type='torch')
                 print(test_dataset)
             else:
-                test_dataset = dataset.select(range(train_samples, len(dataset)))
+                test_dataset = dataset.select(range(train_samples))
                 test_dataset.set_format(type='torch')
                 print(test_dataset)
             

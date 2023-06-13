@@ -57,7 +57,10 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.predict_trajectory = model_args.predict_trajectory
 
         self.loss_fn = model_args.loss_fn
-        in_channels = 29 # raster: goal + road_type + agent_type
+        if model_args["with_traffic_light"]:
+            in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+        else:
+            in_channels = 29
         n_embed = config.d_embed // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_embed), nn.Tanh())
@@ -205,7 +208,10 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         if self.task == "waymo":
             in_channels = 26
         else:
-            in_channels = 29  # raster: goal + road_type + agent_type
+            if model_args["with_traffic_light"]:
+                in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+            else:
+                in_channels = 29  # raster: goal + road_type + agent_type
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
@@ -360,7 +366,10 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         model_args = kwargs["model_args"]
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
-        in_channels = 29  # raster: goal + road_type + agent_type
+        if model_args["with_traffic_light"]:
+            in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+        else:
+            in_channels = 29
         n_embed = config.d_model // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_model), nn.Tanh())
@@ -463,7 +472,10 @@ class T5ModelNuplan(T5PreTrainedModel):
         model_args = kwargs["model_args"]
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
-        in_channels = 29  # raster: goal + road_type + agent_type
+        if model_args["with_traffic_light"]:
+            in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+        else:
+            in_channels = 29
         n_embed = config.d_model // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_model), nn.Tanh())
@@ -580,7 +592,10 @@ class DeBertaNuplan(DebertaV2PreTrainedModel):
         model_args = kwargs["model_args"]
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
-        in_channels = 29  # raster: goal + road_type + agent_type
+        if model_args["with_traffic_light"]:
+            in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+        else:
+            in_channels = 29
         n_embed = config.hidden_size // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.hidden_size), nn.Tanh())
@@ -674,7 +689,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.predict_trajectory = model_args.predict_trajectory
         self.recover_obs = model_args.recover_obs
 
-        in_channels = 29 # raster: goal + road_type + traffic light +agent_type
+        if model_args["with_traffic_light"]:
+            in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+        else:
+            in_channels = 29
         n_embed = config.n_embd // 2
 
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
@@ -875,40 +893,33 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         )
 
     def generate(self,
-                intended_maneuver_vector: Optional[torch.Tensor] = None,
-                current_maneuver_vector: Optional[torch.Tensor] = None,
                 high_res_raster: Optional[torch.Tensor] = None,
                 low_res_raster: Optional[torch.Tensor] = None,
                 trajectory: Optional[torch.Tensor] = None,
-                attention_mask: Optional[torch.FloatTensor] = None,
-                position_ids: Optional[torch.LongTensor] = None,
                 use_cache: Optional[bool] = True,
                 output_attentions: Optional[bool] = False,
                 output_hidden_states: Optional[bool] = False,
                 return_dict: Optional[bool] = True,
-                seq_length: Optional[int] = 33,
+                seq_length: Optional[int] = 32,
                 **kwargs):
         """
         all the input items only include the historic contents
         """
         device = high_res_raster.device
-        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, h, w, c)
+        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, c, w, h)
             _b, _h, _w, _= high_res_raster.shape
-            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
-            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
 
-        ## ratser embedding and state embedding concat
-        high_res_raster = high_res_raster.permute(0, 3, 4, 1, 2)
-        low_res_raster = low_res_raster.permute(0, 3, 4, 1, 2)
         batch_size, seq, c, h, w = high_res_raster.shape
         # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
         high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
-        ## maneuver embedding
-        maneuver_embeds = None
         ## action embedding
-        action_embeds = self.action_m_embed(trajectory)
+        trajectory = self.tokenize(trajectory)
+        tokenized_trajectory = F.one_hot(trajectory.to(torch.int64), 60 * 40)
+        action_embeds = self.action_m_embed(tokenized_trajectory.to(torch.float32))
         input_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device),
                                   torch.zeros_like(action_embeds, dtype=torch.float32, device=device)), dim=1)
 
@@ -921,45 +932,113 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         result_to_return["intend_maneuver"] = list()
         result_to_return["current_maneuver"] = list()
         step = 0
-        while True:
-            # TODO: attention mask prepare and position_ids prepare
-            attention_mask = self._prepare_attention_mask_for_generation(input_embeds)
-            position_ids = self._prepare_position_ids_for_generation(attention_mask)
-            transformer_outputs = self.transformer(
-                inputs_embeds=input_embeds,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-            )
-            hidden_state = transformer_outputs[0]
-            # pred mode: Obs-Maneuver-Action Pair: [m,a | o,m,a | ... | o,m,a]
-            if self.mode == "PRED-OA":
-                if step > 2 * seq_length - 1:
-                    break
-                if step % 2 == 0:
-                    if self.predict_trajectory:
-                        traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
-                    result_to_return["trajectory"].append(traj_logits)
-                    next_embed = self.action_m_embed(traj_logits)
-                if step % 2 == 1:
-                    next_embed = self.obs_embed_decoder(hidden_state[:, -1, :].unsqueeze(1))
-            # pred mode : Only Action
-            elif self.mode == "PRED-A":
-                if step > seq_length - 1:
-                    break
-                if self.predict_trajectory:
-                    traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
-                result_to_return["trajectory"].append(traj_logits)
-                next_embed = self.action_m_embed(traj_logits)
+        input_kwargs = dict(
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        trajectory = self.beam_search(input_embeds, input_kwargs, max_length=seq_length, beam_width=2)
+        # while True:
+        #     attention_mask = self._prepare_attention_mask_for_generation(input_embeds)
+        #     position_ids = self._prepare_position_ids_for_generation(attention_mask)
+        #     transformer_outputs = self.transformer(
+        #         inputs_embeds=input_embeds,
+        #         attention_mask=attention_mask,
+        #         position_ids=position_ids,
+        #         use_cache=use_cache,
+        #         output_attentions=output_attentions,
+        #         output_hidden_states=output_hidden_states,
+        #         return_dict=return_dict,
+        #     )
+        #     hidden_state = transformer_outputs[0]
+        #     # pred mode: Obs-Action Pair: [o,a | ... | o,a | a | a | a]
+        #     if self.mode == "PRED-OA":
+        #         if step > 2 * seq_length - 1:
+        #             break
+        #         if step % 2 == 0:
+        #             if self.predict_trajectory:
+        #                 traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
+        #             result_to_return["trajectory"].append(traj_logits)
+        #             next_embed = self.action_m_embed(traj_logits)
+        #         if step % 2 == 1:
+        #             next_embed = self.obs_embed_decoder(hidden_state[:, -1, :].unsqueeze(1))
+        #     # pred mode : Only Action
+        #     elif self.mode == "PRED-A":
+        #         if step > seq_length - 1:
+        #             break
+        #         if self.predict_trajectory:
+        #             traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
+        #         result_to_return["trajectory"].append(traj_logits)
+        #         next_embed = self.action_m_embed(traj_logits)
 
-            input_embeds = torch.cat((input_embeds, next_embed), dim=1)
-            step += 1
+        #     input_embeds = torch.cat((input_embeds, next_embed), dim=1)
+        #     step += 1
 
         result_to_return["trajectory"] = torch.cat(result_to_return["trajectory"], dim=1)
         return result_to_return
+
+    def beam_search(self, input_embeds, input_kwargs, max_length, beam_width=6):
+            # input_embeds shape is (bsz, seq_length, hidden_size)
+            self.eval()
+            batch_size = input_embeds.shape[0]
+            with torch.no_grad():            
+                # init beams and scores
+                beam = [(input_embeds, 0)]
+        
+                for _ in range(max_length):
+                    candidates = []
+
+                    for seq, score in beam:
+                        attention_mask = self._prepare_attention_mask_for_generation(seq)
+                        position_ids = self._prepare_position_ids_for_generation(attention_mask)
+                        transformer_output = self.transformer(
+                            inputs_embeds=seq,
+                            attention_mask=attention_mask,
+                            position_ids=position_ids,
+                            **input_kwargs
+                        )
+                        transformer_hidden_state = transformer_output[0]
+                        output = self.traj_decoder(transformer_hidden_state[:, -1, :])
+                        prob_dist = torch.log_softmax(output, dim=1)
+                    
+                        topk_probs, topk_class = prob_dist.topk(beam_width, dim=-1)
+                        topk_class = topk_class.reshape(topk_class.shape[0], 1, -1)
+                        for j in range(beam_width):
+                            action = F.one_hot(topk_class[:, :, j].to(torch.int64), 60 * 40).to(torch.float32)
+                            next_token_embed = self.action_m_embed(action)
+                            candidate_seq = torch.cat((seq, next_token_embed), dim=1)
+                            candidate_score = score + topk_probs[:, j]
+                            candidates.append((candidate_seq, candidate_score))
+
+                    candidate_perbatch_list = []
+                    for i in range(batch_size):
+                        candidate_perbatch = []
+                        for candidate in candidates:
+                            cls, score = candidate[0][i], candidate[1][i]
+                            candidate_perbatch.append((cls, score))
+                        candidate_perbatch = sorted(candidate_perbatch, key=lambda x: x[1], reverse=True)[:beam_width]
+                        candidate_perbatch_list.append(candidate_perbatch)
+                    
+                    reshaped_candidates = list()
+                    for i in range(beam_width): # reshape the tensor by order
+                        candidate_cls_order = []
+                        candidate_score_order = []
+                        for candidate_perbatch in candidate_perbatch_list:
+                            candidate_cls_order.append(candidate_perbatch[i][0].unsqueeze(0)) 
+                            candidate_score_order.append(candidate_perbatch[i][1].unsqueeze(0))
+                        candidate_cls_order = torch.cat(candidate_cls_order, dim=0)
+                        candidate_score_order = torch.cat(candidate_score_order, dim=0)
+                        reshaped_candidates.append((candidate_cls_order, candidate_score_order))
+                        
+                    beam = reshaped_candidates
+            
+                best_seq, best_score = beam[0]
+                best_seq = best_seq[:, -max_length:, :]
+                actions = self.traj_decoder(best_seq)
+                actions = torch.argmax(actions, dim = -1)
+                return actions
+
 
     # def _prepare_model_inputs(self, input)
     def _prepare_attention_mask_for_generation(self, input_embeds):
@@ -1116,7 +1195,7 @@ if  __name__ == '__main__':
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]
     labels = model.tokenize(example["trajectory"])
-    result = model(
+    result = model.generate(
         # trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
         # context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
         trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
