@@ -15,6 +15,14 @@ import torch.nn.functional as F
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
+DEFAULT_TOKEN_CONFIG = dict(
+    x_range=[0, 3],
+    y_range=[-1, 1],
+    x_class=60,
+    y_class=40,
+    sample_frequency=4 
+)
+
 def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9):
     """
     input raster can be either high resolution raster or low resolution raster
@@ -689,7 +697,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.predict_trajectory = model_args.predict_trajectory
         self.recover_obs = model_args.recover_obs
 
-        if model_args["with_traffic_light"]:
+        if model_args.with_traffic_light:
             in_channels = 33 # raster: goal + road_type + traffic light +agent_type
         else:
             in_channels = 29
@@ -707,6 +715,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.model_parallel = False
         self.device_map = None
+        self.token_map = None
         self.post_init()
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
@@ -752,10 +761,14 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         elif self.predict_trajectory and self.recover_obs:
             return "PRED-OA"
 
-    def tokenize(self, trajectory, x_range=[0, 3], y_range=[-1, 1], x_class=60, y_class=40):
+    def tokenize(self, trajectory):
         """
         Default token space is: x [0, 3], interval 0.1, 30 token; y [-1, 1], interval is 0.05
         """
+        x_range = DEFAULT_TOKEN_CONFIG["x_range"]
+        y_range = DEFAULT_TOKEN_CONFIG["y_range"]
+        x_class = DEFAULT_TOKEN_CONFIG["x_class"]
+        y_class = DEFAULT_TOKEN_CONFIG["y_class"]
         x, y = trajectory[..., 0], trajectory[..., 1]
         x = torch.where(x > x_range[1], torch.ones_like(x) * x_range[1], x)
         x = torch.where(x < x_range[0], torch.ones_like(x) * x_range[0], x)
@@ -766,6 +779,15 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         x_index = torch.where(x_index >= x_class, torch.ones_like(x_index) * (x_class - 1), x_index).to(torch.int32)
         y_index = torch.where(y_index >= y_class, torch.ones_like(y_index) * (y_class - 1), y_index).to(torch.int32)
         labels = x_index + y_index * x_class
+        if self.token_map is None:
+            self.token_map = dict(
+                x_interval = (x_range[1] - x_range[0])/x_class,
+                y_interval = (y_range[1] - y_range[0])/y_class,
+                y_class = y_class,
+                x_class = x_class,
+                x_range = x_range,
+                y_range = y_range
+            )
         return labels
 
     def forward(
@@ -794,16 +816,13 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         low_res_raster: batch_size, seq, h, w, c (c=29)
         trajectory: batch_size, seq, 4
         """
-        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, h, w, c)
+        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, c, h, w)
             _b, _h, _w, _= high_res_raster.shape
-            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
-            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 1, 2, 4)
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 4, 3, 1, 2)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 4, 3, 1, 2)
+        
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
-
-        ## ratser embedding and concat to state embedding
-        high_res_raster = high_res_raster.permute(0, 1, 4, 2, 3)
-        low_res_raster = low_res_raster.permute(0, 1, 4, 2, 3)
         batch_size, seq, c, h, w = high_res_raster.shape
         future_seq = seq - past_seq
         # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
@@ -813,10 +832,9 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         state_embeds = torch.cat((high_res_embed,
                                   low_res_embed), dim=-1).to(torch.float32)
         ## action embedding
-        trajectory = self.tokenize(trajectory)
-        trajectory_token = F.one_hot(trajectory.to(torch.int64), 60 * 40)
-        action_embeds = self.action_m_embed(trajectory_token.to(torch.float32))
-        n_embed = action_embeds.shape[-1]
+        action_label = self.tokenize(trajectory)
+        action_token = F.one_hot(action_label.to(torch.int64), self.token_map["x_class"]*self.token_map["y_class"])
+        action_embeds = self.action_m_embed(action_token.to(torch.float32))
 
         # concat state embeding, maneuver embeding, action embeding
         input_embeds_past = torch.cat((
@@ -860,7 +878,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             action_hidden_states_future = hidden_states[:, total_past_length-1:-1, :]
             action_hidden_states = torch.cat((action_hidden_states_past, action_hidden_states_future), dim=1)
 
-        traj_logits = self.traj_decoder(action_hidden_states.to(device))
+        action_logits = self.traj_decoder(action_hidden_states.to(device))
 
         if self.recover_obs:
             obs_labels = state_embeds[:, 1:, :]
@@ -871,7 +889,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         ## input recover supervision
         if self.predict_trajectory and self.traj_decoder is not None:
             loss_fct = CrossEntropyLoss(reduction="mean")
-            loss_to_add = loss_fct(traj_logits.permute(0, 2, 1).to(torch.float64), trajectory.to(device).long())
+            b, s, c = action_logits.shape
+            loss_to_add = loss_fct(action_logits.reshape(b*s, c).to(torch.float64), action_label.reshape(-1).to(device).long())
             loss += loss_to_add
 
         if self.recover_obs:
@@ -880,12 +899,12 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             loss += loss_to_add
 
         if not return_dict:
-            output = (traj_logits,) + transformer_outputs[1:]
+            output = (action_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
-            logits=traj_logits,
+            logits=action_logits,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
@@ -900,7 +919,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 output_attentions: Optional[bool] = False,
                 output_hidden_states: Optional[bool] = False,
                 return_dict: Optional[bool] = True,
-                seq_length: Optional[int] = 32,
+                seq_length: Optional[int] = 33,
                 **kwargs):
         """
         all the input items only include the historic contents
@@ -910,9 +929,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             _b, _h, _w, _= high_res_raster.shape
             high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
             low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
-
         batch_size, seq, c, h, w = high_res_raster.shape
-        # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
         high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
@@ -927,10 +944,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds
 
         # result dict
-        result_to_return = dict()
-        result_to_return["trajectory"] = list()
-        result_to_return["intend_maneuver"] = list()
-        result_to_return["current_maneuver"] = list()
         step = 0
         input_kwargs = dict(
             use_cache=use_cache,
@@ -974,9 +987,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         #     input_embeds = torch.cat((input_embeds, next_embed), dim=1)
         #     step += 1
-
-        result_to_return["trajectory"] = torch.cat(result_to_return["trajectory"], dim=1)
-        return result_to_return
+        return trajectory
 
     def beam_search(self, input_embeds, input_kwargs, max_length, beam_width=6):
             # input_embeds shape is (bsz, seq_length, hidden_size)
@@ -1035,12 +1046,18 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             
                 best_seq, best_score = beam[0]
                 best_seq = best_seq[:, -max_length:, :]
-                actions = self.traj_decoder(best_seq)
-                actions = torch.argmax(actions, dim = -1)
-                return actions
+                action_labels = self.traj_decoder(best_seq)
+                action_logits = F.softmax(action_labels, dim=-1)
+                action_labels = torch.argmax(action_logits, dim = -1)
+                return self.token2action(action_labels)
 
+    def token2action(self, tokens):
+        y_label = torch.floor(torch.div(tokens, self.token_map["x_class"]))
+        x_label = tokens - y_label * self.token_map["x_class"]
+        y_values = self.token_map["y_range"][0] + y_label * self.token_map["y_interval"]
+        x_values = self.token_map["x_range"][0] + x_label * self.token_map["x_interval"]
+        return torch.cat([x_values.unsqueeze(-1), y_values.unsqueeze(-1)], dim=-1)
 
-    # def _prepare_model_inputs(self, input)
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
 
@@ -1054,11 +1071,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         device = trajectory.device
         ego_trajectory = torch.zeros((bsz, 1, 4), device=device)
         ego_trajectory[-1] = yaw
-        next_normalized_trajectories = list()
         for idx in range(0, trajectory.shape[1]):
-            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, -1]), torch.sin(-ego_trajectory[:, -1, -1])
-            cos_.to(device)
-            sin_.to(device)
+            cos_, sin_ = torch.cos(-ego_trajectory[:, -1, -1]).to(device), torch.sin(-ego_trajectory[:, -1, -1]).to(device)
             delta_yaw = torch.arctan(torch.divide(trajectory[:, idx, 1], trajectory[:, idx, 0]))
             offset_x = trajectory[:, idx, 0] * cos_ + trajectory[:, idx, 1] * sin_
             offset_y = trajectory[:, idx, 1] * cos_ - trajectory[:, idx, 0] * sin_
@@ -1068,11 +1082,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                                         # ego_trajectory[:, -1, -1] + delta_yaw],dim=-1)
                                         ego_trajectory[:, -1, -1] + trajectory[:, idx, -1]],dim=-1)
             ego_trajectory = torch.cat((ego_trajectory, torch.tensor(next_ego_traj).reshape(bsz, 1, -1)), dim=1)
-            next_normalized_trajectories.append(next_ego_traj)
-
-        next_normalized_trajectories = torch.stack(next_normalized_trajectories).permute(1, 0, 2)
         # bsz, seq, 4
-        return next_normalized_trajectories
+        return ego_trajectory[:, 1:, :]
 
     def compute_yaw(self, point):
         yaw = torch.arctan(point[:, 1]/point[:, 0])
@@ -1159,13 +1170,15 @@ if  __name__ == '__main__':
     from transformer4planning.utils import ModelArguments
     parser = HfArgumentParser((ModelArguments))
     model_args = parser.parse_args()
-    model_args.d_embed = 256
-    model_args.d_model = 256
-    model_args.d_inner = 1024
-    model_args.n_layers = 4
-    model_args.n_heads = 8
-    model_args.model_name = "scratch-gpt"
+    model_args.d_embed = 768
+    model_args.d_model = 768
+    model_args.d_inner = 3072
+    model_args.n_layers = 12
+    model_args.n_heads = 12
+    model_args.model_name = "pretrain-autogpt"
+    model_args.model_pretrain_name_or_path = "/home/shiduozhang/nuplan/checkpoint-4000"
     model_args.task = "nuplan"
+    model_args.with_traffic_light = False
 
     model = build_models(model_args)
 
@@ -1194,7 +1207,7 @@ if  __name__ == '__main__':
     # print(dataset.features)
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]
-    labels = model.tokenize(example["trajectory"])
+    labels = model.tokenize(example["trajectory"])[9:]
     result = model.generate(
         # trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
         # context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
@@ -1203,8 +1216,9 @@ if  __name__ == '__main__':
         low_res_raster=torch.cat([example['low_res_raster'].unsqueeze(0),example['low_res_raster'].unsqueeze(0)]),
         return_dict=True,
     )
-    pred_traj = result.logits
-    gt_traj = example['trajectory_label'][1::2].cpu().numpy()
+    pred_traj = result
+    
+    gt_traj = example['trajectory'][9:].cpu().numpy()
     loss_fn = nn.MSELoss()
     loss = loss_fn(pred_traj, example['trajectory_label'][1::2])
     print("loss", loss)
