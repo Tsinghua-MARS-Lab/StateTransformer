@@ -7,7 +7,6 @@ from typing import List, Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
-import metrics
 
 class CustomCallback(DefaultFlowCallback):
     """
