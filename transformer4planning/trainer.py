@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
-
+import metrics
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -147,5 +147,15 @@ class PlanningTrainer(Trainer):
         logits = nested_detach(logits)
         if len(logits) == 1:
             logits = logits[0]
+
+        if 'auto' in model.config.model_name:
+            result = model.clf_metrics.compute()
+            logger.info("***** Eval results *****")
+            logger.info(f"  {result}")
+            try:
+                import wandb
+                wandb.log(result)
+            except:
+                pass
 
         return (loss, logits, labels)

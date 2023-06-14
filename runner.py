@@ -33,10 +33,12 @@ from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data import random_split
 from transformers.trainer_callback import DefaultFlowCallback
+import evaluate
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
+clf_metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
 
 @dataclass
 class ModelArguments:
@@ -271,6 +273,8 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
+    if 'auto' in model_args.model_name:
+        model.clf_metrics = clf_metrics
 
     if training_args.do_train:
         import multiprocessing
@@ -304,10 +308,6 @@ def main():
     
     trainer.pop_callback(DefaultFlowCallback)
 
-    # to run eval one time without the trainner
-    # if not training_args.do_train and training_args.do_eval:
-    #     trainer.evaluate()
-
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -319,8 +319,19 @@ def main():
         trainer.save_model()  # Saves the tokenizer too for easy upload
         trainer.save_state()
 
+    # to run eval one time without the trainner
+    # if not training_args.do_train and training_args.do_eval:
+    #     trainer.evaluate()
+
     # Evaluation
     results = {}
+    if training_args.do_eval:
+        if 'auto' in model_args.model_name:
+            result = clf_metrics.compute()
+            logger.info("***** Final Eval results *****")
+            logger.info(f"  {result}")
+            hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
+            evaluate.save("./results/", ** result, ** hyperparams)
 
     if training_args.do_predict:
         from sklearn.metrics import classification_report
@@ -530,6 +541,186 @@ def main():
                 with open(dagger_result_path, 'wb') as handle:
                     pickle.dump(y_bias_dagger_dic, handle)
                 print("dagger results save to {}".format(dagger_result_path))
+
+            # additionally use waymo metrics to test
+            # if model_args.task == "waymo":
+            #     from waymo_open_dataset.metrics.ops import py_metrics_ops
+            #     from waymo_open_dataset.metrics.python import config_util_py as config_util
+            #     from waymo_open_dataset.protos import motion_metrics_pb2
+            #     def _default_metrics_config():
+            #         config = motion_metrics_pb2.MotionMetricsConfig()
+            #         config_text = """
+            #           track_steps_per_second: 10
+            #           prediction_steps_per_second: 2
+            #           track_history_samples: 10
+            #           track_future_samples: 80
+            #           speed_lower_bound: 1.4
+            #           speed_upper_bound: 11.0
+            #           speed_scale_lower: 0.5
+            #           speed_scale_upper: 1.0
+            #           step_configurations {
+            #             measurement_step: 5
+            #             lateral_miss_threshold: 1.0
+            #             longitudinal_miss_threshold: 2.0
+            #           }
+            #           step_configurations {
+            #             measurement_step: 9
+            #             lateral_miss_threshold: 1.8
+            #             longitudinal_miss_threshold: 3.6
+            #           }
+            #           step_configurations {
+            #             measurement_step: 15
+            #             lateral_miss_threshold: 3.0
+            #             longitudinal_miss_threshold: 6.0
+            #           }
+            #           max_predictions: 6
+            #           """
+            #         text_format.Parse(config_text, config)
+            #         return config
+            #     class MotionMetrics:
+            #         """Wrapper for motion metrics computation."""
+            #
+            #         def __init__(self, config, is_short=False):
+            #             # super().__init__()
+            #             self._ground_truth_trajectory = []
+            #             self._ground_truth_is_valid = []
+            #             self._prediction_trajectory = []
+            #             self._prediction_score = []
+            #             self._object_type = []
+            #             self._scenario_id = []
+            #             self._object_id = []
+            #             self._metrics_config = config
+            #             self.is_short = is_short
+            #             self.not_compute = False
+            #
+            #             self.args = None
+            #
+            #         def reset_state(self):
+            #             self._ground_truth_trajectory = []
+            #             self._ground_truth_is_valid = []
+            #             self._prediction_trajectory = []
+            #             self._prediction_score = []
+            #             self._object_type = []
+            #             self._scenario_id = []
+            #             self._object_id = []
+            #
+            #         def update_state(self, prediction_trajectory, prediction_score,
+            #                          ground_truth_trajectory, ground_truth_is_valid, object_type, scenario_id, object_id):
+            #             if self.is_short:
+            #                 interval = (
+            #                         self._metrics_config.track_steps_per_second //
+            #                         self._metrics_config.prediction_steps_per_second)
+            #                 assert len(prediction_trajectory.shape) == 4, prediction_trajectory.shape
+            #                 # warning: numpy, not tf.tensor
+            #                 if not isinstance(prediction_trajectory, np.ndarray):
+            #                     prediction_trajectory = prediction_trajectory.numpy()
+            #                 if prediction_trajectory.shape[2] == self.args.future_frame_num:
+            #                     prediction_trajectory = prediction_trajectory[:, :, (interval - 1)::interval, :].copy()
+            #                 else:
+            #                     assert prediction_trajectory.shape[2] == 16
+            #                 ground_truth_trajectory = None
+            #                 ground_truth_is_valid = None
+            #
+            #             self._prediction_trajectory.append(prediction_trajectory)
+            #             self._prediction_score.append(prediction_score)
+            #             self._ground_truth_trajectory.append(ground_truth_trajectory)
+            #             self._ground_truth_is_valid.append(ground_truth_is_valid)
+            #             self._object_type.append(object_type)
+            #             self._scenario_id.append(scenario_id)
+            #             self._object_id.append(object_id)
+            #
+            #         def get_all(self):
+            #             return (
+            #                 self._prediction_trajectory,
+            #                 self._prediction_score,
+            #                 self._ground_truth_trajectory,
+            #                 self._ground_truth_is_valid,
+            #                 self._object_type,
+            #                 self._scenario_id,
+            #                 self._object_id,
+            #             )
+            #
+            #         def result(self):
+            #             # [batch_size, steps, 2].
+            #             if self.is_short or self.not_compute:
+            #                 return None
+            #             if len(self._prediction_trajectory) == 0:
+            #                 return None
+            #             prediction_trajectory = tf.concat(self._prediction_trajectory, 0)
+            #             # [batch_size].
+            #             prediction_score = tf.concat(self._prediction_score, 0)
+            #             # [batch_size, gt_steps, 7].
+            #             ground_truth_trajectory = tf.concat(self._ground_truth_trajectory, 0)
+            #             # [batch_size, gt_steps].
+            #             ground_truth_is_valid = tf.concat(self._ground_truth_is_valid, 0)
+            #             # [batch_size].
+            #             object_type = tf.cast(tf.concat(self._object_type, 0), tf.int64)
+            #
+            #             # We are predicting more steps than needed by the eval code. Subsample.
+            #             interval = (
+            #                     self._metrics_config.track_steps_per_second //
+            #                     self._metrics_config.prediction_steps_per_second)
+            #             # [batch_size, top_k, num_agents_per_joint_prediction, pred_steps, 2].
+            #             if len(prediction_trajectory.shape) == 5:
+            #                 prediction_trajectory = prediction_trajectory[:, :, :, (interval - 1)::interval, :]
+            #             else:
+            #                 assert len(prediction_trajectory.shape) == 4, prediction_trajectory.shape
+            #                 prediction_trajectory = prediction_trajectory[:, :, tf.newaxis, (interval - 1)::interval, :]
+            #
+            #             # Prepare these into shapes expected by the metrics computation.
+            #             #
+            #             # num_agents_per_joint_prediction is also 1 here.
+            #             # [batch_size, top_k].
+            #             assert len(prediction_score.shape) == 2
+            #             prediction_score = prediction_score[:, :]
+            #             # [batch_size, num_agents_per_joint_prediction, gt_steps, 7].
+            #             if len(ground_truth_trajectory.shape) == 4:
+            #                 pass
+            #             else:
+            #                 ground_truth_trajectory = ground_truth_trajectory[:, tf.newaxis]
+            #             # # SQ: change to hard checking, adding a new axis at the end to fit target dimension does not make sense ->>>>>
+            #             # assert len(ground_truth_trajectory.shape) == 4, ground_truth_trajectory.shape
+            #
+            #             # [batch_size, num_agents_per_joint_prediction, gt_steps].
+            #             if len(ground_truth_is_valid.shape) == 3:
+            #                 pass
+            #             else:
+            #                 ground_truth_is_valid = ground_truth_is_valid[:, tf.newaxis]
+            #             # [batch_size, num_agents_per_joint_prediction].
+            #             if len(object_type.shape) == 2:
+            #                 pass
+            #             else:
+            #                 object_type = object_type[:, tf.newaxis]
+            #
+            #             return py_metrics_ops.motion_metrics(
+            #                 config=self._metrics_config.SerializeToString(),
+            #                 prediction_trajectory=prediction_trajectory,
+            #                 prediction_score=prediction_score,
+            #                 ground_truth_trajectory=ground_truth_trajectory,
+            #                 ground_truth_is_valid=ground_truth_is_valid,
+            #                 object_type=object_type)
+            #
+            #     metrics_config = _default_metrics_config()
+            #     motion_metrics = MotionMetrics(metrics_config)
+            #     metric_names = config_util.get_breakdown_names_from_motion_config(
+            #         metrics_config)
+            #
+            #     for i in range(args.distributed_training - 1):
+            #         motion_metrics_ = queue.get()
+            #         assert isinstance(motion_metrics_, MotionMetrics), type(motion_metrics_)
+            #         motion_metrics_.args = args
+            #         for each in zip(*motion_metrics_.get_all()):
+            #             motion_metrics.update_state(*each)
+            #     print('all metric_values', len(motion_metrics.get_all()[0]))
+            #
+            #     score_file = utils.get_eval_identifier()
+            #
+            #     utils.logging(utils.metric_values_to_string(motion_metrics.result(), metric_names),
+            #                   type=score_file, to_screen=True, append_time=True)
+            #
+            #     gather_and_output_motion_metrics(args, device, queue, motion_metrics, metric_names, MotionMetrics)
+            #     gather_and_output_others(args, device, queue, motion_metrics)
+
         # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         # metrics = predict_results.metrics
         # max_predict_samples = (
