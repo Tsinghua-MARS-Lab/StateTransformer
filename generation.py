@@ -3,7 +3,7 @@ import torch, pickle
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-from dataset_gen.nuplan_obs import get_observation_for_nsm
+from dataset_gen.nuplan_obs import *
 from torch.utils.data import DataLoader
 import os, time
 import importlib.util
@@ -21,6 +21,11 @@ def main(args):
     #     'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
     #     'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
     #     'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    # }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
+    #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
+    #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
     # }
     data_path = {
         'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
@@ -46,7 +51,7 @@ def main(args):
     max_file_num = args.ending_file_num - starting_file_num if args.ending_file_num != -1 and starting_file_num is not None else None
     # dl = NuPlanDL(scenario_to_start=0,
     #             file_to_start=0,
-    #             max_file_number=max_file_num,
+    #             max_file_number=1,
     #             data_path=data_path, db=None, gt_relation_path=None,
     #             road_dic_path=None,
     #             running_mode=running_mode)
@@ -66,7 +71,8 @@ def main(args):
         frame_sample_interval=4,
         action_label_scale=100,
     )
-
+    # loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=20)
+    # obs = get_observation_for_autoregression_basedon_previous_coor(observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
     def yield_data(shards, dl, filter_info=None):
         for shard in shards:
             # loaded_dic = dl.get_next_file(specify_file_index=shard)
@@ -182,8 +188,12 @@ def main(args):
                             road_dic_path=None,
                             running_mode=running_mode)
             file_name = dl.file_names[0]
+            if args.auto_regressive:
+                seconds_in_future = 9
+            else:
+                seconds_in_future = 8
             while not dl.end:
-                loaded_dic, _ = dl.get_next(seconds_in_future=8, sample_interval=args.sample_interval)
+                loaded_dic, _ = dl.get_next(seconds_in_future=seconds_in_future, sample_interval=args.sample_interval)
                 if loaded_dic is None:
                     continue
                 if loaded_dic["skip"]:
@@ -193,8 +203,13 @@ def main(args):
                 # if loaded_dic["type"] not in filter_scenario:
                 #     continue
                 loaded_dic["agent"]["ego"]["type"] = 7 # Fix Ego Type to 7
-                observation_dic = get_observation_for_nsm(
-                    observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
+                if args.auto_regressive:
+                    observation_dic = get_observation_for_autoregression_basedon_previous_coor(
+                        observation_kwargs, loaded_dic, 40, 201, nsm_result=None
+                    )
+                # else:
+                #     observation_dic = get_observation_for_nsm(
+                #         observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
                 other_info = {
                     'file_name':file_name,
                     'scnario_type':loaded_dic["type"],
@@ -344,7 +359,7 @@ if __name__ == '__main__':
                         help="balance sample rate of simple scenarios in nsm case")
     parser.add_argument('--sample_interval', type=int, default=200)
     parser.add_argument('--dataset_name', type=str, default='nsm')
-    parser.add_argument('--auto_regressive', default=False)
+    parser.add_argument('--auto_regressive', default=False, action="store_true")
     # pass in filter pickle file path to generate augment dataset
     parser.add_argument('--filter_pickle_path', type=str, default=None)
     parser.add_argument('--filter_rank', type=float, default=0.1,
