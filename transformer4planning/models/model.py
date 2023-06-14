@@ -718,6 +718,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.token_map = None
         self.post_init()
 
+        self.clf_metrics = None
+
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
         warnings.warn(
@@ -901,6 +903,11 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         if not return_dict:
             output = (action_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
+
+        # evaluate accuracy if on eval
+        if self.eval():
+            predictions = torch.argmax(traj_logits, dim=-1)
+            self.clf_metrics.add_batch(references=trajectory, predictions=predictions)
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,

@@ -159,7 +159,7 @@ def main(args):
                     'scenario_id': '',  # empty for NuPlan
                     'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
                     'frame_index': t,
-                    'map_name': 'boston',
+                    'map_name': dl.current_dataset[0].map_name,
                     'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
                 }
                 if observation_dic is not None:

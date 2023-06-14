@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
-
+import metrics
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -147,5 +147,35 @@ class PlanningTrainer(Trainer):
         logits = nested_detach(logits)
         if len(logits) == 1:
             logits = logits[0]
+
+        batch_generate_eval = True
+        if 'auto' in model.config.model_name:
+            # run classsification metrics
+            result = model.clf_metrics.compute()
+            logger.info("***** Eval results *****")
+            logger.info(f"  {result}")
+
+            if batch_generate_eval:
+                # run generate for sequence of actions
+                prediction_actions_in_batch = model.generate(**input)
+                prediction_trajectory_in_batch = model.compute_normalized_points(prediction_actions_in_batch)
+                trajectory_label = input["trajectory_label"]
+                # compute ade
+                x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label[:, :, 0]
+                y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label[:, :, 1]
+                ade = torch.sqrt(x_error ** 2 + y_error ** 2)
+                ade = ade.mean()
+                result['ade'] = ade
+                # compute fde
+                x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label[:, -1, 0]
+                y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label[:, -1, 1]
+                fde = torch.sqrt(x_error ** 2 + y_error ** 2)
+                fde = fde.mean()
+                result['fde'] = fde
+            try:
+                import wandb
+                wandb.log(result)
+            except:
+                pass
 
         return (loss, logits, labels)

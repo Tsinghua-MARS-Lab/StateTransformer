@@ -33,10 +33,12 @@ from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data import random_split
 from transformers.trainer_callback import DefaultFlowCallback
+import evaluate
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
+clf_metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
 
 @dataclass
 class ModelArguments:
@@ -276,6 +278,8 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
+    if 'auto' in model_args.model_name:
+        model.clf_metrics = clf_metrics
 
     if training_args.do_train:
         import multiprocessing
@@ -309,10 +313,6 @@ def main():
     
     trainer.pop_callback(DefaultFlowCallback)
 
-    # to run eval one time without the trainner
-    # if not training_args.do_train and training_args.do_eval:
-    #     trainer.evaluate()
-
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -324,8 +324,19 @@ def main():
         trainer.save_model()  # Saves the tokenizer too for easy upload
         trainer.save_state()
 
+    # to run eval one time without the trainner
+    # if not training_args.do_train and training_args.do_eval:
+    #     trainer.evaluate()
+
     # Evaluation
     results = {}
+    if training_args.do_eval:
+        if 'auto' in model_args.model_name:
+            result = clf_metrics.compute()
+            logger.info("***** Final Eval results *****")
+            logger.info(f"  {result}")
+            hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
+            evaluate.save("./results/", ** result, ** hyperparams)
 
     if training_args.do_predict:
         from sklearn.metrics import classification_report
@@ -536,6 +547,7 @@ def main():
                 with open(dagger_result_path, 'wb') as handle:
                     pickle.dump(y_bias_dagger_dic, handle)
                 print("dagger results save to {}".format(dagger_result_path))
+
         # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         # metrics = predict_results.metrics
         # max_predict_samples = (
