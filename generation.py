@@ -44,7 +44,15 @@ def main(args):
     # check starting or ending number
     starting_file_num = args.starting_file_num if args.starting_file_num != -1 else None
     max_file_num = args.ending_file_num - starting_file_num if args.ending_file_num != -1 and starting_file_num is not None else None
-
+    # dl = NuPlanDL(scenario_to_start=0,
+    #             file_to_start=0,
+    #             max_file_number=max_file_num,
+    #             data_path=data_path, db=None, gt_relation_path=None,
+    #             road_dic_path=None,
+    #             running_mode=running_mode)
+    # scenarios, zero_file = dl.get_scenario_num()
+    # print("Total scenario number is", scenarios, "zeros files", zero_file)
+    # exit()
     observation_kwargs = dict(
         max_dis=500,
         high_res_raster_shape=[224, 224], # for high resolution image, we cover 50 meters for delicated short-term actions
@@ -175,7 +183,7 @@ def main(args):
                             running_mode=running_mode)
             file_name = dl.file_names[0]
             while not dl.end:
-                loaded_dic, _ = dl.get_next(seconds_in_future=8)
+                loaded_dic, _ = dl.get_next(seconds_in_future=8, sample_interval=args.sample_interval)
                 if loaded_dic is None:
                     continue
                 if loaded_dic["skip"]:
@@ -281,6 +289,7 @@ def main(args):
         for i, each_file_name in enumerate(sorted_file_names):
             if all_file_path.index(each_file_name) in file_indices:
                 sorted_file_indices.append(all_file_path.index(each_file_name))
+    print(f"Total file num is {total_file_num}")
     sorted_file_indices = sorted_file_indices[:total_file_num]
     # order by processes
     file_indices = []
