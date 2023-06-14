@@ -117,7 +117,7 @@ class Loss(torch.nn.Module):
         cls_loss = cls_loss.sum(dim=-1) #[batch, number of agents]
         cls_loss = cls_loss.sum(dim=-1)/endpoint_exist_mask.squeeze(dim=-1).sum(-1) #[batch]
         return cls_loss.mean()
-
+    
     def _cross_entropy(self, score, target, gamma=2):
         ce_loss = -score*target*(self.weight**gamma)
         return ce_loss
@@ -263,7 +263,6 @@ class Loss(torch.nn.Module):
         # inner_product = model_outputs['inner_product'] if 'inner_product' in model_outputs else None 
         losses, miss_rate = self.loss_function(y, pred, self.K, y_mask, conf=conf, par_conf=None, inner_product=None) #target and neighbours loss
         
-        
         if not self.training:
             traj_ade = torch.norm(pred[:,0]-y[:,0],dim=-1)*y_mask
             traj_ade = traj_ade.sum(-1)/(y_mask.sum(-1)+1e-7)
@@ -271,6 +270,7 @@ class Loss(torch.nn.Module):
             idx = conf[:,0].argmax(-1)
             # ADE = traj_ade.gather(-1,idx[:,None]).mean()
             minADE = traj_ade.min(-1)[0].mean()
+            # minADE = traj_ade.min(-1)[0]
             
             return minADE, None, None
 

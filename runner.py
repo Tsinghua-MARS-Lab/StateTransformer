@@ -101,6 +101,9 @@ class ModelArguments:
     task: Optional[str] = field(
         default="waymo" # only for mmtransformer
     )
+    with_traffic_light: Optional[str] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -239,6 +242,8 @@ def main():
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
                 test_dataset.set_format(type='torch')
                 print(test_dataset)
+            else:
+                test_dataset = train_dataset
             nuplan_dataset = dict(
                 train=train_dataset,
                 validation=test_dataset.shuffle(seed=training_args.seed),
@@ -259,7 +264,7 @@ def main():
                 test_dataset.set_format(type='torch')
                 print(test_dataset)
             else:
-                test_dataset = dataset.select(range(train_samples, len(dataset)))
+                test_dataset = dataset.select(range(train_samples))
                 test_dataset.set_format(type='torch')
                 print(test_dataset)
             
@@ -383,8 +388,10 @@ def main():
             # initialize intended maneuver metrics
             def nuplan_collate_fn(batch):
                 import collections
-                expect_keys = ["file_name", "frame_index", "high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-                
+                if "nonauto" in model_args.model_name:
+                    expect_keys = ["file_name", "frame_index", "high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
+                else:
+                    expect_keys = ["high_res_raster", "low_res_raster", "trajectory"]
                 elem = batch[0]
                 if isinstance(elem, collections.abc.Mapping):
                     return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
@@ -416,10 +423,9 @@ def main():
                 if "autogpt" in model_args.model_name:
                     actual_input = dict()
                     actual_input["trajectory"] = input["trajectory"][:, :8]
-                    actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
-                    actual_input["low_res_raster"] = input["low_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :]
-                    output = model.generate(**copy.deepcopy(actual_input))
-                    traj_pred = output["trajectory"]
+                    actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :].permute(0, 3, 4, 1, 2)
+                    actual_input["low_res_raster"] = input["low_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :].permute(0, 3, 4, 1, 2)
+                    traj_pred = model.generate(**copy.deepcopy(actual_input))
                 else:
                     output = model(**copy.deepcopy(input))
                     try:
