@@ -316,28 +316,10 @@ def get_observation_for_nsm(observation_kwargs, data_dic, scenario_frame_number,
 
     return result_to_return
 
-def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenario_frame_number, total_frames, nsm_result=None):
+def get_observation_for_autoregression_basedon_previous_coor(observation_kwargs, data_dic, scenario_frame_number, total_frames, nsm_result=None):
     """
-    only for NuPlan dataset, rasters and vectors are not flexible to change
-    Rester shapes should be 2D: width and height
-    Speed: tested on MAC M1 on 2Hz, 6 examples per second with two rasters, 7 examples per second without rasters,
-    Size: about 1.3GB per file on 2Hz with two rasters, 40MB per file without rasters
-    return:
-        'intended_maneuver_vector': (t, 1),
-        'current_maneuver_vector': (t, 12),
-        'trajectory_label': (t, 4)  # t = future_frame_num
-        'intended_maneuver_label': (1),  # after interval
-        'current_maneuver_label': (12),  # after interval
-        'high_res_raster': (w, h, 1 + n + m * t)
-        'low_res_raster': (w, h, 1 + n + m * t)
-    {
-        'goal_of_current_frame_raster': (w, h),
-        'map_raster': (n, w, h),  # n is the number of road types and traffic lights types
-        'ego_past_raster': (t, w, h)  # t = past_frame_num // frame_sample_interval + 1 (including the current frame)
-        'other_past_raster': (t, m-1, w, h)  # m is the number of agent types
-    }
+    only for autoregressive mode nuplan raster dataset generation.
     """
-
     # hyper parameters setting
     max_dis = observation_kwargs["max_dis"]
     high_res_raster_shape = observation_kwargs["high_res_raster_shape"]
@@ -356,17 +338,17 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
 
     total_road_types = 20
     total_agent_types = 8
-    total_raster_channels = 1 + total_road_types + total_agent_types 
+    total_traffic_types = 4
+    total_raster_channels = 1 + total_road_types + total_traffic_types + total_agent_types 
     sample_frames = list(range(scenario_frame_number - past_frames_number, \
                                scenario_frame_number + future_frames_number + 1, frame_sample_interval))
 
-   
     trajectory_list = list()
     high_res_rasters_list = list()
     low_res_rasters_list = list()
     current_goal_maneuver_mem = list()
     current_action_weights_mem = list()
-    for _, frame in enumerate(sample_frames):
+    for id, frame in enumerate(sample_frames):
         # update ego position
         ego_pose = data_dic["agent"]["ego"]["pose"][frame].copy()
         cos_, sin_ = math.cos(-ego_pose[3]), math.sin(-ego_pose[3])
@@ -437,11 +419,8 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
             low_res_route = low_res_route.astype('int32')
             high_res_route += observation_kwargs["high_res_raster_shape"][0] // 2
             low_res_route += observation_kwargs["low_res_raster_shape"][0] // 2
-            for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
-                        tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
-                        tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
+            cv2.fillPoly(rasters_high_res_channels[0], np.int32([high_res_route[:, :2]]), (255, 255, 255))
+            cv2.fillPoly(rasters_low_res_channels[0], np.int32([low_res_route[:, :2]]), (255, 255, 255))
         
         # road type channel drawing
         for i, key in enumerate(data_dic['road']):
@@ -467,11 +446,43 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
             high_res_road += observation_kwargs["high_res_raster_shape"][0] // 2
             low_res_road += observation_kwargs["low_res_raster_shape"][0] // 2
 
+            if road_type in [5, 17, 18, 19]:
+                cv2.fillPoly(rasters_high_res_channels[road_type + 1], np.int32([high_res_road[:, :2]]), (255, 255, 255))
+                cv2.fillPoly(rasters_low_res_channels[road_type + 1], np.int32([low_res_road[:, :2]]), (255, 255, 255))
+            else:
+                for j in range(simplified_xyz.shape[0] - 1):
+                    cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
+                            tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
+                    cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
+                            tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
+        # traffic light
+        for i, key in enumerate(data_dic['traffic_light']):
+            xyz = data_dic["road"][key]["xyz"].copy()
+            xyz[:, :2] -= ego_pose[:2]
+            if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+                abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+                continue
+            traffic_state = data_dic['traffic_light'][key]['state']
+            pts = list(zip(xyz[:, 0], xyz[:, 1]))
+            line = shapely.geometry.LineString(pts)
+            simplified_xyz_line = line.simplify(1)
+            simplified_x, simplified_y = simplified_xyz_line.xy
+            simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz[:, 1] *= -1
+            high_res_traffic = simplified_xyz * high_res_raster_scale
+            low_res_traffic = simplified_xyz * low_res_raster_scale
+            high_res_traffic = high_res_traffic.astype('int32') + observation_kwargs["high_res_raster_shape"][0] // 2
+            low_res_traffic = low_res_traffic.astype('int32') + observation_kwargs["high_res_raster_shape"][0] // 2
+            # traffic state order is GREEN, RED, YELLOW, UNKNOWN
             for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
-                        tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
-                        tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
+                cv2.line(rasters_high_res_channels[1 + total_road_types + traffic_state], \
+                        tuple(high_res_traffic[j, :2]),
+                        tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                cv2.line(rasters_low_res_channels[1 + total_road_types + traffic_state], \
+                        tuple(low_res_traffic[j, :2]),
+                        tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
         
         cos_, sin_ = math.cos(-ego_pose[3]), math.sin(-ego_pose[3])
         for i, key in enumerate(data_dic['agent']):
@@ -506,9 +517,10 @@ def get_observation_for_autoregression_nsm(observation_kwargs, data_dic, scenari
         low_res_rasters_list.append(rasters_low_res)
     
     result_to_return['trajectory'] = np.array(trajectory_list)
+    # squeeze raster for less space occupy and faster disk write
     result_to_return['high_res_raster'] = np.array(high_res_rasters_list, dtype=bool).transpose(1, 2, 0, 3).reshape(224, 224, -1)
     result_to_return['low_res_raster'] = np.array(low_res_rasters_list, dtype=bool).transpose(1, 2, 0, 3).reshape(224, 224, -1)
-    #.transpose(1, 2, 0, 3).reshape(224, 224, -1)
+
     if nsm_result is not None:
         result_to_return['intended_maneuver_vector'] = np.array(current_goal_maneuver_mem, dtype=np.int32)
         result_to_return['current_maneuver_vector'] = np.array(current_action_weights_mem, dtype=np.float32)
