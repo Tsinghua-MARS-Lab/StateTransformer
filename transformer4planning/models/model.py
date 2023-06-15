@@ -906,7 +906,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         # evaluate accuracy if on eval
         if self.eval():
             predictions = torch.argmax(action_logits, dim=-1)
-            print(action_label.shape, predictions.shape)
             self.clf_metrics.add_batch(references=action_label, predictions=predictions)
 
         return CausalLMOutputWithCrossAttentions(
