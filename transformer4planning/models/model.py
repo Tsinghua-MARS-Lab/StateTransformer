@@ -16,9 +16,9 @@ _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
 
 DEFAULT_TOKEN_CONFIG = dict(
-    x_range=[0, 3],
-    y_range=[-1, 1],
-    x_class=60,
+    x_range=[0, 4],
+    y_range=[-0.4, 0.4],
+    x_class=80,
     y_class=40,
     sample_frequency=4 
 )
@@ -696,7 +696,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         model_args = kwargs['model_args']
         self.predict_trajectory = model_args.predict_trajectory
         self.recover_obs = model_args.recover_obs
-
         if model_args.with_traffic_light:
             in_channels = 33 # raster: goal + road_type + traffic light +agent_type
         else:
@@ -704,7 +703,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         n_embed = config.n_embd // 2
 
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
-        self.action_m_embed = nn.Sequential(nn.Linear(40 * 60, config.n_embd), nn.Tanh())
+        self.action_m_embed = nn.Sequential(nn.Linear(40 * 80, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
         if self.predict_trajectory:
@@ -907,7 +906,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         # evaluate accuracy if on eval
         if self.eval():
             predictions = torch.argmax(action_logits, dim=-1)
-            self.clf_metrics.add_batch(references=trajectory, predictions=predictions)
+            print(action_label.shape, predictions.shape)
+            self.clf_metrics.add_batch(references=action_label, predictions=predictions)
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
@@ -1182,7 +1182,7 @@ if  __name__ == '__main__':
     model_args.d_inner = 3072
     model_args.n_layers = 12
     model_args.n_heads = 12
-    model_args.model_name = "pretrain-autogpt"
+    model_args.model_name = "scratch-autogpt"
     model_args.model_pretrain_name_or_path = "/home/shiduozhang/nuplan/checkpoint-4000"
     model_args.task = "nuplan"
     model_args.with_traffic_light = False
@@ -1215,6 +1215,7 @@ if  __name__ == '__main__':
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]
     labels = model.tokenize(example["trajectory"])[9:]
+    model.eval()
     example = model(
         trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
         high_res_raster=torch.cat([example['high_res_raster'].unsqueeze(0),example['high_res_raster'].unsqueeze(0)]),
