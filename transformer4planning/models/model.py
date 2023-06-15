@@ -820,8 +820,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         """
         if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, c, h, w)
             _b, _h, _w, _= high_res_raster.shape
-            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 4, 3, 1, 2)
-            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 4, 3, 1, 2)
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
         
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -906,7 +906,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         # evaluate accuracy if on eval
         if self.eval():
-            predictions = torch.argmax(traj_logits, dim=-1)
+            predictions = torch.argmax(action_logits, dim=-1)
             self.clf_metrics.add_batch(references=trajectory, predictions=predictions)
 
         return CausalLMOutputWithCrossAttentions(
@@ -1215,6 +1215,12 @@ if  __name__ == '__main__':
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]
     labels = model.tokenize(example["trajectory"])[9:]
+    example = model(
+        trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
+        high_res_raster=torch.cat([example['high_res_raster'].unsqueeze(0),example['high_res_raster'].unsqueeze(0)]),
+        low_res_raster=torch.cat([example['low_res_raster'].unsqueeze(0),example['low_res_raster'].unsqueeze(0)]),
+        return_dict=True,
+    )
     result = model.generate(
         # trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
         # context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
