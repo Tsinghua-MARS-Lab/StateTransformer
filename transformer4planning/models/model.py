@@ -11,6 +11,7 @@ from transformer4planning.models.decoders import *
 
 import torch.nn as nn
 import torch.nn.functional as F
+from datasets import Value
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
@@ -23,7 +24,7 @@ DEFAULT_TOKEN_CONFIG = dict(
     sample_frequency=4 
 )
 
-def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9):
+def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True):
     """
     input raster can be either high resolution raster or low resolution raster
     expected input size: [bacthsize, channel, h, w], and channel is consisted of goal(1d)+roadtype(20d)+agenttype*time(8*9d)
@@ -31,13 +32,18 @@ def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9):
     b, c, h, w = raster.shape
     agent_type = 8
     road_type = 20
+    traffic_light_type = 4
 
     goal_raster = raster[:, 0, :, :].reshape(b, 1, h, w)
     road_ratser = raster[:, 1:21, :, :]
-    result = torch.zeros((b, framenum, agent_type + road_type + 1, h, w), device=raster.device)
+    traffic_raster = raster[:, 21:25, :, :]
+    result = torch.zeros((b, framenum, agent_type + road_type + traffic_light_type + 1, h, w), device=raster.device)
     for i in range(framenum):
-        agent_raster = raster[:, 1 + road_type + i::framenum, :, :]
-        raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim = 1) # expected format (b, 1+20+8, h, w)
+        agent_raster = raster[:, 1 + road_type + traffic_light_type + i::framenum, :, :]
+        if traffic:
+            raster_i = torch.cat([goal_raster, road_ratser, traffic_raster, agent_raster], dim = 1) # expected format (b, 1+20+8, h, w)
+        else:
+            raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim = 1) 
         result[:, i, :, :, :] = raster_i
     # return format (batchsize, history_frame_number, channels_per_frame, h, w)
     return result
@@ -65,7 +71,7 @@ class TransfoXLModelNuPlan(TransfoXLPreTrainedModel):
         self.predict_trajectory = model_args.predict_trajectory
 
         self.loss_fn = model_args.loss_fn
-        if model_args["with_traffic_light"]:
+        if model_args.with_traffic_light:
             in_channels = 33 # raster: goal + road_type + traffic light +agent_type
         else:
             in_channels = 29
@@ -216,7 +222,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         if self.task == "waymo":
             in_channels = 26
         else:
-            if model_args["with_traffic_light"]:
+            if model_args.with_traffic_light:
                 in_channels = 33 # raster: goal + road_type + traffic light +agent_type
             else:
                 in_channels = 29  # raster: goal + road_type + agent_type
@@ -233,6 +239,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.model_parallel = False
         self.device_map = None
+        self.with_traffic_light = model_args.with_traffic_light
         self.post_init()
     
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
@@ -297,8 +304,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1] + 1
         if self.task == "nuplan":
-            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
+            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
         elif self.task == "waymo":
             high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
             low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
@@ -374,7 +381,7 @@ class XLNetModelNuplan(XLNetPreTrainedModel):
         model_args = kwargs["model_args"]
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
-        if model_args["with_traffic_light"]:
+        if model_args.with_traffic_light:
             in_channels = 33 # raster: goal + road_type + traffic light +agent_type
         else:
             in_channels = 29
@@ -480,7 +487,7 @@ class T5ModelNuplan(T5PreTrainedModel):
         model_args = kwargs["model_args"]
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
-        if model_args["with_traffic_light"]:
+        if model_args.with_traffic_light:
             in_channels = 33 # raster: goal + road_type + traffic light +agent_type
         else:
             in_channels = 29
@@ -600,7 +607,7 @@ class DeBertaNuplan(DebertaV2PreTrainedModel):
         model_args = kwargs["model_args"]
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
-        if model_args["with_traffic_light"]:
+        if model_args.with_traffic_light:
             in_channels = 33 # raster: goal + road_type + traffic light +agent_type
         else:
             in_channels = 29
@@ -904,9 +911,9 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             return ((loss,) + output) if loss is not None else output
 
         # evaluate accuracy if on eval
-        if self.eval():
-            predictions = torch.argmax(action_logits, dim=-1)
-            self.clf_metrics.add_batch(references=action_label, predictions=predictions)
+        # if not self.training:
+        #     predictions = torch.argmax(action_logits, dim=-1)
+        #     self.clf_metrics.add_batch(references=Value(action_label.tolist()), predictions=Value(predictions.tolist()))
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
@@ -1181,10 +1188,10 @@ if  __name__ == '__main__':
     model_args.d_inner = 3072
     model_args.n_layers = 12
     model_args.n_heads = 12
-    model_args.model_name = "scratch-autogpt"
+    model_args.model_name = "scratch-nonauto-gpt"
     model_args.model_pretrain_name_or_path = "/home/shiduozhang/nuplan/checkpoint-4000"
     model_args.task = "nuplan"
-    model_args.with_traffic_light = False
+    model_args.with_traffic_light = True
 
     model = build_models(model_args)
 
@@ -1208,15 +1215,17 @@ if  __name__ == '__main__':
         next_world_coor_y = next_world_coor_trajectories[:,1]
         return next_world_coor_x - yaw, next_world_coor_y - yaw
     
-    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/autoregressive_boston/")
-    # dataset = datasets.load_from_disk("/home/shiduozhang/waymo/t4p_waymo")
+    # dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/autoregressive_boston/")
+    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/boston_byscenario")
     # print(dataset.features)
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]
-    labels = model.tokenize(example["trajectory"])[9:]
+    # labels = model.tokenize(example["trajectory"])[9:]
     model.eval()
     example = model(
-        trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
+        trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
+        context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
+        # trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
         high_res_raster=torch.cat([example['high_res_raster'].unsqueeze(0),example['high_res_raster'].unsqueeze(0)]),
         low_res_raster=torch.cat([example['low_res_raster'].unsqueeze(0),example['low_res_raster'].unsqueeze(0)]),
         return_dict=True,
