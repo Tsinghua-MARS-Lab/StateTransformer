@@ -12,6 +12,7 @@ from transformer4planning.models.decoders import *
 import torch.nn as nn
 import torch.nn.functional as F
 from datasets import Value
+import evaluate
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
@@ -704,12 +705,14 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         self.predict_trajectory = model_args.predict_trajectory
         self.recover_obs = model_args.recover_obs
         if model_args.with_traffic_light:
-            in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+            self.in_channels = 33 # raster: goal + road_type + traffic light +agent_type
         else:
-            in_channels = 29
+            self.in_channels = 29
+        # TODO: add parameter to conifg past_seq 
+        self.past_seq = 10
         n_embed = config.n_embd // 2
 
-        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=self.in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(40 * 80, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
@@ -814,7 +817,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        past_seq: Optional[int] = 8,
         **kwargs
     ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
         """
@@ -824,10 +826,11 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         low_res_raster: batch_size, seq, h, w, c (c=29)
         trajectory: batch_size, seq, 4
         """
+        past_seq = self.past_seq
         if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, c, h, w)
             _b, _h, _w, _= high_res_raster.shape
-            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
-            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, 29).permute(0, 3, 4, 1, 2)
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
         
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
@@ -911,9 +914,9 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             return ((loss,) + output) if loss is not None else output
 
         # evaluate accuracy if on eval
-        # if not self.training:
-        #     predictions = torch.argmax(action_logits, dim=-1)
-        #     self.clf_metrics.add_batch(references=Value(action_label.tolist()), predictions=Value(predictions.tolist()))
+        if not self.training:
+            predictions = torch.argmax(action_logits, dim=-1)
+            self.clf_metrics.add_batch(references=action_label.reshape(-1), predictions=predictions.reshape(-1))
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
@@ -964,43 +967,14 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        trajectory = self.beam_search(input_embeds, input_kwargs, max_length=seq_length, beam_width=2)
-        # while True:
-        #     attention_mask = self._prepare_attention_mask_for_generation(input_embeds)
-        #     position_ids = self._prepare_position_ids_for_generation(attention_mask)
-        #     transformer_outputs = self.transformer(
-        #         inputs_embeds=input_embeds,
-        #         attention_mask=attention_mask,
-        #         position_ids=position_ids,
-        #         use_cache=use_cache,
-        #         output_attentions=output_attentions,
-        #         output_hidden_states=output_hidden_states,
-        #         return_dict=return_dict,
-        #     )
-        #     hidden_state = transformer_outputs[0]
-        #     # pred mode: Obs-Action Pair: [o,a | ... | o,a | a | a | a]
-        #     if self.mode == "PRED-OA":
-        #         if step > 2 * seq_length - 1:
-        #             break
-        #         if step % 2 == 0:
-        #             if self.predict_trajectory:
-        #                 traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
-        #             result_to_return["trajectory"].append(traj_logits)
-        #             next_embed = self.action_m_embed(traj_logits)
-        #         if step % 2 == 1:
-        #             next_embed = self.obs_embed_decoder(hidden_state[:, -1, :].unsqueeze(1))
-        #     # pred mode : Only Action
-        #     elif self.mode == "PRED-A":
-        #         if step > seq_length - 1:
-        #             break
-        #         if self.predict_trajectory:
-        #             traj_logits = self.traj_decoder(hidden_state[:, -1, :].unsqueeze(1))
-        #         result_to_return["trajectory"].append(traj_logits)
-        #         next_embed = self.action_m_embed(traj_logits)
-
-        #     input_embeds = torch.cat((input_embeds, next_embed), dim=1)
-        #     step += 1
-        return trajectory
+        beam = self.beam_search(input_embeds, input_kwargs, max_length=seq_length, beam_width=6)
+        best_seq, _ = beam[0]
+        best_seq = best_seq[:, -seq_length:, :]
+        action_labels = self.traj_decoder(best_seq)
+        action_logits = F.softmax(action_labels, dim=-1)
+        action_labels = torch.argmax(action_logits, dim = -1)
+        return self.token2action(action_labels)
+        
 
     def beam_search(self, input_embeds, input_kwargs, max_length, beam_width=6):
             # input_embeds shape is (bsz, seq_length, hidden_size)
@@ -1056,13 +1030,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                         reshaped_candidates.append((candidate_cls_order, candidate_score_order))
                         
                     beam = reshaped_candidates
-            
-                best_seq, best_score = beam[0]
-                best_seq = best_seq[:, -max_length:, :]
-                action_labels = self.traj_decoder(best_seq)
-                action_logits = F.softmax(action_labels, dim=-1)
-                action_labels = torch.argmax(action_logits, dim = -1)
-                return self.token2action(action_labels)
+
+                return beam
 
     def token2action(self, tokens):
         y_label = torch.floor(torch.div(tokens, self.token_map["x_class"]))
@@ -1188,11 +1157,11 @@ if  __name__ == '__main__':
     model_args.d_inner = 3072
     model_args.n_layers = 12
     model_args.n_heads = 12
-    model_args.model_name = "scratch-nonauto-gpt"
+    model_args.model_name = "scratch-auto-gpt"
     model_args.model_pretrain_name_or_path = "/home/shiduozhang/nuplan/checkpoint-4000"
     model_args.task = "nuplan"
-    model_args.with_traffic_light = True
-
+    model_args.with_traffic_light = False
+    clf_metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
     model = build_models(model_args)
 
     def compute_world_points(pred_traj, yaw=0):
@@ -1215,21 +1184,23 @@ if  __name__ == '__main__':
         next_world_coor_y = next_world_coor_trajectories[:,1]
         return next_world_coor_x - yaw, next_world_coor_y - yaw
     
-    # dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/autoregressive_boston/")
-    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/boston_byscenario")
+    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/autoregressive_boston/")
+    # dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/boston_byscenario")
     # print(dataset.features)
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]
     # labels = model.tokenize(example["trajectory"])[9:]
     model.eval()
+    model.clf_metrics = clf_metrics
     example = model(
-        trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
-        context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
-        # trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
+        # trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
+        # context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
+        trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
         high_res_raster=torch.cat([example['high_res_raster'].unsqueeze(0),example['high_res_raster'].unsqueeze(0)]),
         low_res_raster=torch.cat([example['low_res_raster'].unsqueeze(0),example['low_res_raster'].unsqueeze(0)]),
         return_dict=True,
     )
+    eval_result = model.clf_metrics.compute() 
     result = model.generate(
         # trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
         # context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,

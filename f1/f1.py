@@ -123,7 +123,7 @@ class F1(evaluate.Metric):
             reference_urls=["https://scikit-learn.org/stable/modules/generated/sklearn.metrics.f1_score.html"],
         )
 
-    def _compute(self, predictions, references, labels=None, pos_label=1, average="binary", sample_weight=None):
+    def _compute(self, predictions, references, labels=None, pos_label=1, average="macro", sample_weight=None):
         score = f1_score(
             references, predictions, labels=labels, pos_label=pos_label, average=average, sample_weight=sample_weight
         )
