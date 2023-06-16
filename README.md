@@ -8,8 +8,8 @@ model_name consist of ['scratch','pretrain']-['xl','gpt']
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run \
 --nproc_per_node=8 \
-runner.py --model_name scratch-transxl \
---model_pretrain_name_or_path transfo-xl-wt103 \
+runner.py --model_name scratch-nonauto-gpt \
+--model_pretrain_name_or_path None \
 --saved_dataset_folder /localdata_ssd/nuplan_nsm/nsm_sparse_balance_new_4seq \
 --output_dir data/example/training_results \
 --logging_dir data/example/training_logs \
@@ -21,17 +21,11 @@ runner.py --model_name scratch-transxl \
 --logging_steps 200 \
 --save_strategy steps \
 --save_steps 2000 \
---past_index 2 \
 --dataloader_num_workers 5 \
 --save_total_limit 5 \
---use_nsm False \
---with_future_intend_maneuver False \
---with_future_current_maneuver False \
 --predict_trajectory True \
---predict_trajectory_with_stopflag False \
 --dataloader_drop_last True \
 --do_train \
---maneuver_repeat True \
 --d_embed 256 \
 --d_model 256 \
 --d_inner 1024 \
@@ -39,6 +33,12 @@ runner.py --model_name scratch-transxl \
 --n_heads 8 \
 --activation_function silu \
 --resume_from_checkpoint None\
+--do_eval \
+--evaluation_strategy epoch \
+--saved_valid_dataset_folder /localdata_ssd/nuplan/boston_test_byscenario/ \ --per_device_eval_batch_size 2 \
+--dataset_scale 1 \
+--task nuplan \
+--with_traffic_light True \
 `
 
 
@@ -55,19 +55,14 @@ runner.py --model_name pretrain-xl \
 --saved_dataset_folder /localdata_ssd/nuplan/nsm_autoregressive_rapid \
 --output_dir data/example/prediction_results/checkpoint-xxxxx \
 --per_device_eval_batch_size 20 \
---past_index 2 \
 --dataloader_num_workers 40 \
---use_nsm False \
---with_future_intend_maneuver False \
---with_future_current_maneuver False \
---predict_intended_maneuver False \
---predict_current_maneuver False \
 --predict_trajectory True \
---predict_trajectory_with_stopflag False \
 --recover_obs False \
 --do_predict \
+--saved_valid_dataset_folder /localdata_ssd/nuplan/boston_test_byscenario/
 --max_predict_samples 500 \
 --dataloader_drop_last True \
+--with_traffic_light True
 `
 
 ## To generate dataset:
