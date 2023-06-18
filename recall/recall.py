@@ -119,7 +119,7 @@ class Recall(evaluate.Metric):
         references,
         labels=None,
         pos_label=1,
-        average="macro",
+        average="binary",
         sample_weight=None,
         zero_division="warn",
     ):
