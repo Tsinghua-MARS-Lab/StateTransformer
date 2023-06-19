@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
+import logging
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -150,9 +151,13 @@ class PlanningTrainer(Trainer):
         batch_generate_eval = True
         if 'auto' in model.config.model_name:
             # run classsification metrics
-            result = model.clf_metrics.compute()
-            logger.info("***** Eval results *****")
-            logger.info(f"  {result}")
+            result = dict()
+            result["accuracy"] = model.clf_metrics["accuracy"].compute()
+            result["f1"] = model.clf_metrics["f1"].compute(average="macro")
+            result["precision"] = model.clf_metrics["precision"].compute(average="macro")
+            result["recall"] = model.clf_metrics["recall"].compute(average="macro")
+            logging.info("***** Eval results *****")
+            logging.info(f"  {result}")
 
             if batch_generate_eval:
                 # run generate for sequence of actions

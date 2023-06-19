@@ -31,14 +31,18 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
-from torch.utils.data import random_split
 from transformers.trainer_callback import DefaultFlowCallback
 import evaluate
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
-clf_metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
+cls_metrics = dict(
+    accuracy=evaluate.load("accuracy"),
+    f1=evaluate.load("f1"),
+    precision=evaluate.load("precision"),
+    recall=evaluate.load("recall")
+)
 
 @dataclass
 class ModelArguments:
@@ -312,6 +316,9 @@ def main():
     )
     
     trainer.pop_callback(DefaultFlowCallback)
+
+    if 'auto' in model_args.model_name and training_args.do_eval:
+        trainer.evaluate()
 
     # Training
     if training_args.do_train:

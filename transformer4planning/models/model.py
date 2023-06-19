@@ -717,7 +717,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         self.traj_decoder = None
         if self.predict_trajectory:
-            self.traj_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=60 * 40)
+            self.traj_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=80 * 40)
         if self.recover_obs:
             self.obs_embed_decoder = DecoderResCat(model_args.d_inner, config.n_embd, out_features=config.n_embd)
         # end of added
@@ -916,7 +916,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         # evaluate accuracy if on eval
         if not self.training:
             predictions = torch.argmax(action_logits, dim=-1)
-            self.clf_metrics.add_batch(references=action_label.reshape(-1), predictions=predictions.reshape(-1))
+            for _, metric in self.clf_metrics.items():
+                metric.add_batch(references=action_label.reshape(-1), predictions=predictions.reshape(-1))
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
@@ -1160,7 +1161,7 @@ if  __name__ == '__main__':
     model_args.model_name = "scratch-auto-gpt"
     model_args.model_pretrain_name_or_path = "/home/shiduozhang/nuplan/checkpoint-4000"
     model_args.task = "nuplan"
-    model_args.with_traffic_light = False
+    model_args.with_traffic_light = True
     clf_metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
     model = build_models(model_args)
 
@@ -1184,8 +1185,8 @@ if  __name__ == '__main__':
         next_world_coor_y = next_world_coor_trajectories[:,1]
         return next_world_coor_x - yaw, next_world_coor_y - yaw
     
-    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/autoregressive_boston/")
-    # dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/boston_byscenario")
+    # dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/autoregressive_boston/")
+    dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_autoregressive_test/")
     # print(dataset.features)
     dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
     example = dataset['train'][0]
