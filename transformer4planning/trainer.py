@@ -141,15 +141,8 @@ class PlanningTrainer(Trainer):
                     # # TODO: this needs to be fixed and made cleaner later.
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
-        if prediction_loss_only:
-            return (loss, None, None)
-
-        logits = nested_detach(logits)
-        if len(logits) == 1:
-            logits = logits[0]
-
-        batch_generate_eval = True
-        if 'auto' in model.config.model_name:
+        batch_generate_eval = False
+        if 'auto' in model.model_args.model_name:
             # run classsification metrics
             result = dict()
             result["accuracy"] = model.clf_metrics["accuracy"].compute()
@@ -176,10 +169,14 @@ class PlanningTrainer(Trainer):
                 fde = torch.sqrt(x_error ** 2 + y_error ** 2)
                 fde = fde.mean()
                 result['fde'] = fde
-            try:
-                import wandb
-                wandb.log(result)
-            except:
-                pass
+                    
+            self.log(result)
+    
+        if prediction_loss_only:
+            return (loss, None, None)
 
-        return (loss, logits, labels)
+        logits = nested_detach(logits)
+        if len(logits) == 1:
+            logits = logits[0]
+
+        return (loss, logits, None)
