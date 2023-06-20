@@ -37,7 +37,7 @@ import evaluate
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
-cls_metrics = dict(
+clf_metrics = dict(
     accuracy=evaluate.load("accuracy"),
     f1=evaluate.load("f1"),
     precision=evaluate.load("precision"),
@@ -155,6 +155,9 @@ class DataTrainingArguments:
     )
     dataset_scale: Optional[str] = field(
         default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
+    )
+    dagger: Optional[str] = field(
+        default=False, metadata={"help: Whether to save "}
     )
 
 def main():
@@ -317,9 +320,6 @@ def main():
     
     trainer.pop_callback(DefaultFlowCallback)
 
-    if 'auto' in model_args.model_name and training_args.do_eval:
-        trainer.evaluate()
-
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -330,10 +330,6 @@ def main():
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()  # Saves the tokenizer too for easy upload
         trainer.save_state()
-
-    # to run eval one time without the trainner
-    # if not training_args.do_train and training_args.do_eval:
-    #     trainer.evaluate()
 
     # Evaluation
     results = {}
@@ -371,11 +367,7 @@ def main():
                 'current_frame': [],
                 'next_step_action': [],
                 'predicted_trajectory': [],
-            }
-            prediction_metrics = {
-                'next_step_action': None,
-                'predicted_trajectory': None,
-            }        
+            }     
             device = model.device
             def preprocess_data(examples):
                 # take a batch of texts
@@ -435,10 +427,7 @@ def main():
                     traj_pred = model.generate(**copy.deepcopy(actual_input))
                 else:
                     output = model(**copy.deepcopy(input))
-                    try:
-                        intended_m_logits, current_m_logits, traj_pred = output.all_logits
-                    except:
-                        traj_pred = output.logits                   
+                    traj_pred = output.logits                   
                     try:
                         file_name = input['file_name']
                         current_frame_idx = input['frame_index']
@@ -447,8 +436,9 @@ def main():
                         current_frame_idx = -1 * torch.ones(input_length)
                     prediction_results['file_names'].extend(file_name)
                     prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
-                    dagger_results['file_name'].extend(file_name)
-                    dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
+                    if data_args.dagger:
+                        dagger_results['file_name'].extend(file_name)
+                        dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
                 
                 if model_args.predict_trajectory:
                     if "autogpt" in model_args.model_name:
@@ -483,9 +473,10 @@ def main():
                 print('End point y offset: ', np.average(np.abs(end_bias_y)))
                 distance_error = np.sqrt(np.abs(all_bias_x)**2 + np.abs(all_bias_y)**2).reshape(-1, 80)
                 final_distance_error = np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)
-                dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
-                dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
-                dagger_results['y_bias'].extend(list(np.average(all_bias_y.reshape(-1, 80), axis=1).reshape(-1)))
+                if data_args.dagger:
+                    dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
+                    dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
+                    dagger_results['y_bias'].extend(list(np.average(all_bias_y.reshape(-1, 80), axis=1).reshape(-1)))
                 print('ADE', np.average(distance_error))
                 print('FDE', np.average(final_distance_error))
             
@@ -533,27 +524,26 @@ def main():
                 plt.xlabel("Value")
                 plt.ylabel("Frequency")
                 plt.savefig(os.path.join(savepath, "{}.png".format(title)))
+            if data_args.dagger:
+                draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
+                draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
+                draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
+                fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
 
-            draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
-            draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
-            draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
-            fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
-            # print(fde_dagger_dic)
-            # print(y_bias_dagger_dic)
 
             if training_args.output_dir is not None:
                 # save results
                 output_file_path = os.path.join(training_args.output_dir, 'generated_predictions.pickle')
                 with open(output_file_path, 'wb') as handle:
                     pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                
-                dagger_result_path = os.path.join(training_args.output_dir, "fde_dagger.pkl")
-                with open(dagger_result_path, 'wb') as handle:
-                    pickle.dump(fde_dagger_dic, handle)
-                dagger_result_path = os.path.join(training_args.output_dir, "ybias_dagger.pkl")
-                with open(dagger_result_path, 'wb') as handle:
-                    pickle.dump(y_bias_dagger_dic, handle)
-                print("dagger results save to {}".format(dagger_result_path))
+                if data_args.dagger:
+                    dagger_result_path = os.path.join(training_args.output_dir, "fde_dagger.pkl")
+                    with open(dagger_result_path, 'wb') as handle:
+                        pickle.dump(fde_dagger_dic, handle)
+                    dagger_result_path = os.path.join(training_args.output_dir, "ybias_dagger.pkl")
+                    with open(dagger_result_path, 'wb') as handle:
+                        pickle.dump(y_bias_dagger_dic, handle)
+                    print("dagger results save to {}".format(dagger_result_path))
 
         # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         # metrics = predict_results.metrics
@@ -592,11 +582,6 @@ def main():
         trainer.create_model_card(**kwargs)
 
     return results
-
-
-def _mp_fn(index):
-    # For xla_spawn (TPUs)
-    main()
 
 
 if __name__ == "__main__":
