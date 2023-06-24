@@ -155,8 +155,8 @@ class PlanningTrainer(Trainer):
             else:
                 pass
             # compute ade
-            x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
-            y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
+            x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, -40:, 0]
+            y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, -40:, 1]
             ade = torch.sqrt(x_error ** 2 + y_error ** 2)
             ade = ade.mean()
             self.ade = (ade + self.ade * self.eval_itr)/(self.eval_itr + 1)
