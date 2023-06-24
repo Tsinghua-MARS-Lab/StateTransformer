@@ -250,7 +250,10 @@ class NuPlanDL:
 
         data_to_return['dataset'] = 'NuPlan'
         data_to_return['lidar_pc_tokens'] = log_db.lidar_pc
-
+        data_to_return['frame_id'] = round(20 * (self.timestamp - log_db.lidar_pc[0].timestamp)/1e6)
+        data_to_return['timestamp'] = lidar_token_timestamp
+        data_to_return['file_name'] = log_db.log_name
+        data_to_return['map'] = log_db.map_name
         return data_to_return, new_files_loaded
 
     def get_next_file(self, specify_file_index=None):

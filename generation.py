@@ -59,7 +59,7 @@ def main(args):
     # print("Total scenario number is", scenarios, "zeros files", zero_file)
     # exit()
     observation_kwargs = dict(
-        max_dis=500,
+        max_dis=300,
         high_res_raster_shape=[224, 224], # for high resolution image, we cover 50 meters for delicated short-term actions
         # for high resolution image, we cover 50 meters for delicated short-term actions
         high_res_raster_scale=4.0,
@@ -72,8 +72,9 @@ def main(args):
         action_label_scale=100,
     )
     # loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=20)
+    # obs = get_observation_for_nsm(observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
     # obs = get_observation_for_autoregression_basedon_previous_coor(observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
-    def yield_data(shards, dl, filter_info=None):
+    def yield_data(shards, filter_info=None):
         for shard in shards:
             # loaded_dic = dl.get_next_file(specify_file_index=shard)
             # file_name = dl.file_names[shard]
@@ -219,7 +220,46 @@ def main(args):
                 observation_dic.update(other_info)
                 yield observation_dic
             del dl
-    
+
+    def yield_data_index(shards):
+        for shard in shards:
+            dl = NuPlanDL(scenario_to_start=0,
+                            file_to_start=shard,
+                            max_file_number=1,
+                            data_path=data_path, db=None, gt_relation_path=None,
+                            road_dic_path=None,
+                            running_mode=running_mode)
+            while not dl.end:
+                loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval)
+                if loaded_dic is None:
+                    continue
+                if loaded_dic["skip"]:
+                    continue
+                if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
+                    continue      
+                data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
+                yield data_to_return
+            del dl
+
+    def yield_data_dic(shards):
+        for shard in shards:
+            dl = NuPlanDL(scenario_to_start=0,
+                          file_to_start=shard,
+                          max_file_number=1,
+                          data_path=data_path, db=None, gt_relation_path=None,
+                          road_dic_path=road_path,
+                          running_mode=running_mode)
+            loaded_dic = dl.get_next_file(specify_file_index=0)
+            file_name = dl.file_names[0]
+            result = dict()
+            result["agent_dic"] = loaded_dic["agent"]
+            result["traffic_dic"] = loaded_dic["traffic_light"]
+            result["file_name"] = file_name
+            with open(os.path.join(args.cache_folder, args.dataset_name, f"{file_name}.pkl"), "wb") as f:
+                pickle.dump(result, f)
+            yield result
+        del dl
+    # dic = yield_data_dic([0])
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
 
     NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
@@ -253,7 +293,7 @@ def main(args):
         if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
             args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
-    total_file_number = len(file_indices)
+
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:
@@ -288,8 +328,6 @@ def main(args):
         file_indices = specific_city_indices
         print(f'{args.city} city has {len(file_indices)} files in testset! total {len(all_file_names)}')
     
-    total_file_number = len(file_indices)
-    print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
 
     # sort by file size
     sorted_file_indices = []
@@ -310,8 +348,22 @@ def main(args):
     file_indices = []
     for i in range(args.num_proc):
         file_indices += sorted_file_indices[i::args.num_proc]
+    total_file_number = len(file_indices)
+    print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
     # end of sorting
-    if args.by_scenario:
+    if args.only_index:
+        nuplan_dataset = Dataset.from_generator(yield_data_index,
+                                                gen_kwargs={'shards': file_indices},
+                                                writer_batch_size=10, cache_dir=args.cache_folder,
+                                                num_proc=args.num_proc
+                                                )
+    elif args.only_data_dic:
+        nuplan_dataset = Dataset.from_generator(yield_data_dic,
+                                                gen_kwargs={'shards': file_indices},
+                                                writer_batch_size=10, cache_dir=args.cache_folder,
+                                                num_proc=args.num_proc)
+
+    elif args.by_scenario:
         nuplan_dataset = Dataset.from_generator(yield_data_by_scenario,
                                                 gen_kwargs={'shards': file_indices},
                                                 writer_batch_size=2, cache_dir=args.cache_folder,
@@ -369,6 +421,8 @@ if __name__ == '__main__':
     parser.add_argument('--by_scenario', default=False, action='store_true')
     parser.add_argument('--city', type=str, default=None)
     parser.add_argument('--vehicle_pickle_path', default="vehicle.pkl")
+    parser.add_argument('--only_index', default=False, action='store_true')
+    parser.add_argument('--only_data_dic', default=False, action='store_true')
     # parser.add_argument('--save_playback', default=True, action='store_true')
     args_p = parser.parse_args()
     main(args_p)
