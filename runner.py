@@ -430,11 +430,8 @@ def main():
                 input = preprocess_data(input)
                 input_length = training_args.per_device_eval_batch_size
                 if model_args.autoregressive:
-                    actual_input = dict()
-                    actual_input["trajectory"] = input["trajectory"][:, :8]
-                    actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :].permute(0, 3, 4, 1, 2)
-                    actual_input["low_res_raster"] = input["low_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :].permute(0, 3, 4, 1, 2)
-                    traj_pred = model.generate(**copy.deepcopy(actual_input))
+                    traj_pred = model.generate(**input)
+                    traj_label = model(**input)
                 else:
                     output = model(**copy.deepcopy(input))
                     traj_pred = output.logits                   
@@ -452,8 +449,9 @@ def main():
                 
                 if model_args.predict_trajectory:
                     if model_args.autoregressive:
-                        trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
+                        trajectory_label = model.compute_normalized_points(input["trajectory"][:, 10:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
+                        
                     else:
                         if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
                             trajectory_label = input["trajectory_label"][:, :, :2]
