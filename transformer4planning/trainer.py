@@ -1,3 +1,5 @@
+from torch.utils.data import DataLoader
+from transformers.trainer_utils import EvalLoopOutput
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
@@ -141,37 +143,31 @@ class PlanningTrainer(Trainer):
                     # # TODO: this needs to be fixed and made cleaner later.
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
-        batch_generate_eval = False
-        if 'auto' in model.model_args.model_name:
-            # run classsification metrics
-            result = dict()
-            result["accuracy"] = model.clf_metrics["accuracy"].compute()
-            result["f1"] = model.clf_metrics["f1"].compute(average="macro")
-            result["precision"] = model.clf_metrics["precision"].compute(average="macro")
-            result["recall"] = model.clf_metrics["recall"].compute(average="macro")
-            logging.info("***** Eval results *****")
-            logging.info(f"  {result}")
+        batch_generate_eval = True
 
-            if batch_generate_eval:
-                # run generate for sequence of actions
-                prediction_actions_in_batch = model.generate(**input)
-                prediction_trajectory_in_batch = model.compute_normalized_points(prediction_actions_in_batch)
-                trajectory_label = input["trajectory_label"]
-                # compute ade
-                x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label[:, :, 0]
-                y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label[:, :, 1]
-                ade = torch.sqrt(x_error ** 2 + y_error ** 2)
-                ade = ade.mean()
-                result['ade'] = ade
-                # compute fde
-                x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label[:, -1, 0]
-                y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label[:, -1, 1]
-                fde = torch.sqrt(x_error ** 2 + y_error ** 2)
-                fde = fde.mean()
-                result['fde'] = fde
-                    
-            self.log(result)
-    
+        if batch_generate_eval:
+            # run generate for sequence of actions
+            if self.model.model_args.autoregressive:
+                prediction_actions_in_batch = self.model.generate(**inputs)
+                prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
+                actions_label_in_batch = inputs["trajectory"]
+                trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
+            else:
+                pass
+            # compute ade
+            x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
+            y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
+            ade = torch.sqrt(x_error ** 2 + y_error ** 2)
+            ade = ade.mean()
+            self.ade = (ade + self.ade * self.eval_itr)/(self.eval_itr + 1)
+            # compute fde
+            x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
+            y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
+            fde = torch.sqrt(x_error ** 2 + y_error ** 2)
+            fde = fde.mean()
+            self.fde = (fde + self.fde * self.eval_itr)/(self.eval_itr + 1)
+        
+        self.eval_itr += 1
         if prediction_loss_only:
             return (loss, None, None)
 
@@ -180,3 +176,29 @@ class PlanningTrainer(Trainer):
             logits = logits[0]
 
         return (loss, logits, None)
+    
+    def evaluation_loop(
+        self,
+        dataloader: DataLoader,
+        description: str,
+        prediction_loss_only: Optional[bool] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> EvalLoopOutput:
+        self.fde = 0
+        self.ade = 0
+        self.eval_itr = 0
+        eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+        if self.model.model_args.autoregressive:
+            # run classsification metrics
+            result = dict()
+            result["accuracy"] = self.model.clf_metrics["accuracy"].compute()
+            result["f1"] = self.model.clf_metrics["f1"].compute(average="macro")
+            result["precision"] = self.model.clf_metrics["precision"].compute(average="macro")
+            result["recall"] = self.model.clf_metrics["recall"].compute(average="macro")
+        result["ade"] = self.ade
+        result["fde"] = self.fde
+        logging.info("***** Eval results *****")
+        logging.info(f"  {result}")    
+        self.log(result)
+        return eval_output
