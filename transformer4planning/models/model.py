@@ -1082,7 +1082,7 @@ def build_models(model_args):
         config_p.n_inner = model_args.d_inner
         config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
-        if 'nonauto' in model_args.model_name:
+        if not model_args.autoregressive:
             ModelCls = GPTNonAutoRegressiveModelNuplan
             tag = 'GPT nonauto'
         else:

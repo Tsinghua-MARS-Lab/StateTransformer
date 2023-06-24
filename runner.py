@@ -33,7 +33,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
 import evaluate
-
+from dataset_gen.preprocess import preprocess
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -105,7 +105,10 @@ class ModelArguments:
     task: Optional[str] = field(
         default="waymo" # only for mmtransformer
     )
-    with_traffic_light: Optional[str] = field(
+    with_traffic_light: Optional[bool] = field(
+        default=False
+    )
+    autoregressive: Optional[bool] = field(
         default=False
     )
 
@@ -153,12 +156,19 @@ class DataTrainingArguments:
     dataset_name: Optional[str] = field(
         default=None, metadata={"help": "The dataset name from hugging face used to push the model."}
     )
-    dataset_scale: Optional[str] = field(
+    dataset_scale: Optional[float] = field(
         default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
-    dagger: Optional[str] = field(
-        default=False, metadata={"help: Whether to save "}
+    dagger: Optional[bool] = field(
+        default=False, metadata={"help":"Whether to save dagger results"}
     )
+    online_preprocess: Optional[bool] = field(
+        default=False, metadata={"help":"Whether to generate raster dataset online"}
+    )
+    datadic_path: Optional[str] = field(
+        default=None, metadata={"help":"The root path of data dictionary pickle file"}
+    )
+    
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -264,17 +274,17 @@ def main():
             dataset.shuffle(seed=training_args.seed)
             train_samples = int(len(dataset) * float(data_args.dataset_scale))
             train_dataset = dataset.select(range(train_samples))
-            print('Dataset Loaded: ', dataset)
             
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
                 test_dataset.set_format(type='torch')
-                print(test_dataset)
             else:
                 test_dataset = dataset.select(range(train_samples))
                 test_dataset.set_format(type='torch')
-                print(test_dataset)
-            
+            if data_args.online_preprocess:
+                train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
+                test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
+            print('TrainingSet: ', dataset, '\nTestSet', test_dataset)
             nuplan_dataset = dict(
                 train=train_dataset,
                 validation=test_dataset.shuffle(seed=training_args.seed),
@@ -334,7 +344,7 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
-        if 'auto' in model_args.model_name:
+        if model_args.autoregressive:
             result = clf_metrics.compute()
             logger.info("***** Final Eval results *****")
             logger.info(f"  {result}")
@@ -419,7 +429,7 @@ def main():
             for itr, input in enumerate(tqdm(test_dataloader)):
                 input = preprocess_data(input)
                 input_length = training_args.per_device_eval_batch_size
-                if "autogpt" in model_args.model_name:
+                if model_args.autoregressive:
                     actual_input = dict()
                     actual_input["trajectory"] = input["trajectory"][:, :8]
                     actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :].permute(0, 3, 4, 1, 2)
@@ -441,7 +451,7 @@ def main():
                         dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
                 
                 if model_args.predict_trajectory:
-                    if "autogpt" in model_args.model_name:
+                    if model_args.autoregressive:
                         trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
                     else:
