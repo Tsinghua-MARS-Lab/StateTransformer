@@ -531,6 +531,59 @@ def get_observation_for_autoregression_basedon_previous_coor(observation_kwargs,
 
     return result_to_return
 
+def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=40):
+    max_dis = observation_kwargs["max_dis"]
+    past_frames_number = observation_kwargs["past_frame_num"]
+    frame_sample_interval = observation_kwargs["frame_sample_interval"]
+    sample_frames = list(range(scenario_frame_number - past_frames_number, scenario_frame_number + 1, frame_sample_interval))
+
+    ego_pose = data_dic["agent"]["ego"]["pose"][scenario_frame_number]
+    data_to_return = dict()
+    route_ids = data_dic["route"]
+    data_to_return["route_ids"] = list()
+    # filter visible route id
+    for route_id in route_ids:
+        xyz = data_dic["road"][route_id]["xyz"]
+        xyz[:, :2] -= ego_pose[:2]
+        if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+            abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+            continue
+        data_to_return["route_ids"].append(route_id)
+    # filter visible road id
+    data_to_return["road_ids"] = list()
+    for i, key in enumerate(data_dic["road"]):
+        xyz = data_dic["road"][key]["xyz"]
+        xyz[:, :2] -= ego_pose[:2]
+        if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+                abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+            continue
+        data_to_return["road_ids"].append(key)
+    # filter visible traffic id
+    data_to_return["traffic_ids"] = list()
+    for _, key in enumerate(data_dic["traffic_light"]):
+        xyz = data_dic["road"][int(key)]["xyz"]
+        xyz[:, :2] -= ego_pose[:2]
+        if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+            abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
+            continue
+        data_to_return["traffic_ids"].append(key)
+    # filter visible agents id in each sample frame
+    data_to_return["agent_ids"] = list()
+    for sample_frame in sample_frames:
+        agent_ids_each_frame = list()
+        for _, key in enumerate(data_dic["agent"]):
+            pose = data_dic['agent'][key]['pose'][sample_frame, :]
+            if pose[0] < 0 and pose[1] < 0:
+                continue
+            pose -= ego_pose
+            if abs(pose[0]) > max_dis or abs(pose[1]) > max_dis:
+                continue
+            agent_ids_each_frame.append(key)
+        data_to_return["agent_ids"].append(agent_ids_each_frame)
+    # other infomation record
+    for key in ["frame_id", "file_name", "map", "timestamp"]:
+        data_to_return[key] = data_dic[key]
+    return data_to_return
 
 if __name__ == '__main__':
     import pickle

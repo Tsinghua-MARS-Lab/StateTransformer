@@ -31,14 +31,18 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
-from torch.utils.data import random_split
 from transformers.trainer_callback import DefaultFlowCallback
 import evaluate
-
+from dataset_gen.preprocess import preprocess
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
-clf_metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
+clf_metrics = dict(
+    accuracy=evaluate.load("accuracy"),
+    f1=evaluate.load("f1"),
+    precision=evaluate.load("precision"),
+    recall=evaluate.load("recall")
+)
 
 @dataclass
 class ModelArguments:
@@ -101,7 +105,10 @@ class ModelArguments:
     task: Optional[str] = field(
         default="waymo" # only for mmtransformer
     )
-    with_traffic_light: Optional[str] = field(
+    with_traffic_light: Optional[bool] = field(
+        default=False
+    )
+    autoregressive: Optional[bool] = field(
         default=False
     )
 
@@ -149,9 +156,19 @@ class DataTrainingArguments:
     dataset_name: Optional[str] = field(
         default=None, metadata={"help": "The dataset name from hugging face used to push the model."}
     )
-    dataset_scale: Optional[str] = field(
+    dataset_scale: Optional[float] = field(
         default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
+    dagger: Optional[bool] = field(
+        default=False, metadata={"help":"Whether to save dagger results"}
+    )
+    online_preprocess: Optional[bool] = field(
+        default=False, metadata={"help":"Whether to generate raster dataset online"}
+    )
+    datadic_path: Optional[str] = field(
+        default=None, metadata={"help":"The root path of data dictionary pickle file"}
+    )
+    
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -257,17 +274,17 @@ def main():
             dataset.shuffle(seed=training_args.seed)
             train_samples = int(len(dataset) * float(data_args.dataset_scale))
             train_dataset = dataset.select(range(train_samples))
-            print('Dataset Loaded: ', dataset)
             
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
                 test_dataset.set_format(type='torch')
-                print(test_dataset)
             else:
                 test_dataset = dataset.select(range(train_samples))
                 test_dataset.set_format(type='torch')
-                print(test_dataset)
-            
+            if data_args.online_preprocess:
+                train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
+                test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
+            print('TrainingSet: ', dataset, '\nTestSet', test_dataset)
             nuplan_dataset = dict(
                 train=train_dataset,
                 validation=test_dataset.shuffle(seed=training_args.seed),
@@ -324,14 +341,10 @@ def main():
         trainer.save_model()  # Saves the tokenizer too for easy upload
         trainer.save_state()
 
-    # to run eval one time without the trainner
-    # if not training_args.do_train and training_args.do_eval:
-    #     trainer.evaluate()
-
     # Evaluation
     results = {}
     if training_args.do_eval:
-        if 'auto' in model_args.model_name:
+        if model_args.autoregressive:
             result = clf_metrics.compute()
             logger.info("***** Final Eval results *****")
             logger.info(f"  {result}")
@@ -364,11 +377,7 @@ def main():
                 'current_frame': [],
                 'next_step_action': [],
                 'predicted_trajectory': [],
-            }
-            prediction_metrics = {
-                'next_step_action': None,
-                'predicted_trajectory': None,
-            }        
+            }     
             device = model.device
             def preprocess_data(examples):
                 # take a batch of texts
@@ -420,18 +429,12 @@ def main():
             for itr, input in enumerate(tqdm(test_dataloader)):
                 input = preprocess_data(input)
                 input_length = training_args.per_device_eval_batch_size
-                if "autogpt" in model_args.model_name:
-                    actual_input = dict()
-                    actual_input["trajectory"] = input["trajectory"][:, :8]
-                    actual_input["high_res_raster"] = input["high_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :].permute(0, 3, 4, 1, 2)
-                    actual_input["low_res_raster"] = input["low_res_raster"].reshape(input_length, 224, 224, -1, 29)[:, :, :, :9, :].permute(0, 3, 4, 1, 2)
-                    traj_pred = model.generate(**copy.deepcopy(actual_input))
+                if model_args.autoregressive:
+                    traj_pred = model.generate(**input)
+                    traj_label = model(**input)
                 else:
                     output = model(**copy.deepcopy(input))
-                    try:
-                        intended_m_logits, current_m_logits, traj_pred = output.all_logits
-                    except:
-                        traj_pred = output.logits                   
+                    traj_pred = output.logits                   
                     try:
                         file_name = input['file_name']
                         current_frame_idx = input['frame_index']
@@ -440,13 +443,15 @@ def main():
                         current_frame_idx = -1 * torch.ones(input_length)
                     prediction_results['file_names'].extend(file_name)
                     prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
-                    dagger_results['file_name'].extend(file_name)
-                    dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
+                    if data_args.dagger:
+                        dagger_results['file_name'].extend(file_name)
+                        dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
                 
                 if model_args.predict_trajectory:
-                    if "autogpt" in model_args.model_name:
-                        trajectory_label = model.compute_normalized_points(input["trajectory"][:, 8:, :])
+                    if model_args.autoregressive:
+                        trajectory_label = model.compute_normalized_points(input["trajectory"][:, 10:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
+                        
                     else:
                         if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
                             trajectory_label = input["trajectory_label"][:, :, :2]
@@ -476,9 +481,10 @@ def main():
                 print('End point y offset: ', np.average(np.abs(end_bias_y)))
                 distance_error = np.sqrt(np.abs(all_bias_x)**2 + np.abs(all_bias_y)**2).reshape(-1, 80)
                 final_distance_error = np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)
-                dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
-                dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
-                dagger_results['y_bias'].extend(list(np.average(all_bias_y.reshape(-1, 80), axis=1).reshape(-1)))
+                if data_args.dagger:
+                    dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
+                    dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
+                    dagger_results['y_bias'].extend(list(np.average(all_bias_y.reshape(-1, 80), axis=1).reshape(-1)))
                 print('ADE', np.average(distance_error))
                 print('FDE', np.average(final_distance_error))
             
@@ -526,27 +532,26 @@ def main():
                 plt.xlabel("Value")
                 plt.ylabel("Frequency")
                 plt.savefig(os.path.join(savepath, "{}.png".format(title)))
+            if data_args.dagger:
+                draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
+                draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
+                draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
+                fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
 
-            draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
-            draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
-            draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
-            fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
-            # print(fde_dagger_dic)
-            # print(y_bias_dagger_dic)
 
             if training_args.output_dir is not None:
                 # save results
                 output_file_path = os.path.join(training_args.output_dir, 'generated_predictions.pickle')
                 with open(output_file_path, 'wb') as handle:
                     pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                
-                dagger_result_path = os.path.join(training_args.output_dir, "fde_dagger.pkl")
-                with open(dagger_result_path, 'wb') as handle:
-                    pickle.dump(fde_dagger_dic, handle)
-                dagger_result_path = os.path.join(training_args.output_dir, "ybias_dagger.pkl")
-                with open(dagger_result_path, 'wb') as handle:
-                    pickle.dump(y_bias_dagger_dic, handle)
-                print("dagger results save to {}".format(dagger_result_path))
+                if data_args.dagger:
+                    dagger_result_path = os.path.join(training_args.output_dir, "fde_dagger.pkl")
+                    with open(dagger_result_path, 'wb') as handle:
+                        pickle.dump(fde_dagger_dic, handle)
+                    dagger_result_path = os.path.join(training_args.output_dir, "ybias_dagger.pkl")
+                    with open(dagger_result_path, 'wb') as handle:
+                        pickle.dump(y_bias_dagger_dic, handle)
+                    print("dagger results save to {}".format(dagger_result_path))
 
         # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         # metrics = predict_results.metrics
@@ -585,11 +590,6 @@ def main():
         trainer.create_model_card(**kwargs)
 
     return results
-
-
-def _mp_fn(index):
-    # For xla_spawn (TPUs)
-    main()
 
 
 if __name__ == "__main__":
