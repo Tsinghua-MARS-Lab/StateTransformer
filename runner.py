@@ -115,6 +115,10 @@ class ModelArguments:
     autoregressive: Optional[bool] = field(
         default=False
     )
+    k: Optional[int] = field(
+        default=-1,
+        metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -247,14 +251,6 @@ def main():
     if config_args.save_data_config_to_path is not None:
         with open(config_args.save_data_config_to_path, 'w') as f:
             json.dump(data_args.__dict__, f, indent=4)
-    # Automatically saving all args into a json file.
-    all_args_dic = {**model_args.__dict__, **data_args.__dict__, **config_args.__dict__, **training_args.__dict__}
-    if training_args.do_train:
-        with open(os.path.join(training_args.output_dir, "training_args.json"), 'w') as f:
-            json.dump(all_args_dic, f, indent=4)
-    elif training_args.do_eval:
-        with open(os.path.join(training_args.output_dir, "eval_args.json"), 'w') as f:
-            json.dump(all_args_dic, f, indent=4)
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -344,7 +340,7 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
-    if 'auto' in model_args.model_name:
+    if 'auto' in model_args.model_name and model_args.k == -1:
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
@@ -637,6 +633,16 @@ def main():
         trainer.push_to_hub(**kwargs)
     else:
         trainer.create_model_card(**kwargs)
+
+    # Automatically saving all args into a json file.
+    # TODO: Add this into Trainer class to save config while saving other logs
+    # all_args_dic = {**model_args.__dict__, **data_args.__dict__, **config_args.__dict__, **training_args.__dict__}
+    # if training_args.do_train:
+    #     with open(os.path.join(training_args.output_dir, "training_args.json"), 'w') as f:
+    #         json.dump(all_args_dic, f, indent=4)
+    # elif training_args.do_eval:
+    #     with open(os.path.join(training_args.output_dir, "eval_args.json"), 'w') as f:
+    #         json.dump(all_args_dic, f, indent=4)
 
     return results
 
