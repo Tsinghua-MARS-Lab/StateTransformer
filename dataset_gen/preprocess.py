@@ -4,7 +4,11 @@ import math
 import cv2
 import shapely
 import os
+import multiprocessing
+from multiprocessing import Pool
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from transformers import FeatureExtractionMixin
 
 def generate_contour_pts(center_pt, w, l, direction):
     pt1 = rotate(center_pt, (center_pt[0]-w/2, center_pt[1]-l/2), direction, tuple=True)
@@ -221,6 +225,40 @@ def static_coor_rasterize(sample, datapath, raster_shape=(224, 224),
     result_to_return['trajectory_label'] = trajectory_label[1:, :]
     
     return result_to_return
+
+class NuplanFeatureExtractor(FeatureExtractionMixin):
+    """
+    Nuplan raster feature extractor
+    """
+    def __init__(self, dic_path, raster_shape=(224, 224),
+                        frame_rate=20, past_seconds=2, future_seconds=8,
+                        high_res_scale=4, low_res_scale=0.77, frame_sample_interval=4,
+                        road_types=20, agent_types=8, traffic_types=4, autoregressive=False):
+        self.dic_path = dic_path
+        self.encode_kwargs = dict(
+            raster_shape = raster_shape,
+            frame_rate = frame_rate,
+            past_seconds = past_seconds,
+            future_seconds = future_seconds,
+            high_res_scale = high_res_scale,
+            low_res_scale = low_res_scale,
+            frame_sample_interval = frame_sample_interval,
+            road_types = road_types,
+            agent_types = agent_types,
+            traffic_types = traffic_types,   
+        )
+        self.autoregressive = autoregressive
+
+    def rasterize(self, batch):
+        encode_kwargs = self.encode_kwargs
+        result = list()
+        indice = range(len(batch))
+        with ThreadPoolExecutor(max_workers=len(batch)) as executor:
+            result = list(executor.map(static_coor_rasterize, batch, [self.dic_path]*len(batch)))
+            # p = multiprocessing.Process(target=static_coor_rasterize, args=(item, self.dic_path), kwargs=(self.encode_kwargs, ))
+            # p.start()
+            # result.append(static_coor_rasterize(item, self.dic_path)) 
+        return result
 
 if __name__ == "__main__":
     import datasets
