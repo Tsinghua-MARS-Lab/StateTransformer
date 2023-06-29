@@ -119,6 +119,10 @@ class ModelArguments:
         default=-1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
     )
+    next_token_scorer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to use next token scorer for prediction."},
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -341,6 +345,8 @@ def main():
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
     if 'auto' in model_args.model_name and model_args.k == -1:
+        model.clf_metrics = clf_metrics
+    if 'auto' in model_args.model_name and model_args.next_token_scorer:
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:

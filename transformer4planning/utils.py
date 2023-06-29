@@ -42,6 +42,9 @@ class ModelArguments:
     recover_obs: Optional[bool] = field(
         default=False,
     )
+    teacher_forcing_obs: Optional[bool] = field(
+        default=False,
+    )
     d_embed: Optional[int] = field(
         default=256,
     )
@@ -63,6 +66,14 @@ class ModelArguments:
     )
     loss_fn: Optional[str] = field(
         default="mse",
+    )
+    k: Optional[int] = field(
+        default=1,
+        metadata={"help": "Set k for top-k predictions"},
+    )
+    next_token_scorer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to use next token scorer for prediction."},
     )
 
     
