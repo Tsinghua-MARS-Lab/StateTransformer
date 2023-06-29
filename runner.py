@@ -14,6 +14,8 @@ import torch
 from torch import nn
 from tqdm import tqdm
 import copy
+import json
+
 import datasets
 import numpy as np
 import evaluate
@@ -80,6 +82,9 @@ class ModelArguments:
     recover_obs: Optional[bool] = field(
         default=False,
     )
+    teacher_forcing_obs: Optional[bool] = field(
+        default=False,
+    )
     d_embed: Optional[int] = field(
         default=256,
     )
@@ -110,6 +115,10 @@ class ModelArguments:
     )
     autoregressive: Optional[bool] = field(
         default=False
+    )
+    k: Optional[int] = field(
+        default=-1,
+        metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
     )
 
 @dataclass
@@ -168,6 +177,24 @@ class DataTrainingArguments:
     datadic_path: Optional[str] = field(
         default=None, metadata={"help":"The root path of data dictionary pickle file"}
     )
+
+@dataclass
+class ConfigArguments:
+    """
+    Arguments pertaining to what data we are going to input our model for training and eval.
+    """
+    save_model_config_to_path: Optional[str] = field(
+        default=None, metadata={"help": "save current model config to a json file if not None"}
+    )
+    save_data_config_to_path: Optional[str] = field(
+        default=None, metadata={"help": "save current data config to a json file if not None"}
+    )
+    load_model_config_from_path: Optional[str] = field(
+        default=None, metadata={"help": "load model config from a json file if not None"}
+    )
+    load_data_config_from_path: Optional[str] = field(
+        default=None, metadata={"help": "load data config to a json file if not None"}
+    )
     
 
 def main():
@@ -175,8 +202,8 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, PlanningTrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
+    model_args, data_args, config_args, training_args = parser.parse_args_into_dataclasses()
 
     # Set up pytorch backend
     # if training_args.deepspeed is None:
@@ -206,6 +233,25 @@ def main():
         + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
+
+    # Handle config loading and saving
+    if config_args.load_model_config_from_path is not None:
+        # Load the data class object from the JSON file
+        model_parser = HfArgumentParser(ModelArguments)
+        model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
+        print(model_args)
+        logger.warning("Loading model args, this will overwrite model args from command lines!!!")
+    if config_args.load_data_config_from_path is not None:
+        # Load the data class object from the JSON file
+        data_parser = HfArgumentParser(DataTrainingArguments)
+        data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
+        logger.warning("Loading data args, this will overwrite data args from command lines!!!")
+    if config_args.save_model_config_to_path is not None:
+        with open(config_args.save_model_config_to_path, 'w') as f:
+            json.dump(model_args.__dict__, f, indent=4)
+    if config_args.save_data_config_to_path is not None:
+        with open(config_args.save_data_config_to_path, 'w') as f:
+            json.dump(data_args.__dict__, f, indent=4)
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -295,7 +341,7 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
-    if 'auto' in model_args.model_name:
+    if 'auto' in model_args.model_name and model_args.k == -1:
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
@@ -590,6 +636,16 @@ def main():
         trainer.push_to_hub(**kwargs)
     else:
         trainer.create_model_card(**kwargs)
+
+    # Automatically saving all args into a json file.
+    # TODO: Add this into Trainer class to save config while saving other logs
+    # all_args_dic = {**model_args.__dict__, **data_args.__dict__, **config_args.__dict__, **training_args.__dict__}
+    # if training_args.do_train:
+    #     with open(os.path.join(training_args.output_dir, "training_args.json"), 'w') as f:
+    #         json.dump(all_args_dic, f, indent=4)
+    # elif training_args.do_eval:
+    #     with open(os.path.join(training_args.output_dir, "eval_args.json"), 'w') as f:
+    #         json.dump(all_args_dic, f, indent=4)
 
     return results
 
