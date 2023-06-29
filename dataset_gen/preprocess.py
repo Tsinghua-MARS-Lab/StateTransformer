@@ -24,7 +24,7 @@ def preprocess(dataset, dic_path, autoregressive=False):
                     writer_batch_size=10, num_proc=os.cpu_count())
     return target_datasets
 
-def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwargs=dict()):
+def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -36,7 +36,7 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
     # padding for tensor data
     expected_padding_keys = ["road_ids", "route_ids", "traffic_ids"]
     agent_id_lengths = list()
-    for i, d in enumerate(batch): 
+    for i, d in enumerate(batch):
         agent_id_lengths.append(len(d["agent_ids"]))
     max_agent_id_length = max(agent_id_lengths)
     for i, d in enumerate(batch):
@@ -44,9 +44,9 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
         agent_ids.extend(["null"] * (max_agent_id_length - len(agent_ids)))
         batch[i]["agent_ids"] = agent_ids
     padded_tensors = dict()
-    for key in expected_padding_keys: 
-        tensors = [torch.tensor(data[key]) for data in batch]
-        padded_tensors[key] = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=-1) 
+    for key in expected_padding_keys:
+        tensors = [data[key] for data in batch]
+        padded_tensors[key] = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=-1)
         for i, _ in enumerate(batch):
             batch[i][key] = padded_tensors[key][i]
 
@@ -253,15 +253,15 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
     with open(os.path.join(datapath, f"{map}.pkl"), "rb") as f:
         road_dic = pickle.load(f)
     with open(os.path.join(datapath, f"agent_dic/{filename}.pkl"), "rb") as f:
-        data_dic = pickle.load(f)  
+        data_dic = pickle.load(f)
         agent_dic = data_dic["agent_dic"]
-        traffic_dic = data_dic["traffic_dic"]          
+        traffic_dic = data_dic["traffic_dic"]
     road_ids = sample["road_ids"]
     agent_ids = sample["agent_ids"]
     traffic_ids = sample["traffic_ids"]
     route_ids = sample["route_ids"]
     frame_id = sample["frame_id"].item()
-    
+
     # initialize rasters
     scenario_start_frame = frame_id - past_seconds * frame_rate
     scenario_end_frame = frame_id + future_seconds * frame_rate
