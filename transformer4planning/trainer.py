@@ -44,9 +44,9 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
-    
+
 class PlanningTrainer(Trainer):
-    
+
     def prediction_step(
         self,
         model: nn.Module,
@@ -144,6 +144,12 @@ class PlanningTrainer(Trainer):
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
         batch_generate_eval = True
+        if model.mode == 'OA-OA':
+            batch_generate_eval = False
+            print('batch generate for OA-OA is not implemented yet')
+        if self.model.model_args.k != -1:
+            batch_generate_eval = False
+            print('batch generate for TopK is not implemented yet')
 
         if batch_generate_eval:
             # run generate for sequence of actions
@@ -160,13 +166,15 @@ class PlanningTrainer(Trainer):
             ade = torch.sqrt(x_error ** 2 + y_error ** 2)
             ade = ade.mean()
             self.ade = (ade + self.ade * self.eval_itr)/(self.eval_itr + 1)
+            self.ade = float(self.ade)  # tensor to float to save in json
             # compute fde
             x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
             y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
             fde = torch.sqrt(x_error ** 2 + y_error ** 2)
             fde = fde.mean()
             self.fde = (fde + self.fde * self.eval_itr)/(self.eval_itr + 1)
-        
+            self.fde = float(self.fde)  # tensor to float to save in json
+
         self.eval_itr += 1
         if prediction_loss_only:
             return (loss, None, None)
@@ -176,7 +184,7 @@ class PlanningTrainer(Trainer):
             logits = logits[0]
 
         return (loss, logits, None)
-    
+
     def evaluation_loop(
         self,
         dataloader: DataLoader,
@@ -189,11 +197,12 @@ class PlanningTrainer(Trainer):
         self.ade = 0
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+
         self.fde = self.fde.item()
         self.ade = self.ade.item()
-        if self.model.model_args.autoregressive:
+        result = dict()
+        if self.model.model_args.autoregressive and self.model.clf_metrics is not None:
             # run classsification metrics
-            result = dict()
             result["accuracy"] = self.model.clf_metrics["accuracy"].compute()
             result["f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result["precision"] = self.model.clf_metrics["precision"].compute(average="macro")
@@ -201,6 +210,6 @@ class PlanningTrainer(Trainer):
         result["ade"] = self.ade
         result["fde"] = self.fde
         logging.info("***** Eval results *****")
-        logging.info(f"  {result}")    
+        logging.info(f"  {result}")
         self.log(result)
         return eval_output
