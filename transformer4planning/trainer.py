@@ -189,6 +189,8 @@ class PlanningTrainer(Trainer):
         self.ade = 0
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+        self.fde = self.fde.item()
+        self.ade = self.ade.item()
         if self.model.model_args.autoregressive:
             # run classsification metrics
             result = dict()

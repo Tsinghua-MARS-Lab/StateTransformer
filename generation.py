@@ -30,7 +30,8 @@ def main(args):
     data_path = {
         'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
         'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
+        # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
     }
     road_path = args.road_dic_path
     if args.use_nsm:
@@ -201,6 +202,8 @@ def main(args):
                     continue
                 if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
                     continue
+                if len(loaded_dic["route"]) == 0:
+                    continue
                 # if loaded_dic["type"] not in filter_scenario:
                 #     continue
                 loaded_dic["agent"]["ego"]["type"] = 7 # Fix Ego Type to 7
@@ -236,7 +239,9 @@ def main(args):
                 if loaded_dic["skip"]:
                     continue
                 if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
-                    continue      
+                    continue
+                if len(loaded_dic["route"]) == 0:
+                    continue
                 data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
                 yield data_to_return
             del dl
@@ -257,7 +262,7 @@ def main(args):
             result["file_name"] = file_name
             with open(os.path.join(args.cache_folder, args.dataset_name, f"{file_name}.pkl"), "wb") as f:
                 pickle.dump(result, f)
-            yield result
+            yield dict(filename=result["file_name"])
         del dl
     # dic = yield_data_dic([0])
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0

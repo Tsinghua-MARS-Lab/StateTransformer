@@ -843,12 +843,13 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         state_embeds = torch.cat((high_res_embed,
                                   low_res_embed), dim=-1).to(torch.float32)
-        ## action embedding
+        # action embedding, shape is (b, seq), seq is default to 51 with 5hz
         action_label = self.tokenize(trajectory)
         action_token = F.one_hot(action_label.to(torch.int64), self.token_map["x_class"]*self.token_map["y_class"])
         action_embeds = self.action_m_embed(action_token.to(torch.float32))
 
-        # concat state embeding, maneuver embeding, action embeding
+        # concat state embedding, action embedding as input embedding
+        ## past state embedding shape is (b, seq+1，emd), while past action embedding shape is (b, seq+1, emd), seq is defalutly set to 10
         input_embeds_past = torch.cat((
             torch.zeros_like(state_embeds[:, :past_seq+1]), torch.zeros_like(action_embeds[:, :past_seq, :])
         ), dim=1)
@@ -880,7 +881,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        hidden_states = transformer_outputs[0]
+        # in PRED-A mode, the hidden states' shape is (b, (2*past_seq+1)+(future seq), emb), such as (1, 62, 256), in PRED-OA mode, the shape is (b, 2*total_seq, emb), such as (1, 2*51, 256)
+        hidden_states = transformer_outputs[0] 
         # compute correspond hidden states to predict
         action_hidden_states_past = hidden_states[:, :total_past_length-1, :][:, ::2, :]
         if self.mode == "PRED-OA":
@@ -972,6 +974,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         )
         beam = self.beam_search(input_embeds, input_kwargs, max_length=seq_length, beam_width=6)
         best_seq, _ = beam[0]
+        # TODO OA pair
         best_seq = best_seq[:, -seq_length:, :]
         action_labels = self.traj_decoder(best_seq)
         action_logits = F.softmax(action_labels, dim=-1)
@@ -1008,6 +1011,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                         for j in range(beam_width):
                             action = F.one_hot(topk_class[:, :, j].to(torch.int64), 80 * 40).to(torch.float32)
                             next_token_embed = self.action_m_embed(action)
+                            # TODO OA pair
                             candidate_seq = torch.cat((seq, next_token_embed), dim=1)
                             candidate_score = score + topk_probs[:, j]
                             candidates.append((candidate_seq, candidate_score))

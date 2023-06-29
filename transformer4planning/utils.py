@@ -9,15 +9,22 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="non-auto-gpt",
+        default="pretrain-nonauto-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="transfo-xl-wt103",
+        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-117M-1data-boston/training_results/checkpoint-20800",
+        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-30M-1data-boston/training_results/checkpoint-20000",
+        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-762M-1data-boston",
+        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-1.5B-1data-boston",
+        # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/1.5B-multicity",
+        default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/762M-multicity",
+        # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/117M-multicity",
+        # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     use_multi_city: bool = field(
-        default=True
+        default=False
     )
     model_revision: str = field(
         default="main",
@@ -64,7 +71,9 @@ class ModelArguments:
     loss_fn: Optional[str] = field(
         default="mse",
     )
-
+    task: Optional[str] = field(
+        default="nuplan" # only for mmtransformer
+    )
     
 def rotate_array(origin, points, angle, tuple=False):
     """
@@ -162,3 +171,26 @@ def get_angle_of_a_line(pt1, pt2):
     x2, y2 = pt2
     angle = math.atan2(y2 - y1, x2 - x1)
     return angle
+
+def generate_contour_pts(center_pt, w, l, direction):
+    pt1 = rotate(center_pt, (center_pt[0]-w/2, center_pt[1]-l/2), direction, tuple=True)
+    pt2 = rotate(center_pt, (center_pt[0]+w/2, center_pt[1]-l/2), direction, tuple=True)
+    pt3 = rotate(center_pt, (center_pt[0]+w/2, center_pt[1]+l/2), direction, tuple=True)
+    pt4 = rotate(center_pt, (center_pt[0]-w/2, center_pt[1]+l/2), direction, tuple=True)
+    return pt1, pt2, pt3, pt4
+
+def rotate(origin, point, angle, tuple=False):
+    """
+    Rotate a point counter-clockwise by a given angle around a given origin.
+    The angle should be given in radians.
+    """
+
+    ox, oy = origin
+    px, py = point
+
+    qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
+    qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
+    if tuple:
+        return (qx, qy)
+    else:
+        return qx, qy

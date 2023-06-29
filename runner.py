@@ -18,11 +18,13 @@ import json
 
 import datasets
 import numpy as np
+import evaluate
+import transformers
 from datasets import Dataset
 from datasets.arrow_dataset import _concatenate_map_style_datasets
 from dataclasses import dataclass, field
+from functools import partial
 
-import transformers
 from transformers import (
     HfArgumentParser,
     set_seed,
@@ -33,8 +35,7 @@ from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArgume
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
-import evaluate
-from dataset_gen.preprocess import preprocess
+from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -326,9 +327,9 @@ def main():
             else:
                 test_dataset = dataset.select(range(train_samples))
                 test_dataset.set_format(type='torch')
-            if data_args.online_preprocess:
-                train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
-                test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
+            # if data_args.online_preprocess:
+            #     train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
+            #     test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
             print('TrainingSet: ', dataset, '\nTestSet', test_dataset)
             nuplan_dataset = dict(
                 train=train_dataset,
@@ -365,12 +366,14 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
+    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive, dic_path=data_args.datadic_path) if data_args.online_preprocess else None
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
+        data_collator=collate_fn
     )
     
     trainer.pop_callback(DefaultFlowCallback)
