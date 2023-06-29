@@ -319,10 +319,10 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
         
         # road channels drawing
         for road_id in road_ids:
-            if route_id.item() == -1:
+            if road_id.item() == -1:
                 continue
             xyz = road_dic[road_id.item()]["xyz"].copy()
-            road_type = int(road_dic[road_id]["type"])
+            road_type = int(road_dic[road_id.item()]["type"])
             xyz[:, :2] -= ego_pose[:2]
             # simplify road vector, can simplify about half of all the points
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
