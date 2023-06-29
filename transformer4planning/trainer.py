@@ -44,9 +44,9 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
-    
+
 class PlanningTrainer(Trainer):
-    
+
     def prediction_step(
         self,
         model: nn.Module,
@@ -174,7 +174,7 @@ class PlanningTrainer(Trainer):
             fde = fde.mean()
             self.fde = (fde + self.fde * self.eval_itr)/(self.eval_itr + 1)
             self.fde = float(self.fde)  # tensor to float to save in json
-        
+
         self.eval_itr += 1
         if prediction_loss_only:
             return (loss, None, None)
@@ -184,7 +184,7 @@ class PlanningTrainer(Trainer):
             logits = logits[0]
 
         return (loss, logits, None)
-    
+
     def evaluation_loop(
         self,
         dataloader: DataLoader,
@@ -197,6 +197,9 @@ class PlanningTrainer(Trainer):
         self.ade = 0
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+
+        self.fde = self.fde.item()
+        self.ade = self.ade.item()
         result = dict()
         if self.model.model_args.autoregressive and self.model.clf_metrics is not None:
             # run classsification metrics
@@ -207,6 +210,6 @@ class PlanningTrainer(Trainer):
         result["ade"] = self.ade
         result["fde"] = self.fde
         logging.info("***** Eval results *****")
-        logging.info(f"  {result}")    
+        logging.info(f"  {result}")
         self.log(result)
         return eval_output
