@@ -58,7 +58,7 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
     #     batch = list(executor.map(map_func, batch))
     new_batch = list()
-    for i in range(len(batch)):
+    for i, d in enumerate(batch):
         new_batch.append(map_func(d))
     
     # process as data dictionary
@@ -349,9 +349,10 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
         for traffic_id in traffic_ids:
             if traffic_id.item() == -1 or traffic_id.item() not in list(traffic_dic.keys()):
                 continue
-            xyz = data_dic["road"][traffic_id.item()]["xyz"].copy()
+            xyz = road_dic[traffic_id.item()]["xyz"].copy()
             xyz[:, :2] -= ego_pose[:2]
-            traffic_state = data_dic['traffic_light'][traffic_id]['state']
+            traffic_state = traffic_dic[traffic_id.item()]["state"]
+
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
             line = shapely.geometry.LineString(pts)
             simplified_xyz_line = line.simplify(1)
