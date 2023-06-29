@@ -147,12 +147,13 @@ class PlanningTrainer(Trainer):
         if model.mode == 'OA-OA':
             batch_generate_eval = False
             print('batch generate for OA-OA is not implemented yet')
-        if self.model.model_args.k != -1:
+        if self.model.model_args.k not in [-1]:
             batch_generate_eval = False
             print('batch generate for TopK is not implemented yet')
 
         if batch_generate_eval:
             # run generate for sequence of actions
+            # TODO: support different frame interval, change sequence length from 40
             if self.model.model_args.autoregressive:
                 prediction_actions_in_batch = self.model.generate(**inputs)
                 prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
@@ -198,8 +199,6 @@ class PlanningTrainer(Trainer):
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
 
-        self.fde = self.fde.item()
-        self.ade = self.ade.item()
         result = dict()
         if self.model.model_args.autoregressive and self.model.clf_metrics is not None:
             # run classsification metrics
@@ -207,8 +206,8 @@ class PlanningTrainer(Trainer):
             result["f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result["precision"] = self.model.clf_metrics["precision"].compute(average="macro")
             result["recall"] = self.model.clf_metrics["recall"].compute(average="macro")
-        result["ade"] = self.ade
-        result["fde"] = self.fde
+        result["ade"] = float(self.ade)
+        result["fde"] = float(self.fde)
         logging.info("***** Eval results *****")
         logging.info(f"  {result}")
         self.log(result)

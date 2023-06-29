@@ -414,7 +414,7 @@ def main():
     results = {}
     if training_args.do_eval:
         if model_args.autoregressive:
-            result = clf_metrics.compute()
+            result = trainer.evaluate()
             logger.info("***** Final Eval results *****")
             logger.info(f"  {result}")
             hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}

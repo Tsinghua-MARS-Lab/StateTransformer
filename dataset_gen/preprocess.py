@@ -59,7 +59,10 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwa
     #     batch = list(executor.map(map_func, batch))
     new_batch = list()
     for i, d in enumerate(batch):
-        new_batch.append(map_func(d))
+        rst = map_func(d)
+        if rst is None:
+            continue
+        new_batch.append(rst)
     
     # process as data dictionary
     result = dict()
@@ -252,6 +255,10 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
     map = sample["map"]
     with open(os.path.join(datapath, f"{map}.pkl"), "rb") as f:
         road_dic = pickle.load(f)
+
+    if filename in ['2021.10.22.18.45.52_veh-28_01175_01298', '2021.10.22.18.45.52_veh-28_00651_00768']:
+        return None
+
     with open(os.path.join(datapath, f"agent_dic/{filename}.pkl"), "rb") as f:
         data_dic = pickle.load(f)
         agent_dic = data_dic["agent_dic"]
