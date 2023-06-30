@@ -148,15 +148,17 @@ class PlanningTrainer(Trainer):
         if batch_generate_eval:
             # run generate for sequence of actions
             if self.model.model_args.autoregressive:
-                prediction_actions_in_batch = self.model.generate(**inputs)
-                prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
                 actions_label_in_batch = inputs["trajectory"]
+                past_length = int((actions_label_in_batch.shape[1] - 1)*0.2 + 1)
+                future_length = actions_label_in_batch.shape[1] - past_length
+                prediction_actions_in_batch = self.model.generate(past_length=past_length, seq_length=future_length,**inputs)
+                prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
                 trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
             else:
                 pass
             # compute ade
-            x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, -40:, 0]
-            y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, -40:, 1]
+            x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, -future_length:, 0]
+            y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, -future_length:, 1]
             ade = torch.sqrt(x_error ** 2 + y_error ** 2)
             ade = ade.mean()
             self.ade = (ade + self.ade * self.eval_itr)/(self.eval_itr + 1)
@@ -194,13 +196,13 @@ class PlanningTrainer(Trainer):
         if self.model.model_args.autoregressive:
             # run classsification metrics
             result = dict()
-            result["accuracy"] = self.model.clf_metrics["accuracy"].compute()
-            result["f1"] = self.model.clf_metrics["f1"].compute(average="macro")
-            result["precision"] = self.model.clf_metrics["precision"].compute(average="macro")
-            result["recall"] = self.model.clf_metrics["recall"].compute(average="macro")
-        result["ade"] = self.ade
-        result["fde"] = self.fde
+            result[f"{metric_key_prefix}_accuracy"] = self.model.clf_metrics["accuracy"].compute()
+            result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
+            result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
+            result[f"{metric_key_prefix}_recall"] = self.model.clf_metrics["recall"].compute(average="macro")
+        result[f"{metric_key_prefix}_ade"] = self.ade
+        result[f"{metric_key_prefix}_fde"] = self.fde
         logging.info("***** Eval results *****")
-        logging.info(f"  {result}")    
+        logging.info(f"{result}")    
         self.log(result)
         return eval_output

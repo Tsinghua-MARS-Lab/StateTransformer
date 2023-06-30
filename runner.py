@@ -295,7 +295,7 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
-    if 'auto' in model_args.model_name:
+    if model_args.autoregressive:
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
