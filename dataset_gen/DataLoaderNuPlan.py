@@ -351,9 +351,9 @@ class NuPlanDL:
                     continue
                 if token not in agent_dic:
                     # init
-                    new_dic = {'pose': np.ones([total_frames, 4]) * -1,
-                               'shape': np.ones([total_frames, 3]) * -1,
-                               'speed': np.ones([total_frames, 2]) * -1,
+                    new_dic = {'pose': np.ones([total_frames, 4], dtype=np.float16) * -1,
+                               'shape': np.ones([total_frames, 3], dtype=np.float16) * -1,
+                               'speed': np.ones([total_frames, 2], dtype=np.float16) * -1,
                                'type': int(agent_type),
                                'is_sdc': 0, 'to_predict': 0}
                     agent_dic[token] = new_dic
@@ -366,6 +366,10 @@ class NuPlanDL:
             if current_pc != last_lidar_pc:
                 current_pc = current_pc.next
                 current_ego_pose = current_pc.ego_pose
+        for key in agent_dic.keys():
+            agent_dic[key]['pose'] = agent_dic[key]['pose'].astype(np.float16)
+            agent_dic[key]['shape'] = agent_dic[key]['shape'].astype(np.float16)
+            agent_dic[key]['speed'] = agent_dic[key]['speed'].astype(np.float16)
 
         road_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,
                                                               scenario_list=scenario_list)
@@ -728,7 +732,7 @@ class NuPlanDL:
 
 
         ego_state = scenario.get_ego_state_at_iteration(0)
-        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 999999,
+        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 1e8,
                                                                       selected_objs)
 
         all_selected_objs_to_render = []
@@ -937,27 +941,11 @@ class NuPlanDL:
 
         if not agent_only:
             if self.running_mode == 1:
-                    # if self.road_dic_path is not None:
-                    #     loading_file_name = self.road_dic_path
-                    #     # print(loading_file_name)
-                    #     with open(loading_file_name, 'rb') as f:
-                    #         road_dic = pickle.load(f)
-                    #         # print(road_dic)
-                road_dic, traffic_dic = self.pack_scenario_to_roaddic(scenario)
-                # traffic_dic = self.pack_scenario_to_trafficdic(scenario)
-                # route_road_ids = scenario.get_route_roadblock_ids()
-                # # handle '' empty string in route_road_ids
-                # road_ids_processed = []
-                # for each_id in route_road_ids:
-                #     if each_id != '':
-                #         try:
-                #             road_ids_processed.append(int(each_id))
-                #         except:
-                #             print(f"Invalid road id in route {each_id}")
-                # route_road_ids = road_ids_processed
+                road_dic = self.pack_scenario_to_roaddic(scenario, map_radius=1e2)
+                traffic_dic = self.pack_scenario_to_trafficdic(scenario)
             else:
                 if self.road_dic_mem is None:
-                    self.road_dic_mem = self.pack_scenario_to_roaddic(scenario, map_radius=9999)
+                    self.road_dic_mem = self.pack_scenario_to_roaddic(scenario, map_radius=1e2)
                 if self.route_idx_mem is None:
                      # loop route road ids from all scenarios in this file
                     route_road_ids = []

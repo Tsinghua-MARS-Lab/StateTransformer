@@ -45,7 +45,7 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
         batch[i]["agent_ids"] = agent_ids
     padded_tensors = dict()
     for key in expected_padding_keys: 
-        tensors = [torch.tensor(data[key]) for data in batch]
+        tensors = [data[key] for data in batch]
         padded_tensors[key] = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=-1) 
         for i, _ in enumerate(batch):
             batch[i][key] = padded_tensors[key][i]
@@ -319,10 +319,10 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
         
         # road channels drawing
         for road_id in road_ids:
-            if route_id.item() == -1:
+            if road_id.item() == -1:
                 continue
             xyz = road_dic[road_id.item()]["xyz"].copy()
-            road_type = int(road_dic[road_id]["type"])
+            road_type = int(road_dic[road_id.item()]["type"])
             xyz[:, :2] -= ego_pose[:2]
             # simplify road vector, can simplify about half of all the points
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
@@ -349,9 +349,9 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
         for traffic_id in traffic_ids:
             if traffic_id.item() == -1 or traffic_id.item() not in list(traffic_dic.keys()):
                 continue
-            xyz = data_dic["road"][traffic_id.item()]["xyz"].copy()
+            xyz = road_dic[traffic_id.item()]["xyz"].copy()
             xyz[:, :2] -= ego_pose[:2]
-            traffic_state = data_dic['traffic_light'][traffic_id]['state']
+            traffic_state = traffic_dic[traffic_id.item()]['state']
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
             line = shapely.geometry.LineString(pts)
             simplified_xyz_line = line.simplify(1)
