@@ -9,10 +9,13 @@ from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
 
+from transformers.generation.configuration_utils import GenerationConfig
+
 import torch.nn as nn
 import torch.nn.functional as F
 from datasets import Value
 import evaluate
+import copy
 
 _CHECKPOINT_FOR_DOC = "transfo-xl-wt103"
 _CONFIG_FOR_DOC = "TransfoXLConfig"
@@ -710,7 +713,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         else:
             self.in_channels = 29
         # TODO: add parameter to conifg past_seq
-        self.past_seq = 10  # 20 frames / 4 = 5 frames per second
+        self.past_seq = model_args.past_seq  # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
         n_embed = config.n_embd // 2
 
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=self.in_channels)
@@ -818,6 +821,53 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             )
         return labels
 
+    def _prepare_model_inputs(self,
+                              high_res_raster,
+                              low_res_raster,
+                              trajectory):
+        """
+        Prepare the inputs for the model.
+        """
+        past_seq = self.past_seq
+        if len(high_res_raster.shape) == 4:  # convert (b, h, w, seq*c) ->(b, seq, c, h, w)
+            _b, _h, _w, _ = high_res_raster.shape
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
+
+        batch_size, seq, c, h, w = high_res_raster.shape
+        future_seq = seq - past_seq
+        # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
+        high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
+        low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
+
+        state_embeds = torch.cat((high_res_embed,
+                                  low_res_embed), dim=-1).to(torch.float32)
+        # action embedding, shape is (b, seq), seq is default to 51 with 5hz
+        action_label = self.tokenize(trajectory)
+        action_token = F.one_hot(action_label.to(torch.int64), self.token_map["x_class"] * self.token_map["y_class"])
+        action_embeds = self.action_m_embed(action_token.to(torch.float32))
+
+        # concat state embedding, action embedding as input embedding
+        ## past state embedding shape is (b, seq+1，emd), while past action embedding shape is (b, seq+1, emd), seq is defalutly set to 10
+        input_embeds_past = torch.cat((
+            torch.zeros_like(state_embeds[:, :past_seq + 1]), torch.zeros_like(action_embeds[:, :past_seq, :])
+        ), dim=1)
+        input_embeds_past[:, ::2, :] = state_embeds[:, :past_seq + 1, :]
+        input_embeds_past[:, 1::2, :] = action_embeds[:, :past_seq, :]
+
+        total_past_length = input_embeds_past.shape[1]
+        if self.mode == "PRED-OA" or self.mode == 'OA-OA':
+            input_embeds_future = torch.cat((
+                torch.zeros_like(state_embeds[:, past_seq + 1:, :]), torch.zeros_like(action_embeds[:, past_seq:, :])
+            ), dim=1)
+            input_embeds_future[:, ::2, :] = action_embeds[:, past_seq:, :]
+            input_embeds_future[:, 1::2, :] = state_embeds[:, past_seq + 1:, :]
+        elif self.mode == "PRED-A":
+            input_embeds_future = action_embeds[:, past_seq:, :]
+
+        input_embeds = torch.cat((input_embeds_past, input_embeds_future), dim=1)
+        return input_embeds, total_past_length
+
     def forward(
         self,
         high_res_raster: Optional[torch.Tensor] = None,
@@ -843,46 +893,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         low_res_raster: batch_size, seq, h, w, c (c=29)
         trajectory: batch_size, seq, 4
         """
-        past_seq = self.past_seq
-        if len(high_res_raster.shape) == 4: # convert (b, h, w, seq*c) ->(b, seq, c, h, w)
-            _b, _h, _w, _= high_res_raster.shape
-            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
-            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
-
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
-        batch_size, seq, c, h, w = high_res_raster.shape
-        future_seq = seq - past_seq
-        # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
-        high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
-        low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
-
-        state_embeds = torch.cat((high_res_embed,
-                                  low_res_embed), dim=-1).to(torch.float32)
-        # action embedding, shape is (b, seq), seq is default to 51 with 5hz
-        action_label = self.tokenize(trajectory)
-        action_token = F.one_hot(action_label.to(torch.int64), self.token_map["x_class"]*self.token_map["y_class"])
-        action_embeds = self.action_m_embed(action_token.to(torch.float32))
-
-        # concat state embedding, action embedding as input embedding
-        ## past state embedding shape is (b, seq+1，emd), while past action embedding shape is (b, seq+1, emd), seq is defalutly set to 10
-        input_embeds_past = torch.cat((
-            torch.zeros_like(state_embeds[:, :past_seq+1]), torch.zeros_like(action_embeds[:, :past_seq, :])
-        ), dim=1)
-        input_embeds_past[:, ::2, :] = state_embeds[:, :past_seq+1, :]
-        input_embeds_past[:, 1::2, :] = action_embeds[:, :past_seq, :]
-
-        total_past_length = input_embeds_past.shape[1]
-        if self.mode == "PRED-OA" or self.mode == 'OA-OA':
-            input_embeds_future = torch.cat((
-                torch.zeros_like(state_embeds[:, past_seq+1:, :]), torch.zeros_like(action_embeds[:, past_seq:, :])
-            ), dim=1)
-            input_embeds_future[:, ::2, :] = action_embeds[:, past_seq:, :]
-            input_embeds_future[:, 1::2, :] = state_embeds[:, past_seq+1:, :]
-        elif self.mode == "PRED-A":
-            input_embeds_future = action_embeds[:, past_seq:, :]
-
-        input_embeds = torch.cat((input_embeds_past, input_embeds_future), dim=1)
+        input_embeds, total_past_length = self._prepare_model_inputs(high_res_raster, low_res_raster, trajectory)
 
         transformer_outputs = self.transformer(
             past_key_values=past_key_values,
@@ -919,7 +931,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             recovered_obs_embd = self.obs_embed_decoder(obs_recover_hidden_states[:, :-1, :])
 
         loss = torch.tensor(0, dtype=torch.float32, device=device)
-
         ## input recover supervision
         if self.predict_trajectory and self.traj_decoder is not None:
             b, s, c = action_logits.shape
@@ -992,37 +1003,287 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             cross_attentions=transformer_outputs.cross_attentions,
         )
 
-    def _prepare_model_inputs(self, inputs):
-        """
-        Prepare the inputs for the model.
-        """
-        high_res_raster = inputs['high_res_raster']
-        low_res_raster = inputs['low_res_raster']
-        trajectory = inputs['trajectory']
+    @torch.no_grad()
+    def generate(
+            self,
+            generation_config: Optional[GenerationConfig] = None,
+            # logits_processor: Optional[LogitsProcessorList] = None,
+            # stopping_criteria: Optional[StoppingCriteriaList] = None,
+            # synced_gpus: Optional[bool] = False,
+            **kwargs
+    ) -> torch.FloatTensor:
+        # temp import
+        # from transformer4planning.generation.beam_search import PlanningBeamSearchScorer
 
+        r"""
+
+        Generates sequences of poses for models with a pose decoder head.
+
+        This is derived from the original generate function from language modeling tasks.
+        See the Higging Face's Official Repo for potential updates at:
+        https://github.com/huggingface/transformers/blob/v4.30.0/src/transformers/generation/utils.py#L1111
+
+        Provide at least 2 seconds of Observation and Action pair to generate a trajectory.
+        Frequency should be greater than the data used for training.
+
+        Parameters:
+            TBD (TODO)
+            generation_config (`~generation.GenerationConfig`, *optional*):
+                The generation configuration to be used as base parametrization for the generation call. `**kwargs`
+                passed to generate matching the attributes of `generation_config` will override them. If
+                `generation_config` is not provided, the default will be used, which had the following loading
+                priority: 1) from the `generation_config.json` model file, if it exists; 2) from the model
+                configuration. Please note that unspecified parameters will inherit [`~generation.GenerationConfig`]'s
+                default values, whose documentation should be checked to parameterize generation.
+            logits_processor (`LogitsProcessorList`, *optional*):
+                Custom logits processors that complement the default logits processors built from arguments and
+                generation config. If a logit processor is passed that is already created with the arguments or a
+                generation config an error is thrown. This feature is intended for advanced users.
+            stopping_criteria (`StoppingCriteriaList`, *optional*):
+                Custom stopping criteria that complement the default stopping criteria built from arguments and a
+                generation config. If a stopping criteria is passed that is already created with the arguments or a
+                generation config an error is thrown. This feature is intended for advanced users.
+            synced_gpus (`bool`, *optional*, defaults to `False`):
+                Whether to continue running the while loop until max_length (needed for ZeRO stage 3)
+            kwargs:
+                Ad hoc parametrization of `generate_config` and/or additional model-specific kwargs that will be
+                forwarded to the `forward` function of the model. If the model is an encoder-decoder model, encoder
+                specific kwargs should not be prefixed and decoder specific kwargs should be prefixed with *decoder_*.
+
+        Return:
+            [`~utils.ModelOutput`] or `torch.LongTensor`: A [`~utils.ModelOutput`] (if `return_dict_in_generate=True`
+            or when `config.return_dict_in_generate=True`) or a `torch.FloatTensor`.
+
+                As a decoeder-only model (`model.config.is_encoder_decoder=False`), the possible
+                [`~utils.ModelOutput`] types are:
+
+                    - [`~generation.GreedySearchDecoderOnlyOutput`],
+                    - [`~generation.SampleDecoderOnlyOutput`],
+                    - [`~generation.BeamSearchDecoderOnlyOutput`],
+                    - [`~generation.BeamSampleDecoderOnlyOutput`]
+        """
+        # priority: `generation_config` argument > `model.generation_config` (the default generation config)
+        if generation_config is None:
+            # legacy: users may modify the model configuration to control generation -- update the generation config
+            # model attribute accordingly, if it was created from the model config
+            if self.generation_config._from_model_config:
+                new_generation_config = GenerationConfig.from_model_config(self.config)
+                if new_generation_config != self.generation_config:
+                    warnings.warn(
+                        "You have modified the pretrained model configuration to control generation. This is a"
+                        " deprecated strategy to control generation and will be removed soon, in a future version."
+                        " Please use a generation configuration file (see"
+                        " https://huggingface.co/docs/transformers/main_classes/text_generation)"
+                    )
+                    self.generation_config = new_generation_config
+            generation_config = self.generation_config
+
+        generation_config = copy.deepcopy(generation_config)
+        model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
+        generation_config.validate()
+
+        # 2. Set generation parameters if not already defined
+        # logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
+        # stopping_criteria = stopping_criteria if stopping_criteria is not None else StoppingCriteriaList()
+
+        # 3. Define model inputs
+        # input_embeds has to be defined
+        high_res_raster = kwargs.get("high_res_raster", None)
+        low_res_raster = kwargs.get("low_res_raster", None)
+        trajectory = kwargs.get("trajectory", None)
+        input_embeds, _ = self._prepare_model_inputs(high_res_raster, low_res_raster, trajectory)
+        batch_size = trajectory.shape[0]
+
+        # 4. Define other model kwargs
+        model_kwargs["output_attentions"] = generation_config.output_attentions
+        model_kwargs["output_hidden_states"] = generation_config.output_hidden_states
+        model_kwargs["use_cache"] = generation_config.use_cache
+        assert not generation_config.use_cache, "Generation with caches is currently not supported. Please set `use_cache=False`."
+
+        # 7. determine generation mode
+        is_constraint_gen_mode = (
+                generation_config.constraints is not None or generation_config.force_words_ids is not None
+        )
+
+        is_contrastive_search_gen_mode = (
+                generation_config.top_k is not None
+                and generation_config.top_k > 1
+                and generation_config.do_sample is False
+                and generation_config.penalty_alpha is not None
+                and generation_config.penalty_alpha > 0
+        )
+
+        is_greedy_gen_mode = (
+                (generation_config.num_beams == 1)
+                and (generation_config.num_beam_groups == 1)
+                and generation_config.do_sample is False
+                and not is_constraint_gen_mode
+                and not is_contrastive_search_gen_mode
+        )
+        is_sample_gen_mode = (
+                (generation_config.num_beams == 1)
+                and (generation_config.num_beam_groups == 1)
+                and generation_config.do_sample is True
+                and not is_constraint_gen_mode
+                and not is_contrastive_search_gen_mode
+        )
+        is_beam_gen_mode = (
+                (generation_config.num_beams > 1)
+                and (generation_config.num_beam_groups == 1)
+                and generation_config.do_sample is False
+                and not is_constraint_gen_mode
+                and not is_contrastive_search_gen_mode
+        )
+        is_beam_sample_gen_mode = (
+                (generation_config.num_beams > 1)
+                and (generation_config.num_beam_groups == 1)
+                and generation_config.do_sample is True
+                and not is_constraint_gen_mode
+                and not is_contrastive_search_gen_mode
+        )
+        is_group_beam_gen_mode = (
+                (generation_config.num_beams > 1)
+                and (generation_config.num_beam_groups > 1)
+                and not is_constraint_gen_mode
+                and not is_contrastive_search_gen_mode
+        )
+
+        if generation_config.num_beam_groups > generation_config.num_beams:
+            raise ValueError("`num_beam_groups` has to be smaller or equal to `num_beams`")
+        if is_group_beam_gen_mode and generation_config.do_sample is True:
+            raise ValueError(
+                "Diverse beam search cannot be used in sampling mode. Make sure that `do_sample` is set to `False`."
+            )
+
+        if self.device.type != input_embeds.device.type:
+            warnings.warn(
+                "You are calling .generate() with the `input_ids` being on a device type different"
+                f" than your model's device. `input_ids` is on {input_ids.device.type}, whereas the model"
+                f" is on {self.device.type}. You may experience unexpected behaviors or slower generation."
+                " Please make sure that you have put `input_ids` to the"
+                f" correct device by calling for example input_ids = input_ids.to('{self.device.type}') before"
+                " running `.generate()`.",
+                UserWarning,
+            )
+
+        if self.k == 1:
+            return self.generate_without_score(kwargs)
+        else:
+            raise NotImplementedError("TopK generation is not implemented yet.")
+
+        # 8. prepare distribution pre_processing samplers (TBD)
+        # 9. prepare stopping criteria (TBD)
+        # 10. go into different generation modes
+        if is_greedy_gen_mode:
+            raise NotImplementedError("Greedy generation is not implemented yet.")
+
+        elif is_contrastive_search_gen_mode:
+            raise NotImplementedError("Contrastive search generation is not implemented yet.")
+
+        elif is_sample_gen_mode:
+            raise NotImplementedError("Sampling is not implemented yet.")
+
+        elif is_beam_gen_mode:
+            raise NotImplementedError("Sampling is not implemented yet.")
+            if generation_config.num_return_sequences > generation_config.num_beams:
+                raise ValueError("`num_return_sequences` has to be smaller or equal to `num_beams`.")
+            # 11. prepare beam search scorer
+            # TODO: Implement Scorer
+            # beam_scorer = PlanningBeamSearchScorer(
+            #     batch_size=batch_size,
+            #     num_beams=generation_config.num_beams,
+            #     device=inputs_tensor.device,
+            #     # do_early_stopping=generation_config.early_stopping,
+            #     num_beam_hyps_to_keep=generation_config.num_return_sequences,
+            #     max_length=generation_config.max_length,
+            # )
+            # # 12. interleave input_ids with `num_beams` additional sequences per batch
+            # input_ids, model_kwargs = self._expand_inputs_for_generation(
+            #     input_ids=input_ids,
+            #     expand_size=generation_config.num_beams,
+            #     is_encoder_decoder=self.config.is_encoder_decoder,
+            #     **model_kwargs,
+            # )
+            # # 13. run beam search
+            # return self.beam_search(
+            #     input_ids,
+            #     beam_scorer,
+            #     logits_processor=logits_processor,
+            #     stopping_criteria=stopping_criteria,
+            #     pad_token_id=generation_config.pad_token_id,
+            #     eos_token_id=generation_config.eos_token_id,
+            #     output_scores=generation_config.output_scores,
+            #     return_dict_in_generate=generation_config.return_dict_in_generate,
+            #     synced_gpus=synced_gpus,
+            #     **model_kwargs,
+            # )
+
+        elif is_beam_sample_gen_mode:
+            raise NotImplementedError("Beam sampling is not implemented yet.")
+
+        elif is_group_beam_gen_mode:
+            raise NotImplementedError("Group beam search is not implemented yet.")
+
+        elif is_constraint_gen_mode:
+            raise NotImplementedError("Constrained generation is not implemented yet.")
+
+    def generate_without_score(self, kwargs):
+        high_res_raster = kwargs.get("high_res_raster", None)
+        low_res_raster = kwargs.get("low_res_raster", None)
+        trajectory = kwargs.get("trajectory", None)
         device = high_res_raster.device
-        # get observation embedding
+        past_length = 11 if kwargs.get("past_length", None) is None else kwargs.get("past_length", None)
+        provided_length = past_length
+        seq_length = 40 if kwargs.get("seq_length", None) is None else kwargs.get("seq_length", None)
+
         if len(high_res_raster.shape) == 4:  # convert (b, h, w, seq*c) ->(b, seq, c, w, h)
             _b, _h, _w, _ = high_res_raster.shape
-            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)[:, :self.past_seq, ...]
-            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)[:, :self.past_seq, ...]
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)[:,
+                              :past_length, ...]
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)[:,
+                             :past_length, ...]
         batch_size, seq, c, h, w = high_res_raster.shape
         high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
-        # get action embedding
-        trajectory = self.tokenize(trajectory[:, :self.past_seq, ...])
-        tokenized_trajectory = F.one_hot(trajectory.to(torch.int64), 80 * 40)
-        action_embeds = self.action_m_embed(tokenized_trajectory.to(torch.float32))
-        input_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device),
-                                  torch.zeros_like(action_embeds, dtype=torch.float32, device=device)), dim=1)
+        trajectory_to_loop = trajectory[:, :past_length, :2]  # b, past_length, 2
 
-        input_embeds[:, ::2, :] = state_embeds
-        input_embeds[:, 1::2, :] = action_embeds
+        looping_embeds = None
+        for _ in range(seq_length):
+            if looping_embeds is None:
+                ## action embedding
+                trajectory_tokens = self.tokenize(trajectory_to_loop[:, :past_length, ...])
+                tokenized_trajectory = F.one_hot(trajectory_tokens.to(torch.int64), 80 * 40)
+                action_embeds = self.action_m_embed(tokenized_trajectory.to(torch.float32))
+                looping_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device),
+                                          torch.zeros_like(action_embeds, dtype=torch.float32, device=device)), dim=1)
 
-        return input_embeds
+                looping_embeds[:, ::2, :] = state_embeds
+                looping_embeds[:, 1::2, :] = action_embeds
+            else:
+                ## action embedding
+                prev_token = self.tokenize(trajectory_to_loop[:, -1, ...].unsqueeze(1))
+                prev_tokenized_action = F.one_hot(prev_token.to(torch.int64), 80 * 40)
+                action_embeds = self.action_m_embed(prev_tokenized_action.to(torch.float32))
+                looping_embeds = torch.cat((looping_embeds, action_embeds), dim=1)
 
-    def generate(self,
+            attention_mask = self._prepare_attention_mask_for_generation(looping_embeds)
+            position_ids = self._prepare_position_ids_for_generation(attention_mask)
+            transformer_output = self.transformer(
+                inputs_embeds=looping_embeds,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                # **input_kwargs
+            )
+            transformer_hidden_state = transformer_output[0]
+            output = self.traj_decoder(transformer_hidden_state[:, -1, :]).unsqueeze(1)  # b, 1, 2
+
+            trajectory_to_loop = torch.cat((trajectory_to_loop, output), dim=1)
+            past_length += 1
+
+        return trajectory_to_loop[:, provided_length:, :2]
+
+    def generate_legacy(self,
                 high_res_raster: Optional[torch.Tensor] = None,
                 low_res_raster: Optional[torch.Tensor] = None,
                 trajectory: Optional[torch.Tensor] = None,
@@ -1045,6 +1306,12 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+        input_kwargs = dict(
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
         ## action embedding
         trajectory = self.tokenize(trajectory[:, :past_length, ...])
         tokenized_trajectory = F.one_hot(trajectory.to(torch.int64), 80 * 40)
@@ -1057,12 +1324,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         # result dict
         step = 0
-        input_kwargs = dict(
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
         beam = self.beam_search(input_embeds, input_kwargs, max_length=seq_length, beam_width=6)
         best_seq, _ = beam[0]
         # TODO OA pair
@@ -1071,7 +1332,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         action_logits = F.softmax(action_labels, dim=-1)
         action_labels = torch.argmax(action_logits, dim = -1)
         return self.token2action(action_labels)
-
 
     def beam_search(self, input_embeds, input_kwargs, max_length, beam_width=6):
             # input_embeds shape is (bsz, seq_length, hidden_size)

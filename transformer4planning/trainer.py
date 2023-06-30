@@ -147,7 +147,10 @@ class PlanningTrainer(Trainer):
         if model.mode == 'OA-OA':
             batch_generate_eval = False
             print('batch generate for OA-OA is not implemented yet')
-        if self.model.model_args.k not in [-1]:
+        # if self.model.model_args.k not in [-1]:
+        #     batch_generate_eval = False
+        #     print('batch generate for TopK is not implemented yet')
+        if self.model.model_args.k not in [1, -1]:
             batch_generate_eval = False
             print('batch generate for TopK is not implemented yet')
 
@@ -155,7 +158,20 @@ class PlanningTrainer(Trainer):
             # run generate for sequence of actions
             # TODO: support different frame interval, change sequence length from 40
             if self.model.model_args.autoregressive:
-                prediction_actions_in_batch = self.model.generate(**inputs)
+                if self.model.model_args.k == 1:
+                    from transformers import GenerationConfig
+                    translation_generation_config = GenerationConfig(
+                        num_beams=20,
+                        early_stopping=True,
+                        decoder_start_token_id=0,
+                        eos_token_id=model.config.eos_token_id,
+                        pad_token=model.config.pad_token_id,
+                        max_new_tokens=50,
+                        use_cache=False,
+                    )
+                    prediction_actions_in_batch = self.model.generate(**inputs, generation_config=translation_generation_config)
+                elif self.model.model_args.k == -1:
+                    prediction_actions_in_batch = self.model.generate(**inputs)
                 prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
                 actions_label_in_batch = inputs["trajectory"]
                 trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
