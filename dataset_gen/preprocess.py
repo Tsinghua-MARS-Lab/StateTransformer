@@ -50,13 +50,13 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
         for i, _ in enumerate(batch):
             batch[i][key] = padded_tensors[key][i]
 
-    # online rasterize TODO:autoregressive function transfer
+    # online rasterize
     if autoregressive:
         map_func = partial(dynamic_coor_rasterize, datapath=dic_path, **encode_kwargs)
     else:
         map_func = partial(static_coor_rasterize, datapath=dic_path, **encode_kwargs) 
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
-    #     batch = list(executor.map(map_func, batch))
+    #     new_batch = list(executor.map(map_func, batch))
     new_batch = list()
     for i in range(len(batch)):
         new_batch.append(map_func(d))
@@ -89,10 +89,18 @@ def static_coor_rasterize(sample, datapath, raster_shape=(224, 224),
     map = sample["map"]
     with open(os.path.join(datapath, f"{map}.pkl"), "rb") as f:
         road_dic = pickle.load(f)
-    with open(os.path.join(datapath, f"agent_dic/{filename}.pkl"), "rb") as f:
-        data_dic = pickle.load(f)  
-        agent_dic = data_dic["agent_dic"]
-        traffic_dic = data_dic["traffic_dic"]          
+    # load agent and traffic dictionaries
+    data_dic = None
+    items = [item for item in os.listdir(datapath)]
+    for item in items:
+        if os.path.isdir(os.path.join(datapath, item)) and os.path.exists(os.path.join(datapath, item, f"{filename}.pkl")):
+            with open(os.path.join(datapath, item, f"{filename}.pkl"), "rb") as f:
+                data_dic = pickle.load(f)  
+                agent_dic = data_dic["agent_dic"]
+                traffic_dic = data_dic["traffic_dic"]
+            break     
+    if data_dic is None:
+        return None
     road_ids = sample["road_ids"]
     agent_ids = sample["agent_ids"]
     traffic_ids = sample["traffic_ids"]
@@ -252,10 +260,18 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
     map = sample["map"]
     with open(os.path.join(datapath, f"{map}.pkl"), "rb") as f:
         road_dic = pickle.load(f)
-    with open(os.path.join(datapath, f"agent_dic/{filename}.pkl"), "rb") as f:
-        data_dic = pickle.load(f)  
-        agent_dic = data_dic["agent_dic"]
-        traffic_dic = data_dic["traffic_dic"]          
+    # load agent and traffic dictionaries
+    items = [item for item in os.listdir(datapath)]
+    data_dic = None
+    for item in items:
+        if os.path.isdir(os.path.join(datapath, item)) and os.path.exists(os.path.join(datapath, item, f"{filename}.pkl")):
+            with open(os.path.join(datapath, item, f"{filename}.pkl"), "rb") as f:
+                data_dic = pickle.load(f)  
+                agent_dic = data_dic["agent_dic"]
+                traffic_dic = data_dic["traffic_dic"]
+            break
+    if data_dic is None:
+        return None          
     road_ids = sample["road_ids"]
     agent_ids = sample["agent_ids"]
     traffic_ids = sample["traffic_ids"]
