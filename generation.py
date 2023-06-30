@@ -25,7 +25,7 @@ def main(args):
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
     #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
-    #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
+    #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_singapore",
     # }
     data_path = {
         'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
@@ -56,6 +56,10 @@ def main(args):
     #             data_path=data_path, db=None, gt_relation_path=None,
     #             road_dic_path=None,
     #             running_mode=running_mode)
+    # loaded_dic, _ = dl.get_next_file()
+    # map = loaded_dic["map"]
+    # with open(f"{map}.pkl", "wb") as f:
+    #     pickle.dump(loaded_dic["road"], f)
     # scenarios, zero_file = dl.get_scenario_num()
     # print("Total scenario number is", scenarios, "zeros files", zero_file)
     # exit()
@@ -260,7 +264,10 @@ def main(args):
             result["agent_dic"] = loaded_dic["agent"]
             result["traffic_dic"] = loaded_dic["traffic_light"]
             result["file_name"] = file_name
-            with open(os.path.join(args.cache_folder, args.dataset_name, f"{file_name}.pkl"), "wb") as f:
+            store_path = os.path.join(args.cache_folder, args.dataset_name)
+            if not os.path.exists(store_path):
+                os.makedirs(store_path)
+            with open(os.path.join(store_path, f"{file_name}.pkl"), "wb") as f:
                 pickle.dump(result, f)
             yield dict(filename=result["file_name"])
         del dl
