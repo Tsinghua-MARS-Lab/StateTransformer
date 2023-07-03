@@ -11,13 +11,13 @@ from transformer4planning.checkratser import visulize_raster_perchannel, visuliz
 @dataclass
 class TestArguments:
     dataset: str = field(
-        default="/home/shiduozhang/nuplan/online_debug/boston_index_demo"
+        default="/home/shiduozhang/nuplan/online_debug/us-ma-boston"
     )
     datadic_path: str = field(
         default="/home/shiduozhang/nuplan/online_debug/"
     )
     batch_size: int = field(
-        default=8
+        default=2
     )
     num_workers: int = field(
         default=1
@@ -46,6 +46,8 @@ class TestOnlinePreprocess(unittest.TestCase):
         Load data from dataloader to check if the collate_fn works well
         """
         dataset = datasets.load_from_disk(self.args.dataset)
+        dataset = dataset.add_column('split', column=['test']*len(dataset))
+        example = dataset[0]
         collate_fn = partial(nuplan_collate_func, dic_path=self.args.datadic_path, autoregressive=True)
         dataloader = DataLoader(
             dataset=dataset,
