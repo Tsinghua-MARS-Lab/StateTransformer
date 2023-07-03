@@ -130,6 +130,15 @@ class ModelArguments:
         default=10,
         metadata={"help": "past frames to include for prediction/planning."},
     )
+    x_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    y_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    tokenize_label: Optional[bool] = field(
+        default=True
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -214,6 +223,7 @@ class DataProcessArguments:
     frame_sample_interval: Optional[int] = field(
         default=4
     )
+
     
 
 def main():
@@ -339,6 +349,7 @@ def main():
             dataset.shuffle(seed=training_args.seed)
             train_samples = int(len(dataset) * float(data_args.dataset_scale))
             train_dataset = dataset.select(range(train_samples))
+            train_dataset.add_column('split', column=['train']*len(train_dataset))
             
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
@@ -346,10 +357,21 @@ def main():
             else:
                 test_dataset = dataset.select(range(train_samples))
                 test_dataset.set_format(type='torch')
+
+            # loop split info and update for test set
+            # splits={'train': SplitInfo(name='train', num_bytes=1538228595562, num_examples=71490, shard_lengths=[..]}
+            split_dic = test_dataset.info.splits['train']
+            split_dic.name = 'test'
+            test_dataset.info.splits['test'] = split_dic
+            del test_dataset.info.splits['train']
+            # add additional column for flagging test set
+            test_dataset.add_column('split', column=['test']*len(test_dataset))
+
             # if data_args.online_preprocess:
             #     train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
             #     test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
             print('TrainingSet: ', dataset, '\nTestSet', test_dataset)
+
             nuplan_dataset = dict(
                 train=train_dataset,
                 validation=test_dataset.shuffle(seed=training_args.seed),
@@ -362,7 +384,7 @@ def main():
     model = build_models(model_args)
     if 'auto' in model_args.model_name and model_args.k == -1:
         model.clf_metrics = clf_metrics
-    if 'auto' in model_args.model_name and model_args.next_token_scorer:
+    elif 'auto' in model_args.model_name and model_args.next_token_scorer:
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
@@ -419,6 +441,7 @@ def main():
             logger.info(f"  {result}")
             hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
             evaluate.save("./results/", ** result, ** hyperparams)
+            logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
     if training_args.do_predict:
         from sklearn.metrics import classification_report

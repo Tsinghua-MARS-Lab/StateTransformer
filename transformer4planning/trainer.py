@@ -150,15 +150,17 @@ class PlanningTrainer(Trainer):
         # if self.model.model_args.k not in [-1]:
         #     batch_generate_eval = False
         #     print('batch generate for TopK is not implemented yet')
-        if self.model.model_args.k not in [1, -1]:
-            batch_generate_eval = False
-            print('batch generate for TopK is not implemented yet')
+        # if self.model.model_args.k not in [1, -1]:
+        #     batch_generate_eval = False
+        #     print('batch generate for TopK is not implemented yet')
 
         if batch_generate_eval:
             # run generate for sequence of actions
             # TODO: support different frame interval, change sequence length from 40
             if self.model.model_args.autoregressive:
-                if self.model.model_args.k == 1:
+                actions_label_in_batch = inputs["trajectory"].clone()
+                trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
+                if self.model.model_args.k > 0:
                     from transformers import GenerationConfig
                     translation_generation_config = GenerationConfig(
                         num_beams=20,
@@ -171,23 +173,21 @@ class PlanningTrainer(Trainer):
                     )
                     prediction_actions_in_batch = self.model.generate(**inputs, generation_config=translation_generation_config)
                 elif self.model.model_args.k == -1:
-                    prediction_actions_in_batch = self.model.generate(**inputs)
+                    prediction_actions_in_batch = self.model.generate_legacy(**inputs)
                 prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
-                actions_label_in_batch = inputs["trajectory"]
-                trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
             else:
                 pass
             # compute ade
             x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, -40:, 0]
             y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, -40:, 1]
-            ade = torch.sqrt(x_error ** 2 + y_error ** 2)
+            ade = torch.sqrt(x_error.flatten() ** 2 + y_error.flatten() ** 2)
             ade = ade.mean()
             self.ade = (ade + self.ade * self.eval_itr)/(self.eval_itr + 1)
             self.ade = float(self.ade)  # tensor to float to save in json
             # compute fde
             x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
             y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
-            fde = torch.sqrt(x_error ** 2 + y_error ** 2)
+            fde = torch.sqrt(x_error.flatten() ** 2 + y_error.flatten() ** 2)
             fde = fde.mean()
             self.fde = (fde + self.fde * self.eval_itr)/(self.eval_itr + 1)
             self.fde = float(self.fde)  # tensor to float to save in json

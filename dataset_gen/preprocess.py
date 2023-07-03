@@ -253,16 +253,23 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
                             road_types=20, agent_types=8, traffic_types=4):
     filename = sample["file_name"]
     map = sample["map"]
+    split = sample["split"]
     with open(os.path.join(datapath, f"{map}.pkl"), "rb") as f:
         road_dic = pickle.load(f)
 
     if filename in ['2021.10.22.18.45.52_veh-28_01175_01298', '2021.10.22.18.45.52_veh-28_00651_00768']:
         return None
+    if split == 'train':
+        with open(os.path.join(datapath, f"agent_dic/{filename}.pkl"), "rb") as f:
+            data_dic = pickle.load(f)
+            agent_dic = data_dic["agent_dic"]
+            traffic_dic = data_dic["traffic_dic"]
+    else:
+        with open(os.path.join(datapath, f"test_dic/{filename}.pkl"), "rb") as f:
+            data_dic = pickle.load(f)
+            agent_dic = data_dic["agent_dic"]
+            traffic_dic = data_dic["traffic_dic"]
 
-    with open(os.path.join(datapath, f"agent_dic/{filename}.pkl"), "rb") as f:
-        data_dic = pickle.load(f)
-        agent_dic = data_dic["agent_dic"]
-        traffic_dic = data_dic["traffic_dic"]
     road_ids = sample["road_ids"]
     agent_ids = sample["agent_ids"]
     traffic_ids = sample["traffic_ids"]
