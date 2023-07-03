@@ -223,9 +223,9 @@ class PlanningTrainer(Trainer):
             result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
             result[f"{metric_key_prefix}_recall"] = self.model.clf_metrics["recall"].compute(average="macro")
-        result[f"{metric_key_prefix}_ade"] = self.ade
-        result[f"{metric_key_prefix}_fde"] = self.fde
+        result[f"{metric_key_prefix}_ade"] = float(self.ade)
+        result[f"{metric_key_prefix}_fde"] = float(self.fde)
         logging.info("***** Eval results *****")
-        logging.info(f"{result}")    
+        logging.info(f"{result}")
         self.log(result)
         return eval_output

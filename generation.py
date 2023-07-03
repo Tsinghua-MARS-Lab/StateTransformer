@@ -11,8 +11,7 @@ import logging
 import argparse
 import numpy as np
 
-from visulization.checkraster import *
-import pickle
+# from visulization.checkraster import *
 
 def main(args):
     running_mode = args.running_mode
@@ -32,6 +31,17 @@ def main(args):
     #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
     #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
     #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
+    # }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
+    #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
+    # }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/Volumes/Elements SE/nuPlan",
+    #     'NUPLAN_MAPS_ROOT': "/Volumes/Elements SE/nuPlan/maps",
+    #     'NUPLAN_DB_FILES': "/Volumes/Elements SE/nuPlan/nuplan-v1.1/{}".format(args.data_path)
     # }
     road_path = args.road_dic_path
     if args.use_nsm:
@@ -188,11 +198,11 @@ def main(args):
     def yield_data_by_scenario(shards):
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
-                            file_to_start=shard,
-                            max_file_number=1,
-                            data_path=data_path, db=None, gt_relation_path=None,
-                            road_dic_path=None,
-                            running_mode=running_mode)
+                          file_to_start=shard,
+                          max_file_number=1,
+                          data_path=data_path, db=None, gt_relation_path=None,
+                          road_dic_path=None,
+                          running_mode=running_mode)
             file_name = dl.file_names[0]
             if args.auto_regressive:
                 seconds_in_future = 9
@@ -231,11 +241,12 @@ def main(args):
     def yield_data_index(shards):
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
-                            file_to_start=shard,
-                            max_file_number=1,
-                            data_path=data_path, db=None, gt_relation_path=None,
-                            road_dic_path=None,
-                            running_mode=running_mode)
+                          file_to_start=shard,
+                          max_file_number=1,
+                          data_path=data_path, db=None, gt_relation_path=None,
+                          road_dic_path=None,
+                          running_mode=running_mode,
+                          filter_scenario=filter_scenario)
             while not dl.end:
                 loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval)
                 if loaded_dic is None:
@@ -264,6 +275,7 @@ def main(args):
             result["agent_dic"] = loaded_dic["agent"]
             result["traffic_dic"] = loaded_dic["traffic_light"]
             result["file_name"] = file_name
+            # check if folder exists
             store_path = os.path.join(args.cache_folder, args.dataset_name)
             if not os.path.exists(store_path):
                 os.makedirs(store_path)
@@ -271,6 +283,9 @@ def main(args):
                 pickle.dump(result, f)
             yield dict(filename=result["file_name"])
         del dl
+
+
+    # dic = yield_data_dic([0])
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
 
     NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
@@ -373,14 +388,13 @@ def main(args):
                                                 gen_kwargs={'shards': file_indices},
                                                 writer_batch_size=10, cache_dir=args.cache_folder,
                                                 num_proc=args.num_proc)
-
+        exit()
     elif args.by_scenario:
         nuplan_dataset = Dataset.from_generator(yield_data_by_scenario,
                                                 gen_kwargs={'shards': file_indices},
                                                 writer_batch_size=2, cache_dir=args.cache_folder,
                                                 num_proc=args.num_proc
                                                 )
-
     else:
         nuplan_dataset = Dataset.from_generator(yield_data,
                                                 gen_kwargs={'shards': file_indices, 'dl': None,
@@ -396,6 +410,17 @@ def main(args):
 
 if __name__ == '__main__':
     from pathlib import Path
+    """
+    python generation.py  --num_proc 40 --sample_interval 100  
+    --dataset_name boston_index_demo  --starting_file_num 0  
+    --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
+    --data_path train_boston  --only_data_dic
+    
+    python generation.py  --num_proc 40 --sample_interval 100  
+    --dataset_name boston_index_interval100  --starting_file_num 0  
+    --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
+    --data_path train_boston  --only_index
+    """
 
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 

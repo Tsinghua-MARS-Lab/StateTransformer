@@ -94,13 +94,13 @@ def static_coor_rasterize(sample, datapath, raster_shape=(224, 224),
     with open(os.path.join(datapath, "map", f"{map}.pkl"), "rb") as f:
         road_dic = pickle.load(f)
     # load agent and traffic dictionaries
-    data_dic = None    
+    data_dic = None
     traffic_dic = sample["traffic_dic"]
     if os.path.exists(os.path.join(datapath, f"{split}", f"{map}", f"{filename}.pkl")):
         with open(os.path.join(datapath, f"{split}", f"{map}", f"{filename}.pkl"), "rb") as f:
-            data_dic = pickle.load(f)  
+            data_dic = pickle.load(f)
             agent_dic = data_dic["agent_dic"]
-            # traffic_dic = data_dic["traffic_dic"] # load traffic dictonary from dic per file, which is a legacy way
+            # traffic_dic = data_dic["traffic_dic"]  # load traffic dictionary from dic per file
     if data_dic is None:
         return None
     road_ids = sample["road_ids"]
@@ -183,18 +183,53 @@ def static_coor_rasterize(sample, datapath, raster_shape=(224, 224),
         simplified_x, simplified_y = simplified_xyz_line.xy
         simplified_xyz = np.ones((len(simplified_x), 2)) * -1
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,
+                                                                                          1].copy() * sin_, simplified_xyz[
+                                                                                                            :,
+                                                                                                            0].copy() * sin_ + simplified_xyz[
+                                                                                                                               :,
+                                                                                                                               1].copy() * cos_
         simplified_xyz[:, 1] *= -1
         high_res_traffic = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
         low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
-            # traffic state order is GREEN, RED, YELLOW, UNKNOWN
+        # traffic state order is GREEN, RED, YELLOW, UNKNOWN
         for j in range(simplified_xyz.shape[0] - 1):
             cv2.line(rasters_high_res_channels[1 + road_types + traffic_state], \
-                    tuple(high_res_traffic[j, :2]),
-                    tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                     tuple(high_res_traffic[j, :2]),
+                     tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
             cv2.line(rasters_low_res_channels[1 + road_types + traffic_state], \
-                    tuple(low_res_traffic[j, :2]),
-                    tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                     tuple(low_res_traffic[j, :2]),
+                     tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+    # traffic raster
+    for traffic_id in traffic_ids:
+        if traffic_id.item() == -1 or traffic_id.item() not in list(traffic_dic.keys()):
+            continue
+        xyz = road_dic[traffic_id.item()]["xyz"].copy()
+        xyz[:, :2] -= origin_ego_pose[:2]
+        traffic_state = traffic_dic[traffic_id.item()]["state"]
+        pts = list(zip(xyz[:, 0], xyz[:, 1]))
+        line = shapely.geometry.LineString(pts)
+        simplified_xyz_line = line.simplify(1)
+        simplified_x, simplified_y = simplified_xyz_line.xy
+        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,
+                                                                                          1].copy() * sin_, simplified_xyz[
+                                                                                                            :,
+                                                                                                            0].copy() * sin_ + simplified_xyz[
+                                                                                                                               :,
+                                                                                                                               1].copy() * cos_
+        simplified_xyz[:, 1] *= -1
+        high_res_traffic = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+        low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
+        # traffic state order is GREEN, RED, YELLOW, UNKNOWN
+        for j in range(simplified_xyz.shape[0] - 1):
+            cv2.line(rasters_high_res_channels[1 + road_types + traffic_state], \
+                     tuple(high_res_traffic[j, :2]),
+                     tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+            cv2.line(rasters_low_res_channels[1 + road_types + traffic_state], \
+                     tuple(low_res_traffic[j, :2]),
+                     tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
     for state in traffic_dic.keys():
         traffic_ids = traffic_dic[state]
         state = int(state)
@@ -208,18 +243,18 @@ def static_coor_rasterize(sample, datapath, raster_shape=(224, 224),
             simplified_x, simplified_y = simplified_xyz_line.xy
             simplified_xyz = np.ones((len(simplified_x), 2)) * -1
             simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:,0].copy() * sin_ + simplified_xyz[:,1].copy() * cos_
             simplified_xyz[:, 1] *= -1
             high_res_traffic = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
             low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
-        
+
         for j in range(simplified_xyz.shape[0] - 1):
             cv2.line(rasters_high_res_channels[1 + road_types + state], \
-                    tuple(high_res_traffic[j, :2]),
-                    tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                     tuple(high_res_traffic[j, :2]),
+                     tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
             cv2.line(rasters_low_res_channels[1 + road_types + state], \
-                    tuple(low_res_traffic[j, :2]),
-                    tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                     tuple(low_res_traffic[j, :2]),
+                     tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
     # agent raster
     cos_, sin_ = math.cos(-origin_ego_pose[3]), math.sin(-origin_ego_pose[3])
     for _, agent_id in enumerate(agent_ids):
@@ -396,7 +431,7 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
         #     xyz = road_dic[traffic_id.item()]["xyz"].copy()
         #     xyz[:, :2] -= ego_pose[:2]
         #     traffic_state = traffic_dic[traffic_id.item()]["state"]
-
+        #
         #     pts = list(zip(xyz[:, 0], xyz[:, 1]))
         #     line = shapely.geometry.LineString(pts)
         #     simplified_xyz_line = line.simplify(1)
@@ -415,7 +450,7 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
         #         cv2.line(rasters_low_res_channels[1 + road_types + traffic_state], \
         #                 tuple(low_res_traffic[j, :2]),
         #                 tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
-        
+
         # for the case that traffic data_dic stored in sample
         for state in traffic_dic.keys():
             traffic_ids = traffic_dic[state]
@@ -430,18 +465,18 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
                 simplified_x, simplified_y = simplified_xyz_line.xy
                 simplified_xyz = np.ones((len(simplified_x), 2)) * -1
                 simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:,0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:,0].copy() * sin_ + simplified_xyz[:,1].copy() * cos_
                 simplified_xyz[:, 1] *= -1
                 high_res_traffic = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
                 low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
-            
+
             for j in range(simplified_xyz.shape[0] - 1):
                 cv2.line(rasters_high_res_channels[1 + road_types + state], \
-                        tuple(high_res_traffic[j, :2]),
-                        tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                         tuple(high_res_traffic[j, :2]),
+                         tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
                 cv2.line(rasters_low_res_channels[1 + road_types + state], \
-                        tuple(low_res_traffic[j, :2]),
-                        tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                         tuple(low_res_traffic[j, :2]),
+                         tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
         # draw agent
         cos_, sin_ = math.cos(-ego_pose[3]), math.sin(-ego_pose[3])
         for agent_id in agent_ids:
