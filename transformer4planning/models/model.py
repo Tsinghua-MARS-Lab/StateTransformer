@@ -717,7 +717,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         n_embed = config.n_embd // 2
 
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=self.in_channels)
-        self.action_m_embed = nn.Sequential(nn.Linear(40 * 80, config.n_embd), nn.Tanh())
+        if self.model_args.tokenize_label:
+            self.action_m_embed = nn.Sequential(nn.Linear(40 * 80, config.n_embd), nn.Tanh())
+        else:
+            self.action_m_embed = nn.Sequential(nn.Linear(2, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
         self.k = int(self.model_args.k)
@@ -834,6 +837,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
             low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)
 
+        device = high_res_raster.device
+
         batch_size, seq, c, h, w = high_res_raster.shape
         future_seq = seq - past_seq
         # embed with the format of (batchsize*history, n_embed) => (batchsize, history, n_embed): both high and low res => (batchsize, history, 2*n_embed)
@@ -843,9 +848,20 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         state_embeds = torch.cat((high_res_embed,
                                   low_res_embed), dim=-1).to(torch.float32)
         # action embedding, shape is (b, seq), seq is default to 51 with 5hz
-        action_label = self.tokenize(trajectory)
-        action_token = F.one_hot(action_label.to(torch.int64), self.token_map["x_class"] * self.token_map["y_class"])
-        action_embeds = self.action_m_embed(action_token.to(torch.float32))
+        copy_trajectory = trajectory.clone()
+        if self.model_args.x_random_walk > 0:
+            x_noise = torch.rand(trajectory.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
+            copy_trajectory[:, past_seq:, 0] += x_noise[:, past_seq:, 0]
+        if self.model_args.y_random_walk > 0:
+            y_noise = torch.rand(trajectory.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
+            copy_trajectory[:, past_seq:, 1] += y_noise[:, past_seq:, 1]
+
+        if self.model_args.tokenize_label:
+            action_label = self.tokenize(copy_trajectory)
+            action_token = F.one_hot(action_label.to(torch.int64), self.token_map["x_class"] * self.token_map["y_class"])
+            action_embeds = self.action_m_embed(action_token.to(torch.float32))
+        else:
+            action_embeds = self.action_m_embed(copy_trajectory[..., :2].to(torch.float32))  # (b, seq, emd)
 
         # concat state embedding, action embedding as input embedding
         ## past state embedding shape is (b, seq+1，emd), while past action embedding shape is (b, seq+1, emd), seq is defalutly set to 10
@@ -970,16 +986,12 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                     pred_logits = self.next_token_scorer_decoder(action_hidden_states.to(device))  # b, s, k
                     loss_fct = CrossEntropyLoss(reduction="mean")
                     loss_to_add = loss_fct(pred_logits.reshape(b*s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
-                    loss += loss_to_add
+                    loss += loss_to_add * 0.1
 
         if self.recover_obs:
             loss_fct = MSELoss(reduction="mean")
             loss_to_add = loss_fct(recovered_obs_embd, obs_labels)
             loss += loss_to_add
-
-        if not return_dict:
-            output = (action_logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
 
         # evaluate accuracy if on eval
         if not self.training and self.clf_metrics is not None:
@@ -993,6 +1005,10 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 predictions = torch.argmax(action_logits, dim=-1)
                 for _, metric in self.clf_metrics.items():
                     metric.add_batch(references=action_label.reshape(-1), predictions=predictions.reshape(-1))
+
+        if not return_dict:
+            output = (action_logits,) + transformer_outputs[1:]
+            return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
@@ -1091,7 +1107,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         high_res_raster = kwargs.get("high_res_raster", None)
         low_res_raster = kwargs.get("low_res_raster", None)
         trajectory = kwargs.get("trajectory", None)
-        input_embeds, _ = self._prepare_model_inputs(high_res_raster, low_res_raster, trajectory)
+        input_embeds, _ = self._prepare_model_inputs(high_res_raster, low_res_raster, trajectory.clone())
         batch_size = trajectory.shape[0]
 
         # 4. Define other model kwargs
@@ -1168,6 +1184,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         if self.k == 1:
             return self.generate_without_score(kwargs)
+        elif self.k > 1:
+            return self.generate_with_score(kwargs)
         else:
             raise NotImplementedError("TopK generation is not implemented yet.")
 
@@ -1246,7 +1264,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
-        trajectory_to_loop = trajectory[:, :past_length, :2]  # b, past_length, 2
+        trajectory_to_loop = trajectory.clone()[:, :past_length, :2]  # b, past_length, 2
 
         looping_embeds = None
         for _ in range(seq_length):
@@ -1283,6 +1301,75 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
 
         return trajectory_to_loop[:, provided_length:, :2]
 
+    def generate_with_score(self, kwargs):
+        assert self.next_token_scorer_decoder is not None, 'generate k depends on scores prediction'
+        high_res_raster = kwargs.get("high_res_raster", None)
+        low_res_raster = kwargs.get("low_res_raster", None)
+        trajectory = kwargs.get("trajectory", None)
+        device = high_res_raster.device
+        past_length = 11 if kwargs.get("past_length", None) is None else kwargs.get("past_length", None)
+        provided_length = past_length
+        seq_length = 40 if kwargs.get("seq_length", None) is None else kwargs.get("seq_length", None)
+
+        if len(high_res_raster.shape) == 4:  # convert (b, h, w, seq*c) ->(b, seq, c, w, h)
+            _b, _h, _w, _ = high_res_raster.shape
+            high_res_raster = high_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)[:,
+                              :past_length, ...]
+            low_res_raster = low_res_raster.reshape(_b, _h, _w, -1, self.in_channels).permute(0, 3, 4, 1, 2)[:,
+                             :past_length, ...]
+        batch_size, seq, c, h, w = high_res_raster.shape
+        high_res_embed = self.cnn_downsample(high_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
+        low_res_embed = self.cnn_downsample(low_res_raster.to(torch.float32).reshape(batch_size * seq, c, h, w)).reshape(batch_size, seq, -1)
+        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+        trajectory_to_loop = trajectory.clone()[:, :past_length, :2]  # b, past_length, 2
+
+        looping_embeds = None
+        for _ in range(seq_length):
+            if looping_embeds is None:
+                ## action embedding
+                if self.model_args.tokenize_label:
+                    trajectory_tokens = self.tokenize(trajectory_to_loop[:, :past_length, ...])
+                    tokenized_trajectory = F.one_hot(trajectory_tokens.to(torch.int64), 80 * 40)
+                    action_embeds = self.action_m_embed(tokenized_trajectory.to(torch.float32))
+                else:
+                    action_embeds = self.action_m_embed(trajectory_to_loop[:, :past_length, :2].to(torch.float32))
+                looping_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device),
+                                          torch.zeros_like(action_embeds, dtype=torch.float32, device=device)), dim=1)
+
+                looping_embeds[:, ::2, :] = state_embeds
+                looping_embeds[:, 1::2, :] = action_embeds
+            else:
+                if self.model_args.tokenize_label:
+                    ## action embedding
+                    prev_token = self.tokenize(trajectory_to_loop[:, -1, ...].unsqueeze(1))
+                    prev_tokenized_action = F.one_hot(prev_token.to(torch.int64), 80 * 40)
+                    action_embeds = self.action_m_embed(prev_tokenized_action.to(torch.float32))
+                else:
+                    action_embeds = self.action_m_embed(trajectory_to_loop[:, -1, :2].unsqueeze(1).to(torch.float32))
+                looping_embeds = torch.cat((looping_embeds, action_embeds), dim=1)
+
+            attention_mask = self._prepare_attention_mask_for_generation(looping_embeds)
+            position_ids = self._prepare_position_ids_for_generation(attention_mask)
+            transformer_output = self.transformer(
+                inputs_embeds=looping_embeds,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                # **input_kwargs
+            )
+            transformer_hidden_state = transformer_output[0]
+            output = self.traj_decoder(transformer_hidden_state[:, -1, :])  # b, k*2
+            predict_actions = output.reshape(batch_size, -1, 2)  # b, k, 2
+            pred_logits = self.next_token_scorer_decoder(transformer_hidden_state[:, -1, :])  # b, k
+            selected_pred = torch.argmax(pred_logits, dim=-1)  # b
+            selected_actions = []
+            for i in range(batch_size):
+                selected_actions.append(predict_actions[i, selected_pred[i], :].unsqueeze(0))
+            selected_actions = torch.cat(selected_actions, dim=0).reshape(batch_size, 1, 2)
+            trajectory_to_loop = torch.cat((trajectory_to_loop, selected_actions), dim=1)
+            past_length += 1
+
+        return trajectory_to_loop[:, provided_length:, :2]
+
     def generate_legacy(self,
                 high_res_raster: Optional[torch.Tensor] = None,
                 low_res_raster: Optional[torch.Tensor] = None,
@@ -1312,10 +1399,13 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        ## action embedding
-        trajectory = self.tokenize(trajectory[:, :past_length, ...])
-        tokenized_trajectory = F.one_hot(trajectory.to(torch.int64), 80 * 40)
-        action_embeds = self.action_m_embed(tokenized_trajectory.to(torch.float32))
+        if self.model_args.tokenize_label:
+            ## action embedding
+            trajectory = self.tokenize(trajectory[:, :past_length, ...])
+            tokenized_trajectory = F.one_hot(trajectory.to(torch.int64), 80 * 40)
+            action_embeds = self.action_m_embed(tokenized_trajectory.to(torch.float32))
+        else:
+            assert False, "not implemented"
         input_embeds = torch.cat((torch.zeros_like(state_embeds, dtype=torch.float32, device=device),
                                   torch.zeros_like(action_embeds, dtype=torch.float32, device=device)), dim=1)
 
@@ -1411,7 +1501,14 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         device = trajectory.device
         ego_trajectory = torch.zeros((bsz, 1, 4), device=device)
         ego_trajectory[-1] = yaw
+
+        # low velocity filter
+        # TODO: set dynamic threshold
+        trajectory[:, :, 0] = torch.where(trajectory[:, :, 0] < 0.1, 0, trajectory[:, :, 0])
+        trajectory[:, :, 1] = torch.where(trajectory[:, :, 0] < 0.1, 0, trajectory[:, :, 1])
+
         for idx in range(0, trajectory.shape[1]):
+            # loop each point in trajectory
             cos_, sin_ = torch.cos(-ego_trajectory[:, -1, -1]).to(device), torch.sin(-ego_trajectory[:, -1, -1]).to(device)
             delta_yaw = torch.arctan(torch.divide(trajectory[:, idx, 1], trajectory[:, idx, 0]))
             offset_x = trajectory[:, idx, 0] * cos_ + trajectory[:, idx, 1] * sin_
