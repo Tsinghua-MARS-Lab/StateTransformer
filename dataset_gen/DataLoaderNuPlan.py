@@ -85,7 +85,8 @@ def get_default_scenario_from_token(log_db: NuPlanDB, token: str, token_timestam
 
 class NuPlanDL:
     def __init__(self, file_to_start=None, scenario_to_start=None, max_file_number=None,
-                 gt_relation_path=None, cpus=10, db=None, data_path=None, road_dic_path=None, running_mode=None):
+                 gt_relation_path=None, cpus=10, db=None, data_path=None, road_dic_path=None, running_mode=None,
+                 filter_scenario=None):
 
         NUPLAN_MAP_VERSION = 'nuplan-maps-v1.0'
         if data_path is None:
@@ -102,7 +103,7 @@ class NuPlanDL:
         for each_path in files_names:
             if '.db' not in each_path:
                 print('ERROR', each_path)
-
+        self.data_path = data_path
         files_names = sorted(files_names)
 
         if file_to_start is not None and max_file_number is None:
@@ -111,7 +112,18 @@ class NuPlanDL:
             files_names = files_names[file_to_start:file_to_start + max_file_number]
 
         self.global_file_names = files_names
+        self.filter_scenario = filter_scenario
 
+        self.map_api = None
+        self.total_frames = None
+        # self.loaded_playback = None
+        self.running_mode = running_mode
+        self.road_dic_path = road_dic_path
+        # self.traffic_dic_path = traffic_dic_path
+        self.gt_relation_path = gt_relation_path
+        self.timestamp = None
+        self.road_dic_mem = None
+        self.route_idx_mem = None
         if db is None:
             db = NuPlanDBWrapper(
                 data_root=NUPLAN_DATA_ROOT,
@@ -145,17 +157,7 @@ class NuPlanDL:
             self.current_scenario_index = scenario_to_start - 1
         else:
             self.current_scenario_index = SCENE_TO_START - 1
-        self.map_api = None
 
-        self.total_frames = None
-        # self.loaded_playback = None
-        self.running_mode = running_mode
-        self.road_dic_path = road_dic_path
-        # self.traffic_dic_path = traffic_dic_path
-        self.gt_relation_path = gt_relation_path
-        self.timestamp = None
-        self.road_dic_mem = None
-        self.route_idx_mem = None
         print("Data Loader Initialized NuPlan: ", self.file_names[0],
               self.start_file_number, FILE_TO_START, self.current_file_index, file_to_start,
               self.current_scenario_index, self.current_file_total_scenario, self.max_file_number, self.total_file_num)
@@ -226,6 +228,10 @@ class NuPlanDL:
                                                                                                 lidar_token)
 
         scenario = get_default_scenario_from_token(log_db, lidar_token, lidar_token_timestamp)
+        # filter scenarios by type
+        scenario_type = self.current_dataset.log_dbs[self.current_file_index].scenario_tag[self.current_scenario_index].type
+        if self.filter_scenario is not None and scenario_type not in self.filter_scenario:
+            return None, False
 
         scenario_id = scenario.token
         self.timestamp = lidar_token_timestamp
@@ -238,8 +244,6 @@ class NuPlanDL:
             data_to_return = {'skip': True}
             return data_to_return, new_files_loaded
 
-        scenario_type = self.current_dataset.log_dbs[self.current_file_index].scenario_tag[
-            self.current_scenario_index].type
         data_to_return['type'] = scenario_type
         # goal_state = scenario.get_mission_goal()
         goal_state = scenario.get_expert_goal_state()
@@ -351,9 +355,9 @@ class NuPlanDL:
                     continue
                 if token not in agent_dic:
                     # init
-                    new_dic = {'pose': np.ones([total_frames, 4]) * -1,
-                               'shape': np.ones([total_frames, 3]) * -1,
-                               'speed': np.ones([total_frames, 2]) * -1,
+                    new_dic = {'pose': np.ones([total_frames, 4], dtype=np.float16) * -1,
+                               'shape': np.ones([total_frames, 3], dtype=np.float16) * -1,
+                               'speed': np.ones([total_frames, 2], dtype=np.float16) * -1,
                                'type': int(agent_type),
                                'is_sdc': 0, 'to_predict': 0}
                     agent_dic[token] = new_dic
@@ -366,7 +370,11 @@ class NuPlanDL:
             if current_pc != last_lidar_pc:
                 current_pc = current_pc.next
                 current_ego_pose = current_pc.ego_pose
-
+        # convert to float16 to save disk space
+        for key in agent_dic.keys():
+            agent_dic[key]['pose'] = agent_dic[key]['pose'].astype(np.float16)
+            agent_dic[key]['shape'] = agent_dic[key]['shape'].astype(np.float16)
+            agent_dic[key]['speed'] = agent_dic[key]['speed'].astype(np.float16)
         road_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,
                                                               scenario_list=scenario_list)
         traffic_dic = self.pack_scenario_to_trafficdic(starting_scenario, map_radius=100,
@@ -631,7 +639,7 @@ class NuPlanDL:
         ]
 
         ego_state = scenario.get_ego_state_at_iteration(0)
-        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 999999,
+        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 1e8,
                                                                       selected_objs)
 
         all_selected_objs_to_render = []
@@ -937,28 +945,12 @@ class NuPlanDL:
 
         if not agent_only:
             if self.running_mode == 1:
-                    # if self.road_dic_path is not None:
-                    #     loading_file_name = self.road_dic_path
-                    #     # print(loading_file_name)
-                    #     with open(loading_file_name, 'rb') as f:
-                    #         road_dic = pickle.load(f)
-                    #         # print(road_dic)
-                road_dic, traffic_dic = self.pack_scenario_to_roaddic(scenario)
-                # traffic_dic = self.pack_scenario_to_trafficdic(scenario)
-                # route_road_ids = scenario.get_route_roadblock_ids()
-                # # handle '' empty string in route_road_ids
-                # road_ids_processed = []
-                # for each_id in route_road_ids:
-                #     if each_id != '':
-                #         try:
-                #             road_ids_processed.append(int(each_id))
-                #         except:
-                #             print(f"Invalid road id in route {each_id}")
-                # route_road_ids = road_ids_processed
+                road_dic = self.pack_scenario_to_roaddic(scenario, map_radius=1e2)
+                traffic_dic = self.pack_scenario_to_trafficdic(scenario)
             else:
                 if self.road_dic_mem is None:
-                    self.road_dic_mem = self.pack_scenario_to_roaddic(scenario, map_radius=9999)
-                if self.route_idx_mem is None:
+                    self.road_dic_mem = self.pack_scenario_to_roaddic(scenario, map_radius=1e2)
+                if self.route_idx_mem is None and self.current_dataset is not None:
                      # loop route road ids from all scenarios in this file
                     route_road_ids = []
                     log_db = self.current_dataset.log_dbs[self.current_file_index]
@@ -988,13 +980,6 @@ class NuPlanDL:
             road_dic = {}
             traffic_dic = {}
 
-        if self.road_dic_mem is None or traffic_dic is None:
-            return None
-
-        if len(self.route_idx_mem) == 0:
-            print("Invalid route given, Skipping")
-            return None
-
         # mark still agents is the past
         for agent_id in agent_dic:
             is_still = False
@@ -1006,34 +991,52 @@ class NuPlanDL:
                     is_still = True
             agent_dic[agent_id]['still_in_past'] = is_still
 
+        if self.road_dic_mem is None or traffic_dic is None:
+            return None
+
         data_to_return = {
             "road": self.road_dic_mem,
             "agent": agent_dic,
             "traffic_light": traffic_dic,
         }
 
+        if self.current_dataset is None:
+            # no db mode, fetch current scenario route ids
+            route_road_ids = scenario.get_route_roadblock_ids()
+            road_ids_processed = []
+            for each_id in route_road_ids:
+                if each_id != '':
+                    try:
+                        road_ids_processed.append(int(each_id))
+                    except:
+                        print(f"Invalid road id in route {each_id}")
+            data_to_return['route'] = road_ids_processed
+        else:
+            if len(self.route_idx_mem) == 0:
+                print("Invalid route given, Skipping")
+                return None
+            else:
+                data_to_return['route'] = self.route_idx_mem
+
         if 'ego' not in agent_dic:
             print("no ego and skip")
             skip = True
-        elif agent_dic['ego']['pose'][20][0] == -1:
+        elif agent_dic['ego']['pose'][40][0] == -1:
             print("invalid ego pose")
             skip = True
 
         # sanity check
-        if agent_dic is None or self.road_dic_mem is None or traffic_dic is None:
-            print("Invalid Scenario Loaded: ", agent_dic is None, road_dic is None, traffic_dic is None)
-            skip = True
+        for each_key in data_to_return:
+            if data_to_return[each_key] is None:
+                print("Invalid Scenario Loaded for key", each_key)
+                skip = True
 
         # category = classify_scenario(data_to_return)
         data_to_return["category"] = 1
         data_to_return['scenario'] = scenario_id
-
         data_to_return['edges'] = edges
         data_to_return['skip'] = skip
         data_to_return['edge_type'] = edge_type
-
-        data_to_return['route'] = self.route_idx_mem
-
         return data_to_return
 
     def get_scenario_num(self):

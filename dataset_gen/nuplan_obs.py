@@ -558,8 +558,15 @@ def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=
                 abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
             continue
         data_to_return["road_ids"].append(key)
+    # data_to_return["traffic_dic"] = [{"-1":{"state":0}}]
     # filter visible traffic id
     data_to_return["traffic_ids"] = [-1]
+    data_to_return["traffic_dic"] = {
+        "0": [-1],
+        "1": [-1],
+        "2": [-1],
+        "3": [-1]
+    }
     for _, key in enumerate(data_dic["traffic_light"]):
         xyz = data_dic["road"][key]["xyz"].copy()
         xyz[:, :2] -= ego_pose[:2]
@@ -568,6 +575,8 @@ def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=
             continue
         assert key is not None
         data_to_return["traffic_ids"].append(key)
+        # data_to_return["traffic_dic"].append({str(key): data_dic["traffic_light"][key]})
+        data_to_return["traffic_dic"][str(data_dic["traffic_light"][key]["state"])].append(key)
     # filter visible agents id in each sample frame
     data_to_return["agent_ids"] = set()
     for sample_frame in sample_frames:
