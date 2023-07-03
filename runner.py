@@ -124,6 +124,12 @@ class ModelArguments:
         default=False,
         metadata={"help": "Whether to use next token scorer for prediction."},
     )
+    past_seq: Optional[int] = field(
+        # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
+        # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
+        default=10,
+        metadata={"help": "past frames to include for prediction/planning."},
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -199,6 +205,15 @@ class ConfigArguments:
     load_data_config_from_path: Optional[str] = field(
         default=None, metadata={"help": "load data config to a json file if not None"}
     )
+
+@dataclass
+class DataProcessArguments:
+    """
+    Arguments pertaining to what data we are going to input our model for training and eval.
+    """
+    frame_sample_interval: Optional[int] = field(
+        default=4
+    )
     
 
 def main():
@@ -206,8 +221,8 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
-    model_args, data_args, config_args, training_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
+    model_args, data_args, config_args, data_process, training_args = parser.parse_args_into_dataclasses()
 
     # Set up pytorch backend
     # if training_args.deepspeed is None:
@@ -372,7 +387,7 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive, dic_path=data_args.datadic_path) if data_args.online_preprocess else None
+    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive, dic_path=data_args.datadic_path, **data_process.__dict__) if data_args.online_preprocess else None
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -399,7 +414,7 @@ def main():
     results = {}
     if training_args.do_eval:
         if model_args.autoregressive:
-            result = clf_metrics.compute()
+            result = trainer.evaluate()
             logger.info("***** Final Eval results *****")
             logger.info(f"  {result}")
             hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}

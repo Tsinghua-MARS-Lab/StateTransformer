@@ -85,6 +85,10 @@ class ModelArguments:
     task: Optional[str] = field(
         default="nuplan" # only for mmtransformer
     )
+    past_seq: Optional[int] = field(
+        default=10,
+        metadata={"help": "past frames to include for prediction/planning."},
+    )
 
 def rotate_array(origin, points, angle, tuple=False):
     """
