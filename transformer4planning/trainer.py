@@ -218,13 +218,14 @@ class PlanningTrainer(Trainer):
         result = dict()
         if self.model.model_args.autoregressive and self.model.clf_metrics is not None:
             # run classsification metrics
-            result["accuracy"] = self.model.clf_metrics["accuracy"].compute()
-            result["f1"] = self.model.clf_metrics["f1"].compute(average="macro")
-            result["precision"] = self.model.clf_metrics["precision"].compute(average="macro")
-            result["recall"] = self.model.clf_metrics["recall"].compute(average="macro")
-        result["ade"] = float(self.ade)
-        result["fde"] = float(self.fde)
+            result = dict()
+            result[f"{metric_key_prefix}_accuracy"] = self.model.clf_metrics["accuracy"].compute()
+            result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
+            result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
+            result[f"{metric_key_prefix}_recall"] = self.model.clf_metrics["recall"].compute(average="macro")
+        result[f"{metric_key_prefix}_ade"] = float(self.ade)
+        result[f"{metric_key_prefix}_fde"] = float(self.fde)
         logging.info("***** Eval results *****")
-        logging.info(f"  {result}")
+        logging.info(f"{result}")
         self.log(result)
         return eval_output
