@@ -49,6 +49,9 @@ class ModelArguments:
     recover_obs: Optional[bool] = field(
         default=False,
     )
+    teacher_forcing_obs: Optional[bool] = field(
+        default=False,
+    )
     d_embed: Optional[int] = field(
         default=256,
     )
@@ -71,10 +74,22 @@ class ModelArguments:
     loss_fn: Optional[str] = field(
         default="mse",
     )
+    k: Optional[int] = field(
+        default=1,
+        metadata={"help": "Set k for top-k predictions"},
+    )
+    next_token_scorer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to use next token scorer for prediction."},
+    )
     task: Optional[str] = field(
         default="nuplan" # only for mmtransformer
     )
-    
+    past_seq: Optional[int] = field(
+        default=10,
+        metadata={"help": "past frames to include for prediction/planning."},
+    )
+
 def rotate_array(origin, points, angle, tuple=False):
     """
     Rotate a numpy array of points counter-clockwise by a given angle around a given origin.

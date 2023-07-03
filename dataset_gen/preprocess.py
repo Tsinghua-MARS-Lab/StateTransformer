@@ -24,7 +24,7 @@ def preprocess(dataset, dic_path, autoregressive=False):
                     writer_batch_size=10, num_proc=os.cpu_count())
     return target_datasets
 
-def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwargs=dict()):
+def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -36,7 +36,7 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
     # padding for tensor data
     expected_padding_keys = ["road_ids", "route_ids", "traffic_ids"]
     agent_id_lengths = list()
-    for i, d in enumerate(batch): 
+    for i, d in enumerate(batch):
         agent_id_lengths.append(len(d["agent_ids"]))
     max_agent_id_length = max(agent_id_lengths)
     for i, d in enumerate(batch):
@@ -44,9 +44,9 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
         agent_ids.extend(["null"] * (max_agent_id_length - len(agent_ids)))
         batch[i]["agent_ids"] = agent_ids
     padded_tensors = dict()
-    for key in expected_padding_keys: 
+    for key in expected_padding_keys:
         tensors = [data[key] for data in batch]
-        padded_tensors[key] = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=-1) 
+        padded_tensors[key] = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=-1)
         for i, _ in enumerate(batch):
             batch[i][key] = padded_tensors[key][i]
 
@@ -58,8 +58,11 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, encode_kwarg
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
     #     new_batch = list(executor.map(map_func, batch))
     new_batch = list()
-    for i in range(len(batch)):
-        new_batch.append(map_func(d))
+    for i, d in enumerate(batch):
+        rst = map_func(d)
+        if rst is None:
+            continue
+        new_batch.append(rst)
     
     # process as data dictionary
     result = dict()
@@ -258,26 +261,29 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
                             road_types=20, agent_types=8, traffic_types=4):
     filename = sample["file_name"]
     map = sample["map"]
+    split = sample["split"]
     with open(os.path.join(datapath, f"{map}.pkl"), "rb") as f:
         road_dic = pickle.load(f)
-    # load agent and traffic dictionaries
-    items = [item for item in os.listdir(datapath)]
-    data_dic = None
-    for item in items:
-        if os.path.isdir(os.path.join(datapath, item)) and os.path.exists(os.path.join(datapath, item, f"{filename}.pkl")):
-            with open(os.path.join(datapath, item, f"{filename}.pkl"), "rb") as f:
-                data_dic = pickle.load(f)  
-                agent_dic = data_dic["agent_dic"]
-                traffic_dic = data_dic["traffic_dic"]
-            break
-    if data_dic is None:
-        return None          
+
+    if filename in ['2021.10.22.18.45.52_veh-28_01175_01298', '2021.10.22.18.45.52_veh-28_00651_00768']:
+        return None
+    if split == 'train':
+        with open(os.path.join(datapath, f"agent_dic/{filename}.pkl"), "rb") as f:
+            data_dic = pickle.load(f)
+            agent_dic = data_dic["agent_dic"]
+            traffic_dic = data_dic["traffic_dic"]
+    else:
+        with open(os.path.join(datapath, f"test_dic/{filename}.pkl"), "rb") as f:
+            data_dic = pickle.load(f)
+            agent_dic = data_dic["agent_dic"]
+            traffic_dic = data_dic["traffic_dic"]
+
     road_ids = sample["road_ids"]
     agent_ids = sample["agent_ids"]
     traffic_ids = sample["traffic_ids"]
     route_ids = sample["route_ids"]
     frame_id = sample["frame_id"].item()
-    
+
     # initialize rasters
     scenario_start_frame = frame_id - past_seconds * frame_rate
     scenario_end_frame = frame_id + future_seconds * frame_rate
@@ -367,7 +373,8 @@ def dynamic_coor_rasterize(sample, datapath, raster_shape=(224, 224),
                 continue
             xyz = road_dic[traffic_id.item()]["xyz"].copy()
             xyz[:, :2] -= ego_pose[:2]
-            traffic_state = traffic_dic[traffic_id.item()]['state']
+            traffic_state = traffic_dic[traffic_id.item()]["state"]
+
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
             line = shapely.geometry.LineString(pts)
             simplified_xyz_line = line.simplify(1)

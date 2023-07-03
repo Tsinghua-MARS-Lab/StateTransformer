@@ -44,9 +44,9 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
-    
+
 class PlanningTrainer(Trainer):
-    
+
     def prediction_step(
         self,
         model: nn.Module,
@@ -144,31 +144,54 @@ class PlanningTrainer(Trainer):
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
         batch_generate_eval = True
+        if model.mode == 'OA-OA':
+            batch_generate_eval = False
+            print('batch generate for OA-OA is not implemented yet')
+        # if self.model.model_args.k not in [-1]:
+        #     batch_generate_eval = False
+        #     print('batch generate for TopK is not implemented yet')
+        # if self.model.model_args.k not in [1, -1]:
+        #     batch_generate_eval = False
+        #     print('batch generate for TopK is not implemented yet')
 
         if batch_generate_eval:
             # run generate for sequence of actions
+            # TODO: support different frame interval, change sequence length from 40
             if self.model.model_args.autoregressive:
-                actions_label_in_batch = inputs["trajectory"]
-                past_length = int((actions_label_in_batch.shape[1] - 1)*0.2 + 1)
-                future_length = actions_label_in_batch.shape[1] - past_length
-                prediction_actions_in_batch = self.model.generate(past_length=past_length, seq_length=future_length,**inputs)
-                prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
+                actions_label_in_batch = inputs["trajectory"].clone()
                 trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
+                if self.model.model_args.k > 0:
+                    from transformers import GenerationConfig
+                    translation_generation_config = GenerationConfig(
+                        num_beams=20,
+                        early_stopping=True,
+                        decoder_start_token_id=0,
+                        eos_token_id=model.config.eos_token_id,
+                        pad_token=model.config.pad_token_id,
+                        max_new_tokens=50,
+                        use_cache=False,
+                    )
+                    prediction_actions_in_batch = self.model.generate(**inputs, generation_config=translation_generation_config)
+                elif self.model.model_args.k == -1:
+                    prediction_actions_in_batch = self.model.generate_legacy(**inputs)
+                prediction_trajectory_in_batch = self.model.compute_normalized_points(prediction_actions_in_batch)
             else:
                 pass
             # compute ade
-            x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, -future_length:, 0]
-            y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, -future_length:, 1]
-            ade = torch.sqrt(x_error ** 2 + y_error ** 2)
+            x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, -40:, 0]
+            y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, -40:, 1]
+            ade = torch.sqrt(x_error.flatten() ** 2 + y_error.flatten() ** 2)
             ade = ade.mean()
             self.ade = (ade + self.ade * self.eval_itr)/(self.eval_itr + 1)
+            self.ade = float(self.ade)  # tensor to float to save in json
             # compute fde
             x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
             y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
-            fde = torch.sqrt(x_error ** 2 + y_error ** 2)
+            fde = torch.sqrt(x_error.flatten() ** 2 + y_error.flatten() ** 2)
             fde = fde.mean()
             self.fde = (fde + self.fde * self.eval_itr)/(self.eval_itr + 1)
-        
+            self.fde = float(self.fde)  # tensor to float to save in json
+
         self.eval_itr += 1
         if prediction_loss_only:
             return (loss, None, None)
@@ -178,7 +201,7 @@ class PlanningTrainer(Trainer):
             logits = logits[0]
 
         return (loss, logits, None)
-    
+
     def evaluation_loop(
         self,
         dataloader: DataLoader,
@@ -191,9 +214,9 @@ class PlanningTrainer(Trainer):
         self.ade = 0
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
-        self.fde = self.fde.item()
-        self.ade = self.ade.item()
-        if self.model.model_args.autoregressive:
+
+        result = dict()
+        if self.model.model_args.autoregressive and self.model.clf_metrics is not None:
             # run classsification metrics
             result = dict()
             result[f"{metric_key_prefix}_accuracy"] = self.model.clf_metrics["accuracy"].compute()
