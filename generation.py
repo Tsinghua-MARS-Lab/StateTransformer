@@ -17,22 +17,22 @@ import pickle
 def main(args):
     running_mode = args.running_mode
 
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
-    #     'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
-    #     'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
-    # }
+    data_path = {
+        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    }
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
     #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
     #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_singapore",
     # }
-    data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
-        # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
-    }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
+    #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
+    # }
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -271,7 +271,6 @@ def main(args):
                 pickle.dump(result, f)
             yield dict(filename=result["file_name"])
         del dl
-    # dic = yield_data_dic([0])
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
 
     NUPLAN_DB_FILES = data_path['NUPLAN_DB_FILES']
@@ -305,7 +304,7 @@ def main(args):
         if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
             args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
-
+        total_file_num = args.ending_file_num - args.starting_file_num
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:
