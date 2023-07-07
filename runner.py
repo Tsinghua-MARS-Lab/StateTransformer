@@ -37,14 +37,10 @@ from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
 from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
+from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
+
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
-clf_metrics = dict(
-    accuracy=evaluate.load("accuracy"),
-    f1=evaluate.load("f1"),
-    precision=evaluate.load("precision"),
-    recall=evaluate.load("recall")
-)
 
 @dataclass
 class ModelArguments:
@@ -139,6 +135,13 @@ class ModelArguments:
     tokenize_label: Optional[bool] = field(
         default=True
     )
+    raster_channels: Optional[int] = field(
+        default=0,
+        metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
+    )
+    predict_yaw: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -220,7 +223,10 @@ class DataProcessArguments:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
-    frame_sample_interval: Optional[int] = field(
+    past_sample_interval: Optional[int] = field(
+        default=4
+    )
+    future_sample_interval: Optional[int] = field(
         default=4
     )
 
@@ -233,6 +239,17 @@ def main():
 
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
     model_args, data_args, config_args, data_process, training_args = parser.parse_args_into_dataclasses()
+
+    # pre-compute raster channels number
+    if model_args.raster_channels == 0:
+        road_types = 20
+        agent_types = 8
+        traffic_types = 4
+        past_sample_number = int(2 * 20 / data_process.past_sample_interval)  # past_seconds-2, frame_rate-20
+        if model_args.with_traffic_light:
+            model_args.raster_channels = 1 + road_types + traffic_types + agent_types
+        else:
+            model_args.raster_channels = 1 + road_types + agent_types
 
     # Set up pytorch backend
     # if training_args.deepspeed is None:
@@ -305,6 +322,7 @@ def main():
     if os.path.isdir(data_args.saved_dataset_folder):
         items = os.listdir(data_args.saved_dataset_folder)
         if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[0])): #sub-datasets
+            # TODO: add split rows to dataset
             print("concating datasets..")
             concatdatasets = list()
             for i, item in enumerate(items):
@@ -333,58 +351,65 @@ def main():
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
                 test_dataset.set_format(type='torch')
-                print(test_dataset)
             else:
                 test_dataset = train_dataset
-            nuplan_dataset = dict(
-                train=train_dataset,
-                validation=test_dataset.shuffle(seed=training_args.seed),
-                test=test_dataset.shuffle(seed=training_args.seed)
-            )
 
         else: # whole hugging face dataset   
             print("loading dataset...")
             dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
+            dataset.features.update({'split': Value('string')})
+            dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
             dataset.set_format(type='torch')
             dataset.shuffle(seed=training_args.seed)
             train_samples = int(len(dataset) * float(data_args.dataset_scale))
             train_dataset = dataset.select(range(train_samples))
-            train_dataset.add_column('split', column=['train']*len(train_dataset))
             
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                test_dataset.set_format(type='torch')
+                # split_dic = test_dataset.info.splits['train']
+                # split_dic.name = 'test'
+                # test_dataset.info.splits['test'] = split_dic
+                # del test_dataset.info.splits['train']
+                # add additional column for flagging test set
+                test_dataset.features.update({'split': Value('string')})
+                test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
             else:
                 test_dataset = dataset.select(range(train_samples))
-                test_dataset.set_format(type='torch')
-
-            # loop split info and update for test set
-            # splits={'train': SplitInfo(name='train', num_bytes=1538228595562, num_examples=71490, shard_lengths=[..]}
-            split_dic = test_dataset.info.splits['train']
-            split_dic.name = 'test'
-            test_dataset.info.splits['test'] = split_dic
-            del test_dataset.info.splits['train']
-            # add additional column for flagging test set
-            test_dataset.add_column('split', column=['test']*len(test_dataset))
+            test_dataset.set_format(type='torch')
 
             # if data_args.online_preprocess:
             #     train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
             #     test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
-            print('TrainingSet: ', dataset, '\nTestSet', test_dataset)
-
-            nuplan_dataset = dict(
-                train=train_dataset,
-                validation=test_dataset.shuffle(seed=training_args.seed),
-                test=test_dataset.shuffle(seed=training_args.seed),
-            )
     else:
         raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
+
+    # loop split info and update for test set
+    # splits={'train': SplitInfo(name='train', num_bytes=1538228595562, num_examples=71490, shard_lengths=[..]}
+    print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
+
+    nuplan_dataset = dict(
+        train=train_dataset,
+        validation=test_dataset.shuffle(seed=training_args.seed),
+        test=test_dataset.shuffle(seed=training_args.seed),
+    )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
     if 'auto' in model_args.model_name and model_args.k == -1:
+        clf_metrics = dict(
+            accuracy=evaluate.load("accuracy"),
+            f1=evaluate.load("f1"),
+            precision=evaluate.load("precision"),
+            recall=evaluate.load("recall")
+        )
         model.clf_metrics = clf_metrics
     elif 'auto' in model_args.model_name and model_args.next_token_scorer:
+        clf_metrics = dict(
+            accuracy=evaluate.load("accuracy"),
+            f1=evaluate.load("f1"),
+            precision=evaluate.load("precision"),
+            recall=evaluate.load("recall")
+        )
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
