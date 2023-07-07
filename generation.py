@@ -16,11 +16,11 @@ import numpy as np
 def main(args):
     running_mode = args.running_mode
 
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
-    #     'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
-    #     'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
-    # }
+    data_path = {
+        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    }
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
     #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
@@ -241,8 +241,10 @@ def main(args):
                           road_dic_path=None,
                           running_mode=running_mode,
                           filter_scenario=filter_scenario)
+
             while not dl.end:
-                loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval)
+                loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval,
+                                            map_name=args.map_name)
                 if loaded_dic is None:
                     continue
                 if loaded_dic["skip"]:
@@ -252,7 +254,32 @@ def main(args):
                 if len(loaded_dic["route"]) == 0:
                     continue
                 data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
-                yield data_to_return
+                # legitimacy check
+                data_to_return_filtered = {}
+                error = False
+                for each_key in data_to_return:
+                    if each_key is None:
+                        print("WARNING: None key in data_to_return")
+                        error = True
+                    if data_to_return[each_key] is not None:
+                        # check if none in list
+                        if isinstance(data_to_return[each_key], type([])):
+                            filtered_list = []
+                            for each_element in data_to_return[each_key]:
+                                if each_element is None:
+                                    print("WARNING: None element in ", each_key)
+                                    error = True
+                                else:
+                                    filtered_list.append(each_element)
+                            data_to_return_filtered[each_key] = filtered_list
+                        else:
+                            data_to_return_filtered[each_key] = data_to_return[each_key]
+                    else:
+                        error = True
+                        print("WARNING: None data in ", each_key)
+                if error:
+                    continue
+                yield data_to_return_filtered
             del dl
 
     def yield_data_dic(shards):
@@ -263,7 +290,9 @@ def main(args):
                           data_path=data_path, db=None, gt_relation_path=None,
                           road_dic_path=road_path,
                           running_mode=running_mode)
-            loaded_dic = dl.get_next_file(specify_file_index=0)
+            loaded_dic = dl.get_next_file(specify_file_index=0, map_name=args.map_name)
+            if loaded_dic is None:
+                continue
             file_name = dl.file_names[0]
             result = dict()
             result["agent_dic"] = loaded_dic["agent"]
@@ -275,7 +304,7 @@ def main(args):
                 os.makedirs(store_path)
             with open(os.path.join(store_path, f"{file_name}.pkl"), "wb") as f:
                 pickle.dump(result, f)
-            yield dict(filename=result["file_name"])
+            yield {'file_name': result["file_name"]}
         del dl
 
 
@@ -375,13 +404,23 @@ def main(args):
         nuplan_dataset = Dataset.from_generator(yield_data_index,
                                                 gen_kwargs={'shards': file_indices},
                                                 writer_batch_size=10, cache_dir=args.cache_folder,
-                                                num_proc=args.num_proc
-                                                )
+                                                num_proc=args.num_proc,
+                                                features=Features({"route_ids": Sequence(Value("int64")),
+                                                                   "road_ids": Sequence(Value("int64")),
+                                                                   "traffic_ids": Sequence(Value("int64")),
+                                                                   "traffic_status": Sequence(Value("int64")),
+                                                                   "agent_ids": Sequence(Value("string")),
+                                                                   "frame_id": Value("int64"),
+                                                                   "file_name": Value("string"),
+                                                                   "map": Value("string"),
+                                                                   "timestamp": Value("int64")}))
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,
                                                 gen_kwargs={'shards': file_indices},
                                                 writer_batch_size=10, cache_dir=args.cache_folder,
-                                                num_proc=args.num_proc)
+                                                num_proc=args.num_proc,
+                                                features=Features({"file_name": Value("string")})
+                                                )
         exit()
     elif args.by_scenario:
         nuplan_dataset = Dataset.from_generator(yield_data_by_scenario,
@@ -413,7 +452,7 @@ if __name__ == '__main__':
     python generation.py  --num_proc 40 --sample_interval 100  
     --dataset_name boston_index_interval100  --starting_file_num 0  
     --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
-    --data_path train_boston  --only_index
+    --data_path train_boston  --only_index  
     """
 
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
@@ -454,5 +493,6 @@ if __name__ == '__main__':
     parser.add_argument('--only_index', default=False, action='store_true')
     parser.add_argument('--only_data_dic', default=False, action='store_true')
     # parser.add_argument('--save_playback', default=True, action='store_true')
+    parser.add_argument('--map_name', type=str, default=None)
     args_p = parser.parse_args()
     main(args_p)

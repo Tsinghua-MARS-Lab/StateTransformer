@@ -38,9 +38,9 @@ def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True):
     road_type = 20
     traffic_light_type = 4
 
-    goal_raster = raster[:, 0, :, :].reshape(b, 1, h, w)
-    road_ratser = raster[:, 1:21, :, :]
-    traffic_raster = raster[:, 21:25, :, :]
+    goal_raster = raster[:, 0, :, :].reshape(b, 1, h, w)  # updated as route raster
+    road_ratser = raster[:, 1:1+road_type, :, :]
+    traffic_raster = raster[:, 1+road_type:1+road_type+traffic_light_type, :, :]
     result = torch.zeros((b, framenum, agent_type + road_type + traffic_light_type + 1, h, w), device=raster.device)
     for i in range(framenum):
         agent_raster = raster[:, 1 + road_type + traffic_light_type + i::framenum, :, :]
@@ -220,26 +220,35 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         super().__init__(config)
         self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
+        self.model_args = model_args
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
         self.task = model_args.task
         if self.task == "waymo":
             in_channels = 26
         else:
-            if model_args.with_traffic_light:
-                in_channels = 33 # raster: goal + road_type + traffic light +agent_type
-            else:
-                in_channels = 29  # raster: goal + road_type + agent_type
+            in_channels = model_args.raster_channels
+            # if model_args.with_traffic_light:
+            #     in_channels = 33 # raster: goal + road_type + traffic light +agent_type
+            # else:
+            #     in_channels = 29  # raster: goal + road_type + agent_type
+        print('Model initialized with raster channels: ', model_args.raster_channels)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
+        self.k = int(self.model_args.k)
         if self.predict_trajectory:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=4)
-            # self.traj_decoder = DecoderResCat(config.n_inner, embed_sz, out_features=4)
+            if self.k == 1:
+                if model_args.predict_yaw:
+                    self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=4)
+                else:
+                    self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=2)
+            else:
+                raise ValueError("Top K prediction not implemented yet", self.k)
+        self.clf_metrics = None
 
-        # end of added
         # Initialize weights and apply final processing
         self.model_parallel = False
         self.device_map = None
@@ -302,11 +311,19 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             return_dict: Optional[bool] = None,
             **kwargs
             ):
-            # gpt non-autoregression version
+        # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
+
+        if self.model_args.x_random_walk > 0:
+            x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
+            context_actions[:, :, 0] += x_noise[:, :, 0]
+        if self.model_args.y_random_walk > 0:
+            y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
+            context_actions[:, :, 1] += y_noise[:, :, 1]
+
         action_embeds = self.action_m_embed(context_actions)
-        context_length = context_actions.shape[1] + 1
+        context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
         if self.task == "nuplan":
             high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
             low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
@@ -322,19 +339,21 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         state_embeds = torch.cat((high_res_embed,
                                   low_res_embed), dim=-1).to(torch.float32)
 
-        trajectory_label = trajectory_label[:, 1::2, :]
+        # trajectory_label = trajectory_label[:, 1::2, :]
         pred_length = trajectory_label.shape[1]
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
-            (batch_size, context_length * 2 - 1, n_embed),
+            (batch_size, context_length * 2, n_embed),
             dtype=torch.float32,
             device=device
         )
-        input_embeds[:, ::2, :] = state_embeds
-        input_embeds[:, 1::2, :] = action_embeds
+        input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
+        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
         # to keep input and output at the same dimension
         input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+        attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+        attention_mask[:, context_length * 2:] = 0
 
         transformer_outputs = self.transformer(
             past_key_values=past_key_values,
@@ -367,7 +386,10 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             _loss = (loss_fct(traj_logits[...,:2], trajectory_label[...,:2].to(device))*y_mask).sum()/(y_mask.sum()+1e-7)
             loss += _loss
         else:
-            loss += loss_fct(traj_logits, trajectory_label.to(device))
+            if self.model_args.predict_yaw:
+                loss += loss_fct(traj_logits, trajectory_label.to(device))
+            else:
+                loss += loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device))
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
@@ -986,7 +1008,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                     pred_logits = self.next_token_scorer_decoder(action_hidden_states.to(device))  # b, s, k
                     loss_fct = CrossEntropyLoss(reduction="mean")
                     loss_to_add = loss_fct(pred_logits.reshape(b*s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
-                    loss += loss_to_add * 0.1
+                    loss += loss_to_add
 
         if self.recover_obs:
             loss_fct = MSELoss(reduction="mean")
