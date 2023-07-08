@@ -229,6 +229,9 @@ class DataProcessArguments:
     future_sample_interval: Optional[int] = field(
         default=4
     )
+    debug_raster_path: Optional[str] = field(
+        default=None
+    )
 
     
 
@@ -246,10 +249,12 @@ def main():
         agent_types = 8
         traffic_types = 4
         past_sample_number = int(2 * 20 / data_process.past_sample_interval)  # past_seconds-2, frame_rate-20
-        if model_args.with_traffic_light:
-            model_args.raster_channels = 1 + road_types + traffic_types + agent_types
-        else:
-            model_args.raster_channels = 1 + road_types + agent_types
+        if 'auto' not in model_args.model_name:
+            # will cast into each frame
+            if model_args.with_traffic_light:
+                model_args.raster_channels = 1 + road_types + traffic_types + agent_types
+            else:
+                model_args.raster_channels = 1 + road_types + agent_types
 
     # Set up pytorch backend
     # if training_args.deepspeed is None:

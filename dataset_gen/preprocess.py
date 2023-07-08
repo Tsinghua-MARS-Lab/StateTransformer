@@ -70,15 +70,91 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwa
         result[key] = default_collate([d[key] for d in new_batch])
     return result
 
+
 def augmentation():
     pass
+
+
+def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, image_file_name,
+                high_scale, low_scale):
+    # save rasters
+    path_to_save = debug_raster_path
+    # check if path not exist, create
+    if not os.path.exists(path_to_save):
+        os.makedirs(path_to_save)
+        file_number = 0
+    else:
+        file_number = len(os.listdir(path_to_save))
+        if file_number > 200:
+            return
+    image_shape = None
+    for each_key in ['high_res_raster', 'low_res_raster']:
+        """
+        # channels:
+        # 0: route raster
+        # 1-20: road raster
+        # 21-24: traffic raster
+        # 25-56: agent raster (32=8 (agent_types) * 4 (sample_frames_in_past))
+        """
+        each_img = result_dic[each_key]
+        goal = each_img[:, :, 0]
+        road = each_img[:, :, :21]
+        traffic_lights = each_img[:, :, 21:25]
+        agent = each_img[:, :, 25:]
+        # generate a color pallet of 20 in RGB space
+        color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
+        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float)
+        image_shape = target_image.shape
+        for i in range(21):
+            road_per_channel = road[:, :, i].copy()
+            # repeat on the third dimension into RGB space
+            # replace the road channel with the color pallet
+            if np.sum(road_per_channel) > 0:
+                for k in range(3):
+                    target_image[:, :, k][road_per_channel == 1] = color_pallet[i, k]
+        for i in range(3):
+            traffic_light_per_channel = traffic_lights[:, :, i].copy()
+            # repeat on the third dimension into RGB space
+            # replace the road channel with the color pallet
+            if np.sum(traffic_light_per_channel) > 0:
+                for k in range(3):
+                    target_image[:, :, k][traffic_light_per_channel == 1] = color_pallet[i, k]
+        target_image[:, :, 0][goal == 1] = 255
+        # generate 9 values interpolated from 0 to 1
+        agent_colors = np.array([[0.01 * 255] * past_frames_num,
+                                 np.linspace(0, 255, past_frames_num),
+                                 np.linspace(255, 0, past_frames_num)]).transpose()
+
+        # print('test: ', past_frames_num, agent_type_num, agent.shape)
+        for i in range(past_frames_num):
+            for j in range(agent_type_num):
+                # if j == 7:
+                #     print('debug', np.sum(agent[:, :, j * 9 + i]), agent[:, :, j * 9 + i])
+                agent_per_channel = agent[:, :, j * past_frames_num + i].copy()
+                # agent_per_channel = agent_per_channel[:, :, None].repeat(3, axis=2)
+                if np.sum(agent_per_channel) > 0:
+                    for k in range(3):
+                        target_image[:, :, k][agent_per_channel == 1] = agent_colors[i, k]
+        cv2.imwrite(os.path.join(path_to_save, image_file_name + '_' + str(each_key) + '.png'), target_image)
+    for each_key in ['context_actions', 'trajectory_label']:
+        pts = result_dic[each_key]
+        for scale in [high_scale, low_scale]:
+            target_image = np.zeros(image_shape, dtype=np.float)
+            for i in range(pts.shape[0]):
+                x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
+                y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
+                if x < target_image.shape[0] and y < target_image.shape[1]:
+                    target_image[x, y, :] = [255, 255, 255]
+            cv2.imwrite(os.path.join(path_to_save, image_file_name + '_' + str(each_key) + '_' + str(scale) +'.png'), target_image)
+    print('debug images saved to: ', path_to_save, file_number)
 
 
 def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           frame_rate=20, past_seconds=2, future_seconds=8,
                           high_res_scale=4, low_res_scale=0.77,
                           road_types=20, agent_types=8, traffic_types=4,
-                          past_sample_interval=4, future_sample_interval=4):
+                          past_sample_interval=4, future_sample_interval=4,
+                          debug_raster_path=None):
     """
     :param sample: a dictionary containing the following keys:
         - file_name: the name of the file
@@ -90,6 +166,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         - traffic_status: the status of the traffic lights
         - route_ids: the ids of the routes
         - frame_id: the frame id of the current frame
+        - debug_raster_path: if a debug_path past, will save rasterized images to disk, warning: will slow down the process
     :param data_path: the root path to load pickle files
     """
     # filename = sample["file_name"].item()
@@ -307,6 +384,14 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["low_res_raster"] = np.array(rasters_low_res, dtype=bool)
     result_to_return["context_actions"] = np.array(context_actions, dtype=np.float32)
     result_to_return['trajectory_label'] = trajectory_label.astype(np.float32)
+
+    if debug_raster_path is not None:
+        # check if path not exist, create
+        if not os.path.exists(debug_raster_path):
+            os.makedirs(debug_raster_path)
+        image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
+        save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past), image_file_name,
+                    high_res_scale, low_res_scale)
 
     return result_to_return
 
