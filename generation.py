@@ -26,17 +26,18 @@ def main(args):
     #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
     #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
     # }
-    data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
-        # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
-    }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
+    #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
+    # }
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/Volumes/Elements SE/nuPlan",
     #     'NUPLAN_MAPS_ROOT': "/Volumes/Elements SE/nuPlan/maps",
     #     'NUPLAN_DB_FILES': "/Volumes/Elements SE/nuPlan/nuplan-v1.1/{}".format(args.data_path)
     # }
+
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -302,10 +303,12 @@ def main(args):
             store_path = os.path.join(args.cache_folder, args.dataset_name)
             if not os.path.exists(store_path):
                 os.makedirs(store_path)
+            print("Storing at ", os.path.join(store_path, f"{file_name}.pkl"))
             with open(os.path.join(store_path, f"{file_name}.pkl"), "wb") as f:
                 pickle.dump(result, f)
+            print("Stored at ", os.path.join(store_path, f"{file_name}.pkl"))
             yield {'file_name': result["file_name"]}
-        del dl
+            del dl
 
 
     # dic = yield_data_dic([0])
@@ -379,24 +382,25 @@ def main(args):
     
 
     # sort by file size
-    sorted_file_indices = []
-    if args.city is not None:
-        sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
-        for i, each_file_name in enumerate(sorted_file_names):
-            if int(each_file_name.split('/')[-1][24:26]) in vehicle_set:
-                sorted_file_indices.append(all_file_path.index(each_file_name))
-        print(f"after sort, {len(sorted_file_indices)} files are chosen")
-    else:
-        sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
-        for i, each_file_name in enumerate(sorted_file_names):
-            if all_file_path.index(each_file_name) in file_indices:
-                sorted_file_indices.append(all_file_path.index(each_file_name))
-    print(f"Total file num is {total_file_num}")
-    sorted_file_indices = sorted_file_indices[:total_file_num]
-    # order by processes
-    file_indices = []
-    for i in range(args.num_proc):
-        file_indices += sorted_file_indices[i::args.num_proc]
+    # sorted_file_indices = []
+    # if args.city is not None:
+    #     sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
+    #     for i, each_file_name in enumerate(sorted_file_names):
+    #         if int(each_file_name.split('/')[-1][24:26]) in vehicle_set:
+    #             sorted_file_indices.append(all_file_path.index(each_file_name))
+    #     print(f"after sort, {len(sorted_file_indices)} files are chosen")
+    # else:
+    #     sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
+    #     for i, each_file_name in enumerate(sorted_file_names):
+    #         if all_file_path.index(each_file_name) in file_indices:
+    #             sorted_file_indices.append(all_file_path.index(each_file_name))
+    # print(f"Total file num is {total_file_num}")
+    # sorted_file_indices = sorted_file_indices[:total_file_num]
+    # # order by processes
+    # file_indices = []
+    # for i in range(args.num_proc):
+    #     file_indices += sorted_file_indices[i::args.num_proc]
+
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
     # end of sorting
