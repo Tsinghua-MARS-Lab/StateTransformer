@@ -113,7 +113,7 @@ class ModelArguments:
         default=False
     )
     k: Optional[int] = field(
-        default=-1,
+        default=1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
     )
     next_token_scorer: Optional[bool] = field(
@@ -141,6 +141,10 @@ class ModelArguments:
     )
     predict_yaw: Optional[bool] = field(
         default=False
+    )
+    ar_future_interval: Optional[int] = field(
+        default=0,
+        metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
 
 @dataclass
@@ -408,7 +412,7 @@ def main():
             recall=evaluate.load("recall")
         )
         model.clf_metrics = clf_metrics
-    elif 'auto' in model_args.model_name and model_args.next_token_scorer:
+    elif model_args.next_token_scorer:
         clf_metrics = dict(
             accuracy=evaluate.load("accuracy"),
             f1=evaluate.load("f1"),

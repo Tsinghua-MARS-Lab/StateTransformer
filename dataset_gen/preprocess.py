@@ -189,6 +189,11 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     route_ids = sample["route_ids"].tolist()
     frame_id = sample["frame_id"]
 
+    if map == 'sg-one-north':
+        y_inverse = -1
+    else:
+        y_inverse = 1
+
     # clean traffic ids, for legacy reasons, there might be -1 in the list
     traffic_light_ids = [x for x in traffic_light_ids if x != -1]
     assert len(traffic_light_ids) == len(traffic_light_states), f'length of ids is not same as length of states, ids: {traffic_light_ids}, states: {traffic_light_states}'
@@ -258,6 +263,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
         simplified_xyz[:, 1] *= -1
+        simplified_xyz[:, 1] *= y_inverse
         high_res_route = (simplified_xyz * high_res_scale + raster_shape[0] // 2).astype('int32')
         low_res_route = (simplified_xyz * low_res_scale + raster_shape[0] // 2).astype('int32')
 
@@ -278,6 +284,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
         simplified_xyz[:, 1] *= -1
+        simplified_xyz[:, 1] *= y_inverse
         high_res_road = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
         low_res_road = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
         if road_type in [5, 17, 18, 19]:
@@ -305,6 +312,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:, 1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
         simplified_xyz[:, 1] *= -1
+        simplified_xyz[:, 1] *= y_inverse
         high_res_traffic = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
         low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
         # traffic state order is GREEN, RED, YELLOW, UNKNOWN
@@ -337,7 +345,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                             direction=-pose[3])
             rect_pts = np.array(rect_pts, dtype=np.int32)
-
+            rect_pts[:, 1] *= y_inverse
             # draw on high resolution
             rect_pts_high_res = (high_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
             # example: if frame_interval = 10, past frames = 40
@@ -358,7 +366,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
                               ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                               np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
-
+    rotated_poses[:, 1] *= y_inverse
     for i in sample_frames_in_past:
         action = rotated_poses[i]
         context_actions.append(action)
@@ -375,6 +383,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     traj_y = trajectory_label[:, 1].copy()
     trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
     trajectory_label[:, 1] = traj_x * sin_ + traj_y * cos_
+    trajectory_label[:, 1] *= y_inverse
 
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
     rasters_low_res = cv2.merge(rasters_low_res_channels).astype(bool)
