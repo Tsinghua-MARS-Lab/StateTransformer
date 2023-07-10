@@ -45,7 +45,7 @@ def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True):
     for i in range(framenum):
         agent_raster = raster[:, 1 + road_type + traffic_light_type + i::framenum, :, :]
         if traffic:
-            raster_i = torch.cat([goal_raster, road_ratser, traffic_raster, agent_raster], dim = 1) # expected format (b, 1+20+8, h, w)
+            raster_i = torch.cat([goal_raster, road_ratser, traffic_raster, agent_raster], dim = 1)  # expected format (b, 1+20+8, h, w)
         else:
             raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim = 1)
         result[:, i, :, :, :] = raster_i
@@ -223,15 +223,12 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.model_args = model_args
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
+        self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
         if self.task == "waymo":
             in_channels = 26
         else:
             in_channels = model_args.raster_channels
-            # if model_args.with_traffic_light:
-            #     in_channels = 33 # raster: goal + road_type + traffic light +agent_type
-            # else:
-            #     in_channels = 29  # raster: goal + road_type + agent_type
         print('Model initialized with raster channels: ', model_args.raster_channels)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
@@ -239,14 +236,17 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
         self.traj_decoder = None
         self.k = int(self.model_args.k)
+
+        self.next_token_scorer_decoder = None
+        self.key_points_decoder = None
         if self.predict_trajectory:
-            if self.k == 1:
-                if model_args.predict_yaw:
-                    self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=4)
-                else:
-                    self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=2)
-            else:
-                raise ValueError("Top K prediction not implemented yet", self.k)
+            out_features = 4 if model_args.predict_yaw else 2
+            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+            if self.ar_future_interval > 0:
+                self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
+        if self.k > 1:
+            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
+
         self.clf_metrics = None
 
         # Initialize weights and apply final processing
@@ -331,6 +331,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
             low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
+
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
         high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
@@ -350,10 +351,23 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
-        # to keep input and output at the same dimension
-        input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-        attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-        attention_mask[:, context_length * 2:] = 0
+        if self.ar_future_interval == 0:
+            # to keep input and output at the same dimension
+            input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+            attention_mask[:, context_length * 2:] = 0
+        elif self.ar_future_interval > 0:
+            # use autoregressive future interval
+            if self.model_args.predict_yaw:
+                future_key_points = trajectory_label[:, ::self.ar_future_interval, :]
+            else:
+                future_key_points = trajectory_label[:, ::self.ar_future_interval, :]
+            future_key_embeds = self.action_m_embed(future_key_points)
+            input_embeds = torch.cat([input_embeds, future_key_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+            attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
+        else:
+            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
         transformer_outputs = self.transformer(
             past_key_values=past_key_values,
@@ -390,6 +404,71 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 loss += loss_fct(traj_logits, trajectory_label.to(device))
             else:
                 loss += loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device))
+
+        if self.ar_future_interval > 0:
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+
+            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)
+            if self.k == 1:
+                if self.model_args.predict_yaw:
+                    loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
+                else:
+                    loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
+                loss += loss_to_add
+            else:
+                b, s, c = future_key_points.shape
+                k_results = key_points_logits.reshape(b, s, self.k, -1)
+
+                # get loss of minimal loss from k results
+                k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
+                loss_fct_key_points = MSELoss(reduction="none")
+                if self.model_args.predict_yaw:
+                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device)) * 100
+                else:
+                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points[..., :2].to(device)) * 100
+                # add loss on x, y (the last dimension)
+                loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
+                min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
+                loss += min_loss.mean()
+                # losses = []  # length of b * s
+                # min_loss_indices = []  # length of b
+                # for i in range(b):
+                #     per_batch_losses = []  # length of s, [x, x, ..]
+                #     per_batch_indices = []  # length of s, [3, 2, 1, 0, ..]
+                #     for j in range(s):
+                #         per_sequence_losses = []  # length of k
+                #         for k in range(self.k):
+                #             if self.model_args.predict_yaw:
+                #                 loss_to_add = loss_fct(k_results[i, j, k, :], future_key_points[i, j, :].to(device)) * 100
+                #             else:
+                #                 loss_to_add = loss_fct(k_results[i, j, k, :], future_key_points[i, j, :2].to(device)) * 100
+                #             per_sequence_losses.append(loss_to_add)
+                #         min_loss = min(per_sequence_losses)
+                #         min_loss_index = per_sequence_losses.index(min_loss)
+                #         per_batch_losses.append(min_loss)
+                #         per_batch_indices.append(min_loss_index)
+                #     losses += per_batch_losses
+                #     min_loss_indices.append(per_batch_indices)
+                # loss += sum(losses) / b / s
+                # min_loss_indices = torch.tensor(min_loss_indices).to(device)  # b, s
+
+                if self.next_token_scorer_decoder is not None:
+                    pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
+                    loss_fct = CrossEntropyLoss(reduction="mean")
+                    loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
+                    loss += loss_to_add
+
+        # evaluate accuracy if on eval
+        if not self.training and self.clf_metrics is not None:
+            if self.next_token_scorer_decoder is not None:
+                # classification on k predictions
+                predictions = torch.argmax(pred_logits, dim=-1)  # b, s, k
+                for _, metric in self.clf_metrics.items():
+                    metric.add_batch(references=min_loss_indices.reshape(-1), predictions=predictions.reshape(-1))
+
+        if not return_dict:
+            output = (action_logits,) + transformer_outputs[1:]
+            return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
