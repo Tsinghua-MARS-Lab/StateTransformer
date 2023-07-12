@@ -478,21 +478,16 @@ def main():
             logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
     if training_args.do_predict:
-        from sklearn.metrics import classification_report
         # Currently only supports single GPU predict outputs
+        """
+        Will save prediction results, and dagger results if dagger is enabled
+        """
+        # TODO: fit new online process pipeline to save dagger and prediction results
         logger.info("*** Predict ***")
-        """
-        Compute accuracy for the following classifications:
-        1. intended_maneuver
-        2. current_maneuver
-        3. pos_x,
-        4. pos_y
-        """
-        model.eval()
         with torch.no_grad():
             dagger_results = {
                 'file_name':[],
-                'frame_index':[],
+                'frame_id':[],
                 'rank':[],
                 'ADE':[],
                 'FDE':[],
@@ -503,47 +498,7 @@ def main():
                 'current_frame': [],
                 'next_step_action': [],
                 'predicted_trajectory': [],
-            }     
-            device = model.device
-            def preprocess_data(examples):
-                # take a batch of texts
-                for each_key in examples:
-                    if isinstance(examples[each_key], type(torch.tensor(0))):
-                        examples[each_key] = examples[each_key].to(device)
-                return examples
-                
-            if model_args.predict_trajectory:
-                end_bias_x = []
-                end_bias_y = []
-                all_bias_x = []
-                all_bias_y = []
-                losses = []
-                loss_fn = torch.nn.MSELoss(reduction="mean")
-    
-            # initialize intended maneuver metrics
-            def nuplan_collate_fn(batch):
-                import collections
-                if "nonauto" in model_args.model_name:
-                    expect_keys = ["file_name", "frame_index", "high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-                else:
-                    expect_keys = ["high_res_raster", "low_res_raster", "trajectory"]
-                elem = batch[0]
-                if isinstance(elem, collections.abc.Mapping):
-                    return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            
-            def waymo_collate_fn(batch):
-                import collections
-                expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-                
-                elem = batch[0]
-                if isinstance(elem, collections.abc.Mapping):
-                    return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            
-            if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
-                collate_fn = waymo_collate_fn
-            else:
-                collate_fn = nuplan_collate_fn
-
+            }
             test_dataloader = DataLoader(
                 dataset=predict_dataset,
                 batch_size=training_args.per_device_eval_batch_size,
@@ -552,10 +507,38 @@ def main():
                 pin_memory=True,
                 drop_last=True
             )
+
+
+            if model_args.predict_trajectory:
+                end_bias_x = []
+                end_bias_y = []
+                all_bias_x = []
+                all_bias_y = []
+                losses = []
+                loss_fn = torch.nn.MSELoss(reduction="mean")
+            
+            # def waymo_collate_fn(batch):
+            #     import collections
+            #     expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
+            #
+            #     elem = batch[0]
+            #     if isinstance(elem, collections.abc.Mapping):
+            #         return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
+            #
+            # if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
+            #     # Todo: test waymo collate fn
+            #     collate_fn = waymo_collate_fn
+
+
             for itr, input in enumerate(tqdm(test_dataloader)):
-                input = preprocess_data(input)
+                # move batch to device
+                for each_key in input:
+                    if isinstance(examples[each_key], type(torch.tensor(0))):
+                        input[each_key] = input[each_key].to(device)
+
                 input_length = training_args.per_device_eval_batch_size
                 if model_args.autoregressive:
+                    # Todo: add autoregressive predict
                     traj_pred = model.generate(**input)
                     traj_label = model(**input)
                 else:
@@ -563,7 +546,7 @@ def main():
                     traj_pred = output.logits                   
                     try:
                         file_name = input['file_name']
-                        current_frame_idx = input['frame_index']
+                        current_frame_idx = input['frame_id']
                     except:
                         file_name = ["null"] * input_length
                         current_frame_idx = -1 * torch.ones(input_length)
@@ -571,7 +554,7 @@ def main():
                     prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
                     if data_args.dagger:
                         dagger_results['file_name'].extend(file_name)
-                        dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
+                        dagger_results['frame_id'].extend(list(current_frame_idx.cpu().numpy()))
                 
                 if model_args.predict_trajectory:
                     if model_args.autoregressive:
@@ -619,7 +602,7 @@ def main():
                 tuple_list = list()
                 fde_result_list = dict()
                 y_bias_result_list = dict()
-                for filename, id, ade, fde, y_bias in zip(dic["file_name"], dic["frame_index"], dic["ADE"], dic["FDE"], dic["y_bias"]):
+                for filename, id, ade, fde, y_bias in zip(dic["file_name"], dic["frame_id"], dic["ADE"], dic["FDE"], dic["y_bias"]):
                     if filename == "null":
                         continue
                     tuple_list.append((filename, id, ade, fde, abs(y_bias)))
@@ -627,7 +610,7 @@ def main():
                 fde_sorted_list = sorted(tuple_list, key=lambda x:x[3], reverse=True)
                 for idx, tp in enumerate(fde_sorted_list): 
                     if tp[0] in fde_result_list.keys():
-                        fde_result_list[tp[0]]["frame_index"].append(tp[1])
+                        fde_result_list[tp[0]]["frame_id"].append(tp[1])
                         fde_result_list[tp[0]]["ade"].append(tp[2])
                         fde_result_list[tp[0]]["fde"].append(tp[3])
                         fde_result_list[tp[0]]["y_bias"].append(tp[4])
@@ -635,19 +618,19 @@ def main():
                         
                     else:
                         fde_result_list[tp[0]] = dict(
-                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(fde_sorted_list)]
+                            frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(fde_sorted_list)]
                         )
                 y_bias_sorted_list = sorted(tuple_list, key=lambda x:x[-1], reverse=True)
                 for idx, tp in enumerate(y_bias_sorted_list): 
                     if tp[0] in y_bias_result_list.keys():
-                        y_bias_result_list[tp[0]]["frame_index"].append(tp[1])
+                        y_bias_result_list[tp[0]]["frame_id"].append(tp[1])
                         y_bias_result_list[tp[0]]["ade"].append(tp[2])
                         y_bias_result_list[tp[0]]["fde"].append(tp[3])
                         y_bias_result_list[tp[0]]["y_bias"].append(tp[4])
                         y_bias_result_list[tp[0]]["rank"].append((idx+1)/len(y_bias_sorted_list))
                     else:
                         y_bias_result_list[tp[0]] = dict(
-                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(y_bias_sorted_list)]
+                            frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(y_bias_sorted_list)]
                         )
                 return fde_result_list, y_bias_result_list
             
