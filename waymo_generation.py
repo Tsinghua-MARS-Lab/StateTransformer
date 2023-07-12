@@ -143,49 +143,36 @@ def get_observation_for_waymo(observation_kwargs, data_dic, scenario_frame_numbe
 def main(args):
     data_path = args.data_path
 
-    observation_kwargs = dict(
-        max_dis=500,
-        high_res_raster_shape=[224, 224],  # for high resolution image, we cover 50 meters for delicated short-term actions
-        high_res_raster_scale=4.0,
-        low_res_raster_shape=[224, 224],  # for low resolution image, we cover 300 meters enough for 8 seconds straight line actions
-        low_res_raster_scale=0.77,
-        past_frame_num=10,
-        future_frame_num=80,
-        frame_sample_interval=1,
-    )
+    # observation_kwargs = dict(
+    #     max_dis=500,
+    #     high_res_raster_shape=[224, 224],  # for high resolution image, we cover 50 meters for delicated short-term actions
+    #     high_res_raster_scale=4.0,
+    #     low_res_raster_shape=[224, 224],  # for low resolution image, we cover 300 meters enough for 8 seconds straight line actions
+    #     low_res_raster_scale=0.77,
+    #     past_frame_num=10,
+    #     future_frame_num=80,
+    #     frame_sample_interval=1,
+    # )
 
     def yield_data(shards, dl):
         for shard in shards:
-            loaded_dic_list = dl.get_next_file(specify_file_index=shard)
-            if loaded_dic_list is None:
+            file_name = dl.get_next_file(specify_file_index=shard)
+            if file_name is None:
                 continue
-            file_name = dl.global_file_names[shard]
-            for loaded_dic in loaded_dic_list:                
-                total_frames = loaded_dic['total_frames']
-                
-                observation_dic = get_observation_for_waymo(
-                    observation_kwargs, loaded_dic, 10, total_frames, nsm_result=None)
-                other_info = {
-                    'file_name': file_name,
-                    'scenario_id': loaded_dic["scenario_id"],  # empty for NuPlan
-                }
-                if observation_dic is not None:
-                    observation_dic.update(other_info)
-                    yield observation_dic
-                else:
-                    continue
+            yield file_name
     
     data_loader = WaymoDL(data_path=data_path)
-    data_dic = data_loader.get_next_file(0)
-    example_dic = get_observation_for_waymo(observation_kwargs, data_dic[0], 10, 91, None)
+    # data_dic = data_loader.get_next_file(0)
     print("here")
-    file_indices = list(range(data_loader.total_file_num))
+    file_indices = []
+    for i in range(args.num_proc):
+        file_indices += range(data_loader.total_file_num)[i::args.num_proc]
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
     
     waymo_dataset = Dataset.from_generator(yield_data,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader},
-                                            writer_batch_size=2, cache_dir=args.cache_folder,
+                                            writer_batch_size=10, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
     print('Saving dataset')
     waymo_dataset.set_format(type="torch")
@@ -202,8 +189,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument("--running_mode", type=int, default=1)
     parser.add_argument("--data_path", type=dict, default={
-            "WAYMO_DATA_ROOT": "/home/shiduozhang/waymo",
-            # "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/processed/",
+            # "WAYMO_DATA_ROOT": "/home/shiduozhang/waymo",
+            "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/processed_0_10/",
             # "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/processed_sequencial",
             "SPLIT_DIR": {
                     'train': "processed_scenarios_training", 
@@ -217,7 +204,7 @@ if __name__ == '__main__':
     parser.add_argument('--starting_file_num', type=int, default=0)
     parser.add_argument('--ending_file_num', type=int, default=1000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
-    parser.add_argument('--cache_folder', type=str, default='/home/shiduozhang/waymo')
+    parser.add_argument('--cache_folder', type=str, default='/home/ldr/tmp/waymo_cache')
 
     parser.add_argument('--train', default=False, action='store_true')   
     parser.add_argument('--num_proc', type=int, default=1)
