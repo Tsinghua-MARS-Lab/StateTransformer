@@ -358,10 +358,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             attention_mask[:, context_length * 2:] = 0
         elif self.ar_future_interval > 0:
             # use autoregressive future interval
-            if self.model_args.predict_yaw:
-                future_key_points = trajectory_label[:, ::self.ar_future_interval, :]
-            else:
-                future_key_points = trajectory_label[:, ::self.ar_future_interval, :]
+            future_key_points = trajectory_label[:, self.ar_future_interval-1::self.ar_future_interval, :]
+            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             future_key_embeds = self.action_m_embed(future_key_points)
             input_embeds = torch.cat([input_embeds, future_key_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
@@ -407,8 +405,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
         if self.ar_future_interval > 0:
             future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)
             if self.k == 1:
                 if self.model_args.predict_yaw:
                     loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
@@ -423,9 +421,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
                 loss_fct_key_points = MSELoss(reduction="none")
                 if self.model_args.predict_yaw:
-                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device)) * 100
+                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device))
                 else:
-                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points[..., :2].to(device)) * 100
+                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points[..., :2].to(device))
                 # add loss on x, y (the last dimension)
                 loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
@@ -457,6 +455,12 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                     loss_fct = CrossEntropyLoss(reduction="mean")
                     loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
                     loss += loss_to_add
+                    # concatenate the key points with predicted trajectory for evaluation
+                    selected_key_points = key_points_logits.reshape(b*s, self.k, -1)[torch.arange(b*s), min_loss_indices.reshape(-1), :].reshape(b, s, -1)
+                    traj_logits = torch.cat([selected_key_points, traj_logits], dim=1)
+                else:
+                    print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
+                    traj_logits = torch.cat([traj_logits, key_points_logits[0].reshape(b, s, -1)], dim=1)
 
         # evaluate accuracy if on eval
         if not self.training and self.clf_metrics is not None:
@@ -467,7 +471,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                     metric.add_batch(references=min_loss_indices.reshape(-1), predictions=predictions.reshape(-1))
 
         if not return_dict:
-            output = (action_logits,) + transformer_outputs[1:]
+            output = (traj_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
@@ -478,6 +482,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
         )
+
 
 class XLNetModelNuplan(XLNetPreTrainedModel):
     def __init__(self, config, **kwargs):
@@ -1086,7 +1091,7 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(action_hidden_states.to(device))  # b, s, k
                     loss_fct = CrossEntropyLoss(reduction="mean")
-                    loss_to_add = loss_fct(pred_logits.reshape(b*s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
+                    loss_to_add = loss_fct(pred_logits.reshape(b*s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long()) * 0.1
                     loss += loss_to_add
 
         if self.recover_obs:

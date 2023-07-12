@@ -169,25 +169,15 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         - debug_raster_path: if a debug_path past, will save rasterized images to disk, warning: will slow down the process
     :param data_path: the root path to load pickle files
     """
-    # filename = sample["file_name"].item()
-    # map = sample["map"].item()
-    # split = sample["split"].item()
-    # road_ids = sample["road_ids"].item()
-    # agent_ids = sample["agent_ids"].item()
-    # traffic_light_ids = sample["traffic_ids"].item()
-    # traffic_light_states = sample["traffic_status"].item()
-    # route_ids = sample["route_ids"].item()
-    # frame_id = sample["frame_id"].item()
-
     filename = sample["file_name"]
     map = sample["map"]
     split = sample["split"]
+    frame_id = sample["frame_id"]
     road_ids = sample["road_ids"].tolist()
     agent_ids = sample["agent_ids"]  # list of strings
     traffic_light_ids = sample["traffic_ids"].tolist()
     traffic_light_states = sample["traffic_status"].tolist()
     route_ids = sample["route_ids"].tolist()
-    frame_id = sample["frame_id"]
 
     if map == 'sg-one-north':
         y_inverse = -1
@@ -374,7 +364,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # future trajectory
     # check if samples in the future is beyond agent_dic['ego']['pose'] length
     if sample_frames_in_future[-1] >= agent_dic['ego']['pose'].shape[0]:
-        print('sample index beyond length of agent_dic: ', sample_frames_in_future[-1], agent_dic['ego']['pose'].shape[0])
+        # print('sample index beyond length of agent_dic: ', sample_frames_in_future[-1], agent_dic['ego']['pose'].shape[0])
         return None
 
     trajectory_label = agent_dic['ego']['pose'][sample_frames_in_future, :].copy()
@@ -401,6 +391,11 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
         save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past), image_file_name,
                     high_res_scale, low_res_scale)
+
+    result_to_return["file_name"] = sample['file_name']
+    result_to_return["map"] = sample['map']
+    result_to_return["split"] = sample['split']
+    result_to_return["frame_id"] = sample['frame_id']
 
     return result_to_return
 

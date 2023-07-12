@@ -1,49 +1,88 @@
 # transformer4planning
 
-## To train:
+
+## NuPlan Dataset Pipeline
+
+Usage:
+
+1. Generate dataDic
+2. Generate index as a cached dataset
+3. Train the model and evaluate during training
+
+### Prepare Environment
+
+(Instructions for different OS TBD)
+
+### Process the dataset
+
+1. process NuPlan .db files to .pkl files (to road, agent, and traffic dictionaries)
+2. generate filtered scenario index and cache in .pkl files
+
+Why process .db files to .pkl files? Lower disk usage (lower precision) and faster loading (without initiate NuPlan DataWrapper)
+
+
+```
+root-
+ |--train
+      |--us-ma-boston
+         --*.pkl
+      |--us-pa-pittsburgh-hazelwood
+    ...
+ |--test
+     |--us-ma-pittsburgh
+        --*.pkl
+     ...
+ |--map
+    --us-ma-boston.pkl
+    --us-pa-pittsburgh-hazelwood.pkl
+    --us-nv-las-vegas-strip.pkl
+    --sg-one-north
+    ...
+ |--index (can be organized dynamically)
+    |--train
+        |--train-index_boston
+            --*.arrow
+    |--test
+        |--test-index_pittsburgh
+            --*.arrow    
+```
+
+
+## To train and evaluate during training:
 
 model_name consist of ['scratch','pretrain']-['xl','gpt']
 
 `
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run \
---nproc_per_node=8 \
-runner.py --model_name scratch-nonauto-gpt \
---model_pretrain_name_or_path None \
---saved_dataset_folder /localdata_ssd/nuplan_nsm/nsm_sparse_balance_new_4seq \
---output_dir data/example/training_results \
---logging_dir data/example/training_logs \
---run_name example \
---num_train_epochs 500 \
---per_device_train_batch_size 2 \
---warmup_steps 500 \
---weight_decay 0.01 \
---logging_steps 200 \
---save_strategy steps \
---save_steps 2000 \
---dataloader_num_workers 5 \
---save_total_limit 5 \
---predict_trajectory True \
---dataloader_drop_last True \
---do_train \
---d_embed 256 \
---d_model 256 \
---d_inner 1024 \
---n_layers 4 \
---n_heads 8 \
---activation_function silu \
---resume_from_checkpoint None\
---do_eval \
---evaluation_strategy epoch \
---saved_valid_dataset_folder /localdata_ssd/nuplan/boston_test_byscenario/ \ --per_device_eval_batch_size 2 \
---dataset_scale 1 \
---task nuplan \
---with_traffic_light True \
+--nproc_per_node=8 runner.py \
+--model_name scratch-gpt --model_pretrain_name_or_path None \
+--saved_dataset_folder  /localdata_ssd/nuplan/train-index_boston/boston_index_full \
+--output_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_results  \
+--logging_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_logs \
+--run_name gpt_1.5B_mse_FI1_PI1_k1 --num_train_epochs 100 \
+--per_device_train_batch_size 4 --warmup_steps 50 \
+--weight_decay 0.01 --logging_steps 2 --save_strategy steps \
+--save_steps 1000 --dataloader_num_workers 10 \
+--save_total_limit 2  --predict_trajectory True \
+--dataloader_drop_last True --do_train \
+--d_embed 1600 --d_model 1600 --d_inner 6400 --n_layers 48 --n_heads 25 \
+--activation_function silu --dataset_scale 1 \
+--task nuplan --with_traffic_light True --k 1 \
+--online_preprocess True \
+--datadic_path /localdata_ssd/nuplan/online \
+--remove_unused_columns False --future_sample_interval 1 \
+--past_sample_interval 1 --do_eval \
+--evaluation_strategy steps --eval_steps 100 \
+--saved_valid_dataset_folder /localdata_ssd/nuplan/test-index_boston_full \
+--overwrite_output_dir --loss_fn mse
 `
 
 
 
-## To predict and evaluate:
+## To predict:
+
+to be update for online process
 
 `
 export CUDA_VISIBLE_DEVICES=3; \
@@ -66,21 +105,28 @@ runner.py --model_name pretrain-xl \
 `
 
 ## To generate dataset:
+
+### Generate data dictionary
+
 `
-python generation.py --num_proc 1 \ 
---sample_interval 20 \
---dataset_name single_test \
---starting_file_num 0 \
---ending_file_num 1 \
---cache_folder /localdata_hdd/nuplan_nsm \
---auto_regressive False
+python generation.py  --num_proc 40 \
+--sample_interval 1  --dataset_name boston_datadic_float32 \
+--starting_file_num 0  --ending_file_num 10000  \
+--cache_folder /localdata_hdd/nuplan/boston_datadic_float32 \
+--data_path train_boston  --only_data_dic
 `
 
- if you need nsm label:
+### Generate index
 
-  add `--use_nsm` at the end of command
-  
- '
+`
+python generation.py  --num_proc 96 --sample_interval 1 \
+--dataset_name boston_index_full \
+--starting_file_num 0  --ending_file_num 10000 \
+--cache_folder /localdata_hdd/nuplan/online_boston \
+--data_path train_boston  --only_index
+`
+
+
 
 ## To evaluate on NuBoard:
 
