@@ -3,7 +3,7 @@ import pickle
 import math
 import cv2
 import shapely
-import os
+import os, time
 import torch
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -63,6 +63,9 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwa
         if rst is None:
             continue
         new_batch.append(rst)
+
+    if len(new_batch) == 0:
+        return None
     
     # process as data dictionary
     result = dict()
@@ -146,6 +149,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
                 if x < target_image.shape[0] and y < target_image.shape[1]:
                     target_image[x, y, :] = [255, 255, 255]
             cv2.imwrite(os.path.join(path_to_save, image_file_name + '_' + str(each_key) + '_' + str(scale) +'.png'), target_image)
+    print('length of action and labels: ', result_dic['context_actions'].shape, result_dic['trajectory_label'].shape)
     print('debug images saved to: ', path_to_save, file_number)
 
 
@@ -154,8 +158,10 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           high_res_scale=4, low_res_scale=0.77,
                           road_types=20, agent_types=8, traffic_types=4,
                           past_sample_interval=4, future_sample_interval=4,
-                          debug_raster_path=None):
+                          debug_raster_path=None, all_maps_dic=None, all_pickles_dic=None,
+                          frequency_change_rate=2):
     """
+    WARNING: frame_rate has been change to 10 as default to generate new dataset pickles, this is automatically processed by hard-coded logits
     :param sample: a dictionary containing the following keys:
         - file_name: the name of the file
         - map: the name of the map, ex: us-ma-boston
@@ -165,29 +171,19 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         - traffic_ids: the ids of the traffic lights
         - traffic_status: the status of the traffic lights
         - route_ids: the ids of the routes
-        - frame_id: the frame id of the current frame
+        - frame_id: the frame id of the current frame, this is the global index which is irrelevant to frame rate of agent_dic pickles
         - debug_raster_path: if a debug_path past, will save rasterized images to disk, warning: will slow down the process
     :param data_path: the root path to load pickle files
     """
-    # filename = sample["file_name"].item()
-    # map = sample["map"].item()
-    # split = sample["split"].item()
-    # road_ids = sample["road_ids"].item()
-    # agent_ids = sample["agent_ids"].item()
-    # traffic_light_ids = sample["traffic_ids"].item()
-    # traffic_light_states = sample["traffic_status"].item()
-    # route_ids = sample["route_ids"].item()
-    # frame_id = sample["frame_id"].item()
-
     filename = sample["file_name"]
     map = sample["map"]
     split = sample["split"]
+    frame_id = sample["frame_id"]
     road_ids = sample["road_ids"].tolist()
     agent_ids = sample["agent_ids"]  # list of strings
     traffic_light_ids = sample["traffic_ids"].tolist()
     traffic_light_states = sample["traffic_status"].tolist()
     route_ids = sample["route_ids"].tolist()
-    frame_id = sample["frame_id"]
 
     if map == 'sg-one-north':
         y_inverse = -1
@@ -198,21 +194,69 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     traffic_light_ids = [x for x in traffic_light_ids if x != -1]
     assert len(traffic_light_ids) == len(traffic_light_states), f'length of ids is not same as length of states, ids: {traffic_light_ids}, states: {traffic_light_states}'
 
-    if os.path.exists(os.path.join(data_path, "map", f"{map}.pkl")):
-        with open(os.path.join(data_path, "map", f"{map}.pkl"), "rb") as f:
-            road_dic = pickle.load(f)
+    if all_maps_dic is None:
+        print('loading map from disk ', map)
+        if os.path.exists(os.path.join(data_path, "map", f"{map}.pkl")):
+            with open(os.path.join(data_path, "map", f"{map}.pkl"), "rb") as f:
+                road_dic = pickle.load(f)
+        else:
+            print(f"Error: cannot load map {map} from {data_path}")
+            return None
+        print('loading map from disk done ', map)
     else:
-        print(f"Error: cannot load map {map} from {data_path}")
-        return None
+        if map in all_maps_dic:
+            road_dic = all_maps_dic[map]
+        else:
+            print(f"Error: cannot load map {map} from all_maps_dic, {list(all_maps_dic.keys())}")
+            return None
 
     # load agent and traffic dictionaries
-    if os.path.exists(os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")):
-        with open(os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl"), "rb") as f:
+    # WARNING: load some pickles can be extremely slow costs about 500-1000 seconds for las vegas map
+    pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
+    # if pickle_path not in all_pickles_dic:
+    #     if os.path.exists(pickle_path):
+    #         # current_time = time.time()
+    #         # print('loading data from disk ', split, map, filename)
+    #         with open(pickle_path, "rb") as f:
+    #             data_dic = pickle.load(f)
+    #             if 'agent_dic' in data_dic:
+    #                 agent_dic = data_dic["agent_dic"]
+    #             elif 'agent' in data_dic:
+    #                 agent_dic = data_dic['agent']
+    #             else:
+    #                 raise ValueError(f'cannot find agent_dic or agent in pickle file, keys: {data_dic.keys()}')
+    #         # time_spent = time.time() - current_time
+    #         # print('loading data from disk done ', split, map, filename, time_spent, 'total frames: ', agent_dic['ego']['pose'].shape[0])
+    #         if split == 'test':
+    #             print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
+    #         all_pickles_dic[pickle_path] = agent_dic
+    #     else:
+    #         print(f"Error: cannot load {filename} from {data_path} with {map}")
+    #         return None
+    # else:
+    #     agent_dic = all_pickles_dic[pickle_path]
+
+    if os.path.exists(pickle_path):
+        # current_time = time.time()
+        # print('loading data from disk ', split, map, filename)
+        with open(pickle_path, "rb") as f:
             data_dic = pickle.load(f)
-            agent_dic = data_dic["agent_dic"]
+            if 'agent_dic' in data_dic:
+                agent_dic = data_dic["agent_dic"]
+            elif 'agent' in data_dic:
+                agent_dic = data_dic['agent']
+            else:
+                raise ValueError(f'cannot find agent_dic or agent in pickle file, keys: {data_dic.keys()}')
+        # time_spent = time.time() - current_time
+        # print('loading data from disk done ', split, map, filename, time_spent, 'total frames: ', agent_dic['ego']['pose'].shape[0])
+        # if split == 'test':
+        #     print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
     else:
-        print(f"Error: cannot load {filename} from {data_path}")
+        print(f"Error: cannot load {filename} from {data_path} with {map}")
         return None
+
+    # if new version of data, using relative frame_id
+    relative_frame_id = True if 'starting_frame' in agent_dic['ego'] else False
 
     # calculate frames to sample
     scenario_start_frame = frame_id - past_seconds * frame_rate
@@ -228,7 +272,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # sample_frames = list(range(scenario_start_frame, frame_id + 1, frame_sample_interval))
 
     # initialize rasters
-    origin_ego_pose = agent_dic["ego"]["pose"][frame_id].copy()
+    origin_ego_pose = agent_dic["ego"]["pose"][frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
     if np.isinf(origin_ego_pose[0]) or np.isinf(origin_ego_pose[1]):
         assert False, f"Error: ego pose is inf {origin_ego_pose}, not enough precision while generating dictionary"
     # channels:
@@ -332,14 +376,24 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             print('unknown agent id', agent_id)
             continue
         for i, sample_frame in enumerate(sample_frames_in_past):
-            pose = agent_dic[agent_id]['pose'][sample_frame, :].copy()
+            if relative_frame_id:
+                agent_starting_frame = agent_dic[agent_id]['starting_frame']
+                agent_ending_frame = agent_dic[agent_id]['ending_frame']
+                if sample_frame < agent_starting_frame:
+                    continue
+                if agent_ending_frame != -1 and sample_frame >= agent_ending_frame:
+                    continue
+                pose = agent_dic[agent_id]['pose'][(sample_frame - agent_starting_frame)//frequency_change_rate, :].copy()  # Hard-coded frequency change
+                shape = agent_dic[agent_id]['shape'][(sample_frame - agent_starting_frame)//frequency_change_rate, :]
+            else:
+                pose = agent_dic[agent_id]['pose'][sample_frame, :].copy()
+                shape = agent_dic[agent_id]['shape'][sample_frame, :]
             if pose[0] < 0 and pose[1] < 0:
                 continue
             pose -= origin_ego_pose
             agent_type = int(agent_dic[agent_id]['type'])
             rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                             pose[0] * sin_ + pose[1] * cos_]
-            shape = agent_dic[agent_id]['shape'][frame_id, :]
             # rect_pts = cv2.boxPoints(((rotated_pose[0], rotated_pose[1]),
             #   (shape[1], shape[0]), np.rad2deg(pose[3])))
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
@@ -368,16 +422,19 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                               np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
     rotated_poses[:, 1] *= y_inverse
     for i in sample_frames_in_past:
-        action = rotated_poses[i]
+        action = rotated_poses[i//frequency_change_rate]  # hard-coded frequency change
         context_actions.append(action)
 
     # future trajectory
     # check if samples in the future is beyond agent_dic['ego']['pose'] length
+    if relative_frame_id:
+        sample_frames_in_future = (np.array(sample_frames_in_future, dtype=int) - agent_dic['ego']['starting_frame']) // frequency_change_rate
     if sample_frames_in_future[-1] >= agent_dic['ego']['pose'].shape[0]:
-        print('sample index beyond length of agent_dic: ', sample_frames_in_future[-1], agent_dic['ego']['pose'].shape[0])
+        # print('sample index beyond length of agent_dic: ', sample_frames_in_future[-1], agent_dic['ego']['pose'].shape[0])
         return None
 
     trajectory_label = agent_dic['ego']['pose'][sample_frames_in_future, :].copy()
+
     trajectory_label -= origin_ego_pose
     traj_x = trajectory_label[:, 0].copy()
     traj_y = trajectory_label[:, 1].copy()
@@ -401,6 +458,14 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
         save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past), image_file_name,
                     high_res_scale, low_res_scale)
+
+    result_to_return["file_name"] = sample['file_name']
+    result_to_return["map"] = sample['map']
+    result_to_return["split"] = sample['split']
+    result_to_return["frame_id"] = sample['frame_id']
+
+    del agent_dic
+    del road_dic
 
     return result_to_return
 

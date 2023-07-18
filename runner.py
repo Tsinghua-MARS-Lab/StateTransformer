@@ -146,6 +146,15 @@ class ModelArguments:
         default=0,
         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
+    arf_x_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    arf_y_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    trajectory_loss_rescale: Optional[float] = field(
+        default=1.0
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -237,7 +246,6 @@ class DataProcessArguments:
         default=None
     )
 
-    
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -328,43 +336,77 @@ def main():
 
     # Pass in the directory to load a saved dataset
     # See generation.py to process and save a dataset from the NuPlan Dataset
-    if os.path.isdir(data_args.saved_dataset_folder):
-        items = os.listdir(data_args.saved_dataset_folder)
-        if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[0])): #sub-datasets
-            # TODO: add split rows to dataset
-            print("concating datasets..")
-            concatdatasets = list()
-            for i, item in enumerate(items):
-                print(os.path.join(data_args.saved_dataset_folder, items[i]))
-                tmp = os.listdir(os.path.join(data_args.saved_dataset_folder, items[i]))
-                if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[i], tmp[0])): # for vegas datasets and dagger
-                    for sub_item in os.listdir(os.path.join(data_args.saved_dataset_folder, item)):
-                        dataset_path = os.path.join(data_args.saved_dataset_folder, item, sub_item)
-                        dataset = Dataset.load_from_disk(dataset_path)
-                        print(dataset)
-                        concatdatasets.append(dataset)
-                else: # for boston, pittsburgh and singapore datasets
-                    dataset_path = os.path.join(data_args.saved_dataset_folder, item)
-                    dataset = Dataset.load_from_disk(dataset_path)
-                    # dataset.set_format(type='torch', columns=["intended_maneuver_vector", "current_maneuver_vector", "high_res_raster", "low_res_raster",\
-                    #                                         "trajectory_label", "context_actions", "intended_maneuver_label", "current_maneuver_label"])
-                    
-                    print(dataset)
-                    concatdatasets.append(dataset)
-          
-            concat_dataset = _concatenate_map_style_datasets(concatdatasets)
-            concat_dataset.set_format(type='torch')
-            concat_dataset.shuffle(seed=training_args.seed)
-            train_samples = int(len(concat_dataset) * float(data_args.dataset_scale))
-            train_dataset = concat_dataset.select(range(train_samples))
-            if training_args.do_eval:
-                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                test_dataset.set_format(type='torch')
-            else:
-                test_dataset = train_dataset
-
-        else: # whole hugging face dataset   
-            print("loading dataset...")
+    """
+    Set saved dataset folder to load a saved dataset
+    1. Pass None to load from data_args.saved_dataset_folder as the root folder path to load all sub-datasets of each city
+    2. Pass the folder of an index files to load one sub-dataset of one city
+    """
+    if data_args.datadic_path is None:
+        from datasets import disable_caching
+        disable_caching()
+        data_args.datadic_path = data_args.saved_dataset_folder
+        # loop all datasets
+        logger.info("Loading full set of datasets from {}".format(data_args.datadic_path))
+        assert os.path.isdir(data_args.datadic_path)
+        index_root = os.path.join(data_args.datadic_path, 'index')
+        root_folders = os.listdir(index_root)
+        if 'train' in root_folders:
+            # load training datasets
+            training_datasets = []
+            training_index_root_folders = os.path.join(index_root, 'train')
+            training_indices = os.listdir(training_index_root_folders)
+            for training_index in training_indices:
+                training_index_path = os.path.join(training_index_root_folders, training_index)
+                if os.path.isdir(training_index_path):
+                    # load training dataset
+                    logger.info("Loading training dataset {}".format(training_index_path))
+                    dataset = Dataset.load_from_disk(training_index_path)
+                    if dataset is not None:
+                        training_datasets.append(dataset)
+            train_dataset = _concatenate_map_style_datasets(training_datasets)
+            # add split column
+            train_dataset.features.update({'split': Value('string')})
+            train_dataset = train_dataset.add_column(name='split', column=['train'] * len(train_dataset))
+            train_dataset.set_format(type='torch')
+            train_samples = int(len(train_dataset) * float(data_args.dataset_scale))
+            train_dataset = train_dataset.select(range(train_samples))
+        else:
+            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+        if training_args.do_eval and 'test' in root_folders:
+            # load test datasets
+            test_datasets = []
+            test_index_root_folders = os.path.join(index_root, 'test')
+            test_indices = os.listdir(test_index_root_folders)
+            for test_index in test_indices:
+                test_index_path = os.path.join(test_index_root_folders, test_index)
+                if os.path.isdir(test_index_path):
+                    # load test dataset
+                    logger.info("Loading test dataset {}".format(test_index_path))
+                    dataset = Dataset.load_from_disk(test_index_path)
+                    if dataset is not None:
+                        test_datasets.append(dataset)
+            test_dataset = _concatenate_map_style_datasets(test_datasets)
+            # add additional column for flagging test set
+            test_dataset.features.update({'split': Value('string')})
+            test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
+            test_dataset.set_format(type='torch')
+        else:
+            test_dataset = train_dataset
+        all_maps_dic = {}
+        all_pickles_dic = {}
+        map_folder = os.path.join(data_args.datadic_path, 'map')
+        for each_map in os.listdir(map_folder):
+            if each_map.endswith('.pkl'):
+                map_path = os.path.join(map_folder, each_map)
+                with open(map_path, 'rb') as f:
+                    map_dic = pickle.load(f)
+                map_name = each_map.split('.')[0]
+                all_maps_dic[map_name] = map_dic
+    else:
+        all_maps_dic = None
+        all_pickles_dic = None
+        if os.path.isdir(data_args.saved_dataset_folder):
+            logger.info("loading dataset...")
             dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             dataset.features.update({'split': Value('string')})
             dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
@@ -372,7 +414,7 @@ def main():
             dataset.shuffle(seed=training_args.seed)
             train_samples = int(len(dataset) * float(data_args.dataset_scale))
             train_dataset = dataset.select(range(train_samples))
-            
+
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
                 # split_dic = test_dataset.info.splits['train']
@@ -385,21 +427,21 @@ def main():
             else:
                 test_dataset = dataset.select(range(train_samples))
             test_dataset.set_format(type='torch')
-
-            # if data_args.online_preprocess:
-            #     train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
-            #     test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
-    else:
-        raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
+        else:
+            raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # loop split info and update for test set
-    # splits={'train': SplitInfo(name='train', num_bytes=1538228595562, num_examples=71490, shard_lengths=[..]}
     print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
 
+    # nuplan_dataset = dict(
+    #     train=train_dataset,
+    #     validation=test_dataset.shuffle(seed=training_args.seed),
+    #     test=test_dataset.shuffle(seed=training_args.seed),
+    # )
     nuplan_dataset = dict(
         train=train_dataset,
-        validation=test_dataset.shuffle(seed=training_args.seed),
-        test=test_dataset.shuffle(seed=training_args.seed),
+        validation=test_dataset,
+        test=test_dataset,
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
@@ -443,7 +485,11 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive, dic_path=data_args.datadic_path, **data_process.__dict__) if data_args.online_preprocess else None
+    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
+                         dic_path=data_args.datadic_path,
+                         all_maps_dic=all_maps_dic,
+                         all_pickles_dic=all_pickles_dic,
+                         **data_process.__dict__) if data_args.online_preprocess else None
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -478,21 +524,16 @@ def main():
             logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
     if training_args.do_predict:
-        from sklearn.metrics import classification_report
         # Currently only supports single GPU predict outputs
+        """
+        Will save prediction results, and dagger results if dagger is enabled
+        """
+        # TODO: fit new online process pipeline to save dagger and prediction results
         logger.info("*** Predict ***")
-        """
-        Compute accuracy for the following classifications:
-        1. intended_maneuver
-        2. current_maneuver
-        3. pos_x,
-        4. pos_y
-        """
-        model.eval()
         with torch.no_grad():
             dagger_results = {
                 'file_name':[],
-                'frame_index':[],
+                'frame_id':[],
                 'rank':[],
                 'ADE':[],
                 'FDE':[],
@@ -503,47 +544,7 @@ def main():
                 'current_frame': [],
                 'next_step_action': [],
                 'predicted_trajectory': [],
-            }     
-            device = model.device
-            def preprocess_data(examples):
-                # take a batch of texts
-                for each_key in examples:
-                    if isinstance(examples[each_key], type(torch.tensor(0))):
-                        examples[each_key] = examples[each_key].to(device)
-                return examples
-                
-            if model_args.predict_trajectory:
-                end_bias_x = []
-                end_bias_y = []
-                all_bias_x = []
-                all_bias_y = []
-                losses = []
-                loss_fn = torch.nn.MSELoss(reduction="mean")
-    
-            # initialize intended maneuver metrics
-            def nuplan_collate_fn(batch):
-                import collections
-                if "nonauto" in model_args.model_name:
-                    expect_keys = ["file_name", "frame_index", "high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-                else:
-                    expect_keys = ["high_res_raster", "low_res_raster", "trajectory"]
-                elem = batch[0]
-                if isinstance(elem, collections.abc.Mapping):
-                    return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            
-            def waymo_collate_fn(batch):
-                import collections
-                expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-                
-                elem = batch[0]
-                if isinstance(elem, collections.abc.Mapping):
-                    return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            
-            if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
-                collate_fn = waymo_collate_fn
-            else:
-                collate_fn = nuplan_collate_fn
-
+            }
             test_dataloader = DataLoader(
                 dataset=predict_dataset,
                 batch_size=training_args.per_device_eval_batch_size,
@@ -552,10 +553,38 @@ def main():
                 pin_memory=True,
                 drop_last=True
             )
+
+
+            if model_args.predict_trajectory:
+                end_bias_x = []
+                end_bias_y = []
+                all_bias_x = []
+                all_bias_y = []
+                losses = []
+                loss_fn = torch.nn.MSELoss(reduction="mean")
+            
+            # def waymo_collate_fn(batch):
+            #     import collections
+            #     expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
+            #
+            #     elem = batch[0]
+            #     if isinstance(elem, collections.abc.Mapping):
+            #         return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
+            #
+            # if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
+            #     # Todo: test waymo collate fn
+            #     collate_fn = waymo_collate_fn
+
+
             for itr, input in enumerate(tqdm(test_dataloader)):
-                input = preprocess_data(input)
+                # move batch to device
+                for each_key in input:
+                    if isinstance(examples[each_key], type(torch.tensor(0))):
+                        input[each_key] = input[each_key].to(device)
+
                 input_length = training_args.per_device_eval_batch_size
                 if model_args.autoregressive:
+                    # Todo: add autoregressive predict
                     traj_pred = model.generate(**input)
                     traj_label = model(**input)
                 else:
@@ -563,7 +592,7 @@ def main():
                     traj_pred = output.logits                   
                     try:
                         file_name = input['file_name']
-                        current_frame_idx = input['frame_index']
+                        current_frame_idx = input['frame_id']
                     except:
                         file_name = ["null"] * input_length
                         current_frame_idx = -1 * torch.ones(input_length)
@@ -571,7 +600,7 @@ def main():
                     prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
                     if data_args.dagger:
                         dagger_results['file_name'].extend(file_name)
-                        dagger_results['frame_index'].extend(list(current_frame_idx.cpu().numpy()))
+                        dagger_results['frame_id'].extend(list(current_frame_idx.cpu().numpy()))
                 
                 if model_args.predict_trajectory:
                     if model_args.autoregressive:
@@ -619,7 +648,7 @@ def main():
                 tuple_list = list()
                 fde_result_list = dict()
                 y_bias_result_list = dict()
-                for filename, id, ade, fde, y_bias in zip(dic["file_name"], dic["frame_index"], dic["ADE"], dic["FDE"], dic["y_bias"]):
+                for filename, id, ade, fde, y_bias in zip(dic["file_name"], dic["frame_id"], dic["ADE"], dic["FDE"], dic["y_bias"]):
                     if filename == "null":
                         continue
                     tuple_list.append((filename, id, ade, fde, abs(y_bias)))
@@ -627,7 +656,7 @@ def main():
                 fde_sorted_list = sorted(tuple_list, key=lambda x:x[3], reverse=True)
                 for idx, tp in enumerate(fde_sorted_list): 
                     if tp[0] in fde_result_list.keys():
-                        fde_result_list[tp[0]]["frame_index"].append(tp[1])
+                        fde_result_list[tp[0]]["frame_id"].append(tp[1])
                         fde_result_list[tp[0]]["ade"].append(tp[2])
                         fde_result_list[tp[0]]["fde"].append(tp[3])
                         fde_result_list[tp[0]]["y_bias"].append(tp[4])
@@ -635,19 +664,19 @@ def main():
                         
                     else:
                         fde_result_list[tp[0]] = dict(
-                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(fde_sorted_list)]
+                            frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(fde_sorted_list)]
                         )
                 y_bias_sorted_list = sorted(tuple_list, key=lambda x:x[-1], reverse=True)
                 for idx, tp in enumerate(y_bias_sorted_list): 
                     if tp[0] in y_bias_result_list.keys():
-                        y_bias_result_list[tp[0]]["frame_index"].append(tp[1])
+                        y_bias_result_list[tp[0]]["frame_id"].append(tp[1])
                         y_bias_result_list[tp[0]]["ade"].append(tp[2])
                         y_bias_result_list[tp[0]]["fde"].append(tp[3])
                         y_bias_result_list[tp[0]]["y_bias"].append(tp[4])
                         y_bias_result_list[tp[0]]["rank"].append((idx+1)/len(y_bias_sorted_list))
                     else:
                         y_bias_result_list[tp[0]] = dict(
-                            frame_index=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(y_bias_sorted_list)]
+                            frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(y_bias_sorted_list)]
                         )
                 return fde_result_list, y_bias_result_list
             

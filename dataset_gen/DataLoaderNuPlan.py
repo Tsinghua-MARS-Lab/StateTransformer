@@ -263,7 +263,7 @@ class NuPlanDL:
         data_to_return['map'] = log_db.map_name
         return data_to_return, new_files_loaded
 
-    def get_next_file(self, specify_file_index=None, map_name=None):
+    def get_next_file(self, specify_file_index=None, map_name=None, agent_only=False, sample_interval=2):
         if specify_file_index is None:
             self.current_file_index += 1
             file_index = self.current_file_index
@@ -276,15 +276,11 @@ class NuPlanDL:
             return None
         log_db = self.current_dataset.log_dbs[file_index]
         if map_name is not None and log_db.map_name != map_name:
-            print('test: ', log_db.map_name, map_name)
+            print('unmatched map name(loaded, asked): ', log_db.map_name, map_name)
             return None
         total_frames = len(log_db.lidar_pc)
         first_lidar_pc = log_db.lidar_pc[0]
         last_lidar_pc = log_db.lidar_pc[-1]
-        # print("test: ", [each_pc.token for each_pc in log_db.lidar_pc])
-        # print("test2: ", first_lidar_pc.prev_token,
-        #       last_lidar_pc.next_token, log_db.lidar_pc[-2].next_token == last_lidar_pc,
-        #       log_db.lidar_pc[-1].prev_token == log_db.lidar_pc[-2])
         starting_timestamp = first_lidar_pc.timestamp
         last_timestamp = last_lidar_pc.timestamp
         starting_token = first_lidar_pc.token
@@ -312,14 +308,14 @@ class NuPlanDL:
         agent_dic = {}
         new_dic = {'pose': np.ones([total_frames, 4]) * -1,
                    'shape': np.ones([total_frames, 3]) * -1,
-                   'speed': np.ones([total_frames, 2]) * -1,
                    'type': 0,
-                   'is_sdc': 0, 'to_predict': 0}
+                   'is_sdc': 0, 'to_predict': 0,
+                   'starting_frame': 0,
+                   'ending_frame': -1,}
         # pack ego
         agent_dic['ego'] = copy.deepcopy(new_dic)
         poses_np = agent_dic['ego']['pose']
         shapes_np = agent_dic['ego']['shape']
-        speeds_np = agent_dic['ego']['speed']
         agent_dic['ego']['type'] = 7
         # get ego
         current_pc = first_lidar_pc
@@ -331,7 +327,6 @@ class NuPlanDL:
                                          current_ego_pose.qw * current_ego_pose.qw + current_ego_pose.qx * current_ego_pose.qx - current_ego_pose.qy * current_ego_pose.qy - current_ego_pose.qz * current_ego_pose.qz)]
             shapes_np[i, :] = [any_ego_state.car_footprint.width,
                                any_ego_state.car_footprint.length, 2]
-            speeds_np[i, :] = [current_ego_pose.vx, current_ego_pose.vy]
             if current_pc != last_lidar_pc:
                 current_pc = current_pc.next
                 current_ego_pose = current_pc.ego_pose
@@ -363,80 +358,110 @@ class NuPlanDL:
                     # init
                     new_dic = {'pose': np.ones([total_frames, 4], dtype=np.float32) * -1,
                                'shape': np.ones([total_frames, 3], dtype=np.float32) * -1,
-                               'speed': np.ones([total_frames, 2], dtype=np.float32) * -1,
                                'type': int(agent_type),
-                               'is_sdc': 0, 'to_predict': 0}
+                               'is_sdc': 0, 'to_predict': 0,
+                               'starting_frame': i,
+                               'ending_frame': -1}
                     agent_dic[token] = new_dic
                 poses_np = agent_dic[token]['pose']
                 shapes_np = agent_dic[token]['shape']
-                speeds_np = agent_dic[token]['speed']
                 poses_np[i, :] = [each_agent.center.x, each_agent.center.y, 0, each_agent.center.heading]
                 shapes_np[i, :] = [each_agent.box.width, each_agent.box.length, 2]
-                speeds_np[i, :] = [each_agent.velocity.x, each_agent.velocity.y]
+                agent_dic[token]['ending_frame'] = i
             if current_pc != last_lidar_pc:
                 current_pc = current_pc.next
                 current_ego_pose = current_pc.ego_pose
+
+        # trim agent_dic
+        for key in agent_dic.keys():
+            """
+            trim unused frames save disk space for almost 10x (used 0.1 percent), also loading/saving pickles 10x faster
+            """
+            if key == 'ego':
+                # nothing to trim for ego
+                continue
+            starting_frame = agent_dic[key]['starting_frame']
+            ending_frame = agent_dic[key]['ending_frame']
+            if ending_frame == -1:
+                agent_dic[key]['pose'] = agent_dic[key]['pose'][starting_frame:, :]
+                agent_dic[key]['shape'] = agent_dic[key]['shape'][starting_frame:, :]
+            elif ending_frame <= 0 or ending_frame <= starting_frame:
+                if ending_frame == starting_frame:
+                    # skip agent with only one valid frame
+                    pass
+                else:
+                    print('warning: illegal ending frame: ', agent_dic[key], ending_frame, starting_frame)
+            else:
+                agent_dic[key]['pose'] = agent_dic[key]['pose'][starting_frame:ending_frame, :]
+                agent_dic[key]['shape'] = agent_dic[key]['shape'][starting_frame:ending_frame, :]
+
         # convert to float16 to save disk space: ERROR: float16 does not have enough space for pose
         for key in agent_dic.keys():
-            agent_dic[key]['pose'] = agent_dic[key]['pose'].astype(np.float32)
-            agent_dic[key]['shape'] = agent_dic[key]['shape'].astype(np.float32)
-            agent_dic[key]['speed'] = agent_dic[key]['speed'].astype(np.float32)
-        road_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,
-                                                 scenario_list=scenario_list)
-        traffic_dic = self.pack_scenario_to_trafficdic(starting_scenario, map_radius=100,
-                                                       scenario_list=scenario_list)
-        # road_dic = {}
-        # traffic_dic = {}
-        data_to_return = {
-            "road": road_dic,
-            "agent": agent_dic,
-            "traffic_light": traffic_dic,
-        }
+            # change 20hz into 10hz to save disk space
+            agent_dic[key]['pose'] = agent_dic[key]['pose'][::sample_interval, :].astype(np.float32)
+            agent_dic[key]['shape'] = agent_dic[key]['shape'][::sample_interval, :].astype(np.float16)
         skip = False
-        # sanity check
-        if agent_dic is None or road_dic is None or traffic_dic is None:
-            print("Invalid Scenario Loaded: ", agent_dic is None, road_dic is None, traffic_dic is None)
-            skip = True
+        if not agent_only:
+            road_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,
+                                                     scenario_list=scenario_list)
+            traffic_dic = self.pack_scenario_to_trafficdic(starting_scenario, map_radius=100,
+                                                           scenario_list=scenario_list)
+            data_to_return = {
+                "road": road_dic,
+                "agent": agent_dic,
+                "traffic_light": traffic_dic,
+            }
+            # sanity check
+            if agent_dic is None or road_dic is None or traffic_dic is None:
+                print("Invalid Scenario Loaded: ", agent_dic is None, road_dic is None, traffic_dic is None)
+                skip = True
+            # loop route road ids from all scenarios in this file
+            route_road_ids = []
+            log_db = self.current_dataset.log_dbs[file_index]
+            sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
+            for each_scenario_tag in log_db.scenario_tag:
+                # fetch lidar token (as time stamp) from scenario tag
+                each_lidar_token = each_scenario_tag.lidar_pc_token
+                # get scenario from lidar_token
+                lidar_token_timestamp = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(log_db.load_path,
+                                                                                                        sensor_data_source,
+                                                                                                        each_lidar_token)
+                scenario = get_default_scenario_from_token(log_db, each_lidar_token, lidar_token_timestamp)
+                route_road_ids += scenario.get_route_roadblock_ids()
 
-        # loop route road ids from all scenarios in this file
-        route_road_ids = []
-        log_db = self.current_dataset.log_dbs[file_index]
-        sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
-        for each_scenario_tag in log_db.scenario_tag:
-            # fetch lidar token (as time stamp) from scenario tag
-            each_lidar_token = each_scenario_tag.lidar_pc_token
-            # get scenario from lidar_token
-            lidar_token_timestamp = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(log_db.load_path,
-                                                                                                    sensor_data_source,
-                                                                                                    each_lidar_token)
-            scenario = get_default_scenario_from_token(log_db, each_lidar_token, lidar_token_timestamp)
-            route_road_ids += scenario.get_route_roadblock_ids()
+            route_road_ids = list(set(route_road_ids))
+            # route_road_ids = starting_scenario.get_route_roadblock_ids()
 
-        route_road_ids = list(set(route_road_ids))
+            # handle '' empty string in route_road_ids
+            road_ids_processed = []
+            for each_id in route_road_ids:
+                if each_id != '':
+                    try:
+                        road_ids_processed.append(int(each_id))
+                    except:
+                        print(f"Invalid road id in route {each_id}")
+            route_road_ids = road_ids_processed
 
-        # route_road_ids = starting_scenario.get_route_roadblock_ids()
+            # category = classify_scenario(data_to_return)
+            data_to_return["category"] = 1
+            data_to_return['scenario'] = f'{self.file_names[file_index]}'
+            data_to_return['edges'] = []
+            data_to_return['skip'] = skip
+            data_to_return['edge_type'] = []
+            data_to_return['route'] = [] if route_road_ids is None else route_road_ids
 
-        # handle '' empty string in route_road_ids
-        road_ids_processed = []
-        for each_id in route_road_ids:
-            if each_id != '':
-                try:
-                    road_ids_processed.append(int(each_id))
-                except:
-                    print(f"Invalid road id in route {each_id}")
-        route_road_ids = road_ids_processed
-
-        # category = classify_scenario(data_to_return)
-        data_to_return["category"] = 1
-        data_to_return['scenario'] = f'{self.file_names[file_index]}'
-        data_to_return['edges'] = []
-        data_to_return['skip'] = skip
-        data_to_return['edge_type'] = []
-        data_to_return['route'] = [] if route_road_ids is None else route_road_ids
-
-        data_to_return['starting_timestamp'] = starting_timestamp
-        data_to_return['lidar_pc_tokens'] = log_db.lidar_pc
-
+            data_to_return['starting_timestamp'] = starting_timestamp
+            data_to_return['lidar_pc_tokens'] = log_db.lidar_pc
+        else:
+            # sanity check
+            if agent_dic is None:
+                print("Invalid Scenario Loaded: ", agent_dic is None)
+                skip = True
+            data_to_return = {
+                "agent": agent_dic,
+                'scenario': f'{self.file_names[file_index]}',
+                'skip': skip,
+            }
         return data_to_return
 
     def pack_scenario_to_agentdic(self, scenario, total_frames_future=TOTAL_FRAMES_IN_FUTURE, total_frames_past=2):

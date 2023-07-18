@@ -32,12 +32,12 @@ def main(args):
     #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
     #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
     # }
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
-    #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
-    # }
+    data_path = {
+        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
+        # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
+    }
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/Volumes/Elements SE/nuPlan",
     #     'NUPLAN_MAPS_ROOT': "/Volumes/Elements SE/nuPlan/maps",
@@ -290,6 +290,7 @@ def main(args):
             del dl
 
     def yield_data_dic(shards):
+        sample_interval = 4
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
                           file_to_start=shard,
@@ -297,25 +298,74 @@ def main(args):
                           data_path=data_path, db=None, gt_relation_path=None,
                           road_dic_path=road_path,
                           running_mode=running_mode)
-            loaded_dic = dl.get_next_file(specify_file_index=0, map_name=args.map_name)
+            # 5 frames per second, sample every 4 frames
+            loaded_dic = dl.get_next_file(specify_file_index=0, map_name=args.map_name, agent_only=True)#, sample_interval=sample_interval)
             if loaded_dic is None:
                 continue
+            if loaded_dic["skip"]:
+                continue
             file_name = dl.file_names[0]
-            result = dict()
-            result["agent_dic"] = loaded_dic["agent"]
-            result["traffic_dic"] = loaded_dic["traffic_light"]
-            result["file_name"] = file_name
+            # result = dict()
+            # result["agent_dic"] = loaded_dic["agent"]
+            # result["traffic_dic"] = loaded_dic["traffic_light"]
+            loaded_dic["file_name"] = file_name
+            loaded_dic["sample_interval"] = sample_interval
             # check if folder exists
             store_path = os.path.join(args.cache_folder, args.dataset_name)
             if not os.path.exists(store_path):
                 os.makedirs(store_path)
             print("Storing at ", os.path.join(store_path, f"{file_name}.pkl"))
             with open(os.path.join(store_path, f"{file_name}.pkl"), "wb") as f:
-                pickle.dump(result, f)
+                pickle.dump(loaded_dic, f, protocol=pickle.HIGHEST_PROTOCOL)
             print("Stored at ", os.path.join(store_path, f"{file_name}.pkl"))
-            yield {'file_name': result["file_name"]}
+            if shard < 2:
+                # inspect result
+                print("Inspecting result\n**************************\n")
+                print("ego pose shape: ", loaded_dic["agent"]["ego"]["pose"].shape, loaded_dic["agent"]["ego"]["starting_frame"], loaded_dic["agent"]["ego"]["ending_frame"])
+                starting_frames = []
+                ending_frames = []
+                for each_agent in loaded_dic['agent']:
+                    starting_frames.append(loaded_dic['agent'][each_agent]['starting_frame'])
+                    ending_frames.append(loaded_dic['agent'][each_agent]['ending_frame'])
+                print("starting frames: ", starting_frames)
+                print("ending frames: ", ending_frames)
+            yield {'file_name': loaded_dic["file_name"]}
             del dl
 
+    def yield_road_dic(shards):
+        for shard in shards:
+            dl = NuPlanDL(scenario_to_start=0,
+                          file_to_start=shard,
+                          max_file_number=1,
+                          data_path=data_path, db=None, gt_relation_path=None,
+                          road_dic_path=None,
+                          running_mode=running_mode,
+                          filter_scenario=filter_scenario)
+
+            while not dl.end:
+                loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval,
+                                            map_name=args.map_name)
+                if loaded_dic is None:
+                    continue
+                if loaded_dic["skip"]:
+                    continue
+                if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
+                    continue
+                if len(loaded_dic["route"]) == 0:
+                    continue
+                road_dic = loaded_dic['road']
+                map_name = loaded_dic['map']
+                # save pickle of map
+                store_path = args.cache_folder
+                if not os.path.exists(store_path):
+                    os.makedirs(store_path)
+                print("Storing at ", os.path.join(store_path, f"{map_name}.pkl"))
+                with open(os.path.join(store_path, f"{map_name}.pkl"), "wb") as f:
+                    pickle.dump(road_dic, f, protocol=pickle.HIGHEST_PROTOCOL)
+                print("Stored at ", os.path.join(store_path, f"{map_name}.pkl"))
+                break
+            del dl
+            break
 
     # dic = yield_data_dic([0])
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
@@ -385,27 +435,26 @@ def main(args):
                 specific_city_indices.append(idx)
         file_indices = specific_city_indices
         print(f'{args.city} city has {len(file_indices)} files in testset! total {len(all_file_names)}')
-    
 
     # sort by file size
-    # sorted_file_indices = []
-    # if args.city is not None:
-    #     sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
-    #     for i, each_file_name in enumerate(sorted_file_names):
-    #         if int(each_file_name.split('/')[-1][24:26]) in vehicle_set:
-    #             sorted_file_indices.append(all_file_path.index(each_file_name))
-    #     print(f"after sort, {len(sorted_file_indices)} files are chosen")
-    # else:
-    #     sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
-    #     for i, each_file_name in enumerate(sorted_file_names):
-    #         if all_file_path.index(each_file_name) in file_indices:
-    #             sorted_file_indices.append(all_file_path.index(each_file_name))
-    # print(f"Total file num is {total_file_num}")
-    # sorted_file_indices = sorted_file_indices[:total_file_num]
-    # # order by processes
-    # file_indices = []
-    # for i in range(args.num_proc):
-    #     file_indices += sorted_file_indices[i::args.num_proc]
+    sorted_file_indices = []
+    if args.city is not None:
+        sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
+        for i, each_file_name in enumerate(sorted_file_names):
+            if int(each_file_name.split('/')[-1][24:26]) in vehicle_set:
+                sorted_file_indices.append(all_file_path.index(each_file_name))
+        print(f"after sort, {len(sorted_file_indices)} files are chosen")
+    else:
+        sorted_file_names = sorted(all_file_path, key=lambda x: os.stat(x).st_size)
+        for i, each_file_name in enumerate(sorted_file_names):
+            if all_file_path.index(each_file_name) in file_indices:
+                sorted_file_indices.append(all_file_path.index(each_file_name))
+    print(f"Total file num is {total_file_num}")
+    sorted_file_indices = sorted_file_indices[:total_file_num]
+    # order by processes
+    file_indices = []
+    for i in range(args.num_proc):
+        file_indices += sorted_file_indices[i::args.num_proc]
 
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
@@ -426,6 +475,14 @@ def main(args):
                                                                    "timestamp": Value("int64")}))
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,
+                                                gen_kwargs={'shards': file_indices},
+                                                writer_batch_size=10, cache_dir=args.cache_folder,
+                                                num_proc=args.num_proc,
+                                                features=Features({"file_name": Value("string")})
+                                                )
+        exit()
+    elif args.save_map:
+        nuplan_dataset = Dataset.from_generator(yield_road_dic,
                                                 gen_kwargs={'shards': file_indices},
                                                 writer_batch_size=10, cache_dir=args.cache_folder,
                                                 num_proc=args.num_proc,
@@ -463,6 +520,9 @@ if __name__ == '__main__':
     --dataset_name boston_index_interval100  --starting_file_num 0  
     --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
     --data_path train_boston  --only_index  
+    
+    python generation.py  --num_proc 40 --sample_interval 1 --dataset_name pittsburgh_index_full  --starting_file_num 0  --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_pittsburgh_jul  --data_path train_pittsburgh --save_map
+    python generation.py  --num_proc 40 --sample_interval 1  --dataset_name vegas2_datadic_float32  --starting_file_num 0  --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/vegas2_datadic_float32  --data_path train_vegas_2 --save_map
     """
 
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
@@ -504,5 +564,6 @@ if __name__ == '__main__':
     parser.add_argument('--only_data_dic', default=False, action='store_true')
     # parser.add_argument('--save_playback', default=True, action='store_true')
     parser.add_argument('--map_name', type=str, default=None)
+    parser.add_argument('--save_map', default=False, action='store_true')
     args_p = parser.parse_args()
     main(args_p)
