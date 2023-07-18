@@ -99,6 +99,13 @@ def waymo_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwar
         result[key] = torch.cat([d[key] for d in new_batch], dim=0)
     return result
 
+def waymo_collate_func_offline(batch, **encode_kwargs): 
+    # process as data dictionary
+    result = dict()
+    for key in batch[0].keys():
+        result[key] = torch.cat([d[key] for d in batch], dim=0)
+    return result
+
 def augmentation():
     pass
 

@@ -95,18 +95,15 @@ class GPTModelWaymo(GPTModelNuPlan):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
 
-        if self.model_args.tokenize_label:
-            self.ego_encoder = nn.Sequential(nn.Linear(40 * 80, 128), nn.Tanh())
-        else:
-            self.ego_encoder = nn.Sequential(nn.Linear(2, 128), nn.Tanh())
+        feature_dim = 40 * 80 if self.model_args.tokenize_label else 2
 
+        self.ego_encoder = nn.Sequential(nn.Linear(feature_dim, 128), nn.Tanh())
         self.agent_encoder = PointNetPolylineEncoder(
             in_channels=2,
             hidden_dim=64,
             num_layers=3,
             out_channels=64
         )
-
         self.map_encoder = PointNetPolylineEncoder(
             in_channels=9,
             hidden_dim=64,
@@ -117,7 +114,8 @@ class GPTModelWaymo(GPTModelNuPlan):
 
         self.map_downsampling = build_mlps(768 * 64, [128 * 64, 64])
 
-        self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k * 80 * 40)
+        self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k * feature_dim)
+        
 
     def forward(
         self,
@@ -172,32 +170,38 @@ class GPTModelWaymo(GPTModelNuPlan):
 
         if self.model_args.tokenize_label:
             pred = self.traj_decoder(hidden_states).view(b * s * self.k, -1)
-            pred_loss_fct = nn.CrossEntropyLoss(reduce=False)
+            pred_loss_fct = nn.CrossEntropyLoss(reduction='none')
             pred_loss = pred_loss_fct(pred, gt.repeat(1, 1, self.k).view(b * s * self.k).long()).view(b, s, self.k)
             pred_loss = pred_loss[gt_mask]
             min_indices = torch.argmin(pred_loss, dim=-1)
             loss += torch.mean(pred_loss)
+        elif self.k == 1:
+            loss_fct = torch.nn.MSELoss(reduction='none')
+            loss_to_add = loss_fct(action_logits, gt).view(b, s, 2)
+            loss_to_add = loss_to_add[gt_mask]
+            loss += torch.mean(loss_to_add)
         else:
-            k_results = action_logits.reshape(b, s, self.k, 2)
-            loss_fct = torch.nn.SmoothL1Loss()
-            losses = []  # length of b * s
-            min_indices = []  # length of b
-            for i in range(b):
-                per_batch_losses = []  # length of s, [x, x, ..]
-                per_batch_indices = []  # length of s, [3, 2, 1, 0, ..]
-                for j in range(s):
-                    per_sequence_losses = []  # length of k
-                    for k in range(self.k):
-                        loss_to_add = loss_fct(k_results[i, j, k, :], gt[i, j, :2].to(device)) * 100
-                        per_sequence_losses.append(loss_to_add)
-                    min_loss = min(per_sequence_losses)
-                    min_loss_index = per_sequence_losses.index(min_loss)
-                    per_batch_losses.append(min_loss)
-                    per_batch_indices.append(min_loss_index)
-                losses += per_batch_losses
-                min_indices.append(per_batch_indices)
-            loss += sum(losses) / b / s
-            min_indices = torch.tensor(min_indices).to(device)
+            raise NotImplementedError
+            # k_results = action_logits.reshape(b, s, self.k, 2)
+            # loss_fct = torch.nn.MSELoss()
+            # losses = []  # length of b * s
+            # min_indices = []  # length of b
+            # for i in range(b):
+            #     per_batch_losses = []  # length of s, [x, x, ..]
+            #     per_batch_indices = []  # length of s, [3, 2, 1, 0, ..]
+            #     for j in range(s):
+            #         per_sequence_losses = []  # length of k
+            #         for k in range(self.k):
+            #             loss_to_add = loss_fct(k_results[i, j, k, :], gt[i, j, :2].to(device)) * 100
+            #             per_sequence_losses.append(loss_to_add)
+            #         min_loss = min(per_sequence_losses)
+            #         min_loss_index = per_sequence_losses.index(min_loss)
+            #         per_batch_losses.append(min_loss)
+            #         per_batch_indices.append(min_loss_index)
+            #     losses += per_batch_losses
+            #     min_indices.append(per_batch_indices)
+            # loss += sum(losses) / b / s
+            # min_indices = torch.tensor(min_indices).to(device)
 
         if self.next_token_scorer_decoder is not None:
             pred_logits = self.next_token_scorer_decoder(hidden_states)  # b, s, k
@@ -221,6 +225,7 @@ class GPTModelWaymo(GPTModelNuPlan):
         """
         device = agent_trajs.device
         num_egos, num_frames, _, _ = agent_trajs.shape
+        track_index_to_predict = track_index_to_predict.long()
         ego_trajs = []
         other_trajs = []
         for i, traj in enumerate(agent_trajs):
@@ -236,10 +241,8 @@ class GPTModelWaymo(GPTModelNuPlan):
             ego_token_one_hot = F.one_hot(ego_token_input.to(torch.int64), self.token_map["x_class"] * self.token_map["y_class"])
             ego_embedding = self.ego_encoder(ego_token_one_hot.to(torch.float32))
         else:
-            print(ego_trajs.shape)
             ego_input = ego_trajs[:, :-1, :2]
             gt = ego_trajs[:, 1:, :2]
-            print(ego_input.shape, gt.shape)
             ego_embedding = self.ego_encoder(ego_input)
 
         other_trajs = torch.stack(other_trajs, dim=0).to(device)

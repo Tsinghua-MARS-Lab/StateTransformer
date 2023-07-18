@@ -35,7 +35,7 @@ from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArgume
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
-from dataset_gen.preprocess import preprocess, nuplan_collate_func, waymo_collate_func
+from dataset_gen.preprocess import preprocess, nuplan_collate_func, waymo_collate_func, waymo_collate_func_offline
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -409,7 +409,7 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(waymo_collate_func, autoregressive=model_args.autoregressive, **data_process.__dict__) if data_args.online_preprocess else None
+    collate_fn = partial(waymo_collate_func, autoregressive=model_args.autoregressive, **data_process.__dict__) if data_args.online_preprocess else waymo_collate_func_offline
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above

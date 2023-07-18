@@ -3,6 +3,9 @@ import numpy as np
 import pickle
 import math
 
+import glob
+import tensorflow as tf
+
 TYPES = {
     "TYPE_UNSET": 0,  
     "TYPE_VEHICLE": 1,
@@ -31,8 +34,11 @@ class WaymoDL:
 
         self.data_root = data_path["WAYMO_DATA_ROOT"]
         self.data_path = os.path.join(self.data_root, data_path["SPLIT_DIR"][mode])
-
-        self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])
+        src_files = glob.glob(os.path.join(self.data_path, '*.tfrecord*'))
+        src_files.sort()
+        
+        self.global_file_names = src_files[:10]
+        # self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])
         # self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])[:12000]
         self.total_file_num = len(self.global_file_names)
 
@@ -49,8 +55,7 @@ class WaymoDL:
             return None
 
         if os.path.getsize(self.global_file_names[file_index]) > 0:
-            with open(self.global_file_names[file_index], 'rb') as f:
-                info = pickle.load(f)
+            data = tf.data.TFRecordDataset(self.global_file_names[file_index], compression_type='')
         else:
             print('empty file', self.global_file_names[file_index])
             return None
@@ -60,7 +65,7 @@ class WaymoDL:
         # obj_types = track_infos['object_type']
         # A, T, _ = trajs.shape
         # curr_frame_index = info["current_time_index"]
-        data = {"file_name": self.global_file_names[file_index]}
+        
         # # process scenario for each track_to_predict agent as ego
         # for ego_index in info['tracks_to_predict']['track_index']:
         #     assert trajs[ego_index, curr_frame_index, -1] > 0
