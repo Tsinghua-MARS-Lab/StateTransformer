@@ -146,6 +146,15 @@ class ModelArguments:
         default=0,
         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
+    arf_x_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    arf_y_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    trajectory_loss_rescale: Optional[float] = field(
+        default=1.0
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -237,7 +246,6 @@ class DataProcessArguments:
         default=None
     )
 
-    
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -328,43 +336,77 @@ def main():
 
     # Pass in the directory to load a saved dataset
     # See generation.py to process and save a dataset from the NuPlan Dataset
-    if os.path.isdir(data_args.saved_dataset_folder):
-        items = os.listdir(data_args.saved_dataset_folder)
-        if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[0])): #sub-datasets
-            # TODO: add split rows to dataset
-            print("concating datasets..")
-            concatdatasets = list()
-            for i, item in enumerate(items):
-                print(os.path.join(data_args.saved_dataset_folder, items[i]))
-                tmp = os.listdir(os.path.join(data_args.saved_dataset_folder, items[i]))
-                if os.path.isdir(os.path.join(data_args.saved_dataset_folder, items[i], tmp[0])): # for vegas datasets and dagger
-                    for sub_item in os.listdir(os.path.join(data_args.saved_dataset_folder, item)):
-                        dataset_path = os.path.join(data_args.saved_dataset_folder, item, sub_item)
-                        dataset = Dataset.load_from_disk(dataset_path)
-                        print(dataset)
-                        concatdatasets.append(dataset)
-                else: # for boston, pittsburgh and singapore datasets
-                    dataset_path = os.path.join(data_args.saved_dataset_folder, item)
-                    dataset = Dataset.load_from_disk(dataset_path)
-                    # dataset.set_format(type='torch', columns=["intended_maneuver_vector", "current_maneuver_vector", "high_res_raster", "low_res_raster",\
-                    #                                         "trajectory_label", "context_actions", "intended_maneuver_label", "current_maneuver_label"])
-                    
-                    print(dataset)
-                    concatdatasets.append(dataset)
-          
-            concat_dataset = _concatenate_map_style_datasets(concatdatasets)
-            concat_dataset.set_format(type='torch')
-            concat_dataset.shuffle(seed=training_args.seed)
-            train_samples = int(len(concat_dataset) * float(data_args.dataset_scale))
-            train_dataset = concat_dataset.select(range(train_samples))
-            if training_args.do_eval:
-                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                test_dataset.set_format(type='torch')
-            else:
-                test_dataset = train_dataset
-
-        else: # whole hugging face dataset   
-            print("loading dataset...")
+    """
+    Set saved dataset folder to load a saved dataset
+    1. Pass None to load from data_args.saved_dataset_folder as the root folder path to load all sub-datasets of each city
+    2. Pass the folder of an index files to load one sub-dataset of one city
+    """
+    if data_args.datadic_path is None:
+        from datasets import disable_caching
+        disable_caching()
+        data_args.datadic_path = data_args.saved_dataset_folder
+        # loop all datasets
+        logger.info("Loading full set of datasets from {}".format(data_args.datadic_path))
+        assert os.path.isdir(data_args.datadic_path)
+        index_root = os.path.join(data_args.datadic_path, 'index')
+        root_folders = os.listdir(index_root)
+        if 'train' in root_folders:
+            # load training datasets
+            training_datasets = []
+            training_index_root_folders = os.path.join(index_root, 'train')
+            training_indices = os.listdir(training_index_root_folders)
+            for training_index in training_indices:
+                training_index_path = os.path.join(training_index_root_folders, training_index)
+                if os.path.isdir(training_index_path):
+                    # load training dataset
+                    logger.info("Loading training dataset {}".format(training_index_path))
+                    dataset = Dataset.load_from_disk(training_index_path)
+                    if dataset is not None:
+                        training_datasets.append(dataset)
+            train_dataset = _concatenate_map_style_datasets(training_datasets)
+            # add split column
+            train_dataset.features.update({'split': Value('string')})
+            train_dataset = train_dataset.add_column(name='split', column=['train'] * len(train_dataset))
+            train_dataset.set_format(type='torch')
+            train_samples = int(len(train_dataset) * float(data_args.dataset_scale))
+            train_dataset = train_dataset.select(range(train_samples))
+        else:
+            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+        if training_args.do_eval and 'test' in root_folders:
+            # load test datasets
+            test_datasets = []
+            test_index_root_folders = os.path.join(index_root, 'test')
+            test_indices = os.listdir(test_index_root_folders)
+            for test_index in test_indices:
+                test_index_path = os.path.join(test_index_root_folders, test_index)
+                if os.path.isdir(test_index_path):
+                    # load test dataset
+                    logger.info("Loading test dataset {}".format(test_index_path))
+                    dataset = Dataset.load_from_disk(test_index_path)
+                    if dataset is not None:
+                        test_datasets.append(dataset)
+            test_dataset = _concatenate_map_style_datasets(test_datasets)
+            # add additional column for flagging test set
+            test_dataset.features.update({'split': Value('string')})
+            test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
+            test_dataset.set_format(type='torch')
+        else:
+            test_dataset = train_dataset
+        all_maps_dic = {}
+        all_pickles_dic = {}
+        map_folder = os.path.join(data_args.datadic_path, 'map')
+        for each_map in os.listdir(map_folder):
+            if each_map.endswith('.pkl'):
+                map_path = os.path.join(map_folder, each_map)
+                with open(map_path, 'rb') as f:
+                    map_dic = pickle.load(f)
+                map_name = each_map.split('.')[0]
+                all_maps_dic[map_name] = map_dic
+    else:
+        all_maps_dic = None
+        all_pickles_dic = None
+        if os.path.isdir(data_args.saved_dataset_folder):
+            logger.info("loading dataset...")
             dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
             dataset.features.update({'split': Value('string')})
             dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
@@ -372,7 +414,7 @@ def main():
             dataset.shuffle(seed=training_args.seed)
             train_samples = int(len(dataset) * float(data_args.dataset_scale))
             train_dataset = dataset.select(range(train_samples))
-            
+
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
                 # split_dic = test_dataset.info.splits['train']
@@ -385,21 +427,21 @@ def main():
             else:
                 test_dataset = dataset.select(range(train_samples))
             test_dataset.set_format(type='torch')
-
-            # if data_args.online_preprocess:
-            #     train_dataset = preprocess(train_dataset, data_args.datadic_path, model_args.autoregressive)
-            #     test_dataset = preprocess(test_dataset, data_args.datadic_path, model_args.autoregressive)
-    else:
-        raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
+        else:
+            raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # loop split info and update for test set
-    # splits={'train': SplitInfo(name='train', num_bytes=1538228595562, num_examples=71490, shard_lengths=[..]}
     print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
 
+    # nuplan_dataset = dict(
+    #     train=train_dataset,
+    #     validation=test_dataset.shuffle(seed=training_args.seed),
+    #     test=test_dataset.shuffle(seed=training_args.seed),
+    # )
     nuplan_dataset = dict(
         train=train_dataset,
-        validation=test_dataset.shuffle(seed=training_args.seed),
-        test=test_dataset.shuffle(seed=training_args.seed),
+        validation=test_dataset,
+        test=test_dataset,
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
@@ -443,7 +485,11 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive, dic_path=data_args.datadic_path, **data_process.__dict__) if data_args.online_preprocess else None
+    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
+                         dic_path=data_args.datadic_path,
+                         all_maps_dic=all_maps_dic,
+                         all_pickles_dic=all_pickles_dic,
+                         **data_process.__dict__) if data_args.online_preprocess else None
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
