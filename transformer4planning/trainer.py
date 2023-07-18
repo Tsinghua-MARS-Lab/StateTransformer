@@ -77,6 +77,8 @@ class PlanningTrainer(Trainer):
             Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss,
             logits and labels (each being optional).
         """
+        if inputs is None:
+            return None, None, None
         has_labels = False if len(self.label_names) == 0 else all(inputs.get(k) is not None for k in self.label_names)
         # For CLIP-like models capable of returning loss values.
         # If `return_loss` is not specified or being `None` in `inputs`, we check if the default value of `return_loss`
@@ -195,6 +197,19 @@ class PlanningTrainer(Trainer):
                     ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
                     fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
                     fde_y_error_key_points = prediction_key_points[:, -1, 1] - future_key_points[:, -1, 1]
+                    if self.model.k == 1:
+                        prediction_trajectory_in_batch_by_gen = self.model.generate(**inputs)
+                        length_of_trajectory = trajectory_label_in_batch.shape[1]
+                        prediction_key_points_by_gen = prediction_trajectory_in_batch_by_gen[:, :-length_of_trajectory, :]
+                        prediction_trajectory_in_batch_by_gen = prediction_trajectory_in_batch_by_gen[:, -length_of_trajectory:, :]
+                        ade_x_error_key_points_by_gen = prediction_key_points_by_gen[:, :, 0] - future_key_points[:, :, 0]
+                        ade_y_error_key_points_by_gen = prediction_key_points_by_gen[:, :, 1] - future_key_points[:, :, 1]
+                        fde_x_error_key_points_by_gen = prediction_key_points_by_gen[:, -1, 0] - future_key_points[:, -1, 0]
+                        fde_y_error_key_points_by_gen = prediction_key_points_by_gen[:, -1, 1] - future_key_points[:, -1, 1]
+                        ade_x_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, 0] - trajectory_label_in_batch[:, :, 0]
+                        ade_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, 1] - trajectory_label_in_batch[:, :, 1]
+                        fde_x_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
+                        fde_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
 
                 ade_x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
                 ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
@@ -204,28 +219,56 @@ class PlanningTrainer(Trainer):
             # compute ade
             ade = torch.sqrt(ade_x_error.flatten() ** 2 + ade_y_error.flatten() ** 2)
             ade = ade.mean()
-            self.eval_result['ade'] = (ade + self.eval_result['ade'] * self.eval_itr)/(self.eval_itr + 1)
-            self.eval_result['ade'] = float(self.eval_result['ade'])  # tensor to float to save in json
+            self.eval_result['ade'].append(float(ade))
+            # self.eval_result['ade'] = (ade + self.eval_result['ade'] * self.eval_itr)/(self.eval_itr + 1)
+            # self.eval_result['ade'] = float(self.eval_result['ade'])  # tensor to float to save in json
             # compute fde
             fde = torch.sqrt(fde_x_error.flatten() ** 2 + fde_y_error.flatten() ** 2)
             fde = fde.mean()
-            self.eval_result['fde'] = (fde + self.eval_result['fde'] * self.eval_itr)/(self.eval_itr + 1)
-            self.eval_result['fde'] = float(self.eval_result['fde'])  # tensor to float to save in json
+            self.eval_result['fde'].append(float(fde))
+            # self.eval_result['fde'] = (fde + self.eval_result['fde'] * self.eval_itr)/(self.eval_itr + 1)
+            # self.eval_result['fde'] = float(self.eval_result['fde'])  # tensor to float to save in json
 
             if self.model.ar_future_interval > 0:
                 if 'ade_keypoints' not in self.eval_result:
-                    self.eval_result['ade_keypoints'] = 0
-                    self.eval_result['fde_keypoints'] = 0
+                    self.eval_result['ade_keypoints'] = []
+                    self.eval_result['fde_keypoints'] = []
                 # compute key points ade
                 ade_key_points = torch.sqrt(ade_x_error_key_points.flatten() ** 2 + ade_y_error_key_points.flatten() ** 2)
                 ade_key_points = ade_key_points.mean()
-                self.eval_result['ade_keypoints'] = (ade_key_points + self.eval_result['ade_keypoints'] * self.eval_itr) / (self.eval_itr + 1)
-                self.eval_result['ade_keypoints'] = float(self.eval_result['ade_keypoints'])  # tensor to float to save in json
+                self.eval_result['ade_keypoints'].append(float(ade_key_points))
+                # self.eval_result['ade_keypoints'] = (ade_key_points + self.eval_result['ade_keypoints'] * self.eval_itr) / (self.eval_itr + 1)
+                # self.eval_result['ade_keypoints'] = float(self.eval_result['ade_keypoints'])  # tensor to float to save in json
                 # compute fde
                 fde_key_points = torch.sqrt(fde_x_error_key_points.flatten() ** 2 + fde_y_error_key_points.flatten() ** 2)
                 fde_key_points = fde_key_points.mean()
-                self.eval_result['fde_keypoints'] = (fde_key_points + self.eval_result['fde_keypoints'] * self.eval_itr) / (self.eval_itr + 1)
-                self.eval_result['fde_keypoints'] = float(self.eval_result['fde_keypoints'])  # tensor to float to save in json
+                self.eval_result['fde_keypoints'].append(float(fde_key_points))
+                # self.eval_result['fde_keypoints'] = (fde_key_points + self.eval_result['fde_keypoints'] * self.eval_itr) / (self.eval_itr + 1)
+                # self.eval_result['fde_keypoints'] = float(self.eval_result['fde_keypoints'])  # tensor to float to save in json
+
+                if self.model.k == 1:
+                    # evaluate through generate function
+                    if 'ade_keypoints_gen' not in self.eval_result:
+                        self.eval_result['ade_keypoints_gen'] = []
+                        self.eval_result['fde_keypoints_gen'] = []
+                        self.eval_result['ade_gen'] = []
+                        self.eval_result['fde_gen'] = []
+                    # compute ade by gen
+                    ade_by_gen = torch.sqrt(ade_x_error_by_gen.flatten() ** 2 + ade_y_error_by_gen.flatten() ** 2)
+                    ade_by_gen = ade_by_gen.mean()
+                    self.eval_result['ade_gen'].append(float(ade_by_gen))
+                    # compute fde
+                    fde_by_gen = torch.sqrt(fde_x_error_by_gen.flatten() ** 2 + fde_y_error_by_gen.flatten() ** 2)
+                    fde_by_gen = fde_by_gen.mean()
+                    self.eval_result['fde_gen'].append(float(fde_by_gen))
+                    # compute key points ade
+                    ade_key_points_by_gen = torch.sqrt(ade_x_error_key_points_by_gen.flatten() ** 2 + ade_y_error_key_points_by_gen.flatten() ** 2)
+                    ade_key_points_by_gen = ade_key_points_by_gen.mean()
+                    self.eval_result['ade_keypoints_gen'].append(float(ade_key_points_by_gen))
+                    # compute key points fde
+                    fde_key_points_by_gen = torch.sqrt(fde_x_error_key_points_by_gen.flatten() ** 2 + fde_y_error_key_points_by_gen.flatten() ** 2)
+                    fde_key_points_by_gen = fde_key_points_by_gen.mean()
+                    self.eval_result['fde_keypoints_gen'].append(float(fde_key_points_by_gen))
 
         self.eval_itr += 1
         if prediction_loss_only:
@@ -247,8 +290,8 @@ class PlanningTrainer(Trainer):
     ) -> EvalLoopOutput:
         print('Starting evaluation loop with reset eval result')
         self.eval_result = {
-            'ade': 0,
-            'fde': 0,
+            'ade': [],
+            'fde': [],
         }
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
@@ -261,7 +304,8 @@ class PlanningTrainer(Trainer):
             result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
             result[f"{metric_key_prefix}_recall"] = self.model.clf_metrics["recall"].compute(average="macro")
         for each_key in self.eval_result:
-            result[f"{metric_key_prefix}_{each_key}"] = float(self.eval_result[each_key])
+            # result[f"{metric_key_prefix}_{each_key}"] = float(self.eval_result[each_key])
+            result[f"{metric_key_prefix}_{each_key}"] = sum(self.eval_result[each_key]) / len(self.eval_result[each_key])
         logging.info("***** Eval results *****")
         logging.info(f"{result}")
         self.log(result)
