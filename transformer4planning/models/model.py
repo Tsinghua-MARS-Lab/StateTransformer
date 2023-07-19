@@ -393,7 +393,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2 + future_key_embeds.shape[1] + 1:] = 0
+            attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
@@ -453,7 +453,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2:context_length * 2 + future_key_points.shape[1], :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -605,7 +605,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         # generate remaining trajectory
         # prepare attention mask
         attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-        attention_mask[:, context_length * 2 + key_points_num + 1:] = 0
+        attention_mask[:, context_length * 2 + key_points_num:] = 0
         position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
