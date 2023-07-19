@@ -229,7 +229,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             in_channels = 26
         else:
             in_channels = model_args.raster_channels
-        print('Model initialized with raster channels: ', model_args.raster_channels)
+        # print('Model initialized with raster channels: ', model_args.raster_channels)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
@@ -323,7 +323,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1]
-
+        # TODO:why x/y noise are generated seperately? Noise could include both x/y noise
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -515,7 +515,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         """
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1] if pred_length is None else pred_length
-
+        # TODO: Is there any case for generate in model.train mode?
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -585,7 +585,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             else:
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-            input_embeds[:, context_length * 2 + i + 1, :] = key_point_embed[:, 0, :]
+            # TODO: check if this is correct
+            input_embeds[:, context_length * 2 + i, :] = key_point_embed[:, 0, :]
         # generate remaining trajectory
         # prepare attention mask
         attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
