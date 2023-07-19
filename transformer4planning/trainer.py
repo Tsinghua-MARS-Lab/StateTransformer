@@ -197,7 +197,7 @@ class PlanningTrainer(Trainer):
                     ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
                     fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
                     fde_y_error_key_points = prediction_key_points[:, -1, 1] - future_key_points[:, -1, 1]
-                    if self.model.k == 1:
+                    if self.model.k >= 1:
                         prediction_trajectory_in_batch_by_gen = self.model.generate(**inputs)
                         length_of_trajectory = trajectory_label_in_batch.shape[1]
                         prediction_key_points_by_gen = prediction_trajectory_in_batch_by_gen[:, :-length_of_trajectory, :]
@@ -246,7 +246,7 @@ class PlanningTrainer(Trainer):
                 # self.eval_result['fde_keypoints'] = (fde_key_points + self.eval_result['fde_keypoints'] * self.eval_itr) / (self.eval_itr + 1)
                 # self.eval_result['fde_keypoints'] = float(self.eval_result['fde_keypoints'])  # tensor to float to save in json
 
-                if self.model.k == 1:
+                if self.model.k >= 1:
                     # evaluate through generate function
                     if 'ade_keypoints_gen' not in self.eval_result:
                         self.eval_result['ade_keypoints_gen'] = []
