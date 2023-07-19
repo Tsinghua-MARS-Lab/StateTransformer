@@ -393,7 +393,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
+            attention_mask[:, context_length * 2 + future_key_embeds.shape[1] + 1:] = 0
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
@@ -411,6 +411,18 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+        # past_key_values: None
+        # attention_mask: tensor([[1., 1., 1., ..., 0., 0., 0.], ...], device='cuda:2')
+        # token_type_ids: None
+        # position_ids: None
+        # head_mask: None
+        # encoder_hidden_states: None
+        # encoder_attention_mask: None
+        # use_cache: None
+        # output_attentions: None
+        # output_hidden_states: None
+        # return_dict: True
+
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
@@ -441,7 +453,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2:context_length * 2 + future_key_points.shape[1], :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -561,11 +573,14 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         # Loop for generation
         for i in range(key_points_num):
             # prepare attention mask
-            attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2 + i:] = 0
-            position_ids = self._prepare_position_ids_for_generation(attention_mask)
+            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+            # attention_mask[:, context_length * 2 + i + 1:] = 0
+            # position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+            input_embeds_current = input_embeds[:, :context_length * 2 + i, :]
+            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
-                inputs_embeds=input_embeds,
+                inputs_embeds=input_embeds_current,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 # **input_kwargs
@@ -585,13 +600,13 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             else:
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-            # TODO: check if this is correct
+            # replace embed at the next position
             input_embeds[:, context_length * 2 + i, :] = key_point_embed[:, 0, :]
         # generate remaining trajectory
         # prepare attention mask
         attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-        attention_mask[:, context_length * 2 + key_points_num:] = 0
-        position_ids = self._prepare_position_ids_for_generation(attention_mask)
+        attention_mask[:, context_length * 2 + key_points_num + 1:] = 0
+        position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
@@ -602,8 +617,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         traj_logits = self.traj_decoder(traj_hidden_state)
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:,
-                                         context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
         key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
         traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
         return traj_logits

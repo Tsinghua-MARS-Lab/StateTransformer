@@ -78,7 +78,7 @@ def augmentation():
     pass
 
 
-def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, image_file_name,
+def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, image_file_name, split,
                 high_scale, low_scale):
     # save rasters
     path_to_save = debug_raster_path
@@ -138,7 +138,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
                 if np.sum(agent_per_channel) > 0:
                     for k in range(3):
                         target_image[:, :, k][agent_per_channel == 1] = agent_colors[i, k]
-        cv2.imwrite(os.path.join(path_to_save, image_file_name + '_' + str(each_key) + '.png'), target_image)
+        cv2.imwrite(os.path.join(path_to_save, split + '_' + image_file_name + '_' + str(each_key) + '.png'), target_image)
     for each_key in ['context_actions', 'trajectory_label']:
         pts = result_dic[each_key]
         for scale in [high_scale, low_scale]:
@@ -148,7 +148,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
                 y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
                 if x < target_image.shape[0] and y < target_image.shape[1]:
                     target_image[x, y, :] = [255, 255, 255]
-            cv2.imwrite(os.path.join(path_to_save, image_file_name + '_' + str(each_key) + '_' + str(scale) +'.png'), target_image)
+            cv2.imwrite(os.path.join(path_to_save, split + '_' + image_file_name + '_' + str(each_key) + '_' + str(scale) +'.png'), target_image)
     print('length of action and labels: ', result_dic['context_actions'].shape, result_dic['trajectory_label'].shape)
     print('debug images saved to: ', path_to_save, file_number)
 
@@ -456,8 +456,9 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         if not os.path.exists(debug_raster_path):
             os.makedirs(debug_raster_path)
         image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
-        save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past), image_file_name,
-                    high_res_scale, low_res_scale)
+        if split == 'test':
+            save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past), image_file_name, split,
+                        high_res_scale, low_res_scale)
 
     result_to_return["file_name"] = sample['file_name']
     result_to_return["map"] = sample['map']
