@@ -617,7 +617,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         traj_logits = self.traj_decoder(traj_hidden_state)
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2:context_length * 2 + future_key_points.shape[1], :]
         key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
         traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
         return traj_logits
