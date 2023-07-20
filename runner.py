@@ -48,11 +48,11 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="non-auto-gpt",
+        default="scratch-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="transfo-xl-wt103",
+        default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(
@@ -104,10 +104,10 @@ class ModelArguments:
         default="mse",
     )
     task: Optional[str] = field(
-        default="waymo" # only for mmtransformer
+        default="nuplan" # only for mmtransformer
     )
     with_traffic_light: Optional[bool] = field(
-        default=False
+        default=True
     )
     autoregressive: Optional[bool] = field(
         default=False
@@ -136,7 +136,7 @@ class ModelArguments:
         default=True
     )
     raster_channels: Optional[int] = field(
-        default=0,
+        default=33,
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     predict_yaw: Optional[bool] = field(
