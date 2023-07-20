@@ -155,6 +155,9 @@ class ModelArguments:
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
     )
+    visualize_prediction_to_path: Optional[str] = field(
+        default=None
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -439,9 +442,9 @@ def main():
     #     test=test_dataset.shuffle(seed=training_args.seed),
     # )
     nuplan_dataset = dict(
-        train=train_dataset,
-        validation=test_dataset,
-        test=test_dataset,
+        train=train_dataset.shuffle(seed=training_args.seed),
+        validation=test_dataset.shuffle(seed=training_args.seed),
+        test=test_dataset.shuffle(seed=training_args.seed),
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
