@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 import logging
+import shutil
+import os
+import numpy as np
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -40,7 +43,7 @@ class PlanningTrainingArguments(TrainingArguments):
         default=1,
         metadata={
             "help": (
-                "how many epoch the model performan evaluation."
+                "how many epoch the model perform an evaluation."
             )
         },
     )
@@ -213,11 +216,44 @@ class PlanningTrainer(Trainer):
                         ade_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                         fde_x_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                         fde_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
+                    else:
+                        raise ValueError(f'unknown k for auto-regression future keypoints: {self.model.k}')
                 else:
                     ade_x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
                     ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                     fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                     fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
+
+            if self.model.model_args.visualize_prediction_to_path is not None and self.is_world_process_zero:
+                # WARNING: only use it for one time evaluation, or slowing the evaluation significantly
+                # only save and debug at process zero
+                path_to_save = self.model.model_args.visualize_prediction_to_path
+                if not os.path.exists(path_to_save):
+                    os.makedirs(path_to_save)
+                    # empty and re-save at every epoch
+                    # os.rmdir(path_to_save)
+                batch_size = trajectory_label_in_batch.shape[0]
+                for i in range(batch_size):
+                    file_number = len(os.listdir(path_to_save))
+                    if file_number <= 200:
+                        if self.model.ar_future_interval > 0:
+                            self.save_raster(path_to_save=path_to_save,
+                                             inputs=inputs,
+                                             sample_index=i,
+                                             file_index=file_number,
+                                             prediction_trajectory=prediction_trajectory_in_batch[i],
+                                             prediction_key_point=prediction_key_points[i],
+                                             prediction_key_point_by_gen=prediction_key_points_by_gen[i],
+                                             prediction_trajectory_by_gen=prediction_trajectory_in_batch_by_gen[i])
+                        else:
+                            # visualize prediction trajectory only
+                            self.save_raster(path_to_save=path_to_save,
+                                             inputs=inputs,
+                                             sample_index=i,
+                                             file_index=file_number,
+                                             prediction_trajectory=prediction_trajectory_in_batch[i])
+                    else:
+                        break
 
             # compute ade
             ade = torch.sqrt(ade_x_error.flatten() ** 2 + ade_y_error.flatten() ** 2)
@@ -292,10 +328,11 @@ class PlanningTrainer(Trainer):
         metric_key_prefix: str = "eval",
     ) -> EvalLoopOutput:
         print('Starting evaluation loop with reset eval result')
-        self.eval_result = {
-            'ade': [],
-            'fde': [],
-        }
+        if self.is_world_process_zero:
+            self.eval_result = {
+                'ade': [],
+                'fde': [],
+            }
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
         result = dict()
@@ -314,3 +351,127 @@ class PlanningTrainer(Trainer):
         self.log(result)
 
         return eval_output
+
+    def save_raster(self, path_to_save,
+                    inputs, sample_index,
+                    prediction_trajectory,
+                    file_index,
+                    high_scale=4, low_scale=0.77,
+                    prediction_key_point=None,
+                    prediction_key_point_by_gen=None,
+                    prediction_trajectory_by_gen=None):
+        import cv2
+        # save rasters
+        image_shape = None
+        image_to_save = {
+            'high_res_raster': None,
+            'low_res_raster': None
+        }
+        past_frames_num = inputs['context_actions'][sample_index].shape[0]
+        agent_type_num = 8
+        for each_key in ['high_res_raster', 'low_res_raster']:
+            """
+            # channels:
+            # 0: route raster
+            # 1-20: road raster
+            # 21-24: traffic raster
+            # 25-56: agent raster (32=8 (agent_types) * 4 (sample_frames_in_past))
+            """
+            each_img = inputs[each_key][sample_index].cpu().numpy()
+            goal = each_img[:, :, 0]
+            road = each_img[:, :, :21]
+            traffic_lights = each_img[:, :, 21:25]
+            agent = each_img[:, :, 25:]
+            # generate a color pallet of 20 in RGB space
+            color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
+            target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float)
+            image_shape = target_image.shape
+            for i in range(21):
+                road_per_channel = road[:, :, i].copy()
+                # repeat on the third dimension into RGB space
+                # replace the road channel with the color pallet
+                if np.sum(road_per_channel) > 0:
+                    for k in range(3):
+                        target_image[:, :, k][road_per_channel == 1] = color_pallet[i, k]
+            for i in range(3):
+                traffic_light_per_channel = traffic_lights[:, :, i].copy()
+                # repeat on the third dimension into RGB space
+                # replace the road channel with the color pallet
+                if np.sum(traffic_light_per_channel) > 0:
+                    for k in range(3):
+                        target_image[:, :, k][traffic_light_per_channel == 1] = color_pallet[i, k]
+            target_image[:, :, 0][goal == 1] = 255
+            # generate 9 values interpolated from 0 to 1
+            agent_colors = np.array([[0.01 * 255] * past_frames_num,
+                                     np.linspace(0, 255, past_frames_num),
+                                     np.linspace(255, 0, past_frames_num)]).transpose()
+
+            # print('test: ', past_frames_num, agent_type_num, agent.shape)
+            for i in range(past_frames_num):
+                for j in range(agent_type_num):
+                    # if j == 7:
+                    #     print('debug', np.sum(agent[:, :, j * 9 + i]), agent[:, :, j * 9 + i])
+                    agent_per_channel = agent[:, :, j * past_frames_num + i].copy()
+                    # agent_per_channel = agent_per_channel[:, :, None].repeat(3, axis=2)
+                    if np.sum(agent_per_channel) > 0:
+                        for k in range(3):
+                            target_image[:, :, k][agent_per_channel == 1] = agent_colors[i, k]
+            if 'high' in each_key:
+                scale = high_scale
+            elif 'low' in each_key:
+                scale = low_scale
+            # draw context actions, and trajectory label
+            for each_traj_key in ['context_actions', 'trajectory_label']:
+                pts = inputs[each_traj_key][sample_index].cpu().numpy()
+                for i in range(pts.shape[0]):
+                    x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
+                    y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
+                    if x < target_image.shape[0] and y < target_image.shape[1]:
+                        if 'actions' in each_traj_key:
+                            target_image[x, y, :] = [255, 0, 0]
+                        elif 'label' in each_traj_key:
+                            target_image[x, y, :] = [0, 255, 0]
+
+            # draw prediction trajectory
+            for i in range(prediction_trajectory.shape[0]):
+                x = int(prediction_trajectory[i, 0] * scale) + target_image.shape[0] // 2
+                y = int(prediction_trajectory[i, 1] * scale) + target_image.shape[1] // 2
+                if x < target_image.shape[0] and y < target_image.shape[1]:
+                    target_image[x, y, 0] += 100
+
+            # draw key points
+            if prediction_key_point is not None:
+                for i in range(prediction_key_point.shape[0]):
+                    x = int(prediction_key_point[i, 0] * scale) + target_image.shape[0] // 2
+                    y = int(prediction_key_point[i, 1] * scale) + target_image.shape[1] // 2
+                    if x < target_image.shape[0] and y < target_image.shape[1]:
+                        target_image[x, y, 1] += 100
+
+            # draw prediction key points during generation
+            if prediction_key_point_by_gen is not None:
+                for i in range(prediction_key_point_by_gen.shape[0]):
+                    x = int(prediction_key_point_by_gen[i, 0] * scale) + target_image.shape[0] // 2
+                    y = int(prediction_key_point_by_gen[i, 1] * scale) + target_image.shape[1] // 2
+                    if x < target_image.shape[0] and y < target_image.shape[1]:
+                        target_image[x, y, 2] += 100
+
+            # draw prediction trajectory by generation
+            if prediction_trajectory_by_gen is not None:
+                for i in range(prediction_trajectory_by_gen.shape[0]):
+                    x = int(prediction_trajectory_by_gen[i, 0] * scale) + target_image.shape[0] // 2
+                    y = int(prediction_trajectory_by_gen[i, 1] * scale) + target_image.shape[1] // 2
+                    if x < target_image.shape[0] and y < target_image.shape[1]:
+                        target_image[x, y, :] += 100
+            target_image = np.clip(target_image, 0, 255)
+            image_to_save[each_key] = target_image
+        import wandb
+        for each_key in image_to_save:
+            images = wandb.Image(
+                image_to_save[each_key],
+                caption=f"{file_index}-{each_key}"
+            )
+            self.log({"pred examples": images})
+            cv2.imwrite(os.path.join(path_to_save, 'test' + '_' + str(file_index) + '_' + str(each_key) + '.png'), image_to_save[each_key])
+        print('length of action and labels: ',
+              inputs['context_actions'][sample_index].shape, inputs['trajectory_label'][sample_index].shape)
+        print('debug images saved to: ', path_to_save, file_index)

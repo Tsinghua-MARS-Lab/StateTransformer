@@ -155,6 +155,9 @@ class ModelArguments:
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
     )
+    visualize_prediction_to_path: Optional[str] = field(
+        default=None
+    )
 
 @dataclass
 class DataTrainingArguments:
