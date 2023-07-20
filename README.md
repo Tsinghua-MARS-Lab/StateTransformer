@@ -13,10 +13,44 @@ Usage:
 
 (Instructions for different OS TBD)
 
-### Process the dataset
+### Process the dataset (NuPlan Only)
 
-1. process NuPlan .db files to .pkl files (to road, agent, and traffic dictionaries)
-2. generate filtered scenario index and cache in .pkl files
+1. process NuPlan .db files to .pkl files (to agent dictionaries)
+2. generate filtered scenario index and cache in .arrow files
+3. generate map dictionary to pickles
+
+Step 1: Process .db to .pkl by running:
+```
+    python generation.py  --num_proc 40 --sample_interval 100  
+    --dataset_name boston_index_demo  --starting_file_num 0  
+    --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
+    --data_path train_boston  --only_data_dic
+```
+
+Step 2: Generate scenarios to .arrow datasets
+```
+    python generation.py  --num_proc 40 --sample_interval 100  
+    --dataset_name boston_index_interval100  --starting_file_num 0  
+    --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
+    --data_path train_boston  --only_index  
+```
+
+Step 3: Generate Map files to .pickle files
+
+```
+    python generation.py  --num_proc 40 --sample_interval 1 --dataset_name pittsburgh_index_full  
+    --starting_file_num 0  --ending_file_num 10000  
+    --cache_folder /localdata_hdd/nuplan/online_pittsburgh_jul  --data_path train_pittsburgh --save_map
+```
+
+```
+    python generation.py  --num_proc 40 --sample_interval 1  
+    --dataset_name vegas2_datadic_float32  --starting_file_num 0  --ending_file_num 10000  
+    --cache_folder /localdata_hdd/nuplan/vegas2_datadic_float32  --data_path train_vegas_2 --save_map
+```
+
+You only need to process Vegas's map once for all Vegas subsets.
+
 
 Why process .db files to .pkl files? Lower disk usage (lower precision) and faster loading (without initiate NuPlan DataWrapper)
 

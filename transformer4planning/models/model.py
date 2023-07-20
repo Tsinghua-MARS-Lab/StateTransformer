@@ -393,7 +393,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2 + future_key_embeds.shape[1] + 1:] = 0
+            attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
@@ -453,7 +453,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2:context_length * 2 + future_key_points.shape[1], :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -587,10 +587,11 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             future_key_point_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
+
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
                 pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
-                selected_key_point = key_points_logit.reshape(b, self.k, -1)[torch.arange(b), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(b, 1, -1)
+                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
                 key_points_logit = selected_key_point
             else:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
@@ -605,12 +606,12 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         # generate remaining trajectory
         # prepare attention mask
         attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-        attention_mask[:, context_length * 2 + key_points_num + 1:] = 0
+        attention_mask[:, context_length * 2 + key_points_num:] = 0
         position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
-            position_ids=position_ids,
+            position_ids=None,
             # **input_kwargs
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
@@ -618,9 +619,19 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         # expected shape for pred trajectory is (b, pred_length, 4)
         traj_logits = self.traj_decoder(traj_hidden_state)
         future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
-        key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-        traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
-        return traj_logits
+
+        if self.k > 1:
+            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+            pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
+            selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[torch.arange(batch_size * key_points_num),
+                                  pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, key_points_num, -1)
+            key_points_logits = selected_key_points
+        elif self.k == 1:
+            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
+        else:
+            raise ValueError("illegal k while generating trajectory", self.k)
+
+        return torch.cat([key_points_logits, traj_logits], dim=1)
 
 
 class XLNetModelNuplan(XLNetPreTrainedModel):
