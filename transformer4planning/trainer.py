@@ -187,7 +187,6 @@ class PlanningTrainer(Trainer):
                     prediction_trajectory_in_batch = logits[0]
                 else:
                     print('unknown logits type', type(logits), logits)
-
                 if self.model.ar_future_interval > 0:
                     length_of_trajectory = trajectory_label_in_batch.shape[1]
                     prediction_key_points = prediction_trajectory_in_batch[:, :-length_of_trajectory, :]
@@ -197,6 +196,10 @@ class PlanningTrainer(Trainer):
                     ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
                     fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
                     fde_y_error_key_points = prediction_key_points[:, -1, 1] - future_key_points[:, -1, 1]
+                    ade_x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
+                    ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
+                    fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
+                    fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
                     if self.model.k >= 1:
                         prediction_trajectory_in_batch_by_gen = self.model.generate(**inputs)
                         length_of_trajectory = trajectory_label_in_batch.shape[1]
@@ -210,11 +213,11 @@ class PlanningTrainer(Trainer):
                         ade_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                         fde_x_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                         fde_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
-
-                ade_x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
-                ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
-                fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
-                fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
+                else:
+                    ade_x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
+                    ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
+                    fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
+                    fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
 
             # compute ade
             ade = torch.sqrt(ade_x_error.flatten() ** 2 + ade_y_error.flatten() ** 2)
