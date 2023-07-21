@@ -365,8 +365,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         if self.ar_future_interval == 0:
             # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-            attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2:] = 0
+            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+            # attention_mask[:, context_length * 2:] = 0
         elif self.ar_future_interval > 0:
             # use autoregressive future interval
             future_key_points = trajectory_label[:, self.ar_future_interval-1::self.ar_future_interval, :]
@@ -392,8 +392,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-            attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
+            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+            # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
