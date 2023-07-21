@@ -229,7 +229,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             in_channels = 26
         else:
             in_channels = model_args.raster_channels
-        print('Model initialized with raster channels: ', model_args.raster_channels)
+        # print('Model initialized with raster channels: ', model_args.raster_channels)
         n_embed = config.n_embd // 2
         self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
@@ -323,7 +323,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1]
-
+        
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -365,8 +365,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         if self.ar_future_interval == 0:
             # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-            attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2:] = 0
+            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+            # attention_mask[:, context_length * 2:] = 0
         elif self.ar_future_interval > 0:
             # use autoregressive future interval
             future_key_points = trajectory_label[:, self.ar_future_interval-1::self.ar_future_interval, :]
@@ -392,8 +392,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-            attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
+            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+            # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
@@ -527,11 +527,11 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         """
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1] if pred_length is None else pred_length
-
-        if self.model_args.x_random_walk > 0 and self.training:
+        
+        if self.model_args.x_random_walk > 0:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
-        if self.model_args.y_random_walk > 0 and self.training:
+        if self.model_args.y_random_walk > 0:
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
