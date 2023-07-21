@@ -323,7 +323,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1]
-        # TODO:why x/y noise are generated seperately? Noise could include both x/y noise
+        
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -527,11 +527,11 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         """
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1] if pred_length is None else pred_length
-        # TODO: Is there any case for generate in model.train mode?
-        if self.model_args.x_random_walk > 0 and self.training:
+        
+        if self.model_args.x_random_walk > 0:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
-        if self.model_args.y_random_walk > 0 and self.training:
+        if self.model_args.y_random_walk > 0:
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
