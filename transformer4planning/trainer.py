@@ -336,9 +336,8 @@ class PlanningTrainer(Trainer):
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
         result = dict()
-        if self.model.clf_metrics is not None:
+        if self.model.clf_metrics is not None and self.model.ar_furture_interval > 0:
             # run classsification metrics
-            result = dict()
             result[f"{metric_key_prefix}_accuracy"] = self.model.clf_metrics["accuracy"].compute()
             result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
