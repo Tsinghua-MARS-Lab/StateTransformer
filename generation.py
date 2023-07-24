@@ -381,7 +381,7 @@ def main(args):
         if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
             args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
-
+        total_file_num = args.ending_file_num - args.starting_file_num
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:

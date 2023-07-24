@@ -48,11 +48,11 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="non-auto-gpt",
+        default="scratch-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="transfo-xl-wt103",
+        default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
     model_revision: str = field(
@@ -104,10 +104,10 @@ class ModelArguments:
         default="mse",
     )
     task: Optional[str] = field(
-        default="waymo" # only for mmtransformer
+        default="nuplan" # only for mmtransformer
     )
     with_traffic_light: Optional[bool] = field(
-        default=False
+        default=True
     )
     autoregressive: Optional[bool] = field(
         default=False
@@ -136,7 +136,7 @@ class ModelArguments:
         default=True
     )
     raster_channels: Optional[int] = field(
-        default=0,
+        default=33,
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     predict_yaw: Optional[bool] = field(
@@ -154,6 +154,9 @@ class ModelArguments:
     )
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
+    )
+    visualize_prediction_to_path: Optional[str] = field(
+        default=None
     )
 
 @dataclass
@@ -439,9 +442,9 @@ def main():
     #     test=test_dataset.shuffle(seed=training_args.seed),
     # )
     nuplan_dataset = dict(
-        train=train_dataset,
-        validation=test_dataset,
-        test=test_dataset,
+        train=train_dataset.shuffle(seed=training_args.seed),
+        validation=test_dataset.shuffle(seed=training_args.seed),
+        test=test_dataset.shuffle(seed=training_args.seed),
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
