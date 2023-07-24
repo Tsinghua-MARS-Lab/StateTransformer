@@ -195,14 +195,14 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     assert len(traffic_light_ids) == len(traffic_light_states), f'length of ids is not same as length of states, ids: {traffic_light_ids}, states: {traffic_light_states}'
 
     if all_maps_dic is None:
-        print('loading map from disk ', map)
+        # print('loading map from disk ', map)
         if os.path.exists(os.path.join(data_path, "map", f"{map}.pkl")):
             with open(os.path.join(data_path, "map", f"{map}.pkl"), "rb") as f:
                 road_dic = pickle.load(f)
         else:
             print(f"Error: cannot load map {map} from {data_path}")
             return None
-        print('loading map from disk done ', map)
+        # print('loading map from disk done ', map)
     else:
         if map in all_maps_dic:
             road_dic = all_maps_dic[map]
@@ -212,7 +212,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     # load agent and traffic dictionaries
     # WARNING: load some pickles can be extremely slow costs about 500-1000 seconds for las vegas map
-    pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
+    pickle_path = os.path.join(data_path, f"{split}",  f"{filename}.pkl")
     # if pickle_path not in all_pickles_dic:
     #     if os.path.exists(pickle_path):
     #         # current_time = time.time()
@@ -252,7 +252,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         # if split == 'test':
         #     print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
     else:
-        print(f"Error: cannot load {filename} from {data_path} with {map}")
+        print(f"Error: cannot load {filename} from {data_path} {split} with {map}")
         return None
 
     # if new version of data, using relative frame_id
@@ -273,6 +273,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     # initialize rasters
     origin_ego_pose = agent_dic["ego"]["pose"][frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
+    # num_frame = torch.div(frame_id, frequency_change_rate, rounding_mode='floor')
+    # origin_ego_pose = agent_dic["ego"]["pose"][num_frame].copy()  # hard-coded resample rate 2
     if np.isinf(origin_ego_pose[0]) or np.isinf(origin_ego_pose[1]):
         assert False, f"Error: ego pose is inf {origin_ego_pose}, not enough precision while generating dictionary"
     # channels:
