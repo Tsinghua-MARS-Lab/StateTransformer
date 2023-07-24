@@ -449,7 +449,7 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
-    if 'auto' in model_args.model_name and model_args.k == -1:
+    if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
         clf_metrics = dict(
             accuracy=evaluate.load("accuracy"),
             f1=evaluate.load("f1"),
@@ -457,7 +457,7 @@ def main():
             recall=evaluate.load("recall")
         )
         model.clf_metrics = clf_metrics
-    elif model_args.next_token_scorer:
+    elif model_args.next_token_scorer and model_args.k > 1 and model_args.ar_future_interval > 0:
         clf_metrics = dict(
             accuracy=evaluate.load("accuracy"),
             f1=evaluate.load("f1"),
