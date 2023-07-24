@@ -17,26 +17,10 @@ def main(args):
     running_mode = args.running_mode
 
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+        'NUPLAN_DATA_ROOT': "/data_3/madanjiao" + "/nuplan/dataset",
+        'NUPLAN_MAPS_ROOT': "/data_3/madanjiao" + "/nuplan/dataset/maps",
+        'NUPLAN_DB_FILES': "/data_3/madanjiao" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
     }
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
-    #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
-    #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
-    # }
-    data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
-        # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
-    }
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/Volumes/Elements SE/nuPlan",
-    #     'NUPLAN_MAPS_ROOT': "/Volumes/Elements SE/nuPlan/maps",
-    #     'NUPLAN_DB_FILES': "/Volumes/Elements SE/nuPlan/nuplan-v1.1/{}".format(args.data_path)
-    # }
 
     road_path = args.road_dic_path
     if args.use_nsm:
@@ -357,6 +341,8 @@ def main(args):
                 with open(os.path.join(store_path, f"{map_name}.pkl"), "wb") as f:
                     pickle.dump(road_dic, f, protocol=pickle.HIGHEST_PROTOCOL)
                 print("Stored at ", os.path.join(store_path, f"{map_name}.pkl"))
+                
+                yield {'file_name': dl.file_names[0]}
                 break
             del dl
             break
@@ -507,12 +493,12 @@ if __name__ == '__main__':
     """
     python generation.py  --num_proc 40 --sample_interval 100  
     --dataset_name boston_index_demo  --starting_file_num 0  
-    --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
+    --ending_file_num 10000  --cache_folder /data_3/madanjiao/nuplan/online_demo/  
     --data_path train_boston  --only_data_dic
     
     python generation.py  --num_proc 40 --sample_interval 100  
     --dataset_name boston_index_interval100  --starting_file_num 0  
-    --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_demo/  
+    --ending_file_num 10000  --cache_folder /data_3/madanjiao/nuplan/online_demo/  
     --data_path train_boston  --only_index  
     
     python generation.py  --num_proc 40 --sample_interval 1 --dataset_name pittsburgh_index_full  --starting_file_num 0  --ending_file_num 10000  --cache_folder /localdata_hdd/nuplan/online_pittsburgh_jul  --data_path train_pittsburgh --save_map
