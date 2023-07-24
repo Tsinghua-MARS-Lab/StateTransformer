@@ -606,7 +606,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         # generate remaining trajectory
         # prepare attention mask
         attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-        attention_mask[:, context_length * 2 + key_points_num:] = 0
+        # attention_mask[:, context_length * 2 + key_points_num:] = 0
         position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
