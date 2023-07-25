@@ -15,6 +15,7 @@ from torch import nn
 from tqdm import tqdm
 import copy
 import json
+from easydict import EasyDict
 
 import datasets
 import numpy as np
@@ -163,6 +164,10 @@ class ModelArguments:
         default=1.0
     )
     visualize_prediction_to_path: Optional[str] = field(
+        default=None
+    )
+    
+    vector_encoder_cfg: Optional[EasyDict] = field(
         default=None
     )
 
@@ -378,6 +383,7 @@ def main():
         nuplan_dataset.update(test=test_set)
 
     # Load a model's pretrained weights from a path or from hugging face's model base
+    model_args.vector_encoder_cfg = cfg.MODEL
     model = build_models(model_args)
     if 'auto' in model_args.model_name and model_args.k == -1:
         clf_metrics = dict(

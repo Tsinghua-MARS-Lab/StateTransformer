@@ -8,6 +8,7 @@ from transformer4planning.models.TransformerXL.model import *
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
+from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
 
 from transformers.generation.configuration_utils import GenerationConfig
 
@@ -1783,7 +1784,20 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         return yaw
 
 def build_models(model_args):
-    if 'gpt' in model_args.model_name:
+    if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
+        config_p = GPT2Config()
+        config_p.n_layer = model_args.n_layers
+        config_p.n_embd = model_args.d_embed
+        config_p.n_inner = model_args.d_inner
+        config_p.n_head = model_args.n_heads
+        config_p.activation_function = model_args.activation_function
+        if not model_args.autoregressive:
+            ModelCls = GPTNonAutoRegressiveModelVector
+            tag = 'GPT nonauto'
+        else:
+            ModelCls = GPTAutoRegressiveModelVector
+            tag = 'GPT auto'
+    elif 'gpt' in model_args.model_name:
         config_p = GPT2Config()
         config_p.n_layer = model_args.n_layers
         config_p.n_embd = model_args.d_embed

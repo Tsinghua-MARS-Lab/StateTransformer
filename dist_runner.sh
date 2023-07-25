@@ -24,7 +24,7 @@
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run --nproc_per_node=8 runner.py \
-        --model_name scratch-gpt --model_pretrain_name_or_path None \
+        --model_name scratch-vector-gpt --model_pretrain_name_or_path None \
         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
         --output_dir /data_3/madanjiao/model_res/gpt_1.5B_mse_FI1_PI1_k1/training_results  \
         --logging_dir /data_3/madanjiao/model_res/gpt_1.5B_mse_FI1_PI1_k1/training_logs \
