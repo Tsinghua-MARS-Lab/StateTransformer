@@ -22,6 +22,7 @@
 #         --saved_valid_dataset_folder /data_3/madanjiao/nuplan/online_demo/mini_index_interval100 \
 #         --overwrite_output_dir --loss_fn mse
 
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run --nproc_per_node=8 runner.py \
         --model_name scratch-gpt --model_pretrain_name_or_path None \
         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \

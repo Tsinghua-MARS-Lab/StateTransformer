@@ -39,6 +39,13 @@ from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 
+from dataset_gen.waymo.waymo_dataset import WaymoDataset
+from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
+__all__ = {
+    'WaymoDataset': WaymoDataset,
+}
+    
+
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
@@ -344,108 +351,31 @@ def main():
     1. Pass None to load from data_args.saved_dataset_folder as the root folder path to load all sub-datasets of each city
     2. Pass the folder of an index files to load one sub-dataset of one city
     """
-    if data_args.datadic_path is None:
-        from datasets import disable_caching
-        disable_caching()
-        data_args.datadic_path = data_args.saved_dataset_folder
-        # loop all datasets
-        logger.info("Loading full set of datasets from {}".format(data_args.datadic_path))
-        assert os.path.isdir(data_args.datadic_path)
-        index_root = os.path.join(data_args.datadic_path, 'index')
-        root_folders = os.listdir(index_root)
-        if 'train' in root_folders:
-            # load training datasets
-            training_datasets = []
-            training_index_root_folders = os.path.join(index_root, 'train')
-            training_indices = os.listdir(training_index_root_folders)
-            for training_index in training_indices:
-                training_index_path = os.path.join(training_index_root_folders, training_index)
-                if os.path.isdir(training_index_path):
-                    # load training dataset
-                    logger.info("Loading training dataset {}".format(training_index_path))
-                    dataset = Dataset.load_from_disk(training_index_path)
-                    if dataset is not None:
-                        training_datasets.append(dataset)
-            train_dataset = _concatenate_map_style_datasets(training_datasets)
-            # add split column
-            train_dataset.features.update({'split': Value('string')})
-            train_dataset = train_dataset.add_column(name='split', column=['train'] * len(train_dataset))
-            train_dataset.set_format(type='torch')
-            train_samples = int(len(train_dataset) * float(data_args.dataset_scale))
-            train_dataset = train_dataset.select(range(train_samples))
-        else:
-            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-        if training_args.do_eval and 'test' in root_folders:
-            # load test datasets
-            test_datasets = []
-            test_index_root_folders = os.path.join(index_root, 'test')
-            test_indices = os.listdir(test_index_root_folders)
-            for test_index in test_indices:
-                test_index_path = os.path.join(test_index_root_folders, test_index)
-                if os.path.isdir(test_index_path):
-                    # load test dataset
-                    logger.info("Loading test dataset {}".format(test_index_path))
-                    dataset = Dataset.load_from_disk(test_index_path)
-                    if dataset is not None:
-                        test_datasets.append(dataset)
-            test_dataset = _concatenate_map_style_datasets(test_datasets)
-            # add additional column for flagging test set
-            test_dataset.features.update({'split': Value('string')})
-            test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            test_dataset.set_format(type='torch')
-        else:
-            test_dataset = train_dataset
-        all_maps_dic = {}
-        all_pickles_dic = {}
-        map_folder = os.path.join(data_args.datadic_path, 'map')
-        for each_map in os.listdir(map_folder):
-            if each_map.endswith('.pkl'):
-                map_path = os.path.join(map_folder, each_map)
-                with open(map_path, 'rb') as f:
-                    map_dic = pickle.load(f)
-                map_name = each_map.split('.')[0]
-                all_maps_dic[map_name] = map_dic
-    else:
-        all_maps_dic = None
-        all_pickles_dic = None
-        if os.path.isdir(data_args.saved_dataset_folder):
-            logger.info("loading dataset...")
-            dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
-            dataset.features.update({'split': Value('string')})
-            dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
-            dataset.set_format(type='torch')
-            dataset.shuffle(seed=training_args.seed)
-            train_samples = int(len(dataset) * float(data_args.dataset_scale))
-            train_dataset = dataset.select(range(train_samples))
-
-            if training_args.do_eval:
-                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                # split_dic = test_dataset.info.splits['train']
-                # split_dic.name = 'test'
-                # test_dataset.info.splits['test'] = split_dic
-                # del test_dataset.info.splits['train']
-                # add additional column for flagging test set
-                test_dataset.features.update({'split': Value('string')})
-                test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            else:
-                test_dataset = dataset.select(range(train_samples))
-            test_dataset.set_format(type='torch')
-        else:
-            raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
-
-    # loop split info and update for test set
-    print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
-
-    # nuplan_dataset = dict(
-    #     train=train_dataset,
-    #     validation=test_dataset.shuffle(seed=training_args.seed),
-    #     test=test_dataset.shuffle(seed=training_args.seed),
-    # )
-    nuplan_dataset = dict(
-        train=train_dataset.shuffle(seed=training_args.seed),
-        validation=test_dataset.shuffle(seed=training_args.seed),
-        test=test_dataset.shuffle(seed=training_args.seed),
+    
+    cfg_from_yaml_file("/home/QJ00367/danjiao/dlnets/transformer4planning/config/sample_config.yaml", cfg)
+    
+    train_set = __all__[cfg.DATA_CONFIG.DATASET](
+        dataset_cfg=cfg.DATA_CONFIG,
+        training=True,
+        logger=logger, 
     )
+    
+    if training_args.do_eval:
+        test_set = __all__[cfg.DATA_CONFIG.DATASET](
+            dataset_cfg=cfg.DATA_CONFIG,
+            training=False,
+            logger=logger, 
+        )
+    
+    nuplan_dataset = dict(
+        train=train_set
+    )
+    
+    if training_args.do_eval:
+        nuplan_dataset.update(validation=test_set)
+    
+    if training_args.do_predict:
+        nuplan_dataset.update(test=test_set)
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
@@ -488,11 +418,7 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
-                         dic_path=data_args.datadic_path,
-                         all_maps_dic=all_maps_dic,
-                         all_pickles_dic=all_pickles_dic,
-                         **data_process.__dict__) if data_args.online_preprocess else None
+    collate_fn = train_dataset.collate_batch
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -565,18 +491,6 @@ def main():
                 all_bias_y = []
                 losses = []
                 loss_fn = torch.nn.MSELoss(reduction="mean")
-            
-            # def waymo_collate_fn(batch):
-            #     import collections
-            #     expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-            #
-            #     elem = batch[0]
-            #     if isinstance(elem, collections.abc.Mapping):
-            #         return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            #
-            # if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
-            #     # Todo: test waymo collate fn
-            #     collate_fn = waymo_collate_fn
 
 
             for itr, input in enumerate(tqdm(test_dataloader)):
