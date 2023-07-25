@@ -1793,10 +1793,10 @@ def build_models(model_args):
         config_p.activation_function = model_args.activation_function
         if not model_args.autoregressive:
             ModelCls = GPTNonAutoRegressiveModelVector
-            tag = 'GPT nonauto'
+            tag = 'Vector GPT nonauto'
         else:
             ModelCls = GPTAutoRegressiveModelVector
-            tag = 'GPT auto'
+            tag = 'Vector GPT auto'
     elif 'gpt' in model_args.model_name:
         config_p = GPT2Config()
         config_p.n_layer = model_args.n_layers

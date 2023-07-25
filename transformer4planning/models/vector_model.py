@@ -17,19 +17,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
         self.model_args = model_args
-        self.encoder = MTREncoder(kwargs["model_args"].vector_encoder_cfg.CONTEXT_ENCODER)
+        self.context_encoder = MTREncoder(kwargs["model_args"].vector_encoder_cfg.CONTEXT_ENCODER)
         
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
-        if self.task == "waymo":
-            in_channels = 26
-        else:
-            in_channels = model_args.raster_channels
-        # print('Model initialized with raster channels: ', model_args.raster_channels)
-        n_embed = config.n_embd // 2
-        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
@@ -69,7 +62,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         )
         assert_device_map(self.device_map, len(self.transformer.h))
         self.transformer.parallelize(self.device_map)
-        self.cnn_downsample = self.cnn_downsample.to(self.transformer.first_device)
         self.traj_decoder = self.traj_decoder.to(self.transformer.first_device)
         self.model_parallel = True
 
@@ -81,7 +73,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         )
         self.transformer.deparallelize()
         self.transformer = self.transformer.to("cpu")
-        self.cnn_downsample = self.cnn_downsample.to("cpu")
         self.traj_decoder = self.traj_decoder.to("cpu")
         self.model_parallel = False
         torch.cuda.empty_cache()
@@ -96,14 +87,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
     def forward(
             self,
-            intended_maneuver_vector: Optional[torch.LongTensor] = None,
-            trajectory_label: Optional[torch.LongTensor] = None,
+            batch_size, input_dict, batch_sample_count,
             context_actions: Optional[torch.LongTensor] = None,
-            intended_maneuver_label: Optional[torch.LongTensor] = None,
-            high_res_raster: Optional[torch.LongTensor] = None,
-            low_res_raster: Optional[torch.LongTensor] = None,
-            intended_maneuver_gt: Optional[torch.LongTensor] = None,
-            current_maneuver_gt: Optional[torch.LongTensor] = None,
             past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
             attention_mask: Optional[torch.FloatTensor] = None,
             token_type_ids: Optional[torch.LongTensor] = None,
@@ -117,11 +102,23 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             return_dict: Optional[bool] = None,
             **kwargs
             ):
-        # gpt non-autoregression version
+        # encoder
+        device = input_dict['obj_trajs'].device
+        batch_dict = self.context_encoder({'batch_size': batch_size, 
+                                           'input_dict': input_dict, 
+                                           'batch_sample_count': batch_sample_count})
+        
+        obj_feature = batch_dict['obj_feature']
+        map_feature = batch_dict['map_feature']
+        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, 256)
+        
+        # traj
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        device = high_res_raster.device
+        trajectory_label = input_dict['center_gt_trajs']
         pred_length = trajectory_label.shape[1]
         
+        # action context
+        context_actions = input_dict['center_objects_past'][..., :4]
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -129,23 +126,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
-        device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        if self.task == "nuplan":
-            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-        elif self.task == "waymo":
-            high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-            low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-        batch_size, context_length, c, h, w = high_res_seq.shape
 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-
-        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+        # create OAOAOA..
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
             (batch_size, context_length * 2, n_embed),
@@ -155,10 +139,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
-        # input_embeds = self.prepare_model_inputs(context_actions=context_actions,
-        #                                          high_res_raster=high_res_raster,
-        #                                          low_res_raster=low_res_raster)
-        # batch_size, context_length, c, h, w = high_res_seq.shape
 
         if self.ar_future_interval == 0:
             # to keep input and output at the same dimension
@@ -325,18 +305,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        if self.task == "nuplan":
-            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-        elif self.task == "waymo":
-            high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-            low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
         batch_size, context_length, c, h, w = high_res_seq.shape
-
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
 
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
         n_embed = action_embeds.shape[-1]

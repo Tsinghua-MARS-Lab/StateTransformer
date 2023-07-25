@@ -69,6 +69,8 @@ class WaymoDataset(DatasetTemplate):
         ret_infos = self.create_scene_level_data(index)
 
         return ret_infos
+    
+    
 
     def create_scene_level_data(self, index):
         """
@@ -96,7 +98,7 @@ class WaymoDataset(DatasetTemplate):
         obj_trajs_past = obj_trajs_full[:, :current_time_index + 1]
         obj_trajs_future = obj_trajs_full[:, current_time_index + 1:]
 
-        center_objects, track_index_to_predict = self.get_interested_agents(
+        center_objects, center_objects_past, track_index_to_predict = self.get_interested_agents(
             track_index_to_predict=track_index_to_predict,
             obj_trajs_full=obj_trajs_full,
             current_time_index=current_time_index,
@@ -122,6 +124,7 @@ class WaymoDataset(DatasetTemplate):
             'obj_ids': obj_ids,
 
             'center_objects_world': center_objects,
+            "center_objects_past": center_objects_past,
             'center_objects_id': np.array(track_infos['object_id'])[track_index_to_predict],
             'center_objects_type': np.array(track_infos['object_type'])[track_index_to_predict],
 
@@ -203,6 +206,7 @@ class WaymoDataset(DatasetTemplate):
 
     def get_interested_agents(self, track_index_to_predict, obj_trajs_full, current_time_index, obj_types, scene_id):
         center_objects_list = []
+        center_objects_past_list = []
         track_index_to_predict_selected = []
 
         for k in range(len(track_index_to_predict)):
@@ -211,11 +215,13 @@ class WaymoDataset(DatasetTemplate):
             assert obj_trajs_full[obj_idx, current_time_index, -1] > 0, f'obj_idx={obj_idx}, scene_id={scene_id}'
 
             center_objects_list.append(obj_trajs_full[obj_idx, current_time_index])
+            center_objects_past_list.append(obj_trajs_full[obj_idx, :current_time_index+1])
             track_index_to_predict_selected.append(obj_idx)
 
         center_objects = np.stack(center_objects_list, axis=0)  # (num_center_objects, num_attrs)
+        center_objects_past = np.stack(center_objects_past_list, axis=0)  # (num_center_objects, past_frame_len, num_attrs)
         track_index_to_predict = np.array(track_index_to_predict_selected)
-        return center_objects, track_index_to_predict
+        return center_objects, center_objects_past, track_index_to_predict
 
     @staticmethod
     def transform_trajs_to_center_coords(obj_trajs, center_xyz, center_heading, heading_index, rot_vel_index=None):
