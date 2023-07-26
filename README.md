@@ -105,15 +105,16 @@ python -m torch.distributed.run \
 --task nuplan --with_traffic_light True --k 1 \
 --online_preprocess True \
 --datadic_path /localdata_ssd/nuplan/online \
---remove_unused_columns False --future_sample_interval 1 \
---past_sample_interval 1 --do_eval \
+--remove_unused_columns False --future_sample_interval 2 \
+--past_sample_interval 5 --do_eval \
 --evaluation_strategy steps --eval_steps 100 \
 --saved_valid_dataset_folder /localdata_ssd/nuplan/test-index_boston_full \
---overwrite_output_dir --loss_fn mse --max_eval_samples 1e5\
+--overwrite_output_dir --loss_fn mse --max_eval_samples 10000\
 --next_token_scorer True \
+--ar_future_interval 20 \
 --x_random_walk 3.0 --y_random_walk 3.0 \
 --arf_x_random_walk 3.0 --arf_y_random_walk 3.0 \
---trajectory_loss_rescale 1e-3 \ 
+--trajectory_loss_rescale 1e-3 \
 --pred_key_points_only False \
 --specified_key_points True \
 --forward_specified_key_points False \
@@ -139,7 +140,7 @@ runner.py --model_name pretrain-gpt \
 --predict_trajectory True \
 --do_predict \
 --saved_valid_dataset_folder /localdata_ssd/nuplan/boston_test_byscenario/
---max_predict_samples 1e3 \
+--max_predict_samples 1000 \
 --dataloader_drop_last True \
 --with_traffic_light True \
 --remove_unused_columns True \
