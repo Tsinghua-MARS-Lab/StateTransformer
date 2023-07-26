@@ -109,7 +109,14 @@ python -m torch.distributed.run \
 --past_sample_interval 1 --do_eval \
 --evaluation_strategy steps --eval_steps 100 \
 --saved_valid_dataset_folder /localdata_ssd/nuplan/test-index_boston_full \
---overwrite_output_dir --loss_fn mse
+--overwrite_output_dir --loss_fn mse --max_eval_samples 1e5\
+--next_token_scorer True \
+--x_random_walk 3.0 --y_random_walk 3.0 \
+--arf_x_random_walk 3.0 --arf_y_random_walk 3.0 \
+--trajectory_loss_rescale 1e-3 \ 
+--pred_key_points_only False \
+--specified_key_points True \
+--forward_specified_key_points False \
 `
 
 
@@ -123,19 +130,24 @@ export CUDA_VISIBLE_DEVICES=3; \
 python -m torch.distributed.run \
 --nproc_per_node=1 \
 --master_port 12345 \
-runner.py --model_name pretrain-xl \
+runner.py --model_name pretrain-gpt \
 --model_pretrain_name_or_path data/example/training_results/checkpoint-xxxxx \
 --saved_dataset_folder /localdata_ssd/nuplan/nsm_autoregressive_rapid \
 --output_dir data/example/prediction_results/checkpoint-xxxxx \
---per_device_eval_batch_size 20 \
---dataloader_num_workers 40 \
+--per_device_eval_batch_size 32 \
+--dataloader_num_workers 16 \
 --predict_trajectory True \
---recover_obs False \
 --do_predict \
 --saved_valid_dataset_folder /localdata_ssd/nuplan/boston_test_byscenario/
---max_predict_samples 500 \
+--max_predict_samples 1e3 \
 --dataloader_drop_last True \
---with_traffic_light True
+--with_traffic_light True \
+--remove_unused_columns True \
+--next_token_scorer True \
+--trajectory_loss_rescale 1e-3 \
+--pred_key_points_only False \
+--specified_key_points True \
+--forward_specified_key_points False \
 `
 
 ## To generate dataset:
