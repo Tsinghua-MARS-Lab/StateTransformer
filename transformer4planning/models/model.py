@@ -1279,13 +1279,8 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
     def generate(
             self,
             generation_config: Optional[GenerationConfig] = None,
-            # logits_processor: Optional[LogitsProcessorList] = None,
-            # stopping_criteria: Optional[StoppingCriteriaList] = None,
-            # synced_gpus: Optional[bool] = False,
             **kwargs
     ) -> torch.FloatTensor:
-        # temp import
-        # from transformer4planning.generation.beam_search import PlanningBeamSearchScorer
 
         r"""
 
@@ -1307,16 +1302,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
                 priority: 1) from the `generation_config.json` model file, if it exists; 2) from the model
                 configuration. Please note that unspecified parameters will inherit [`~generation.GenerationConfig`]'s
                 default values, whose documentation should be checked to parameterize generation.
-            logits_processor (`LogitsProcessorList`, *optional*):
-                Custom logits processors that complement the default logits processors built from arguments and
-                generation config. If a logit processor is passed that is already created with the arguments or a
-                generation config an error is thrown. This feature is intended for advanced users.
-            stopping_criteria (`StoppingCriteriaList`, *optional*):
-                Custom stopping criteria that complement the default stopping criteria built from arguments and a
-                generation config. If a stopping criteria is passed that is already created with the arguments or a
-                generation config an error is thrown. This feature is intended for advanced users.
-            synced_gpus (`bool`, *optional*, defaults to `False`):
-                Whether to continue running the while loop until max_length (needed for ZeRO stage 3)
             kwargs:
                 Ad hoc parametrization of `generate_config` and/or additional model-specific kwargs that will be
                 forwarded to the `forward` function of the model. If the model is an encoder-decoder model, encoder
@@ -1372,65 +1357,13 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
         model_kwargs["use_cache"] = generation_config.use_cache
         assert not generation_config.use_cache, "Generation with caches is currently not supported. Please set `use_cache=False`."
 
-        # 7. determine generation mode
-        is_constraint_gen_mode = (
-                generation_config.constraints is not None or generation_config.force_words_ids is not None
-        )
-
-        is_contrastive_search_gen_mode = (
-                generation_config.top_k is not None
-                and generation_config.top_k > 1
-                and generation_config.do_sample is False
-                and generation_config.penalty_alpha is not None
-                and generation_config.penalty_alpha > 0
-        )
-
-        is_greedy_gen_mode = (
-                (generation_config.num_beams == 1)
-                and (generation_config.num_beam_groups == 1)
-                and generation_config.do_sample is False
-                and not is_constraint_gen_mode
-                and not is_contrastive_search_gen_mode
-        )
-        is_sample_gen_mode = (
-                (generation_config.num_beams == 1)
-                and (generation_config.num_beam_groups == 1)
-                and generation_config.do_sample is True
-                and not is_constraint_gen_mode
-                and not is_contrastive_search_gen_mode
-        )
-        is_beam_gen_mode = (
-                (generation_config.num_beams > 1)
-                and (generation_config.num_beam_groups == 1)
-                and generation_config.do_sample is False
-                and not is_constraint_gen_mode
-                and not is_contrastive_search_gen_mode
-        )
-        is_beam_sample_gen_mode = (
-                (generation_config.num_beams > 1)
-                and (generation_config.num_beam_groups == 1)
-                and generation_config.do_sample is True
-                and not is_constraint_gen_mode
-                and not is_contrastive_search_gen_mode
-        )
-        is_group_beam_gen_mode = (
-                (generation_config.num_beams > 1)
-                and (generation_config.num_beam_groups > 1)
-                and not is_constraint_gen_mode
-                and not is_contrastive_search_gen_mode
-        )
-
         if generation_config.num_beam_groups > generation_config.num_beams:
             raise ValueError("`num_beam_groups` has to be smaller or equal to `num_beams`")
-        if is_group_beam_gen_mode and generation_config.do_sample is True:
-            raise ValueError(
-                "Diverse beam search cannot be used in sampling mode. Make sure that `do_sample` is set to `False`."
-            )
 
         if self.device.type != input_embeds.device.type:
             warnings.warn(
                 "You are calling .generate() with the `input_ids` being on a device type different"
-                f" than your model's device. `input_ids` is on {input_ids.device.type}, whereas the model"
+                f" than your model's device. `input_ids` is on {input_embeds.device.type}, whereas the model"
                 f" is on {self.device.type}. You may experience unexpected behaviors or slower generation."
                 " Please make sure that you have put `input_ids` to the"
                 f" correct device by calling for example input_ids = input_ids.to('{self.device.type}') before"
@@ -1444,62 +1377,6 @@ class GPTModelNuPlan(GPT2PreTrainedModel):
             return self.generate_with_score(kwargs)
         else:
             raise NotImplementedError("TopK generation is not implemented yet.")
-
-        # 8. prepare distribution pre_processing samplers (TBD)
-        # 9. prepare stopping criteria (TBD)
-        # 10. go into different generation modes
-        if is_greedy_gen_mode:
-            raise NotImplementedError("Greedy generation is not implemented yet.")
-
-        elif is_contrastive_search_gen_mode:
-            raise NotImplementedError("Contrastive search generation is not implemented yet.")
-
-        elif is_sample_gen_mode:
-            raise NotImplementedError("Sampling is not implemented yet.")
-
-        elif is_beam_gen_mode:
-            raise NotImplementedError("Sampling is not implemented yet.")
-            if generation_config.num_return_sequences > generation_config.num_beams:
-                raise ValueError("`num_return_sequences` has to be smaller or equal to `num_beams`.")
-            # 11. prepare beam search scorer
-            # TODO: Implement Scorer
-            # beam_scorer = PlanningBeamSearchScorer(
-            #     batch_size=batch_size,
-            #     num_beams=generation_config.num_beams,
-            #     device=inputs_tensor.device,
-            #     # do_early_stopping=generation_config.early_stopping,
-            #     num_beam_hyps_to_keep=generation_config.num_return_sequences,
-            #     max_length=generation_config.max_length,
-            # )
-            # # 12. interleave input_ids with `num_beams` additional sequences per batch
-            # input_ids, model_kwargs = self._expand_inputs_for_generation(
-            #     input_ids=input_ids,
-            #     expand_size=generation_config.num_beams,
-            #     is_encoder_decoder=self.config.is_encoder_decoder,
-            #     **model_kwargs,
-            # )
-            # # 13. run beam search
-            # return self.beam_search(
-            #     input_ids,
-            #     beam_scorer,
-            #     logits_processor=logits_processor,
-            #     stopping_criteria=stopping_criteria,
-            #     pad_token_id=generation_config.pad_token_id,
-            #     eos_token_id=generation_config.eos_token_id,
-            #     output_scores=generation_config.output_scores,
-            #     return_dict_in_generate=generation_config.return_dict_in_generate,
-            #     synced_gpus=synced_gpus,
-            #     **model_kwargs,
-            # )
-
-        elif is_beam_sample_gen_mode:
-            raise NotImplementedError("Beam sampling is not implemented yet.")
-
-        elif is_group_beam_gen_mode:
-            raise NotImplementedError("Group beam search is not implemented yet.")
-
-        elif is_constraint_gen_mode:
-            raise NotImplementedError("Constrained generation is not implemented yet.")
 
     def generate_without_score(self, kwargs):
         high_res_raster = kwargs.get("high_res_raster", None)
