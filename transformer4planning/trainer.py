@@ -346,7 +346,6 @@ class PlanningTrainer(Trainer):
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics
-            result = dict()
             result[f"{metric_key_prefix}_accuracy"] = self.model.clf_metrics["accuracy"].compute()
             result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
