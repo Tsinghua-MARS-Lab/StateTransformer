@@ -5,22 +5,27 @@
 
 
 import os
+import math
 import numpy as np
 from pathlib import Path
 import pickle
 import torch
+import cv2
+import shapely
 
 from dataset_gen.waymo.dataset_template import DatasetTemplate
 import dataset_gen.waymo.common_util as common_utils
 from dataset_gen.waymo.config import cfg
+from transformer4planning.utils import generate_contour_pts
 
 
 
 class WaymoDataset(DatasetTemplate):
-    def __init__(self, dataset_cfg, training=True, logger=None):
+    def __init__(self, dataset_cfg, training=True, logger=None, use_raster=False):
         super().__init__(dataset_cfg=dataset_cfg, training=training, logger=logger)
         self.data_root = cfg.ROOT_DIR / self.dataset_cfg.DATA_ROOT
         self.data_path = self.data_root / self.dataset_cfg.SPLIT_DIR[self.mode]
+        self.use_raster = use_raster
 
         self.infos = self.get_all_infos(self.data_root / self.dataset_cfg.INFO_FILE[self.mode])
         self.logger.info(f'Total scenes after filters: {len(self.infos)}')
@@ -67,10 +72,11 @@ class WaymoDataset(DatasetTemplate):
 
     def __getitem__(self, index):
         ret_infos = self.create_scene_level_data(index)
+        
+        if self.use_raster:
+            ret_infos = self.create_raster(ret_infos)
 
         return ret_infos
-    
-    
 
     def create_scene_level_data(self, index):
         """
@@ -508,6 +514,185 @@ class WaymoDataset(DatasetTemplate):
             pred_dict_list.append(single_pred_dict)
 
         return pred_dict_list
+
+    def create_raster(self, ret_infos):
+        out_ret_infos = {}
+        out_ret_infos['trajectory_label'] = ret_infos['center_gt_trajs'] #  (bs, 80, 4)
+        out_ret_infos['context_actions'] = ret_infos['center_objects_past'] # (bs, 11, 10)
+        
+        bs = ret_infos['obj_trajs'].shape[0]
+        agent_types_value = [self.dataset_cfg.OBJECT_TYPE.index(obj_t) for obj_t in ret_infos['obj_types']]
+        rasters_high_res = []
+        raster_low_res = []
+        
+        for i in range(bs):
+            agent_trajs = ret_infos['obj_trajs'][i, ...] # (num_objects, num_timestamps_past, 29)
+            agent_trajs_mask = ret_infos['obj_trajs_mask'][i, ...]
+            map_trajs = ret_infos['map_polylines'][i, ...] # (num_polilines, 20, 9), index 6 map type [0, 20)
+            map_trajs_mask = ret_infos['map_polylines_mask'][i, ...] # (num_polilines, 20)
+            
+            rasters_high, rasters_low = self.static_coor_rasterize(agent_trajs, agent_types_value, agent_trajs_mask,
+                                                                           map_trajs, map_trajs_mask,
+                                                                           out_ret_infos['trajectory_label'][i, ...], out_ret_infos['context_actions'][i, ...],
+                                                                           str(i) + '_' + ret_infos['scenario_id'][i])
+            
+            rasters_high_res.append(rasters_high)
+            raster_low_res.append(rasters_low)
+        
+        out_ret_infos['high_res_raster'] = np.concatenate(rasters_high_res)  
+        out_ret_infos['low_res_raster'] = np.concatenate(raster_low_res)  
+        
+        return out_ret_infos
+    
+    def static_coor_rasterize(self, agent_trajs, agent_types_value, agent_trajs_mask, map_trajs, map_trajs_mask, 
+                              trajectory_label, context_actions, scenario_id,
+                              raster_shape=(224, 224),
+                              high_res_scale=4, low_res_scale=0.77,
+                              road_types=20, agent_types=3,
+                              debug_raster=False):
+
+        past_frames_num = agent_trajs.shape[1]
+        
+        # channels:
+        # 0-19: road raster
+        # 20-end: agent raster (33=3 (agent_types) * 11 (sample_frames_in_past))
+        total_raster_channels = road_types + agent_types * past_frames_num
+
+        rasters_high_res = np.zeros([raster_shape[0],
+                                    raster_shape[1],
+                                    total_raster_channels], dtype=np.uint8)
+        rasters_low_res = np.zeros([raster_shape[0],
+                                    raster_shape[1],
+                                    total_raster_channels], dtype=np.uint8)
+        rasters_high_res_channels = cv2.split(rasters_high_res)
+        rasters_low_res_channels = cv2.split(rasters_low_res)
+
+        # road raster
+        num_polylines = map_trajs.shape[0]
+        
+        for polyline_id in range(num_polylines):
+            valid_points = map_trajs[polyline_id, ...][map_trajs_mask[polyline_id, ...]] # (20, 9)
+            if valid_points.shape[0] < 7:
+                continue
+            xyz = valid_points[:, 0:3]
+            
+            road_type = int(valid_points[0, 6])
+            pts = list(zip(xyz[:, 0], xyz[:, 1]))
+            line = shapely.geometry.LineString(pts)
+            simplified_xyz_line = line.simplify(1)
+            simplified_x, simplified_y = simplified_xyz_line.xy
+            simplified_xyz = np.ones((len(simplified_x), 2))
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+
+            high_res_road = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+            low_res_road = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
+            if road_type in [5, 17, 18, 19]:
+                cv2.fillPoly(rasters_high_res_channels[road_type + 1], np.int32([high_res_road[:, :2]]), (255, 255, 255))
+                cv2.fillPoly(rasters_low_res_channels[road_type + 1], np.int32([low_res_road[:, :2]]), (255, 255, 255))
+            else:
+                for j in range(simplified_xyz.shape[0] - 1):
+                    cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
+                            tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
+                    cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
+                            tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
+ 
+        # agent
+        num_agents = agent_trajs.shape[0] # (num_objects, num_timestamps_past, 29)
+        
+        for agent_id in range(num_agents):
+            valid_points = agent_trajs[agent_id, ...][agent_trajs_mask[agent_id, ...]] # (num_timestamps_past, 29)
+            if valid_points.shape[0] != past_frames_num:
+                continue
+                
+            agent_tp = agent_types_value[agent_id]
+            for time_id in range(past_frames_num):
+                pose = valid_points[time_id, :] # (x, y, z, dx, dy, dz, ...., sin, cos, vel_x, vel_y, acc_x, acc_y)
+
+                rect_pts = generate_contour_pts((pose[0], pose[1]), w=pose[3], l=pose[4], direction= math.atan2(pose[-6], pose[-5]))
+                rect_pts = np.array(rect_pts, dtype=np.int32)
+                # draw on high resolution
+                rect_pts_high_res = (high_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
+                cv2.drawContours(rasters_high_res_channels[road_types + agent_tp * past_frames_num + time_id],
+                                [rect_pts_high_res], -1, (255, 255, 255), -1)
+                # draw on low resolution
+                rect_pts_low_res = (low_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
+                cv2.drawContours(rasters_low_res_channels[road_types + agent_tp * past_frames_num + time_id],
+                                [rect_pts_low_res], -1, (255, 255, 255), -1)
+
+
+        rasters_high_res = np.array(cv2.merge(rasters_high_res_channels).astype(bool))
+        rasters_low_res = np.array(cv2.merge(rasters_low_res_channels).astype(bool))
+        
+        if debug_raster:
+            show_dict = {
+                'high_res_raster': rasters_high_res, 
+                'low_res_raster': rasters_low_res,
+                'trajectory_label': trajectory_label, 
+                'context_actions': context_actions
+            }
+            image_file_name = scenario_id
+            self.save_raster(show_dict, agent_types, past_frames_num, image_file_name,
+                        high_res_scale, low_res_scale)
+        
+        return rasters_high_res, rasters_low_res
+
+    def save_raster(self, result_dic, agent_type_num, past_frames_num, image_file_name,
+                    high_scale, low_scale):
+        # save rasters
+        path_to_save = './'
+
+        image_shape = None
+        for each_key in ['high_res_raster', 'low_res_raster']:
+            """
+            # channels:
+            # 0-19: road raster
+            # 20:: agent raster (33=3 (agent_types) * 11 (sample_frames_in_past))
+            """
+            each_img = result_dic[each_key]
+            road = each_img[:, :, :20]
+            agent = each_img[:, :, 20:]
+            # generate a color pallet of 20 in RGB space
+            color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
+            target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float32)
+            image_shape = target_image.shape
+            for i in range(20):
+                road_per_channel = road[:, :, i].copy()
+                # repeat on the third dimension into RGB space
+                # replace the road channel with the color pallet
+                if np.sum(road_per_channel) > 0:
+                    for k in range(3):
+                        target_image[:, :, k][road_per_channel == 1] = color_pallet[i, k]
+
+            # generate 9 values interpolated from 0 to 1
+            agent_colors = np.array([[0.01 * 255] * past_frames_num,
+                                    np.linspace(0, 255, past_frames_num),
+                                    np.linspace(255, 0, past_frames_num)]).transpose()
+
+            # print('test: ', past_frames_num, agent_type_num, agent.shape)
+            for i in range(past_frames_num):
+                for j in range(agent_type_num):
+                    # if j == 7:
+                    #     print('debug', np.sum(agent[:, :, j * 9 + i]), agent[:, :, j * 9 + i])
+                    agent_per_channel = agent[:, :, j * past_frames_num + i].copy()
+                    # agent_per_channel = agent_per_channel[:, :, None].repeat(3, axis=2)
+                    if np.sum(agent_per_channel) > 0:
+                        for k in range(3):
+                            target_image[:, :, k][agent_per_channel == 1] = agent_colors[i, k]
+            cv2.imwrite(os.path.join(path_to_save, image_file_name + '_' + str(each_key) + '.png'), target_image)
+            
+        for each_key in ['context_actions', 'trajectory_label']:
+            pts = result_dic[each_key]
+            for scale in [high_scale, low_scale]:
+                target_image = np.zeros(image_shape, dtype=np.float32)
+                for i in range(pts.shape[0]):
+                    x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
+                    y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
+                    if x < target_image.shape[0] and y < target_image.shape[1]:
+                        target_image[x, y, :] = [255, 255, 255]
+                cv2.imwrite(os.path.join(path_to_save, image_file_name + '_' + str(each_key) + '_' + str(scale) +'.png'), target_image)
+                
+        # print('length of action and labels: ', result_dic['context_actions'].shape, result_dic['trajectory_label'].shape)
+        # print('debug images saved to: ', path_to_save)
 
     def evaluation(self, pred_dicts, output_path=None, eval_method='waymo', **kwargs):
         if eval_method == 'waymo':

@@ -3,3 +3,4 @@ data/
 build
 **egg-info**
 *.so
+*.png
