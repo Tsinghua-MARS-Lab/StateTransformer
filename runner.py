@@ -223,10 +223,10 @@ class DataProcessArguments:
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
     past_sample_interval: Optional[int] = field(
-        default=4
+        default=5
     )
     future_sample_interval: Optional[int] = field(
-        default=4
+        default=2
     )
     debug_raster_path: Optional[str] = field(
         default=None
