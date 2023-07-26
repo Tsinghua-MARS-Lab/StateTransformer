@@ -10,7 +10,7 @@ from ..utils import common_layers
 
 
 class PointNetPolylineEncoder(nn.Module):
-    def __init__(self, in_channels, hidden_dim, num_layers=3, num_pre_layers=1, out_channels=None):
+    def __init__(self, in_channels, hidden_dim, num_layers=3, num_pre_layers=1, out_channels=None, return_multipoints_feature=False):
         super().__init__()
         self.pre_mlps = common_layers.build_mlps(
             c_in=in_channels,
@@ -23,6 +23,7 @@ class PointNetPolylineEncoder(nn.Module):
             ret_before_act=False
         )
         
+        self.return_multipoints_feature = return_multipoints_feature
         if out_channels is not None:
             self.out_mlps = common_layers.build_mlps(
                 c_in=hidden_dim, mlp_channels=[hidden_dim, out_channels], 
@@ -56,12 +57,21 @@ class PointNetPolylineEncoder(nn.Module):
         feature_buffers[polylines_mask] = polylines_feature_valid
 
         # max-pooling
-        feature_buffers = feature_buffers.max(dim=2)[0]  # (batch_size, num_polylines, C)
+        if not self.return_multipoints_feature:
+            feature_buffers = feature_buffers.max(dim=2)[0]  # (batch_size, num_polylines, C)
         
         # out-mlp 
         if self.out_mlps is not None:
-            valid_mask = (polylines_mask.sum(dim=-1) > 0)
+            if not self.return_multipoints_feature:
+                valid_mask = (polylines_mask.sum(dim=-1) > 0)
+            else:
+                valid_mask = polylines_mask
+            
             feature_buffers_valid = self.out_mlps(feature_buffers[valid_mask])  # (N, C)
-            feature_buffers = feature_buffers.new_zeros(batch_size, num_polylines, feature_buffers_valid.shape[-1])
+            
+            if not self.return_multipoints_feature:
+                feature_buffers = feature_buffers.new_zeros(batch_size, num_polylines, feature_buffers_valid.shape[-1])
+            else:
+                feature_buffers = feature_buffers.new_zeros(batch_size, num_polylines, num_points_each_polylines, feature_buffers_valid.shape[-1])
             feature_buffers[valid_mask] = feature_buffers_valid
         return feature_buffers

@@ -25,14 +25,16 @@ class MTREncoder(nn.Module):
             in_channels=self.model_cfg.NUM_INPUT_ATTR_AGENT + 1,
             hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_AGENT,
             num_layers=self.model_cfg.NUM_LAYER_IN_MLP_AGENT,
-            out_channels=self.model_cfg.D_MODEL
+            out_channels=self.model_cfg.D_MODEL,
+            return_multipoints_feature=True
         )
         self.map_polyline_encoder = self.build_polyline_encoder(
             in_channels=self.model_cfg.NUM_INPUT_ATTR_MAP,
             hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_MAP,
             num_layers=self.model_cfg.NUM_LAYER_IN_MLP_MAP,
             num_pre_layers=self.model_cfg.NUM_LAYER_IN_PRE_MLP_MAP,
-            out_channels=self.model_cfg.D_MODEL
+            out_channels=self.model_cfg.D_MODEL,
+            return_multipoints_feature=False
         )
 
         # build transformer encoder layers
@@ -50,13 +52,14 @@ class MTREncoder(nn.Module):
         self.self_attn_layers = nn.ModuleList(self_attn_layers)
         self.num_out_channels = self.model_cfg.D_MODEL
 
-    def build_polyline_encoder(self, in_channels, hidden_dim, num_layers, num_pre_layers=1, out_channels=None):
+    def build_polyline_encoder(self, in_channels, hidden_dim, num_layers, num_pre_layers=1, out_channels=None, return_multipoints_feature=False):
         ret_polyline_encoder = polyline_encoder.PointNetPolylineEncoder(
             in_channels=in_channels,
             hidden_dim=hidden_dim,
             num_layers=num_layers,
             num_pre_layers=num_pre_layers,
-            out_channels=out_channels
+            out_channels=out_channels,
+            return_multipoints_feature=return_multipoints_feature
         )
         return ret_polyline_encoder
 
@@ -154,6 +157,7 @@ class MTREncoder(nn.Module):
         map_polylines, map_polylines_mask = input_dict['map_polylines'].cuda(), input_dict['map_polylines_mask'].cuda() 
 
         obj_trajs_last_pos = input_dict['obj_trajs_last_pos'].cuda() 
+        obj_trajs_pos = input_dict['obj_trajs_pos'].cuda() 
         map_polylines_center = input_dict['map_polylines_center'].cuda() 
         track_index_to_predict = input_dict['track_index_to_predict']
 
@@ -164,16 +168,18 @@ class MTREncoder(nn.Module):
 
         # apply polyline encoder
         obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
-        obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, C)
+        obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)        
         map_polylines_feature = self.map_polyline_encoder(map_polylines, map_polylines_mask)  # (num_center_objects, num_polylines, C)
 
         # apply self-attn
-        obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
+        # obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
+        obj_valid_mask = obj_trajs_mask
         map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
+        n_out_embed = obj_polylines_feature.shape[-1]
 
-        global_token_feature = torch.cat((obj_polylines_feature, map_polylines_feature), dim=1) 
-        global_token_mask = torch.cat((obj_valid_mask, map_valid_mask), dim=1) 
-        global_token_pos = torch.cat((obj_trajs_last_pos, map_polylines_center), dim=1) 
+        global_token_feature = torch.cat((obj_polylines_feature.view(num_center_objects, num_objects*num_timestamps, n_out_embed), map_polylines_feature), dim=1) 
+        global_token_mask = torch.cat((obj_valid_mask.view(num_center_objects, -1), map_valid_mask), dim=1) 
+        global_token_pos = torch.cat((obj_trajs_pos.view(num_center_objects, num_objects*num_timestamps, -1), map_polylines_center), dim=1) 
 
         if self.use_local_attn:
             global_token_feature = self.apply_local_attn(
@@ -185,8 +191,8 @@ class MTREncoder(nn.Module):
                 x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
             )
 
-        obj_polylines_feature = global_token_feature[:, :num_objects]
-        map_polylines_feature = global_token_feature[:, num_objects:]
+        obj_polylines_feature = global_token_feature[:, :num_objects*num_timestamps].view(num_center_objects, num_objects, num_timestamps, n_out_embed)
+        map_polylines_feature = global_token_feature[:, num_objects*num_timestamps:][:, :, None, :].repeat(1, 1, num_timestamps, 1)
         assert map_polylines_feature.shape[1] == num_polylines
 
         # organize return features

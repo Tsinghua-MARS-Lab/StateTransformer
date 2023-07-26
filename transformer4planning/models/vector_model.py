@@ -102,15 +102,17 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             return_dict: Optional[bool] = None,
             **kwargs
             ):
+        
+        batch_size = input_dict['obj_trajs'].shape[0]
         # encoder
         device = input_dict['obj_trajs'].device
-        batch_dict = self.context_encoder({'batch_size': batch_size, 
-                                           'input_dict': input_dict, 
+        batch_dict = self.context_encoder({'input_dict': input_dict, 
                                            'batch_sample_count': batch_sample_count})
         
         obj_feature = batch_dict['obj_feature']
         map_feature = batch_dict['map_feature']
-        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, 256)
+        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        state_embeds = state_embeds.max(dim=1)[0]
         
         # traj
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
