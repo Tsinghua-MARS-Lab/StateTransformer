@@ -241,7 +241,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.key_points_decoder = None
         if self.predict_trajectory:
             out_features = 4 if model_args.predict_yaw else 2
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+            if not self.model_args.pred_key_points_only:
+                self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
             if self.ar_future_interval > 0:
                 self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
         if self.k > 1:
@@ -369,7 +370,15 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             # attention_mask[:, context_length * 2:] = 0
         elif self.ar_future_interval > 0:
             # use autoregressive future interval
-            future_key_points = trajectory_label[:, self.ar_future_interval-1::self.ar_future_interval, :]
+            if self.model_args.specified_key_points:
+                # 80, 40, 20, 10, 5
+                if self.model_args.forward_specified_key_points:
+                    selected_indices = [4, 9, 19, 39, 79]
+                else:
+                    selected_indices = [79, 39, 19, 9, 4]
+                future_key_points = trajectory_label[:, selected_indices, :]
+            else:
+                future_key_points = trajectory_label[:, self.ar_future_interval-1::self.ar_future_interval, :]
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
 
             future_key_points_aug = future_key_points.clone()
@@ -427,23 +436,25 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
-        traj_logits = self.traj_decoder(traj_hidden_state)
         loss = torch.tensor(0, dtype=torch.float32, device=device)
-
         if 'mse' in self.loss_fn:
             loss_fct = MSELoss(reduction="mean")
         elif 'l1' in self.loss_fn:
             loss_fct = SmoothL1Loss()
-        if self.task == "waymo":
-            loss_fct = MSELoss(reduction="none")
-            y_mask = ((trajectory_label!=-1).sum(-1)>0).view(batch_size, pred_length, 1)
-            _loss = (loss_fct(traj_logits[...,:2], trajectory_label[...,:2].to(device))*y_mask).sum()/(y_mask.sum()+1e-7)
-            loss += _loss
-        else:
-            if self.model_args.predict_yaw:
-                loss += loss_fct(traj_logits, trajectory_label.to(device)) * self.model_args.trajectory_loss_rescale
+        if not self.model_args.pred_key_points_only:
+            traj_logits = self.traj_decoder(traj_hidden_state)
+            if self.task == "waymo":
+                loss_fct = MSELoss(reduction="none")
+                y_mask = ((trajectory_label!=-1).sum(-1)>0).view(batch_size, pred_length, 1)
+                _loss = (loss_fct(traj_logits[...,:2], trajectory_label[...,:2].to(device))*y_mask).sum()/(y_mask.sum()+1e-7)
+                loss += _loss
             else:
-                loss += loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * self.model_args.trajectory_loss_rescale
+                if self.model_args.predict_yaw:
+                    loss += loss_fct(traj_logits, trajectory_label.to(device)) * self.model_args.trajectory_loss_rescale
+                else:
+                    loss += loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * self.model_args.trajectory_loss_rescale
+        else:
+            traj_logits = torch.zeros_like(trajectory_label[..., :2])
 
         if self.ar_future_interval > 0:
             """
@@ -563,7 +574,15 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
         # use autoregressive future interval
         trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
-        future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+        if self.model_args.specified_key_points:
+            # 80, 40, 20, 10, 5
+            if self.model_args.forward_specified_key_points:
+                selected_indices = [4, 9, 19, 39, 79]
+            else:
+                selected_indices = [79, 39, 19, 9, 4]
+            future_key_points = trajectory_label_dummy[:, selected_indices, :]
+        else:
+            future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
         future_key_embeds_dummy = self.action_m_embed(future_key_points)
         input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
@@ -605,19 +624,23 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             input_embeds[:, context_length * 2 + i, :] = key_point_embed[:, 0, :]
         # generate remaining trajectory
         # prepare attention mask
-        attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+        # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
         # attention_mask[:, context_length * 2 + key_points_num:] = 0
-        position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+        # position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
-            attention_mask=attention_mask,
+            # attention_mask=attention_mask,
+            attention_mask=None,
             position_ids=None,
             # **input_kwargs
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
-        traj_logits = self.traj_decoder(traj_hidden_state)
+        if self.traj_decoder is not None:
+            traj_logits = self.traj_decoder(traj_hidden_state)
+        else:
+            traj_logits = trajectory_label_dummy[..., :2]
         future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
 
         if self.k > 1:

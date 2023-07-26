@@ -145,6 +145,15 @@ class ModelArguments:
     visualize_prediction_to_path: Optional[str] = field(
         default=None
     )
+    pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    forward_specified_key_points: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
