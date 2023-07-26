@@ -466,7 +466,9 @@ def main(args):
                                                                    "frame_id": Value("int64"),
                                                                    "file_name": Value("string"),
                                                                    "map": Value("string"),
-                                                                   "timestamp": Value("int64")}))
+                                                                   "timestamp": Value("int64"),
+                                                                   "scenario_type": Value("string"),
+                                                                   }),)
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,
                                                 gen_kwargs={'shards': file_indices},

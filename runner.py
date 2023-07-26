@@ -158,6 +158,15 @@ class ModelArguments:
     visualize_prediction_to_path: Optional[str] = field(
         default=None
     )
+    pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    forward_specified_key_points: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -457,15 +466,15 @@ def main():
             recall=evaluate.load("recall")
         )
         model.clf_metrics = clf_metrics
-    elif model_args.next_token_scorer:
-        clf_metrics = dict(
-            accuracy=evaluate.load("accuracy"),
-            f1=evaluate.load("f1"),
-            precision=evaluate.load("precision"),
-            recall=evaluate.load("recall")
-        )
-        model.clf_metrics = clf_metrics
-
+    # elif model_args.next_token_scorer:
+    #     # loading default metrics requires network from hugging face
+    #     clf_metrics = dict(
+    #         accuracy=evaluate.load("accuracy_local"),
+    #         f1=evaluate.load("f1_local"),
+    #         precision=evaluate.load("precision_local"),
+    #         recall=evaluate.load("recall_local")
+    #     )
+    #     model.clf_metrics = clf_metrics
     if training_args.do_train:
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
