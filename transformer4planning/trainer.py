@@ -194,7 +194,15 @@ class PlanningTrainer(Trainer):
                     length_of_trajectory = trajectory_label_in_batch.shape[1]
                     prediction_key_points = prediction_trajectory_in_batch[:, :-length_of_trajectory, :]
                     prediction_trajectory_in_batch = prediction_trajectory_in_batch[:, -length_of_trajectory:, :]
-                    future_key_points = trajectory_label_in_batch[:, self.model.ar_future_interval - 1::self.model.ar_future_interval, :]
+                    if self.model.model_args.specified_key_points:
+                        # 80, 40, 20, 10, 5
+                        if self.model.model_args.forward_specified_key_points:
+                            selected_indices = [4, 9, 19, 39, 79]
+                        else:
+                            selected_indices = [79, 39, 19, 9, 4]
+                        future_key_points = trajectory_label_in_batch[:, selected_indices, :]
+                    else:
+                        future_key_points = trajectory_label_in_batch[:, self.model.ar_future_interval - 1::self.model.ar_future_interval, :]
                     ade_x_error_key_points = prediction_key_points[:, :, 0] - future_key_points[:, :, 0]
                     ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
                     fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
@@ -338,7 +346,6 @@ class PlanningTrainer(Trainer):
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics
-            result = dict()
             result[f"{metric_key_prefix}_accuracy"] = self.model.clf_metrics["accuracy"].compute()
             result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")

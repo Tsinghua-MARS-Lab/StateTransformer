@@ -48,25 +48,12 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="non-auto-gpt",
+        default="scratch-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        default="transfo-xl-wt103",
+        default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_auth_token: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
-        },
     )
     predict_result_saving_dir: Optional[str] = field(
         default=False,
@@ -104,10 +91,10 @@ class ModelArguments:
         default="mse",
     )
     task: Optional[str] = field(
-        default="waymo" # only for mmtransformer
+        default="nuplan" # only for mmtransformer
     )
     with_traffic_light: Optional[bool] = field(
-        default=False
+        default=True
     )
     autoregressive: Optional[bool] = field(
         default=False
@@ -136,7 +123,7 @@ class ModelArguments:
         default=True
     )
     raster_channels: Optional[int] = field(
-        default=0,
+        default=33,
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     predict_yaw: Optional[bool] = field(
@@ -158,6 +145,15 @@ class ModelArguments:
     visualize_prediction_to_path: Optional[str] = field(
         default=None
     )
+    pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    forward_specified_key_points: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -170,9 +166,7 @@ class DataTrainingArguments:
     saved_valid_dataset_folder: Optional[str] = field(
         default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
     )
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
+
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
@@ -200,9 +194,7 @@ class DataTrainingArguments:
             )
         },
     )    
-    dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The dataset name from hugging face used to push the model."}
-    )
+
     dataset_scale: Optional[float] = field(
         default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
@@ -240,10 +232,10 @@ class DataProcessArguments:
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
     past_sample_interval: Optional[int] = field(
-        default=4
+        default=5
     )
     future_sample_interval: Optional[int] = field(
-        default=4
+        default=2
     )
     debug_raster_path: Optional[str] = field(
         default=None
@@ -251,10 +243,6 @@ class DataProcessArguments:
 
 
 def main():
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
     model_args, data_args, config_args, data_process, training_args = parser.parse_args_into_dataclasses()
 
@@ -271,9 +259,6 @@ def main():
             else:
                 model_args.raster_channels = 1 + road_types + agent_types
 
-    # Set up pytorch backend
-    # if training_args.deepspeed is None:
-    #     torch.distributed.init_process_group(backend='nccl')
 
     # Setup logging
     logging.basicConfig(
@@ -375,6 +360,7 @@ def main():
             train_dataset = train_dataset.select(range(train_samples))
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+        
         if training_args.do_eval and 'test' in root_folders:
             # load test datasets
             test_datasets = []
@@ -420,10 +406,6 @@ def main():
 
             if training_args.do_eval:
                 test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                # split_dic = test_dataset.info.splits['train']
-                # split_dic.name = 'test'
-                # test_dataset.info.splits['test'] = split_dic
-                # del test_dataset.info.splits['train']
                 # add additional column for flagging test set
                 test_dataset.features.update({'split': Value('string')})
                 test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
@@ -436,11 +418,6 @@ def main():
     # loop split info and update for test set
     print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
 
-    # nuplan_dataset = dict(
-    #     train=train_dataset,
-    #     validation=test_dataset.shuffle(seed=training_args.seed),
-    #     test=test_dataset.shuffle(seed=training_args.seed),
-    # )
     nuplan_dataset = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
         validation=test_dataset.shuffle(seed=training_args.seed),
@@ -449,21 +426,16 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
-    if 'auto' in model_args.model_name and model_args.k == -1:
-        clf_metrics = dict(
-            accuracy=evaluate.load("accuracy"),
-            f1=evaluate.load("f1"),
-            precision=evaluate.load("precision"),
-            recall=evaluate.load("recall")
-        )
+    clf_metrics = dict(
+        accuracy=evaluate.load("accuracy"),
+        f1=evaluate.load("f1"),
+        precision=evaluate.load("precision"),
+        recall=evaluate.load("recall")
+    )
+    if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
         model.clf_metrics = clf_metrics
     elif model_args.next_token_scorer:
-        clf_metrics = dict(
-            accuracy=evaluate.load("accuracy"),
-            f1=evaluate.load("f1"),
-            precision=evaluate.load("precision"),
-            recall=evaluate.load("recall")
-        )
+        assert model_args.k > 1 and model_args.ar_future_interval > 0, "ar_future_interval must be greater than 0 and k must be greater than 1"
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
@@ -582,14 +554,13 @@ def main():
             for itr, input in enumerate(tqdm(test_dataloader)):
                 # move batch to device
                 for each_key in input:
-                    if isinstance(examples[each_key], type(torch.tensor(0))):
-                        input[each_key] = input[each_key].to(device)
+                    if isinstance(input[each_key], type(torch.tensor(0))):
+                        input[each_key] = input[each_key].to("cuda")
 
-                input_length = training_args.per_device_eval_batch_size
-                if model_args.autoregressive:
+                eval_batch_size = training_args.per_device_eval_batch_size
+                if model_args.autoregressive or model_args.ar_future_interval > 0:
                     # Todo: add autoregressive predict
                     traj_pred = model.generate(**input)
-                    traj_label = model(**input)
                 else:
                     output = model(**copy.deepcopy(input))
                     traj_pred = output.logits                   
@@ -597,8 +568,8 @@ def main():
                         file_name = input['file_name']
                         current_frame_idx = input['frame_id']
                     except:
-                        file_name = ["null"] * input_length
-                        current_frame_idx = -1 * torch.ones(input_length)
+                        file_name = ["null"] * eval_batch_size
+                        current_frame_idx = -1 * torch.ones(eval_batch_size)
                     prediction_results['file_names'].extend(file_name)
                     prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
                     if data_args.dagger:
@@ -606,7 +577,7 @@ def main():
                         dagger_results['frame_id'].extend(list(current_frame_idx.cpu().numpy()))
                 
                 if model_args.predict_trajectory:
-                    if model_args.autoregressive:
+                    if model_args.autoregressive:# trajectory label as token case
                         trajectory_label = model.compute_normalized_points(input["trajectory"][:, 10:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
                         
@@ -617,15 +588,13 @@ def main():
                         else:
                             trajectory_label = input["trajectory_label"][:, 1::2, :]
 
-                    # print("trajectory_label", trajectory_label[0, :, :2])
-                    # print("traj_pred", traj_pred[0, :, :2])
-                    loss = loss_fn(trajectory_label[:, :, :2], traj_pred[:, :, :2])
+                    loss = loss_fn(trajectory_label[:, :, :2], traj_pred[:, -trajectory_label.shape[1]:, :2])
                     end_trajectory_label = trajectory_label[:, -1, :]
                     end_point = traj_pred[:, -1, :]
                     end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])
                     end_bias_y.append(end_trajectory_label[:, 1] - end_point[:, 1])
-                    all_bias_x.append(trajectory_label[:, :, 0] - traj_pred[:, :, 0])
-                    all_bias_y.append(trajectory_label[:, :, 1] - traj_pred[:, :, 1])
+                    all_bias_x.append(trajectory_label[:, :, 0] - traj_pred[:, -trajectory_label.shape[1]:, 0])
+                    all_bias_y.append(trajectory_label[:, :, 1] - traj_pred[:, -trajectory_label.shape[1]:, 1])
                     losses.append(loss)
 
             if model_args.predict_trajectory:
@@ -732,15 +701,6 @@ def main():
         #             writer.write("\n".join(predictions))
 
     kwargs = {"finetuned_from": model_args.model_pretrain_name_or_path, "tasks": "NuPlanPlanning"}
-    
-    # push to hub?
-    if data_args.dataset_name is not None:
-        kwargs["dataset_tags"] = data_args.dataset_name
-        if data_args.dataset_config_name is not None:
-            kwargs["dataset_args"] = data_args.dataset_config_name
-            kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
-        else:
-            kwargs["dataset"] = data_args.dataset_name
 
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)

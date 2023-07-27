@@ -247,7 +247,7 @@ class NuPlanDL:
             data_to_return = {'skip': True}
             return data_to_return, new_files_loaded
 
-        data_to_return['type'] = scenario_type
+        data_to_return['scenario_type'] = scenario_type
         # goal_state = scenario.get_mission_goal()
         goal_state = scenario.get_expert_goal_state()
         if goal_state is None:
@@ -766,7 +766,7 @@ class NuPlanDL:
 
 
         ego_state = scenario.get_ego_state_at_iteration(0)
-        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 999999,
+        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 1e8,
                                                                       selected_objs)
 
         all_selected_objs_to_render = []

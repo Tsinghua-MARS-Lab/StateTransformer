@@ -74,10 +74,6 @@ class ModelArguments:
     loss_fn: Optional[str] = field(
         default="mse",
     )
-    k: Optional[int] = field(
-        default=1,
-        metadata={"help": "Set k for top-k predictions"},
-    )
     next_token_scorer: Optional[bool] = field(
         default=False,
         metadata={"help": "Whether to use next token scorer for prediction."},
@@ -85,9 +81,66 @@ class ModelArguments:
     task: Optional[str] = field(
         default="nuplan" # only for mmtransformer
     )
+    with_traffic_light: Optional[bool] = field(
+        default=False
+    )
+    autoregressive: Optional[bool] = field(
+        default=False
+    )
+    k: Optional[int] = field(
+        default=1,
+        metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
+    )
+    next_token_scorer: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to use next token scorer for prediction."},
+    )
     past_seq: Optional[int] = field(
+        # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
+        # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
         default=10,
         metadata={"help": "past frames to include for prediction/planning."},
+    )
+    x_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    y_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    tokenize_label: Optional[bool] = field(
+        default=True
+    )
+    raster_channels: Optional[int] = field(
+        default=0,
+        metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
+    )
+    predict_yaw: Optional[bool] = field(
+        default=False
+    )
+    ar_future_interval: Optional[int] = field(
+        default=0,
+        metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
+    )
+    arf_x_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    arf_y_random_walk: Optional[float] = field(
+        default=0.0
+    )
+    trajectory_loss_rescale: Optional[float] = field(
+        default=1.0
+    )
+    visualize_prediction_to_path: Optional[str] = field(
+        default=None
+    )
+    pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    forward_specified_key_points: Optional[bool] = field(
+        default=False
     )
 
 def rotate_array(origin, points, angle, tuple=False):
