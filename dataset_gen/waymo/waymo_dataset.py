@@ -536,11 +536,11 @@ class WaymoDataset(DatasetTemplate):
                                                                            out_ret_infos['trajectory_label'][i, ...], out_ret_infos['context_actions'][i, ...],
                                                                            str(i) + '_' + ret_infos['scenario_id'][i])
             
-            rasters_high_res.append(rasters_high)
-            raster_low_res.append(rasters_low)
+            rasters_high_res.append(rasters_high[None, ...])
+            raster_low_res.append(rasters_low[None, ...])
         
-        out_ret_infos['high_res_raster'] = np.concatenate(rasters_high_res)  
-        out_ret_infos['low_res_raster'] = np.concatenate(raster_low_res)  
+        out_ret_infos['high_res_raster'] = np.concatenate(rasters_high_res, axis=0)  
+        out_ret_infos['low_res_raster'] = np.concatenate(raster_low_res, axis=0)  
         
         return out_ret_infos
     

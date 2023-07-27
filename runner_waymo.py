@@ -359,11 +359,15 @@ def main():
     
     cfg_from_yaml_file("/home/QJ00367/danjiao/dlnets/transformer4planning/config/sample_config.yaml", cfg)
     
-    train_set = __all__[cfg.DATA_CONFIG.DATASET](
-        dataset_cfg=cfg.DATA_CONFIG,
-        training=True,
-        logger=logger, 
-    )
+    nuplan_dataset = dict()
+    
+    if training_args.do_train:
+        train_set = __all__[cfg.DATA_CONFIG.DATASET](
+            dataset_cfg=cfg.DATA_CONFIG,
+            training=True,
+            logger=logger, 
+        )
+        nuplan_dataset.update(train=train_set)
     
     if training_args.do_eval:
         test_set = __all__[cfg.DATA_CONFIG.DATASET](
@@ -371,12 +375,7 @@ def main():
             training=False,
             logger=logger, 
         )
-    
-    nuplan_dataset = dict(
-        train=train_set
-    )
-    
-    if training_args.do_eval:
+
         nuplan_dataset.update(validation=test_set)
     
     if training_args.do_predict:
