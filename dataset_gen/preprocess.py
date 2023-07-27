@@ -212,7 +212,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     # load agent and traffic dictionaries
     # WARNING: load some pickles can be extremely slow costs about 500-1000 seconds for las vegas map
-    pickle_path = os.path.join(data_path, f"{split}",  f"{filename}.pkl")
+    pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
     # if pickle_path not in all_pickles_dic:
     #     if os.path.exists(pickle_path):
     #         # current_time = time.time()
@@ -252,7 +252,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         # if split == 'test':
         #     print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
     else:
-        print(f"Error: cannot load {filename} from {data_path} {split} with {map}")
+        print(f"Error: cannot load {filename} from {data_path} with {map}")
         return None
 
     # if new version of data, using relative frame_id
