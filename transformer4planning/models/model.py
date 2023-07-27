@@ -1,4 +1,4 @@
-from transformers import GPT2Model,GPT2PreTrainedModel
+from transformers import GPT2Model,GPT2PreTrainedModel, GPT2Tokenizer
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
@@ -47,6 +47,10 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.model_parallel = False
         self.device_map = None
         self.with_traffic_light = model_args.with_traffic_light
+        if self.model_args.token_scenario_tag:
+            self.tag_tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+            self.tag_tokenizer.pad_token = self.tag_tokenizer.eos_token
+            self.tag_embedding = nn.Embedding(self.tag_tokenizer.vocab_size, config.n_embd)
         self.post_init()
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
@@ -96,6 +100,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             context_actions: Optional[torch.LongTensor] = None,
             high_res_raster: Optional[torch.LongTensor] = None,
             low_res_raster: Optional[torch.LongTensor] = None,
+            scenario_type: Optional[str] = None,
             past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
             attention_mask: Optional[torch.FloatTensor] = None,
             token_type_ids: Optional[torch.LongTensor] = None,
@@ -146,6 +151,14 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         )
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+        
+        if self.model_args.token_scenario_tag:
+            scenario_tag_ids = list()
+            for i in range(batch_size):
+                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=10, padding='max_length')["input_ids"]).unsqueeze(0))
+            scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
+            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
+            input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
 
         if self.ar_future_interval == 0:
             # to keep input and output at the same dimension
@@ -306,6 +319,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         pred_length = kwargs.get("pred_length", None)
         trajectory_label = kwargs.get("trajectory_label", None)
         context_actions = kwargs.get("context_actions", None)
+        scenario_type = kwargs.get("scenario_type", None)
         """
         Used for generate with key points
         """
@@ -344,6 +358,17 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         )
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+        if self.model_args.token_scenario_tag:
+            scenario_tag_ids = list()
+            for i in range(batch_size):
+                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=10, padding='max_length')["input_ids"]).unsqueeze(0))
+            scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
+            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
+            input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
+            scenario_type_len = 10
+        else:
+            scenario_type_len = 0
+
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
         # use autoregressive future interval
         trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
@@ -368,7 +393,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
             # attention_mask[:, context_length * 2 + i + 1:] = 0
             # position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-            input_embeds_current = input_embeds[:, :context_length * 2 + i, :]
+            input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
             attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
             position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
@@ -378,7 +403,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 # **input_kwargs
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            future_key_point_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
@@ -394,7 +419,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
-            input_embeds[:, context_length * 2 + i, :] = key_point_embed[:, 0, :]
+            input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
         # generate remaining trajectory
         # prepare attention mask
         # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
@@ -414,7 +439,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             traj_logits = self.traj_decoder(traj_hidden_state)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
 
         if self.k > 1:
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
@@ -505,3 +530,8 @@ def build_models(model_args):
         print('Transfer' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model
 
+if __name__ == "__main__":
+    tag_tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tag_tokenizer.pad_token = tag_tokenizer.eos_token
+    ids = tag_tokenizer('turn right', max_length=4, padding='max_length')['input_ids']
+    print("ids")

@@ -464,6 +464,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["map"] = sample['map']
     result_to_return["split"] = sample['split']
     result_to_return["frame_id"] = sample['frame_id']
+    result_to_return["scenario_type"] = sample["scenario_type"]
 
     del agent_dic
     del road_dic

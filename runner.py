@@ -154,6 +154,9 @@ class ModelArguments:
     forward_specified_key_points: Optional[bool] = field(
         default=False
     )
+    token_scenario_tag: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
