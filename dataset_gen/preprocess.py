@@ -105,8 +105,28 @@ def waymo_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwar
 def waymo_collate_func_offline(batch, **encode_kwargs): 
     # process as data dictionary
     result = dict()
+    
     for key in batch[0].keys():
-        result[key] = torch.cat([d[key] for d in batch], dim=0)
+        if key == "agent_trajs":
+            assert len(batch[0][key].shape) == 4
+            _, T, _, H = batch[0][key].shape
+            ego_length, agent_length = [], []
+            for d in batch:
+                ego_length.append(d[key].shape[0])
+                agent_length.append(d[key].shape[2])
+                
+            ego_length_total = sum(ego_length)
+            max_length = max(agent_length)
+
+            agent_trajs = torch.zeros((ego_length_total, T, max_length, H))
+            last_ego = 0
+            for i, d in enumerate(batch): 
+                agent_trajs[last_ego:last_ego + ego_length[i], :, :agent_length[i], :] = d[key]
+                last_ego = last_ego + ego_length[i]
+            
+            result[key] = agent_trajs
+            
+        else: result[key] = torch.cat([d[key] for d in batch], dim=0)
     return result
 
 def augmentation():

@@ -259,4 +259,94 @@ class GPTModelWaymo(GPTModelNuPlan):
 
         return input_embedding, ego_mask, gt
 
+class GPTModelDemo(GPTModelWaymo):
 
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
+
+        feature_dim = 40 * 80 if self.model_args.tokenize_label else 2
+        self.ego_encoder = nn.Sequential(nn.Linear(feature_dim, self.model_args.d_model), nn.Tanh())
+
+    def forward(
+        self,
+        agent_trajs,
+
+        past_key_values = None,
+        attention_mask = None,
+        token_type_ids = None,
+        position_ids = None,
+        head_mask = None,
+        encoder_hidden_states = None,
+        encoder_attention_mask = None,
+        use_cache = None,
+        output_attentions = None,
+        output_hidden_states = None,
+        return_dict = None,
+    ):
+        """
+        agent_trajs: num_egos, num_frames, num_agents (128), c (c=10)
+        map_polyline: num_egos, num_frames, num_polylines (768), num_points (20), 9
+        """
+        device = agent_trajs.device
+        gt = agent_trajs[:, 1:]
+        ego_embedding = self.ego_encoder(agent_trajs[:, :-1])
+
+        transformer_outputs = self.transformer(
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=ego_embedding,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        hidden_states = transformer_outputs[0]
+        b, s, _ = hidden_states.shape
+
+        if self.traj_decoder is not None:
+            action_logits = self.traj_decoder(hidden_states.to(device))
+
+        loss = torch.tensor(0, dtype=torch.float32, device=device)
+
+        if self.k == 1:
+            loss_fct = torch.nn.MSELoss(reduction='none')
+            loss_to_add = loss_fct(action_logits, gt).view(b, s, 2)
+            loss_to_add = loss_to_add
+            loss += torch.mean(loss_to_add)
+        else:
+            raise NotImplementedError
+            # k_results = action_logits.reshape(b, s, self.k, 2)
+            # loss_fct = torch.nn.MSELoss()
+            # losses = []  # length of b * s
+            # min_indices = []  # length of b
+            # for i in range(b):
+            #     per_batch_losses = []  # length of s, [x, x, ..]
+            #     per_batch_indices = []  # length of s, [3, 2, 1, 0, ..]
+            #     for j in range(s):
+            #         per_sequence_losses = []  # length of k
+            #         for k in range(self.k):
+            #             loss_to_add = loss_fct(k_results[i, j, k, :], gt[i, j, :2].to(device)) * 100
+            #             per_sequence_losses.append(loss_to_add)
+            #         min_loss = min(per_sequence_losses)
+            #         min_loss_index = per_sequence_losses.index(min_loss)
+            #         per_batch_losses.append(min_loss)
+            #         per_batch_indices.append(min_loss_index)
+            #     losses += per_batch_losses
+            #     min_indices.append(per_batch_indices)
+            # loss += sum(losses) / b / s
+            # min_indices = torch.tensor(min_indices).to(device)
+
+        return CausalLMOutputWithCrossAttentions(
+            loss=loss,
+            logits=action_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+            cross_attentions=transformer_outputs.cross_attentions,
+        )

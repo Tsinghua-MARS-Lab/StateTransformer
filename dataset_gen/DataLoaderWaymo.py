@@ -37,7 +37,7 @@ class WaymoDL:
         src_files = glob.glob(os.path.join(self.data_path, '*.tfrecord*'))
         src_files.sort()
         
-        self.global_file_names = src_files[:10]
+        self.global_file_names = src_files[0:100]
         # self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])
         # self.global_file_names = sorted([os.path.join(self.data_path, each_path) for each_path in os.listdir(self.data_path) if each_path[0] != '.'])[:12000]
         self.total_file_num = len(self.global_file_names)

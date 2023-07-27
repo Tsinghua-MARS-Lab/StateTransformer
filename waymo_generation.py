@@ -375,8 +375,9 @@ def main(args):
                 num_egos = track_index_to_predict.shape[0]
 
                 num_agents, num_frames, num_attrs = agent_trajs.shape
-                agent_trajs_res = torch.zeros((num_egos, 512, num_frames, num_attrs))
                 if dynamic_center:
+                    num_agents_input = 550
+                    agent_trajs_res = torch.zeros((num_egos, num_agents_input, num_frames, num_attrs))
                     agent_trajs_res[:, :, 0, 0], agent_trajs_res[:, :, 0, 1] = 0, 0
                     for frame in range(num_frames):
                         center, heading = agent_trajs[track_index_to_predict, frame, :3], agent_trajs[track_index_to_predict, frame, 6]
@@ -395,7 +396,7 @@ def main(args):
                                 if frame < num_frames - 1: agent_trajs_res[i, :, frame + 1, -1] = False
                 else:
                     center, heading = agent_trajs[track_index_to_predict, 10, :3], agent_trajs[track_index_to_predict, 10, 6]
-                    agent_trajs_res[:, :num_agents, :, :] = transform_trajs_to_center_coords(agent_trajs, center, heading, 6, dynamic_center)
+                    agent_trajs_res = transform_trajs_to_center_coords(agent_trajs, center, heading, 6, dynamic_center)
                     map_polylines_data, map_polylines_mask = create_map_data_for_center_objects(
                                 center_objects=center, heading=heading, map_infos=map_infos,
                                 center_offset=(30.0, 0),
@@ -419,6 +420,7 @@ def main(args):
     file_indices = []
     for i in range(args.num_proc):
         file_indices += range(data_loader.total_file_num)[i::args.num_proc]
+
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
     
@@ -461,10 +463,10 @@ if __name__ == '__main__':
     parser.add_argument('--starting_file_num', type=int, default=0)
     parser.add_argument('--ending_file_num', type=int, default=1000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
-    parser.add_argument('--cache_folder', type=str, default='/localdata_ssd/liderun/waymo_debug_cache')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/waymo_training_cache')
 
     parser.add_argument('--train', default=False, action='store_true')   
-    parser.add_argument('--num_proc', type=int, default=10)
+    parser.add_argument('--num_proc', type=int, default=20)
 
     parser.add_argument('--sample_interval', type=int, default=5)
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
