@@ -247,7 +247,7 @@ class NuPlanDL:
             data_to_return = {'skip': True}
             return data_to_return, new_files_loaded
 
-        data_to_return['type'] = scenario_type
+        data_to_return['scenario_type'] = scenario_type
         # goal_state = scenario.get_mission_goal()
         goal_state = scenario.get_expert_goal_state()
         if goal_state is None:
