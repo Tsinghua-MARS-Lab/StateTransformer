@@ -157,6 +157,9 @@ class ModelArguments:
     token_scenario_tag: Optional[bool] = field(
         default=False
     )
+    max_token_len: Optional[int] = field(
+        default=20
+    )
 
 @dataclass
 class DataTrainingArguments:

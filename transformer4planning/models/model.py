@@ -48,7 +48,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.device_map = None
         self.with_traffic_light = model_args.with_traffic_light
         if self.model_args.token_scenario_tag:
-            self.tag_tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+            self.tag_tokenizer = GPT2Tokenizer.from_pretrained(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'))
             self.tag_tokenizer.pad_token = self.tag_tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tag_tokenizer.vocab_size, config.n_embd)
         self.post_init()
@@ -155,7 +155,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         if self.model_args.token_scenario_tag:
             scenario_tag_ids = list()
             for i in range(batch_size):
-                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=10, padding='max_length')["input_ids"]).unsqueeze(0))
+                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
             scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
@@ -361,11 +361,11 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         if self.model_args.token_scenario_tag:
             scenario_tag_ids = list()
             for i in range(batch_size):
-                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=10, padding='max_length')["input_ids"]).unsqueeze(0))
+                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
             scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
-            scenario_type_len = 10
+            scenario_type_len = self.model_args.max_token_len
         else:
             scenario_type_len = 0
 
