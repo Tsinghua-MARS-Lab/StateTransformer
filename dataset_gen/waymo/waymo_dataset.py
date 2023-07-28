@@ -16,6 +16,7 @@ import shapely
 from dataset_gen.waymo.dataset_template import DatasetTemplate
 import dataset_gen.waymo.common_util as common_utils
 from dataset_gen.waymo.config import cfg
+from dataset_gen.waymo.waymo_eval import waymo_evaluation
 from transformer4planning.utils import generate_contour_pts
 
 
@@ -471,13 +472,13 @@ class WaymoDataset(DatasetTemplate):
 
         return map_polylines, map_polylines_mask, map_polylines_center
 
-    def generate_prediction_dicts(self, batch_dict, output_path=None):
+    def generate_prediction_dicts(self, batch_dict, batch_pred_dicts):
         """
 
         Args:
             batch_dict:
                 pred_scores: (num_center_objects, num_modes)
-                pred_trajs: (num_center_objects, num_modes, num_timestamps, 7)
+                pred_trajs: (num_center_objects, num_modes, num_timestamps, 2)
 
               input_dict:
                 center_objects_world: (num_center_objects, 10)
@@ -487,12 +488,12 @@ class WaymoDataset(DatasetTemplate):
         """
         input_dict = batch_dict['input_dict']
 
-        pred_scores = batch_dict['pred_scores']
-        pred_trajs = batch_dict['pred_trajs']
+        pred_trajs = batch_pred_dicts['logits'][:, None, ...]
+        pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
         center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
 
         num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
-        assert num_feat == 7
+        # assert num_feat == 7
 
         pred_trajs_world = common_utils.rotate_points_along_z(
             points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
@@ -696,7 +697,6 @@ class WaymoDataset(DatasetTemplate):
 
     def evaluation(self, pred_dicts, output_path=None, eval_method='waymo', **kwargs):
         if eval_method == 'waymo':
-            from .waymo_eval import waymo_evaluation
             try:
                 num_modes_for_eval = pred_dicts[0][0]['pred_trajs'].shape[0]
             except:
