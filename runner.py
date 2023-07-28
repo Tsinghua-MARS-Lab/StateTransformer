@@ -167,6 +167,12 @@ class ModelArguments:
     forward_specified_key_points: Optional[bool] = field(
         default=False
     )
+    token_scenario_tag: Optional[bool] = field(
+        default=False
+    )
+    max_token_len: Optional[int] = field(
+        default=20
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -310,23 +316,23 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Handle config loading and saving
-    if config_args.load_model_config_from_path is not None:
-        # Load the data class object from the JSON file
-        model_parser = HfArgumentParser(ModelArguments)
-        model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
-        print(model_args)
-        logger.warning("Loading model args, this will overwrite model args from command lines!!!")
-    if config_args.load_data_config_from_path is not None:
-        # Load the data class object from the JSON file
-        data_parser = HfArgumentParser(DataTrainingArguments)
-        data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
-        logger.warning("Loading data args, this will overwrite data args from command lines!!!")
-    if config_args.save_model_config_to_path is not None:
-        with open(config_args.save_model_config_to_path, 'w') as f:
-            json.dump(model_args.__dict__, f, indent=4)
-    if config_args.save_data_config_to_path is not None:
-        with open(config_args.save_data_config_to_path, 'w') as f:
-            json.dump(data_args.__dict__, f, indent=4)
+    # if config_args.load_model_config_from_path is not None:
+    #     # Load the data class object from the JSON file
+    #     model_parser = HfArgumentParser(ModelArguments)
+    #     model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
+    #     print(model_args)
+    #     logger.warning("Loading model args, this will overwrite model args from command lines!!!")
+    # if config_args.load_data_config_from_path is not None:
+    #     # Load the data class object from the JSON file
+    #     data_parser = HfArgumentParser(DataTrainingArguments)
+    #     data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
+    #     logger.warning("Loading data args, this will overwrite data args from command lines!!!")
+    # if config_args.save_model_config_to_path is not None:
+    #     with open(config_args.save_model_config_to_path, 'w') as f:
+    #         json.dump(model_args.__dict__, f, indent=4)
+    # if config_args.save_data_config_to_path is not None:
+    #     with open(config_args.save_data_config_to_path, 'w') as f:
+    #         json.dump(data_args.__dict__, f, indent=4)
 
     # Detecting last checkpoint.
     last_checkpoint = None
