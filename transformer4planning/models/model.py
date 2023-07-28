@@ -10,7 +10,6 @@ import torch.nn as nn
 import evaluate
 import copy
 
-
 class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
@@ -120,7 +119,6 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1]
-
         scenario_type = kwargs.get("scenario_type", None)
 
         if self.model_args.x_random_walk > 0 and self.training:
@@ -345,11 +343,11 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         """
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1] if pred_length is None else pred_length
-
-        if self.model_args.x_random_walk > 0 and self.training:
+        
+        if self.model_args.x_random_walk > 0:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
-        if self.model_args.y_random_walk > 0 and self.training:
+        if self.model_args.y_random_walk > 0:
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
@@ -600,109 +598,3 @@ def build_models(model_args):
         print('Transfer' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model
 
-if  __name__ == '__main__':
-    import datasets
-    import argparse, time, pickle
-    import matplotlib.pyplot as plt
-    from transformers import HfArgumentParser
-    from transformer4planning.utils import ModelArguments
-    parser = HfArgumentParser((ModelArguments))
-    model_args = parser.parse_args()
-    model_args.d_embed = 768
-    model_args.d_model = 768
-    model_args.d_inner = 3072
-    model_args.n_layers = 12
-    model_args.n_heads = 12
-    model_args.model_name = "scratch-auto-gpt"
-    model_args.model_pretrain_name_or_path = "/home/shiduozhang/nuplan/autoregressive"
-    model_args.task = "nuplan"
-    model_args.with_traffic_light = True
-    clf_metrics = evaluate.combine(["accuracy", "f1", "precision", "recall"])
-    model = build_models(model_args)
-
-    def compute_world_points(pred_traj, yaw=0):
-        ego_trajectory = np.zeros((1, 3))
-        ego_trajectory[-1] = yaw
-        next_world_coor_trajectories = list()
-        for idx in range(0, pred_traj.shape[0]):
-            cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-            offset_x = pred_traj[idx, 0] * cos_ + pred_traj[idx, 1] * sin_
-            offset_y = pred_traj[idx, 1] * cos_ - pred_traj[idx, 0] * sin_
-            next_ego_traj = [ego_trajectory[-1][0] + offset_x,
-                            ego_trajectory[-1][1] + offset_y,
-                            ego_trajectory[-1][2] + pred_traj[idx, -1]]
-            ego_trajectory = np.concatenate((ego_trajectory, np.array(next_ego_traj.copy()).reshape(1, -1)), axis=0)
-            next_world_coor_trajectories.append(next_ego_traj)
-
-        next_world_coor_trajectories = np.array(next_world_coor_trajectories)
-        next_world_coor_points = next_world_coor_trajectories[::2]
-        next_world_coor_x = next_world_coor_trajectories[:,0]
-        next_world_coor_y = next_world_coor_trajectories[:,1]
-        return next_world_coor_x - yaw, next_world_coor_y - yaw
-
-    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/boston_byscenario_autoregressive/")
-    # dataset = datasets.load_from_disk("/home/shiduozhang/nuplan/dataset/nsm_autoregressive_test/")
-    # print(dataset.features)
-    dataset = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
-    example = dataset['train'][0]
-    labels = model.tokenize(example["trajectory"])[9:]
-    model.eval()
-    model.clf_metrics = dict()
-    output = model(
-        # trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
-        # context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
-        trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
-        high_res_raster=torch.cat([example['high_res_raster'].unsqueeze(0),example['high_res_raster'].unsqueeze(0)]),
-        low_res_raster=torch.cat([example['low_res_raster'].unsqueeze(0),example['low_res_raster'].unsqueeze(0)]),
-        return_dict=True,
-    )
-    result = model.generate(
-        # trajectory_label=torch.cat([example['trajectory_label'].unsqueeze(0),example['trajectory_label'].unsqueeze(0)], dim=0),
-        # context_actions=torch.cat([example['context_actions'].unsqueeze(0),example['context_actions'].unsqueeze(0)]) ,
-        trajectory = torch.cat([example['trajectory'].unsqueeze(0),example['trajectory'].unsqueeze(0)], dim=0),
-        high_res_raster=torch.cat([example['high_res_raster'].unsqueeze(0),example['high_res_raster'].unsqueeze(0)]),
-        low_res_raster=torch.cat([example['low_res_raster'].unsqueeze(0),example['low_res_raster'].unsqueeze(0)]),
-        return_dict=True,
-    )
-    pred_traj = result
-
-    gt_traj = example['trajectory'][9:].cpu().numpy()
-    loss_fn = nn.MSELoss()
-    loss = loss_fn(pred_traj, example['trajectory_label'][1::2])
-    print("loss", loss)
-    pred_x, pred_y = pred_traj[0, :, 0].detach().cpu().numpy(), pred_traj[0, :, 1].detach().cpu().numpy()
-    gt_x, gt_y = gt_traj[:, 0], gt_traj[:, 1]
-    fig = plt.figure(figsize=(200,100))
-    ax1 = fig.add_subplot(1,1,1)
-    ax1.set_xlim([-100, 100])
-    ax1.set_ylim([-100, 100])
-    ax1.scatter(gt_x[::4], gt_y[::4], color='green')
-    ax1.scatter(pred_x[::4], pred_y[::4], color='red')
-    plt.show()
-
-
-    ## ground truth inverse computation
-    with open("visulization/rasters/test/frame1k.pkl", "rb") as f:
-        example = pickle.load(f)
-        trajectory = example["trajectory"]
-        tan = np.divide(trajectory[:, 1], trajectory[:, 0])
-        yaw_np = np.arctan(tan)
-        delta_yaw = yaw_np - trajectory[:, 2]
-        gt = example["gt"]
-        yaw = example["world_yaw"]
-    gt_x, gt_y = gt[:, 0], gt[:, 1]
-    world_trajectory = model.compute_normalized_points(torch.tensor(trajectory).unsqueeze(0), yaw)
-    x = world_trajectory[0, :, 0].numpy() - yaw
-    y = world_trajectory[0, :, 1].numpy() - yaw
-    # x, y = compute_world_points(trajectory, yaw)
-    diff_x = x - gt_x
-    diff_y = y - gt_y
-    fig = plt.figure(figsize=(200,100))
-    ax1 = fig.add_subplot(1,1,1)
-    ax1.set_xlim([-100, 100])
-    ax1.set_ylim([-100, 100])
-    ax1.plot(gt_x, gt_y, color='green')
-    ax1.plot(x, y, color='red')
-    plt.show()
-
-    print("done")

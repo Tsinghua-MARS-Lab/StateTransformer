@@ -24,7 +24,13 @@ def main(args):
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
     #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
-    #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
+    #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_singapore",
+    # }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
+    #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
     # }
     data_path = {
         'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
@@ -395,7 +401,7 @@ def main(args):
         if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
             args.ending_file_num = total_file_num
         file_indices = list(range(args.starting_file_num, args.ending_file_num))
-
+        total_file_num = args.ending_file_num - args.starting_file_num
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:

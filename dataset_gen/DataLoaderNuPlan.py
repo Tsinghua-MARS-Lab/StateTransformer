@@ -766,7 +766,7 @@ class NuPlanDL:
 
 
         ego_state = scenario.get_ego_state_at_iteration(0)
-        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 999999,
+        all_selected_map_instances = map_api.get_proximal_map_objects(ego_state.car_footprint.center, 1e8,
                                                                       selected_objs)
 
         all_selected_objs_to_render = []
