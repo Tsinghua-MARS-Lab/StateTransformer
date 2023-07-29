@@ -106,7 +106,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
         agent = each_img[:, :, 25:]
         # generate a color pallet of 20 in RGB space
         color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
-        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float)
+        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float32)
         image_shape = target_image.shape
         for i in range(21):
             road_per_channel = road[:, :, i].copy()
@@ -142,7 +142,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
     for each_key in ['context_actions', 'trajectory_label']:
         pts = result_dic[each_key]
         for scale in [high_scale, low_scale]:
-            target_image = np.zeros(image_shape, dtype=np.float)
+            target_image = np.zeros(image_shape, dtype=np.float32)
             for i in range(pts.shape[0]):
                 x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
@@ -195,14 +195,14 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     assert len(traffic_light_ids) == len(traffic_light_states), f'length of ids is not same as length of states, ids: {traffic_light_ids}, states: {traffic_light_states}'
 
     if all_maps_dic is None:
-        print('loading map from disk ', map)
+        # print('loading map from disk ', map)
         if os.path.exists(os.path.join(data_path, "map", f"{map}.pkl")):
             with open(os.path.join(data_path, "map", f"{map}.pkl"), "rb") as f:
                 road_dic = pickle.load(f)
         else:
             print(f"Error: cannot load map {map} from {data_path}")
             return None
-        print('loading map from disk done ', map)
+        # print('loading map from disk done ', map)
     else:
         if map in all_maps_dic:
             road_dic = all_maps_dic[map]
@@ -273,6 +273,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     # initialize rasters
     origin_ego_pose = agent_dic["ego"]["pose"][frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
+    # num_frame = torch.div(frame_id, frequency_change_rate, rounding_mode='floor')
+    # origin_ego_pose = agent_dic["ego"]["pose"][num_frame].copy()  # hard-coded resample rate 2
     if np.isinf(origin_ego_pose[0]) or np.isinf(origin_ego_pose[1]):
         assert False, f"Error: ego pose is inf {origin_ego_pose}, not enough precision while generating dictionary"
     # channels:
