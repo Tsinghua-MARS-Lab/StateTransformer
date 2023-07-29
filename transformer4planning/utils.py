@@ -167,6 +167,26 @@ def rotate_array(origin, points, angle, tuple=False):
         rst_array[:, 1] = qy
         return rst_array
 
+
+def change_coordination(target_point, ego_center, ego_to_global=False):
+    target_point_new = target_point.copy()
+    if ego_to_global:
+        cos_, sin_ = math.cos(ego_center[3]), math.sin(ego_center[3])
+        # global to ego
+        new_x, new_y = target_point_new[0] * cos_ - target_point_new[1] * sin_, \
+                       target_point_new[0] * sin_ + target_point_new[1] * cos_
+        target_point_new[0], target_point_new[1] = new_x, new_y
+        target_point_new[:2] += ego_center[:2]
+    else:
+        cos_, sin_ = math.cos(-ego_center[3]), math.sin(-ego_center[3])
+        target_point_new[:2] -= ego_center[:2]
+        # global to ego
+        new_x, new_y = target_point_new[0] * cos_ - target_point_new[1] * sin_, \
+                       target_point_new[0] * sin_ + target_point_new[1] * cos_
+        target_point_new[0], target_point_new[1] = new_x, new_y
+    return target_point_new
+
+
 def normalize_angle(angle):
     """
     Normalize an angle to [-pi, pi].
