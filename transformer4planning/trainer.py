@@ -1,3 +1,7 @@
+import time
+import tqdm
+import datetime
+import pickle
 from torch.utils.data import DataLoader
 from transformers.trainer_utils import EvalLoopOutput
 from transformers.utils import is_sagemaker_mp_enabled
@@ -5,8 +9,10 @@ from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
+from transformer4planning.common_utils import common_utils
 from typing import List, Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass, field
+from datasets import Dataset
 import torch
 import torch.nn as nn
 import logging
@@ -482,3 +488,68 @@ class PlanningTrainer(Trainer):
         print('length of action and labels: ',
               inputs['context_actions'][sample_index].shape, inputs['trajectory_label'][sample_index].shape)
         print('debug images saved to: ', path_to_save, file_index)
+
+    def evaluate_waymo(
+        self,
+        eval_dataset: Optional[Dataset] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> Dict[str, float]:
+        
+        self.model.eval()
+        
+        dataloader = self.get_eval_dataloader(eval_dataset)
+        dataset = dataloader.dataset
+        
+        if self.is_world_process_zero:
+            progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval', dynamic_ncols=True)
+        
+        eval_output_dir = './'
+        log_file = eval_output_dir + ('log_eval_%s.txt' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+        logger = common_utils.create_logger(log_file, rank=0)
+        
+        start_time = time.time()
+        logger_iter_interval = 1000
+        
+        pred_dicts = []
+        for i, batch_dict in enumerate(dataloader):
+            with torch.no_grad():
+                batch_dict = self._prepare_inputs(batch_dict)
+                batch_pred_dicts = self.model(**batch_dict)
+                final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
+                pred_dicts += final_pred_dicts
+
+            disp_dict = {}
+
+            if self.is_world_process_zero and (i % logger_iter_interval == 0 or i == 0 or i + 1== len(dataloader)):
+                past_time = progress_bar.format_dict['elapsed']
+                second_each_iter = past_time / max(i, 1.0)
+                remaining_time = second_each_iter * (len(dataloader) - i)
+                disp_str = ', '.join([f'{key}={val:.3f}' for key, val in disp_dict.items() if key != 'lr'])
+                batch_size = batch_dict.get('batch_size', None)
+                logger.info(f'eval: batch_iter={i}/{len(dataloader)}, batch_size={batch_size}, iter_cost={second_each_iter:.2f}s, '
+                            f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
+                            f'{disp_str}')
+
+        if self.is_world_process_zero:
+            progress_bar.close()
+
+        logger.info('*************** Performance of EPOCH *****************' )
+        sec_per_example = (time.time() - start_time) / len(dataloader.dataset)
+        logger.info('Generate label finished(sec_per_example: %.4f second).' % sec_per_example)
+
+        ret_dict = {}
+
+        with open(eval_output_dir + 'result.pkl', 'wb') as f:
+            pickle.dump(pred_dicts, f)
+
+        result_str, result_dict = dataset.evaluation(
+            pred_dicts, 
+        )
+
+        logger.info(result_str)
+        ret_dict.update(result_dict)
+
+        logger.info('Result is save to %s' % eval_output_dir)
+        logger.info('****************Evaluation done.*****************')
+        

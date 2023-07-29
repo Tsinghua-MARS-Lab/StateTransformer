@@ -409,12 +409,16 @@ def main():
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
+            
+        collate_fn = train_dataset.collate_batch
 
     if training_args.do_eval:
         eval_dataset = nuplan_dataset["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
+            
+        collate_fn = eval_dataset.collate_batch
 
     if training_args.do_predict:
         predict_dataset = nuplan_dataset["test"]
@@ -423,7 +427,6 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = train_dataset.collate_batch
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -449,6 +452,10 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
+        if data_args.dataset_name == 'waymo':
+            trainer.evaluate_waymo()
+            return
+            
         if model_args.autoregressive:
             result = trainer.evaluate()
             logger.info("***** Final Eval results *****")

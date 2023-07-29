@@ -4,3 +4,5 @@ build
 **egg-info**
 *.so
 *.png
+log_eval*
+*.pkl
