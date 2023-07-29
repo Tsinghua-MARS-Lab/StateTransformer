@@ -18,7 +18,7 @@ class ModelArguments:
         # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-762M-1data-boston",
         # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-1.5B-1data-boston",
         # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/1.5B-multicity",
-        default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/762M-multicity",
+        default = "/public/MARS/datasets/nuPlanCache/checkpoint/gpt30m_kp",
         # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/117M-multicity",
         # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
@@ -96,8 +96,6 @@ class ModelArguments:
         metadata={"help": "Whether to use next token scorer for prediction."},
     )
     past_seq: Optional[int] = field(
-        # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
-        # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
         default=10,
         metadata={"help": "past frames to include for prediction/planning."},
     )
@@ -111,7 +109,7 @@ class ModelArguments:
         default=True
     )
     raster_channels: Optional[int] = field(
-        default=0,
+        default=33,
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     predict_yaw: Optional[bool] = field(
@@ -137,10 +135,16 @@ class ModelArguments:
         default=False
     )
     specified_key_points: Optional[bool] = field(
-        default=False
+        default=True
     )
     forward_specified_key_points: Optional[bool] = field(
+        default=True
+    )
+    token_scenario_tag: Optional[bool] = field(
         default=False
+    )
+    max_token_len: Optional[int] = field(
+        default=20
     )
 
 def rotate_array(origin, points, angle, tuple=False):

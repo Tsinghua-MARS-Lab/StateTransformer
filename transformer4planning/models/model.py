@@ -159,7 +159,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
-
+            scenario_type_len = self.model_args.max_token_len
+        else:
+            scenario_type_len = 0
         if self.ar_future_interval == 0:
             # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds, torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
@@ -250,7 +252,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
