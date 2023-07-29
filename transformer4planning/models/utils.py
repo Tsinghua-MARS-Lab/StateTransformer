@@ -35,7 +35,7 @@ def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True):
 
 def cat_raster_seq_for_waymo(raster, framenum=11):
     b, c, h, w = raster.shape
-    agent_type = 6
+    agent_type = 3
     road_type = 20
     road_raster = raster[:, :road_type, :, :]
     result = torch.zeros((b, framenum, agent_type + road_type, h, w), device=raster.device)

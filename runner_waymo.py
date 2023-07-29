@@ -63,19 +63,6 @@ class ModelArguments:
         default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_auth_token: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
-        },
-    )
     predict_result_saving_dir: Optional[str] = field(
         default=False,
         metadata={"help": "The target folder to save prediction results."},
@@ -166,9 +153,20 @@ class ModelArguments:
     visualize_prediction_to_path: Optional[str] = field(
         default=None
     )
-    
-    vector_encoder_cfg: Optional[EasyDict] = field(
-        default=None
+    pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    forward_specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    token_scenario_tag: Optional[bool] = field(
+        default=False
+    )
+    max_token_len: Optional[int] = field(
+        default=20
     )
 
 @dataclass
@@ -366,6 +364,7 @@ def main():
             dataset_cfg=cfg.DATA_CONFIG,
             training=True,
             logger=logger, 
+            use_raster=False
         )
         nuplan_dataset.update(train=train_set)
     
@@ -374,6 +373,7 @@ def main():
             dataset_cfg=cfg.DATA_CONFIG,
             training=False,
             logger=logger, 
+            use_raster=False
         )
 
         nuplan_dataset.update(validation=test_set)
