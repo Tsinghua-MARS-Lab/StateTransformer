@@ -2,9 +2,9 @@
 
 python -m torch.distributed.run --nproc_per_node=1 runner_waymo.py \
         --model_name pretrain-vector-gpt \
-        --model_pretrain_name_or_path /data_3/madanjiao/model_res/vector_gpt_1.5B_mse_FI1_PI1_k1/training_results/checkpoint-145000 \
+        --model_pretrain_name_or_path /data_3/madanjiao/model_res/vector_gpt_small/training_results/checkpoint-105000 \
         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
-        --output_dir /data_3/madanjiao/model_res/vector_gpt_1.5B_mse_FI1_PI1_k1_part/training_results  \
+        --output_dir /data_3/madanjiao/model_res/vector_gpt_small/training_results  \
         --run_name gpt_mse_FI1_PI1_k1_test \
         --per_device_eval_batch_size 16 --dataloader_num_workers 10 --predict_trajectory True \
         --dataloader_drop_last True \
