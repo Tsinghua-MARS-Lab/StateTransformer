@@ -116,11 +116,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # traj
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        trajectory_label = input_dict['center_gt_trajs']
+        trajectory_label = input_dict['trajectory_label']
         pred_length = trajectory_label.shape[1]
         
         # action context
-        context_actions = input_dict['center_objects_past'][..., :4]
+        context_actions = input_dict['center_objects_past']
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]

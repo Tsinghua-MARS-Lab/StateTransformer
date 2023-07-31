@@ -63,19 +63,6 @@ class ModelArguments:
         default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_auth_token: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
-        },
-    )
     predict_result_saving_dir: Optional[str] = field(
         default=False,
         metadata={"help": "The target folder to save prediction results."},
@@ -166,9 +153,20 @@ class ModelArguments:
     visualize_prediction_to_path: Optional[str] = field(
         default=None
     )
-    
-    vector_encoder_cfg: Optional[EasyDict] = field(
-        default=None
+    pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    forward_specified_key_points: Optional[bool] = field(
+        default=False
+    )
+    token_scenario_tag: Optional[bool] = field(
+        default=False
+    )
+    max_token_len: Optional[int] = field(
+        default=20
     )
 
 @dataclass
@@ -359,6 +357,11 @@ def main():
     
     cfg_from_yaml_file("/home/QJ00367/danjiao/dlnets/transformer4planning/config/sample_config.yaml", cfg)
     
+    if 'vector' in model_args.model_name:
+        use_raster = False
+    else:
+        use_raster = True
+    
     nuplan_dataset = dict()
     
     if training_args.do_train:
@@ -366,6 +369,7 @@ def main():
             dataset_cfg=cfg.DATA_CONFIG,
             training=True,
             logger=logger, 
+            use_raster=use_raster
         )
         nuplan_dataset.update(train=train_set)
     
@@ -374,6 +378,7 @@ def main():
             dataset_cfg=cfg.DATA_CONFIG,
             training=False,
             logger=logger, 
+            use_raster=use_raster
         )
 
         nuplan_dataset.update(validation=test_set)
@@ -409,12 +414,16 @@ def main():
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
+            
+        collate_fn = train_dataset.collate_batch
 
     if training_args.do_eval:
         eval_dataset = nuplan_dataset["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
+            
+        collate_fn = eval_dataset.collate_batch
 
     if training_args.do_predict:
         predict_dataset = nuplan_dataset["test"]
@@ -423,7 +432,6 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = train_dataset.collate_batch
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -449,6 +457,10 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
+        if data_args.dataset_name == 'waymo':
+            trainer.evaluate_waymo()
+            return
+            
         if model_args.autoregressive:
             result = trainer.evaluate()
             logger.info("***** Final Eval results *****")

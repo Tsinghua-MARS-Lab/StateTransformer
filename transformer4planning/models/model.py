@@ -22,7 +22,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
         if self.task == "waymo":
-            in_channels = 26
+            in_channels = 23
         else:
             in_channels = model_args.raster_channels
         # print('Model initialized with raster channels: ', model_args.raster_channels)
