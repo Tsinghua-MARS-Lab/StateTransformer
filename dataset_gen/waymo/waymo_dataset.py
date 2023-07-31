@@ -132,7 +132,7 @@ class WaymoDataset(DatasetTemplate):
 
             'center_objects_world': center_objects,
             "center_objects_past": center_objects_past[..., [0,1,2,6]], # (x, y, z, l, w, h, heading, vx, vy, valid)
-            'trajectory_lables': center_gt_trajs_labels, # ( x, y, z, heading)
+            'trajectory_label': center_gt_trajs_labels, # ( x, y, z, heading)
             'center_objects_id': np.array(track_infos['object_id'])[track_index_to_predict],
             'center_objects_type': np.array(track_infos['object_type'])[track_index_to_predict],
 
@@ -523,8 +523,15 @@ class WaymoDataset(DatasetTemplate):
 
     def create_raster(self, ret_infos):
         out_ret_infos = {}
-        out_ret_infos['trajectory_label'] = ret_infos['trajectory_lables'] #  (bs, 80, 4)
+        out_ret_infos['trajectory_label'] = ret_infos['trajectory_label'] #  (bs, 80, 4)
         out_ret_infos['context_actions'] = ret_infos['center_objects_past'] # (bs, 11, 4)
+        out_ret_infos['center_objects_world'] = ret_infos['center_objects_world'] 
+        out_ret_infos['scenario_id'] = ret_infos['scenario_id'] 
+        out_ret_infos['center_objects_id'] = ret_infos['center_objects_id'] 
+        out_ret_infos['center_objects_type'] = ret_infos['center_objects_type'] 
+        out_ret_infos['center_gt_trajs_src'] = ret_infos['center_gt_trajs_src'] 
+        out_ret_infos['track_index_to_predict'] = ret_infos['track_index_to_predict'] 
+        
         
         bs = ret_infos['obj_trajs'].shape[0]
         agent_types_value = [self.dataset_cfg.OBJECT_TYPE.index(obj_t) for obj_t in ret_infos['obj_types']]

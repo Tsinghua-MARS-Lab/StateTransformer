@@ -505,7 +505,9 @@ class PlanningTrainer(Trainer):
             progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval', dynamic_ncols=True)
         
         eval_output_dir = './'
-        log_file = eval_output_dir + ('log_eval_%s.txt' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+        model_path = self.model.model_args.model_pretrain_name_or_path
+        model_name = model_path.split('/')[-3]+'___' + model_path.split('/')[-1]
+        log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, datetime.datetime.now().strftime('%Y%m%d-%H%M%S')))
         logger = common_utils.create_logger(log_file, rank=0)
         
         start_time = time.time()
@@ -516,7 +518,12 @@ class PlanningTrainer(Trainer):
             with torch.no_grad():
                 batch_dict = self._prepare_inputs(batch_dict)
                 batch_pred_dicts = self.model(**batch_dict)
-                final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
+                
+                if 'vector' in self.model.model_args.model_name:
+                    final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
+                else:
+                    final_pred_dicts = dataset.generate_prediction_dicts({'input_dict': batch_dict}, batch_pred_dicts)
+                    
                 pred_dicts += final_pred_dicts
 
             disp_dict = {}

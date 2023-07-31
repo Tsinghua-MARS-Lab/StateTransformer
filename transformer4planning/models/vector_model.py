@@ -116,7 +116,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # traj
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        trajectory_label = input_dict['trajectory_lables']
+        trajectory_label = input_dict['trajectory_label']
         pred_length = trajectory_label.shape[1]
         
         # action context

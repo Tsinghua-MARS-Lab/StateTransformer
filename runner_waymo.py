@@ -357,6 +357,11 @@ def main():
     
     cfg_from_yaml_file("/home/QJ00367/danjiao/dlnets/transformer4planning/config/sample_config.yaml", cfg)
     
+    if 'vector' in model_args.model_name:
+        use_raster = False
+    else:
+        use_raster = True
+    
     nuplan_dataset = dict()
     
     if training_args.do_train:
@@ -364,7 +369,7 @@ def main():
             dataset_cfg=cfg.DATA_CONFIG,
             training=True,
             logger=logger, 
-            use_raster=False
+            use_raster=use_raster
         )
         nuplan_dataset.update(train=train_set)
     
@@ -373,7 +378,7 @@ def main():
             dataset_cfg=cfg.DATA_CONFIG,
             training=False,
             logger=logger, 
-            use_raster=False
+            use_raster=use_raster
         )
 
         nuplan_dataset.update(validation=test_set)
