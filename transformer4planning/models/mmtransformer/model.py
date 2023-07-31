@@ -87,7 +87,8 @@ class MMTransformer(GPT2PreTrainedModel):
         
         self.K = 6
         self.modality_embeds = nn.Embedding(self.K, config.n_embd)
-        self.mmT = model_args.mmTransformer
+        # Use mmTransformer decoder as default.
+        self.mmT = True
         nn.init.orthogonal_(self.modality_embeds.weight)
         if self.predict_trajectory:
             if self.mmT:
