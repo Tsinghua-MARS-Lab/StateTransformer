@@ -12,6 +12,7 @@ import pickle
 import math
 import numpy as np
 import cv2
+import shapely
 
 import torch
 from waymo_open_dataset.protos import scenario_pb2
@@ -231,6 +232,33 @@ def generate_batch_polylines_from_map(polylines, point_sampled_interval=1, vecto
     return ret_polylines, ret_polylines_mask
 
 def create_map_data_for_center_objects(center_objects, heading, map_infos, center_offset):
+    polylines = torch.from_numpy(map_infos['all_polylines'].copy())
+    pts = list(zip(polylines[:, 0], polylines[:, 1]))
+    line = shapely.geometry.LineString(pts)
+    simplified_xyz_line = line.simplify(1)
+    simplified_x, simplified_y = simplified_xyz_line.xy
+    simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+    mask = np.ones((len(simplified_x),))
+    simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+    
+    map_polylines = []
+    map_polylines_mask = []
+    for i, ego_pos in enumerate(center_objects):
+        cos_, sin_ = math.cos(-heading[i] - math.pi / 2), math.sin(-heading[i] - math.pi / 2)
+        simplified_xyz -= ego_pos.numpy()[:2]
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+        simplified_xyz[:, 1] *= -1
+
+        map_polylines.append(simplified_xyz)
+        map_polylines_mask.append(mask)
+
+    map_polylines = np.stack(map_polylines)
+    map_polylines_mask = np.stack(map_polylines_mask)
+
+    return map_polylines, map_polylines_mask
+
+
+def create_map_data_for_center_objects_MTR(center_objects, heading, map_infos, center_offset):
     """
     Args:
         center_objects (num_center_objects, 10): [cx, cy, cz, dx, dy, dz, heading, vel_x, vel_y, valid]
@@ -403,13 +431,11 @@ def main(args):
                             )
                 
                 agent_trajs_res = agent_trajs_res.permute(0, 2, 1, 3)
-                map_data = torch.from_numpy(map_polylines_data)
-                map_mask = torch.from_numpy(map_polylines_mask)
                 ret_dict = {
                     "agent_trajs": agent_trajs_res.to(torch.float),
                     "track_index_to_predict": track_index_to_predict.view(-1, 1).to(torch.float),
-                    "map_polyline": map_data.to(torch.float), 
-                    "map_polylines_mask": map_mask.to(torch.float),
+                    "map_polyline": map_polylines_data, 
+                    "map_polylines_mask": map_polylines_mask,
                     }
                 
                 yield ret_dict
@@ -463,10 +489,10 @@ if __name__ == '__main__':
     parser.add_argument('--starting_file_num', type=int, default=0)
     parser.add_argument('--ending_file_num', type=int, default=1000)
     parser.add_argument('--starting_scenario', type=int, default=-1)
-    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/waymo_training_cache')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/waymo_debug_cache')
 
     parser.add_argument('--train', default=False, action='store_true')   
-    parser.add_argument('--num_proc', type=int, default=20)
+    parser.add_argument('--num_proc', type=int, default=10)
 
     parser.add_argument('--sample_interval', type=int, default=5)
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
