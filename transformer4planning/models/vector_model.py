@@ -124,6 +124,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         trajectory_label = input_dict['trajectory_label']
         pred_length = trajectory_label.shape[1]
+        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
         
         # action context
         context_actions = input_dict['center_objects_past']
@@ -173,8 +174,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 else:
                     selected_indices = [79, 39, 19, 9, 4]
                 future_key_points = trajectory_label[:, selected_indices, :]
+                future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
             else:
                 future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
 
             future_key_points_aug = future_key_points.clone()
@@ -234,10 +238,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             traj_logits = self.traj_decoder(traj_hidden_state)
             if self.task == "waymo":
                 loss_fct = MSELoss(reduction="none")
-                y_mask = torch.ones((batch_size, pred_length, 1), dtype=torch.bool, device=trajectory_label.device)
                 # y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
-                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * y_mask).sum() / (
-                            y_mask.sum() + 1e-7)
+                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
+                            trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
             else:
                 if self.model_args.predict_yaw:
@@ -267,8 +270,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
                 
                 if self.task == "waymo":
-                    y_mask_add = torch.ones((batch_size, future_key_points.shape[1], 1), dtype=torch.bool, device=trajectory_label.device)
-                    loss_to_add = (loss_to_add* y_mask_add).sum() / (y_mask_add.sum() + 1e-7)
+                    # y_mask_add = torch.ones((batch_size, future_key_points.shape[1], 1), dtype=torch.bool, device=trajectory_label.device)
+                    loss_to_add = (loss_to_add* future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 loss += loss_to_add
                 traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
             else:

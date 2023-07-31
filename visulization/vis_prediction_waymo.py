@@ -134,6 +134,7 @@ def main():
     test_files = os.path.join(args.scenario_folder, f'{args.dataset}/*')
 
     filenames = tf.io.matching_files(test_files)
+    print('---- ', len(filenames))
     for filename in tqdm(filenames):
         shard_dataset = tf.data.TFRecordDataset(filename)
         shard_iterator = shard_dataset.as_numpy_iterator()
