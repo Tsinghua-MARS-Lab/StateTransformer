@@ -3,7 +3,7 @@
 export CUDA_VISIBLE_DEVICES=0;
 python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_waymo.py \
         --model_name pretrain-vector-gpt \
-        --model_pretrain_name_or_path /data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results/checkpoint-37000 \
+        --model_pretrain_name_or_path /data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results/checkpoint-57000 \
         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
         --output_dir /data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results  \
         --run_name gpt_mse_FI1_PI1_k1_test \

@@ -63,7 +63,7 @@
                 "--dataset_scale", "1",
                 "--task", "waymo",
                 "--with_traffic_light", "True",
-                "--k", "1",
+                "--k", "2",
                 "--online_preprocess", "True",
                 "--datadic_path", "/data_3/madanjiao/nuplan/online_demo/mini_demo",
                 "--remove_unused_columns", "False",

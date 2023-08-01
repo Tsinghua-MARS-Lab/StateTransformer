@@ -270,7 +270,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
                 
                 if self.task == "waymo":
-                    # y_mask_add = torch.ones((batch_size, future_key_points.shape[1], 1), dtype=torch.bool, device=trajectory_label.device)
                     loss_to_add = (loss_to_add* future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 loss += loss_to_add
                 traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
@@ -288,7 +287,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 # add loss on x, y (the last dimension)
                 loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                loss += min_loss.mean()
+                
+                if self.task == "waymo":
+                    loss += (min_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
+                else:
+                    loss += min_loss.mean()
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
                     loss_fct = CrossEntropyLoss(reduction="mean")
