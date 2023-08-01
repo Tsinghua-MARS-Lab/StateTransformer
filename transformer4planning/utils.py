@@ -9,7 +9,7 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="pretrain-nonauto-gpt",
+        default="pretrain-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
@@ -82,7 +82,7 @@ class ModelArguments:
         default="nuplan" # only for mmtransformer
     )
     with_traffic_light: Optional[bool] = field(
-        default=False
+        default=True
     )
     autoregressive: Optional[bool] = field(
         default=False
@@ -116,7 +116,7 @@ class ModelArguments:
         default=False
     )
     ar_future_interval: Optional[int] = field(
-        default=0,
+        default=20,
         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
     arf_x_random_walk: Optional[float] = field(
@@ -145,6 +145,12 @@ class ModelArguments:
     )
     max_token_len: Optional[int] = field(
         default=20
+    )
+    past_sample_interval: Optional[int] = field(
+        default=5
+    )
+    future_sample_interval: Optional[int] = field(
+        default=2
     )
 
 def rotate_array(origin, points, angle, tuple=False):
