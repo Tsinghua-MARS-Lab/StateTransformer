@@ -153,8 +153,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
         
         if self.model_args.token_scenario_tag:
-            scenario_tag_ids = torch.tensor(self.tag_tokenizer(scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
-            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
+            scenario_tag_ids = torch.tensor(self.tag_tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
+            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
 
@@ -372,8 +372,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
         if self.model_args.token_scenario_tag:
-            scenario_tag_ids = torch.tensor(self.tag_tokenizer(scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
-            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
+            scenario_tag_ids = torch.tensor(self.tag_tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
+            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
             scenario_type_len = self.model_args.max_token_len
         else:
