@@ -364,6 +364,8 @@ def main(args):
                 with open(os.path.join(store_path, f"{map_name}.pkl"), "wb") as f:
                     pickle.dump(road_dic, f, protocol=pickle.HIGHEST_PROTOCOL)
                 print("Stored at ", os.path.join(store_path, f"{map_name}.pkl"))
+                
+                yield {'file_name': dl.file_names[0]}
                 break
             del dl
             break

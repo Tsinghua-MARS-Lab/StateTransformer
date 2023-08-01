@@ -3,6 +3,8 @@ from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
 from transformer4planning.models.model_legacy import *
+from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
+
 from transformers.generation.configuration_utils import GenerationConfig
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
@@ -19,7 +21,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
         if self.task == "waymo":
-            in_channels = 26
+            in_channels = 23
         else:
             in_channels = model_args.raster_channels
         # print('Model initialized with raster channels: ', model_args.raster_channels)
@@ -518,7 +520,20 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
 
 def build_models(model_args):
-    if 'gpt' in model_args.model_name:
+    if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
+        config_p = GPT2Config()
+        config_p.n_layer = model_args.n_layers
+        config_p.n_embd = model_args.d_embed
+        config_p.n_inner = model_args.d_inner
+        config_p.n_head = model_args.n_heads
+        config_p.activation_function = model_args.activation_function
+        if not model_args.autoregressive:
+            ModelCls = GPTNonAutoRegressiveModelVector
+            tag = 'Vector GPT nonauto'
+        else:
+            ModelCls = GPTAutoRegressiveModelVector
+            tag = 'Vector GPT auto'
+    elif 'gpt' in model_args.model_name:
         config_p = GPT2Config()
         config_p.n_layer = model_args.n_layers
         config_p.n_embd = model_args.d_embed
@@ -577,6 +592,26 @@ def build_models(model_args):
         from transformer4planning.models.mmtransformer.model import MMTransformer
         ModelCls = MMTransformer
         tag = 'mmtransformer'
+    elif 'waymomodel' in model_args.model_name:
+        config_p = GPT2Config()
+        config_p.n_layer = model_args.n_layers
+        config_p.n_embd = model_args.d_embed
+        config_p.n_inner = model_args.d_inner
+        config_p.n_head = model_args.n_heads
+        config_p.activation_function = model_args.activation_function
+        from .waymo_model import GPTModelWaymo
+        ModelCls = GPTModelWaymo
+        tag = 'waymomodel'
+    elif 'demo' in model_args.model_name:
+        config_p = GPT2Config()
+        config_p.n_layer = model_args.n_layers
+        config_p.n_embd = model_args.d_embed
+        config_p.n_inner = model_args.d_inner
+        config_p.n_head = model_args.n_heads
+        config_p.activation_function = model_args.activation_function
+        from .waymo_model import GPTModelDemo
+        ModelCls = GPTModelDemo
+        tag = 'demo'
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:

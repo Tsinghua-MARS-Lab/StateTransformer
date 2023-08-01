@@ -10,13 +10,13 @@ import tensorflow as tf
 
 # Change the method of multiprocessing.
 
-# import multiprocessing
+import multiprocessing
 from concurrent import futures
 
 import glob
 from tqdm import tqdm
 from waymo_open_dataset.protos import scenario_pb2
-from waymo_types import object_type, lane_type, road_line_type, road_edge_type, signal_state, polyline_type
+from .waymo_types import object_type, lane_type, road_line_type, road_edge_type, signal_state, polyline_type
 
     
 def decode_tracks_from_proto(tracks):
@@ -249,17 +249,17 @@ def get_infos_from_protos(data_path, output_path=None, num_workers=8):
 
 
 def create_infos_from_protos(raw_data_path, output_path, num_workers=100):
-    # train_infos = get_infos_from_protos(
-    #     data_path=os.path.join(raw_data_path, 'training'),
-    #     output_path=os.path.join(output_path, 'processed_scenarios_training'),
-    #     num_workers=num_workers
-    # )
-    # print('----------------Saving Waymo info train file----------------')
-    #
-    # train_filename = os.path.join(output_path, 'processed_scenarios_training_infos.pkl')
-    # with open(train_filename, 'wb') as f:
-    #     pickle.dump(train_infos, f)
-    # print('----------------Waymo info train file is saved to %s----------------' % train_filename)
+    train_infos = get_infos_from_protos(
+        data_path=os.path.join(raw_data_path, 'training'),
+        output_path=os.path.join(output_path, 'processed_scenarios_training'),
+        num_workers=num_workers
+    )
+    print('----------------Saving Waymo info train file----------------')
+    
+    train_filename = os.path.join(output_path, 'processed_scenarios_training_infos.pkl')
+    with open(train_filename, 'wb') as f:
+        pickle.dump(train_infos, f)
+    print('----------------Waymo info train file is saved to %s----------------' % train_filename)
 
     val_infos = get_infos_from_protos(
         data_path=os.path.join(raw_data_path, 'validation'),
@@ -273,17 +273,17 @@ def create_infos_from_protos(raw_data_path, output_path, num_workers=100):
         pickle.dump(val_infos, f)
     print('----------------Waymo info val file is saved to %s----------------' % val_filename)
 
-    # test_infos = get_infos_from_protos(
-    #     data_path=os.path.join(raw_data_path, 'testing'),
-    #     output_path=os.path.join(output_path, 'processed_scenarios_testing'),
-    #     num_workers=num_workers
-    # )
-    # print('----------------Saving Waymo info test file----------------')
+    test_infos = get_infos_from_protos(
+        data_path=os.path.join(raw_data_path, 'testing'),
+        output_path=os.path.join(output_path, 'processed_scenarios_testing'),
+        num_workers=num_workers
+    )
+    print('----------------Saving Waymo info test file----------------')
 
-    # val_filename = os.path.join(output_path, 'processed_scenarios_test_infos.pkl')
-    # with open(val_filename, 'wb') as f:
-    #     pickle.dump(test_infos, f)
-    # print('----------------Waymo info test file is saved to %s----------------' % val_filename)
+    val_filename = os.path.join(output_path, 'processed_scenarios_test_infos.pkl')
+    with open(val_filename, 'wb') as f:
+        pickle.dump(test_infos, f)
+    print('----------------Waymo info test file is saved to %s----------------' % val_filename)
     
 
 if __name__ == '__main__':

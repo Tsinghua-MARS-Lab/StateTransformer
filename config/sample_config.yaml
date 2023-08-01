@@ -1,0 +1,51 @@
+DATA_CONFIG:
+    DATASET: WaymoDataset
+    OBJECT_TYPE: &object_type ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
+    
+    DATA_ROOT: 'data/waymo'
+    SPLIT_DIR: {
+        'train': 'processed_scenarios_training', 
+        'test': 'processed_scenarios_validation'
+    }
+
+    INFO_FILE: {
+        'train': 'processed_scenarios_training_infos.pkl', 
+        'test': 'processed_scenarios_val_infos.pkl'
+    }
+
+    SAMPLE_INTERVAL: {
+        'train': 1, 
+        'test': 1
+    }
+
+    INFO_FILTER_DICT: 
+        filter_info_by_object_type: *object_type
+
+   # for map feature encoding
+    POINT_SAMPLED_INTERVAL: 1
+    NUM_POINTS_EACH_POLYLINE: 20
+    VECTOR_BREAK_DIST_THRESH: 1.0
+
+    NUM_OF_SRC_POLYLINES: 768
+    CENTER_OFFSET_OF_MAP: &center_offset [30.0, 0]
+
+MODEL:
+    CONTEXT_ENCODER:
+        NAME: MTREncoder
+
+        NUM_OF_ATTN_NEIGHBORS: 16
+        NUM_INPUT_ATTR_AGENT: 29
+        NUM_INPUT_ATTR_MAP: 9
+        
+        NUM_CHANNEL_IN_MLP_AGENT: 256
+        NUM_CHANNEL_IN_MLP_MAP: 64
+        NUM_LAYER_IN_MLP_AGENT: 3
+        NUM_LAYER_IN_MLP_MAP: 5
+        NUM_LAYER_IN_PRE_MLP_MAP: 3
+
+        D_MODEL: 256
+        NUM_ATTN_LAYERS: 6
+        NUM_ATTN_HEAD: 8 
+        DROPOUT_OF_ATTN: 0.1 
+
+        USE_LOCAL_ATTN: True
