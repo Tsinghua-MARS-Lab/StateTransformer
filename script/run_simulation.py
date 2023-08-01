@@ -8,6 +8,7 @@ import hydra
 import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
 
+from nuplan.common.utils.s3_utils import is_s3_path
 from nuplan.planning.script.builders.simulation_builder import build_simulations
 from nuplan.planning.script.builders.simulation_callback_builder import (
     build_callbacks_worker,
@@ -31,7 +32,6 @@ if os.environ.get('NUPLAN_HYDRA_CONFIG_PATH') is not None:
 if os.path.basename(CONFIG_PATH) != 'simulation':
     CONFIG_PATH = os.path.join(CONFIG_PATH, 'simulation')
 CONFIG_NAME = 'default_simulation'
-# CONFIG_NAME = 'transformer4planning_simulation'
 
 
 def run_simulation(cfg: DictConfig, planners: Optional[Union[AbstractPlanner, List[AbstractPlanner]]] = None) -> None:
@@ -105,8 +105,12 @@ def main(cfg: DictConfig) -> None:
         Already contains the changes merged from the experiment's config to default config.
     """
     assert cfg.simulation_log_main_path is None, 'Simulation_log_main_path must not be set when running simulation.'
+
     # Execute simulation with preconfigured planner(s).
     run_simulation(cfg=cfg)
+
+    if is_s3_path(Path(cfg.output_dir)):
+        clean_up_s3_artifacts()
 
 
 if __name__ == '__main__':
@@ -114,10 +118,5 @@ if __name__ == '__main__':
     os.environ['HYDRA_FULL_ERROR'] = '1'
     os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan/'
     os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.1/'
-    os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/test/'
-
-    # os.environ['NUPLAN_MAP_VERSION'] = 'nuplan-maps-v1.0'
-    # os.environ['NUPLAN_DATA_ROOT'] = '/localdata_hdd1/nuplan/dataset'
-    # os.environ['NUPLAN_DB_FILES'] = '/localdata_hdd1/nuplan/dataset/nuplan-v1.1/trainval/'
-    # os.environ['NUPLAN_MAPS_ROOT'] = '/localdata_hdd1/nuplan/dataset/nuplan-maps-v1.1/'
+    os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/train_boston/'
     main()

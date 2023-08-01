@@ -68,6 +68,7 @@ def build_simulations(
         distributed_mode=DistributedMode[cfg.distributed_mode],
     )
     scenarios = scenario_filter.get_scenarios()
+    print("Finish filterig scenarios...")
 
     metric_engines_map = {}
     if cfg.run_metric:
@@ -87,7 +88,14 @@ def build_simulations(
             if 'planner' not in cfg.keys():
                 raise KeyError('Planner not specified in config. Please specify a planner using "planner" field.')
 
+            # print('test test builder: ', list(cfg.keys()))
+            # planner_cfg = cfg.planner
+            # print('test2: ', cfg.ego_controller)
+            # print('test3: ', cfg.experiment)
+            # print('test4: ', cfg.scenario_filter)
             planners = build_planners(cfg.planner, scenario)
+
+            # planners = build_planners(cfg, scenario)
         else:
             planners = pre_built_planners
 

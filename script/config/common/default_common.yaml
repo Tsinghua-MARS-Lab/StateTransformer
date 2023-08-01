@@ -6,7 +6,7 @@ defaults:
   - scenario_filter: all_scenarios
   - model: null
   # Worker that is used to run simulations
-  - worker: ray_distributed
+  - worker: sequential
 
 distribute_by_scenario: true
 

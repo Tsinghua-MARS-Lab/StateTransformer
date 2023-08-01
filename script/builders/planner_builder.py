@@ -10,7 +10,17 @@ from nuplan.planning.script.builders.utils.utils_type import is_target_type
 from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner
 from nuplan.planning.simulation.planner.ml_planner.ml_planner import MLPlanner
 from nuplan.planning.training.modeling.lightning_module_wrapper import LightningModuleWrapper
+import sys
+sys.path.append('/nuplan_devkit/transformer4planning')
+# sys.path.append('/home/xiongx/repository/nuplan-devkit-submission/transformer4planning')
+from transformer4planning.submission.planner import ControlTFPlanner
+# from nuplan.planning.simulation.planner.planner import ControlTFPlanner
+from transformer4planning.models.model import build_models
+from transformer4planning.utils import ModelArguments
+from transformers import (HfArgumentParser)
+import torch
 
+model = None
 
 def _build_planner(planner_cfg: DictConfig, scenario: Optional[AbstractScenario]) -> AbstractPlanner:
     """
@@ -19,6 +29,8 @@ def _build_planner(planner_cfg: DictConfig, scenario: Optional[AbstractScenario]
     :param scenario: scenario
     :return AbstractPlanner
     """
+    global model
+
     config = planner_cfg.copy()
     if is_target_type(planner_cfg, MLPlanner):
         # Build model and feature builders needed to run an ML model in simulation
@@ -33,6 +45,31 @@ def _build_planner(planner_cfg: DictConfig, scenario: Optional[AbstractScenario]
         config.pop('checkpoint_path')
         OmegaConf.set_struct(config, True)
 
+        planner: AbstractPlanner = instantiate(config, model=model)
+    elif is_target_type(planner_cfg, ControlTFPlanner):
+        if model is None:
+            parser = HfArgumentParser((ModelArguments))
+            model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
+            if model_args.use_multi_city:
+                model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/submission/boston"
+                boston_model = build_models(model_args)
+                model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/submission/pittsburgh"
+                pittsburgh_model = build_models(model_args)
+                model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/submission/singapore"
+                singapore_model = build_models(model_args)
+                model_args.model_pretrain_name_or_path = "/public/MARS/datasets/nuPlanCache/checkpoint/submission/vegas"
+                vegas_model = build_models(model_args)
+                model = dict(
+                    boston=boston_model,
+                    pittsburgh=pittsburgh_model,
+                    singapore=singapore_model,
+                    vegas=vegas_model
+                )
+            else:
+                model = build_models(model_args=model_args)
+                if torch.cuda.is_available():
+                    model.to('cuda')
+        print("control transformer planner initialized")
         planner: AbstractPlanner = instantiate(config, model=model)
     else:
         planner_cls: Type[AbstractPlanner] = _locate(config._target_)
