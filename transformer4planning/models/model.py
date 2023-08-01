@@ -2,13 +2,11 @@ from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
-
+from transformer4planning.models.model_legacy import *
 from transformers.generation.configuration_utils import GenerationConfig
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
 import torch.nn as nn
-import evaluate
-import copy
 
 class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
@@ -120,7 +118,6 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         device = high_res_raster.device
         pred_length = trajectory_label.shape[1]
-        scenario_type = kwargs.get("scenario_type", None)
 
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
@@ -156,20 +153,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
         
         if self.model_args.token_scenario_tag:
-            scenario_tag_ids = list()
-            for i in range(batch_size):
-                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
-            scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
-            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
-            input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
-            scenario_type_len = self.model_args.max_token_len
-        else:
-            scenario_type_len = 0
-        if self.model_args.token_scenario_tag:
-            scenario_tag_ids = list()
-            for i in range(batch_size):
-                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
-            scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
+            scenario_tag_ids = torch.tensor(self.tag_tokenizer(scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
@@ -388,10 +372,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
         if self.model_args.token_scenario_tag:
-            scenario_tag_ids = list()
-            for i in range(batch_size):
-                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
-            scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
+            scenario_tag_ids = torch.tensor(self.tag_tokenizer(scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
             scenario_type_len = self.model_args.max_token_len
