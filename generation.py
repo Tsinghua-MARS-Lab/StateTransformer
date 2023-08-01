@@ -16,11 +16,11 @@ import numpy as np
 def main(args):
     running_mode = args.running_mode
 
-    data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
-    }
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
+    # }
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
     #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
@@ -192,10 +192,11 @@ def main(args):
                     continue
             del dl
         
-    filter_scenario = ["starting_straight_traffic_light_intersection_traversal","high_lateral_acceleration",
-    "changing_lane", "high_magnitude_speed", "low_magnitude_speed", "starting_left_turn",
-    "starting_right_turn", "stopping_with_lead", "following_lane_with_lead","near_multiple_vehicles",
-    "traversing_pickup_dropoff", "behind_long_vehicle", "waiting_for_pedestrian_to_cross", "stationary_in_traffic"]  
+    # filter_scenario = ["starting_straight_traffic_light_intersection_traversal","high_lateral_acceleration",
+    # "changing_lane", "high_magnitude_speed", "low_magnitude_speed", "starting_left_turn",
+    # "starting_right_turn", "stopping_with_lead", "following_lane_with_lead","near_multiple_vehicles",
+    # "traversing_pickup_dropoff", "behind_long_vehicle", "waiting_for_pedestrian_to_cross", "stationary_in_traffic"]  
+    filter_scenario = None
     def yield_data_by_scenario(shards):
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
