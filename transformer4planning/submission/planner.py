@@ -159,12 +159,13 @@ class ControlTFPlanner(AbstractPlanner):
     def observation_type(self) -> Type[Observation]:
         return DetectionsTracks
 
-    def compute_planner_trajectory(self, current_input) -> List[AbstractTrajectory]:
+    def compute_planner_trajectory(self, current_input: PlannerInput) -> List[AbstractTrajectory]:
         global count
         use_backup_planner = self.use_backup_planner
         count += 1
         start=time.time()
         print("count: ", count, "cuda:", torch.cuda.is_available())
+        traffic_data = current_input.traffic_light_data
         history = current_input.history
         ego_states = history.ego_state_buffer  # a list of ego trajectory
         context_length = len(ego_states)
@@ -177,7 +178,7 @@ class ControlTFPlanner(AbstractPlanner):
         agents = [history.observation_buffer[i].tracked_objects.get_agents() for i in range(context_length)]
         statics = [history.observation_buffer[i].tracked_objects.get_static_objects() for i in range(context_length)]
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
-            ego_trajectory, agents, statics, self.road_dic, ego_shape, max_dis=300)
+            ego_trajectory, agents, statics, self.road_dic, traffic_data, ego_shape, max_dis=300, map=self.map_api.map_name)
         time_after_input = time.time() - start
         print("time after ratser build", time_after_input)
         if time_after_input > 0.65:
@@ -342,7 +343,7 @@ class ControlTFPlanner(AbstractPlanner):
         return trajectory
         
     #TODO: add traffic channel
-    def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, ego_shape=None, max_dis=300, context_frequency=None):
+    def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, traffic_data=None, ego_shape=None, max_dis=300, context_frequency=None, map="sg-one-north"):
         """
         the first dimension is the sequence length, each timestep include n-items.
         agent_seq and statics_seq are both agents in raster definition
@@ -362,11 +363,16 @@ class ControlTFPlanner(AbstractPlanner):
         rasters_low_res = np.zeros([224, 224, total_raster_channels], dtype=np.uint8)
         rasters_high_res_channels = cv2.split(rasters_high_res)
         rasters_low_res_channels = cv2.split(rasters_low_res)
+        raster_shape = np.array([224, 224])
+        high_res_scale = 4
+        low_res_scale = 0.77
+        y_inverse = -1 if map == "sg-one-north" else 1
         # downsampling from ego_trajectory, agent_seq and statics_seq in 4 hz case
         
         agents_seq = agents_seq[-20::self.model.model_args.past_sample_interval]
         statics_seq = statics_seq[-20::self.model.model_args.past_sample_interval]
         ego_trajectory = ego_trajectory[-21::self.model.model_args.past_sample_interval]
+        traffic_seq = traffic_data[-20::self.model.model_args.past_sample_interval]
         # goal channel
         ## goal point
         if self.goal is None:
@@ -402,33 +408,21 @@ class ControlTFPlanner(AbstractPlanner):
             simplified_x, simplified_y = simplified_xyz_line.xy
             simplified_xyz = np.ones((len(simplified_x), 2)) * -1
             simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose())
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
             simplified_xyz[:, 1] *= -1
-            high_res_route = simplified_xyz * high_res_raster_scale
-            low_res_route = simplified_xyz * low_res_raster_scale
-            high_res_route = high_res_route.astype('int32')
-            low_res_route = low_res_route.astype('int32')
-            high_res_route += 112
-            low_res_route += 112
-            for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
-                        tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
-                        tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
-        # road element computation
-        # cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
-        # rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
-        # road_key_to_del = list()
+            simplified_xyz[:, 1] *= y_inverse
+            high_res_route = (simplified_xyz * high_res_scale + raster_shape[0] // 2).astype('int32')
+            low_res_route = (simplified_xyz * low_res_scale + raster_shape[0] // 2).astype('int32')
+
+            cv2.fillPoly(rasters_high_res_channels[0], np.int32([high_res_route[:, :2]]), (255, 255, 255))
+            cv2.fillPoly(rasters_low_res_channels[0], np.int32([low_res_route[:, :2]]), (255, 255, 255))
+
         for i, key in enumerate(road_dic):
             xyz = road_dic[key]["xyz"].copy()
             road_type = int(road_dic[key]['type'])
             xyz[:, :2] -= ego_pose[:2]
             if (abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
-                    abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):
-                # if (abs(xyz[0, 0]) > 2 * max_dis and abs(xyz[-1, 0]) > 2 * max_dis) or (
-                #     abs(xyz[0, 1]) > 2 * max_dis and abs(xyz[-1, 1]) > 2 * max_dis):
-                #     road_key_to_del.append(key)               
+                    abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis):             
                 continue
             # simplify road vector, can simplify about half of all the points
             pts = list(zip(xyz[:, 0], xyz[:, 1]))
@@ -437,26 +431,48 @@ class ControlTFPlanner(AbstractPlanner):
             simplified_x, simplified_y = simplified_xyz_line.xy
             simplified_xyz = np.ones((len(simplified_x), 2)) * -1
             simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-            # simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, \
-            #                                             simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-            simplified_xyz = (simplified_xyz @ rotation_matrix.transpose())
-            # simplified_xyz = simplified_xyz.copy() @ rotation_matrix
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
             simplified_xyz[:, 1] *= -1
-            high_res_road = simplified_xyz * high_res_raster_scale
-            low_res_road = simplified_xyz * low_res_raster_scale
-            high_res_road = high_res_road.astype('int32') + 112
-            low_res_road = low_res_road.astype('int32') + 112
-
-            for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
-                         tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
-                         tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
+            simplified_xyz[:, 1] *= y_inverse
+            high_res_road = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+            low_res_road = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
+            if road_type in [5, 17, 18, 19]:
+                cv2.fillPoly(rasters_high_res_channels[road_type + 1], np.int32([high_res_road[:, :2]]), (255, 255, 255))
+                cv2.fillPoly(rasters_low_res_channels[road_type + 1], np.int32([low_res_road[:, :2]]), (255, 255, 255))
+            else:
+                for j in range(simplified_xyz.shape[0] - 1):
+                    cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
+                            tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
+                    cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
+                            tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
         
-        # for key in road_key_to_del:
-        #     del road_dic[key]
-        # agent element computation
-        ## statics include CZONE_SIGN,BARRIER,TRAFFIC_CONE,GENERIC_OBJECT,
+        # traffic light
+        traffic_state = int(traffic_seq[-1].status)
+        lane_id = traffic_seq[-1].lane_connector_id
+        xyz = road_dic[lane_id] ["xyz"].copy()
+        xyz[:, :2] -= ego_pose[:2]
+        if not ((abs(xyz[0, 0]) > max_dis and abs(xyz[-1, 0]) > max_dis) or (
+                abs(xyz[0, 1]) > max_dis and abs(xyz[-1, 1]) > max_dis)):             
+            pts = list(zip(xyz[:, 0], xyz[:, 1]))
+            line = shapely.geometry.LineString(pts)
+            simplified_xyz_line = line.simplify(1)
+            simplified_x, simplified_y = simplified_xyz_line.xy
+            simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:, 1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz[:, 1] *= -1
+            simplified_xyz[:, 1] *= y_inverse
+            high_res_traffic = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+            low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
+            # traffic state order is GREEN, RED, YELLOW, UNKNOWN
+            for j in range(simplified_xyz.shape[0] - 1):
+                cv2.line(rasters_high_res_channels[1 + total_road_types + traffic_state],
+                        tuple(high_res_traffic[j, :2]),
+                        tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+                cv2.line(rasters_low_res_channels[1 + total_road_types + traffic_state],
+                        tuple(low_res_traffic[j, :2]),
+                        tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
+
         cos_, sin_ = math.cos(-ego_pose[2]), math.sin(-ego_pose[2])
 
         ## agent includes VEHICLE, PEDESTRIAN, BICYCLE, EGO(except)
