@@ -547,7 +547,7 @@ class PlanningTrainer(Trainer):
 
         ret_dict = {}
 
-        with open(eval_output_dir + 'result.pkl', 'wb') as f:
+        with open(eval_output_dir + model_name + '_result.pkl', 'wb') as f:
             pickle.dump(pred_dicts, f)
 
         result_str, result_dict = dataset.evaluation(

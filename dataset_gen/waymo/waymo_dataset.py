@@ -493,7 +493,8 @@ class WaymoDataset(DatasetTemplate):
         """
         input_dict = batch_dict['input_dict']
 
-        pred_trajs = batch_pred_dicts['logits'][:, None, ...]
+        pred_length = batch_dict['input_dict']['trajectory_label'].shape[1]
+        pred_trajs = batch_pred_dicts['logits'][:, None, -pred_length - 1:-1, :]
         pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
         center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
 
@@ -710,7 +711,7 @@ class WaymoDataset(DatasetTemplate):
     def evaluation(self, pred_dicts, output_path=None, eval_method='waymo', **kwargs):
         if eval_method == 'waymo':
             try:
-                num_modes_for_eval = pred_dicts[0][0]['pred_trajs'].shape[0]
+                num_modes_for_eval = pred_dicts[0]['pred_trajs'].shape[0]
             except:
                 num_modes_for_eval = 6
             metric_results, result_format_str = waymo_evaluation(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval)

@@ -72,7 +72,7 @@ class Scenario:
                 gt_trajs[:, 1],
                 linewidths=3,
                 color=color,
-                alpha=1.0,
+                alpha=0.5,
                 facecolors='none',
                 zorder=5,
             )
@@ -81,6 +81,16 @@ class Scenario:
             ax.plot(
                 pred_trajs[:, 0],
                 pred_trajs[:, 1],
+                linewidth=3,
+                color=color,
+                alpha=1.0,
+                zorder=5,
+            )
+            
+            ax.scatter(
+                pred_trajs[:, 0],
+                pred_trajs[:, 1],
+                marker='*',
                 linewidth=3,
                 color=color,
                 alpha=1.0,
@@ -95,7 +105,7 @@ class Scenario:
                 s=200,
                 linewidths=3,
                 color=color,
-                alpha=1.0,
+                alpha=0.5,
                 facecolors=color,
                 zorder=5,
             )
@@ -134,7 +144,7 @@ def main():
     test_files = os.path.join(args.scenario_folder, f'{args.dataset}/*')
 
     filenames = tf.io.matching_files(test_files)
-    print('---- ', len(filenames))
+    print(' tot len ', len(filenames))
     for filename in tqdm(filenames):
         shard_dataset = tf.data.TFRecordDataset(filename)
         shard_iterator = shard_dataset.as_numpy_iterator()
@@ -142,7 +152,7 @@ def main():
             scenario = Scenario(scenario_bytes)
 
         scenario_id = scenario.id
-        print(f'process {scenario_id}...')
+        # print(f'process {scenario_id}...')
 
         # filter the data to get the data with the same scenario_id
         predictions = [data[i] for i in range(len(data)) if data[i]['scenario_id'] == scenario_id]
@@ -152,7 +162,7 @@ def main():
         os.makedirs(args.out_folder, exist_ok=True)
         
         scenario.visualize_result(predictions, output_file=output_file)
-        print(f'saved to {output_file}...')
+        # print(f'saved to {output_file}...')
         
         # break
         

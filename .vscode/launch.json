@@ -86,7 +86,7 @@
             "cwd": "${workspaceFolder}/",
             "args": [
                 "--model_name", "pretrain-vector-gpt",
-                "--model_pretrain_name_or_path", "/data_3/madanjiao/model_res/vector_gpt_1.5B_mse_FI1_PI1_k1/training_results/checkpoint-145000",
+                "--model_pretrain_name_or_path", "/data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results/checkpoint-41000",
                 "--saved_dataset_folder", "/data_3/madanjiao/nuplan/online_demo/mini_demo/index",
                 "--output_dir", "/data_3/madanjiao/model_res/gpt_mse_FI1_PI1_k1_test/training_results",
                 "--logging_dir", "/data_3/madanjiao/model_res/gpt_mse_FI1_PI1_k1_test/training_logs",
@@ -101,6 +101,8 @@
                 "--dataloader_num_workers", "10",
                 "--save_total_limit", "2",
                 "--predict_trajectory", "True",
+                "--ar_future_interval", "5",
+                "--specified_key_points", "True",
                 "--dataloader_drop_last", "True",
                 "--d_embed", "256",
                 "--d_model", "256",
