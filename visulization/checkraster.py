@@ -6,7 +6,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from dataset_gen.DataLoaderNuPlan import NuPlanDL
-from dataset_gen.nuplan_obs import get_observation_for_autoregression_nsm
 
 def visulize_raster(savepath, name, raster, context_length=9):
     """

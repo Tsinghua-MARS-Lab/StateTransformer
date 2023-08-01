@@ -11,13 +11,13 @@ from transformer4planning.checkratser import visulize_raster_perchannel, visuliz
 @dataclass
 class TestArguments:
     dataset: str = field(
-        default="/home/shiduozhang/nuplan/online_debug/us-ma-boston"
+        default="/home/shiduozhang/nuplan/online_debug/debug"
     )
     datadic_path: str = field(
         default="/home/shiduozhang/nuplan/online_debug/"
     )
     batch_size: int = field(
-        default=2
+        default=1
     )
     num_workers: int = field(
         default=1
