@@ -385,13 +385,12 @@ class ControlTFPlanner(AbstractPlanner):
                                             l=ego_shape[1],
                                             direction=-rotated_goal_pose[2])
         goal_contour = np.array(goal_contour, dtype=np.int32)
-        goal_contour_high_res = int(high_res_raster_scale) * goal_contour + 112
+        goal_contour_high_res = (high_res_raster_scale * goal_contour).astype('int32') + raster_shape[0] // 2
         cv2.drawContours(rasters_high_res_channels[0], [goal_contour_high_res], -1, (255, 255, 255), -1)
-        goal_contour_low_res = (low_res_raster_scale * goal_contour).astype(np.int64) + 112
+        goal_contour_low_res = (low_res_raster_scale * goal_contour).astype('int32') + raster_shape[0] // 2
         cv2.drawContours(rasters_low_res_channels[0], [goal_contour_low_res], -1, (255, 255, 255), -1)
         ## goal route
         cos_, sin_ = math.cos(-ego_pose[2] - math.pi / 2), math.sin(-ego_pose[2] - math.pi / 2)
-        rotation_matrix = np.array([[cos_, -sin_], [sin_, cos_]])
         route_ids = self.route_roadblock_ids
         # if self.multi_city:
         routes = [road_dic[int(route_id)] for route_id in route_ids]
@@ -488,11 +487,11 @@ class ControlTFPlanner(AbstractPlanner):
                 rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                                 direction=-pose[2])
                 rect_pts = np.array(rect_pts, dtype=np.int32)
-                rect_pts_high_res = int(high_res_raster_scale) * rect_pts + 112
+                rect_pts_high_res = (high_res_raster_scale * rect_pts).astype('int32') + raster_shape[0] // 2
                 cv2.drawContours(rasters_high_res_channels[1 + total_road_types + total_traffic_types + agent_type * context_length + i],
                                  [rect_pts_high_res], -1, (255, 255, 255), -1)
                 # draw on low resolution
-                rect_pts_low_res = (low_res_raster_scale * rect_pts).astype(np.int64) + 112
+                rect_pts_low_res = (low_res_raster_scale * rect_pts).astype('int32') + raster_shape[0] // 2
                 cv2.drawContours(rasters_low_res_channels[1 + total_road_types + total_traffic_types + agent_type * context_length + i],
                                  [rect_pts_low_res], -1, (255, 255, 255), -1)
 
@@ -506,11 +505,11 @@ class ControlTFPlanner(AbstractPlanner):
                                             w=ego_shape[0], l=ego_shape[1],
                                             direction=-pose[2])
             rect_pts = np.int0(rect_pts)
-            rect_pts_high_res = int(high_res_raster_scale) * rect_pts + 112
+            rect_pts_high_res = (high_res_raster_scale * rect_pts).astype('int32') + raster_shape[0] // 2
             cv2.drawContours(rasters_high_res_channels[1 + total_road_types + total_traffic_types + agent_type * context_length + i], [rect_pts_high_res],
                              -1, (255, 255, 255), -1)
             # draw on low resolution
-            rect_pts_low_res = int(low_res_raster_scale) * rect_pts + 112
+            rect_pts_low_res = (low_res_raster_scale * rect_pts).astype('int32') + raster_shape[0] // 2
             cv2.drawContours(rasters_low_res_channels[1 + total_road_types + total_traffic_types + agent_type * context_length + i], [rect_pts_low_res],
                              -1, (255, 255, 255), -1)
 
@@ -519,14 +518,10 @@ class ControlTFPlanner(AbstractPlanner):
 
         # context_actions computation
         context_actions = list()
-        # ego_poses = ego_trajectory - ego_pose
         rotated_poses = np.array([recentered_ego_trajectory[:, 0] * cos_ - recentered_ego_trajectory[:, 1] * sin_,
                                   recentered_ego_trajectory[:, 0] * sin_ + recentered_ego_trajectory[:, 1] * cos_,
                                   np.zeros(recentered_ego_trajectory.shape[0]), recentered_ego_trajectory[:, -1]]).transpose((1, 0))
         for i in range(0, len(rotated_poses) - 1):
-            # if not self.multi_city:
-            #     action = rotated_poses[i+1] - rotated_poses[i] # old model, #it later@5.18
-            # else:
             action = rotated_poses[i]
             context_actions.append(action)
 
