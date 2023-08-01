@@ -3,8 +3,6 @@ from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
 from transformer4planning.models.model_legacy import *
-from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
-
 from transformers.generation.configuration_utils import GenerationConfig
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
@@ -528,6 +526,7 @@ def build_models(model_args):
         config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
         if not model_args.autoregressive:
+            from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
             ModelCls = GPTNonAutoRegressiveModelVector
             tag = 'Vector GPT nonauto'
         else:
