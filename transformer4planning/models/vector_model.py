@@ -329,31 +329,37 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         )
 
     @torch.no_grad()
-    def generate(self, **kwargs) -> torch.FloatTensor:
-        high_res_raster = kwargs.get("high_res_raster", None)
-        low_res_raster = kwargs.get("low_res_raster", None)
-        pred_length = kwargs.get("pred_length", None)
-        trajectory_label = kwargs.get("trajectory_label", None)
-        context_actions = kwargs.get("context_actions", None)
-        """
-        Used for generate with key points
-        """
-        device = high_res_raster.device
-        pred_length = trajectory_label.shape[1] if pred_length is None else pred_length
+    def generate(self, batch_size, input_dict, batch_sample_count, **kwargs) -> torch.FloatTensor:
         
-        if self.model_args.x_random_walk > 0:
+        batch_size = input_dict['obj_trajs'].shape[0]
+        # encoder
+        device = input_dict['obj_trajs'].device
+        batch_dict = self.context_encoder({'input_dict': input_dict, 
+                                           'batch_sample_count': batch_sample_count})
+        
+        obj_feature = batch_dict['obj_feature']
+        map_feature = batch_dict['map_feature']
+        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        state_embeds = state_embeds.max(dim=1)[0]
+        
+        # traj
+        trajectory_label = input_dict['trajectory_label']
+        pred_length = trajectory_label.shape[1]
+        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
+        
+        # action context
+        context_actions = input_dict['center_objects_past']
+        if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
-        if self.model_args.y_random_walk > 0:
+        if self.model_args.y_random_walk > 0 and self.training:
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
-        device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        batch_size, context_length, c, h, w = high_res_seq.shape
 
-        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+        # create OAOAOA..
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
             (batch_size, context_length * 2, n_embed),
@@ -362,15 +368,37 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         )
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+        
+        if self.model_args.token_scenario_tag:
+            scenario_type = kwargs.get("scenario_type", None)
+            scenario_tag_ids = list()
+            for i in range(batch_size):
+                scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
+            scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
+            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
+            input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
+            scenario_type_len = self.model_args.max_token_len
+        else:
+            scenario_type_len = 0
+
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
         # use autoregressive future interval
         trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
-        future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+        if self.model_args.specified_key_points:
+            # 80, 40, 20, 10, 5
+            if self.model_args.forward_specified_key_points:
+                selected_indices = [4, 9, 19, 39, 79]
+            else:
+                selected_indices = [79, 39, 19, 9, 4]
+            future_key_points = trajectory_label_dummy[:, selected_indices, :]
+        else:
+            future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
         future_key_embeds_dummy = self.action_m_embed(future_key_points)
         input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
                                   torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         key_points_num = future_key_points.shape[1]
+        pred_key_points_during_generate = []
         # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
         # Loop for generation
         for i in range(key_points_num):
@@ -378,7 +406,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
             # attention_mask[:, context_length * 2 + i + 1:] = 0
             # position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-            input_embeds_current = input_embeds[:, :context_length * 2 + i, :]
+            input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
             attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
             position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
@@ -388,7 +416,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 # **input_kwargs
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            future_key_point_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
@@ -402,25 +430,31 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
             else:
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
-            input_embeds[:, context_length * 2 + i, :] = key_point_embed[:, 0, :]
+            input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+            pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
         # generate remaining trajectory
         # prepare attention mask
-        attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-        attention_mask[:, context_length * 2 + key_points_num:] = 0
-        position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+        # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
+        # attention_mask[:, context_length * 2 + key_points_num:] = 0
+        # position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
-            attention_mask=attention_mask,
+            # attention_mask=attention_mask,
+            attention_mask=None,
             position_ids=None,
             # **input_kwargs
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
-        traj_logits = self.traj_decoder(traj_hidden_state)
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:, context_length * 2 - 1:context_length * 2 + future_key_points.shape[1] - 1, :]
+        if self.traj_decoder is not None:
+            traj_logits = self.traj_decoder(traj_hidden_state)
+        else:
+            traj_logits = trajectory_label_dummy[..., :2]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
 
         if self.k > 1:
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
@@ -430,7 +464,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             key_points_logits = selected_key_points
         elif self.k == 1:
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
+            # use previous prediction during generation
+            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
         else:
             raise ValueError("illegal k while generating trajectory", self.k)
 
-        return torch.cat([key_points_logits, traj_logits], dim=1)
+        # return torch.cat([key_points_logits, traj_logits], dim=1)
+        return {'key_points_logits': key_points_logits, 'logits': traj_logits}

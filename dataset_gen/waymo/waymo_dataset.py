@@ -494,7 +494,7 @@ class WaymoDataset(DatasetTemplate):
         input_dict = batch_dict['input_dict']
 
         pred_length = batch_dict['input_dict']['trajectory_label'].shape[1]
-        pred_trajs = batch_pred_dicts['logits'][:, None, -pred_length - 1:-1, :]
+        pred_trajs = batch_pred_dicts['logits'][:, None, -pred_length:, :]
         pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
         center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
 

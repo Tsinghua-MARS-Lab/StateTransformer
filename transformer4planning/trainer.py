@@ -517,7 +517,8 @@ class PlanningTrainer(Trainer):
         for i, batch_dict in enumerate(dataloader):
             with torch.no_grad():
                 batch_dict = self._prepare_inputs(batch_dict)
-                batch_pred_dicts = self.model(**batch_dict)
+                batch_pred_dicts = self.model.generate(**batch_dict)
+                # batch_pred_dicts = self.model(**batch_dict)
                 
                 if 'vector' in self.model.model_args.model_name:
                     final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
