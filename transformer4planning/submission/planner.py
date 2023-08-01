@@ -342,7 +342,6 @@ class ControlTFPlanner(AbstractPlanner):
         print("time consumed", time.time()-start)
         return trajectory
         
-    #TODO: add traffic channel
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, road_dic, traffic_data=None, ego_shape=None, max_dis=300, context_frequency=None, map="sg-one-north"):
         """
         the first dimension is the sequence length, each timestep include n-items.
