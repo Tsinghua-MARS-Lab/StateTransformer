@@ -51,6 +51,22 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.tag_tokenizer.pad_token = self.tag_tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tag_tokenizer.vocab_size, config.n_embd)
         self.post_init()
+        
+        # loss
+        if 'mse' in self.loss_fn:
+            self.reg_trj_loss = MSELoss(reduction="none")
+        elif 'l1' in self.loss_fn:
+            self.reg_trj_loss = nn.SmoothL1Loss()
+            
+        if self.ar_future_interval > 0:
+            self.reg_kps_loss = self.reg_trj_loss
+        
+        self.cls_kps_loss = CrossEntropyLoss(reduction="mean")
+        
+        if self.model_args.predict_yaw:
+            self.pred_dim = 4
+        else:
+            self.pred_dim = 2 
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -229,28 +245,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
-        loss = torch.tensor(0, dtype=torch.float32, device=device)
-        if 'mse' in self.loss_fn:
-            loss_fct = nn.MSELoss(reduction="mean")
-        elif 'l1' in self.loss_fn:
-            loss_fct = nn.SmoothL1Loss()
-        if not self.model_args.pred_key_points_only:
-            traj_logits = self.traj_decoder(traj_hidden_state)
-            if self.task == "waymo":
-                loss_fct = MSELoss(reduction="none")
-                # y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
-                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
-                            trajectory_label_mask.sum() + 1e-7)
-                loss += _loss
-            else:
-                if self.model_args.predict_yaw:
-                    loss += loss_fct(traj_logits, trajectory_label.to(device)) * self.model_args.trajectory_loss_rescale
-                else:
-                    loss += loss_fct(traj_logits[..., :2], trajectory_label[...,
-                                                           :2].to(device)) * self.model_args.trajectory_loss_rescale
-        else:
-            traj_logits = torch.zeros_like(trajectory_label[..., :2])
-
+        pred_traj_logits = self.traj_decoder(traj_hidden_state)   # ---- for loss
+        
         if self.ar_future_interval > 0:
             """
             for example:
@@ -261,70 +257,28 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             """
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
             future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-
-            if self.k == 1:
-                if self.model_args.predict_yaw:
-                    loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
-                else:
-                    loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
-                
-                if self.task == "waymo":
-                    loss_to_add = (loss_to_add* future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
-                loss += loss_to_add
-                traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
-            else:
-                b, s, c = future_key_points.shape
-                k_results = key_points_logits.reshape(b, s, self.k, -1)
-
-                # get loss of minimal loss from k results
-                k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
-                loss_fct_key_points = MSELoss(reduction="none")
-                if self.model_args.predict_yaw:
-                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device))
-                else:
-                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points[..., :2].to(device))
-                # add loss on x, y (the last dimension)
-                loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
-                min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                
-                if self.task == "waymo":
-                    loss += (min_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
-                else:
-                    loss += min_loss.mean()
-                if self.next_token_scorer_decoder is not None:
-                    pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-                    loss_fct = CrossEntropyLoss(reduction="mean")
-                    loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
-                    loss += loss_to_add
-                    if self.training:
-                        # concatenate the key points with predicted trajectory for evaluation
-                        selected_key_points = key_points_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
-                                              min_loss_indices.reshape(-1), :].reshape(b, s, -1)
-                    else:
-                        # concatenate the key points with predicted trajectory selected from the classifier for evaluation
-                        selected_key_points = key_points_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
-                                              pred_logits.argmax(dim=-1).reshape(-1), :].reshape(b, s, -1)
-                    traj_logits = torch.cat([selected_key_points, traj_logits], dim=1)
-                else:
-                    print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
-                    traj_logits = torch.cat([key_points_logits[0].reshape(b, s, -1), traj_logits], dim=1)
-
-        # evaluate accuracy if on eval
-        if not self.training and self.clf_metrics is not None:
+            pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k  # ---- for loss
+            
             if self.next_token_scorer_decoder is not None:
-                # classification on k predictions
-                predictions = torch.argmax(pred_logits, dim=-1)  # b, s, k
-                for _, metric in self.clf_metrics.items():
-                    metric.add_batch(references=min_loss_indices.reshape(-1), predictions=predictions.reshape(-1))
+                pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k  # ----- for loss
+        
+        # get loss
+        pred_traj_logits, loss = self.calc_loss(pred_traj_logits=pred_traj_logits, 
+                              gt_traj=trajectory_label, 
+                              gt_traj_mask=trajectory_label_mask, 
+                              pred_kps_logits=pred_kps_logits,
+                              gt_kps=future_key_points, 
+                              gt_kps_mask=future_key_points_gt_mask,
+                              pred_kps_cls=pred_kps_cls,
+                              )
 
         if not return_dict:
-            output = (traj_logits,) + transformer_outputs[1:]
+            output = (pred_traj_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
-            logits=traj_logits,
+            logits=pred_traj_logits,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
@@ -394,8 +348,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             else:
                 selected_indices = [79, 39, 19, 9, 4]
             future_key_points = trajectory_label_dummy[:, selected_indices, :]
+            future_key_points_gt = trajectory_label[:, selected_indices, :]
         else:
             future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+            future_key_points_gt = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
         future_key_embeds_dummy = self.action_m_embed(future_key_points)
         input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
@@ -424,6 +380,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
                 pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
+                
+                # delta = (key_points_logit.reshape(batch_size, self.k, -1) - future_key_points_gt[:, [i], :2])
+                # dist = -delta[..., 0]*delta[..., 0] - delta[..., 1]*delta[..., 1]
+                # pred_logits = dist[:, None, :]
+                
                 selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
                 key_points_logit = selected_key_point
             else:
@@ -474,3 +435,64 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         # return torch.cat([key_points_logits, traj_logits], dim=1)
         return {'key_points_logits': key_points_logits, 'logits': traj_logits}
+    
+    def calc_loss(self, pred_traj_logits, gt_traj, gt_traj_mask=None, 
+                  pred_kps_logits=None, gt_kps=None, gt_kps_mask=None,
+                  pred_kps_cls=None,
+                  ):
+        
+        device = pred_traj_logits.device
+        loss = torch.tensor(0, dtype=torch.float32, device=device)
+
+        loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
+        loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
+        loss += loss_traj
+
+        if self.ar_future_interval > 0:
+            if self.k == 1:
+                loss_keypoints = self.reg_trj_loss(pred_kps_logits, gt_kps[..., :self.pred_dim].to(device))
+                loss_keypoints = (loss_keypoints* gt_kps_mask).sum() / (gt_kps_mask.sum() + 1e-7)
+                
+                loss += loss_keypoints
+                pred_traj_logits = torch.cat([pred_kps_logits, pred_traj_logits], dim=1)
+            else:
+                b, s, c = gt_kps.shape
+                k_results = pred_kps_logits.reshape(b, s, self.k, -1)
+
+                # get loss of minimal loss from k results
+                k_future_key_points = gt_kps.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
+
+                loss_keypoints = self.reg_kps_loss(k_results, k_future_key_points[..., :self.pred_dim].to(device))
+                # add loss on x, y (the last dimension)
+                loss_keypoints = loss_keypoints.sum(dim=-1)  # b, s, k
+                min_loss_kp, min_loss_kp_indices = torch.min(loss_keypoints, dim=2)  # b, s
+                min_loss_kp = (min_loss_kp.unsqueeze(-1) * gt_kps_mask).sum() / (gt_kps_mask.sum() + 1e-7)
+                
+                loss += min_loss_kp
+                
+                if self.next_token_scorer_decoder is not None:
+                    loss_kp_cls = self.cls_kps_loss(pred_kps_cls.reshape(b * s, self.k).to(torch.float64), min_loss_kp_indices.reshape(-1).long())
+                    loss += loss_kp_cls
+                    
+                    if self.training:
+                        # concatenate the key points with predicted trajectory for evaluation
+                        selected_key_points = pred_kps_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
+                                              min_loss_kp_indices.reshape(-1), :].reshape(b, s, -1)
+                    else:
+                        # concatenate the key points with predicted trajectory selected from the classifier for evaluation
+                        selected_key_points = pred_kps_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
+                                              pred_kps_cls.argmax(dim=-1).reshape(-1), :].reshape(b, s, -1)
+                    pred_traj_logits = torch.cat([selected_key_points, pred_traj_logits], dim=1)
+                else:
+                    print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
+                    pred_traj_logits = torch.cat([pred_kps_logits[0].reshape(b, s, -1), pred_traj_logits], dim=1)
+                    
+                # evaluate accuracy if on eval
+        if not self.training and self.clf_metrics is not None:
+            if self.next_token_scorer_decoder is not None:
+                # classification on k predictions
+                predictions = torch.argmax(pred_kps_cls, dim=-1)  # b, s, k
+                for _, metric in self.clf_metrics.items():
+                    metric.add_batch(references=min_loss_kp_indices.reshape(-1), predictions=predictions.reshape(-1))
+                    
+        return pred_traj_logits, loss

@@ -6,7 +6,7 @@ python -m torch.distributed.run --nproc_per_node=7 runner_waymo.py \
         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
         --output_dir /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_masked_ep100/training_results  \
         --logging_dir /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_masked_ep100/training_logs \
-        --run_name gpt_1.5B_mse_FI1_PI1_k1 --num_train_epochs 20 \
+        --run_name gpt_1.5B_mse_FI1_PI1_k1 --num_train_epochs 100 \
         --per_device_train_batch_size 16 --warmup_steps 50 \
         --weight_decay 0.01 --logging_steps 2 --save_strategy steps \
         --save_steps 5000 --dataloader_num_workers 10 \

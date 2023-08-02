@@ -86,7 +86,7 @@
             "cwd": "${workspaceFolder}/",
             "args": [
                 "--model_name", "pretrain-vector-gpt",
-                "--model_pretrain_name_or_path", "/data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results/checkpoint-80000",
+                "--model_pretrain_name_or_path", "/data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_masked_ep100/training_results/checkpoint-25000",
                 "--saved_dataset_folder", "/data_3/madanjiao/nuplan/online_demo/mini_demo/index",
                 "--output_dir", "/data_3/madanjiao/model_res/gpt_mse_FI1_PI1_k1_test/training_results",
                 "--logging_dir", "/data_3/madanjiao/model_res/gpt_mse_FI1_PI1_k1_test/training_logs",
@@ -114,7 +114,7 @@
                 "--dataset_name", "waymo",
                 "--task", "waymo",
                 "--with_traffic_light", "True",
-                "--k", "1",
+                "--k", "6",
                 "--online_preprocess", "True",
                 "--datadic_path", "/data_3/madanjiao/nuplan/online_demo/mini_demo",
                 "--remove_unused_columns", "False",
