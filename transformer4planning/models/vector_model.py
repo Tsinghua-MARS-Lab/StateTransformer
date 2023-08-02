@@ -440,6 +440,20 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                   pred_kps_logits=None, gt_kps=None, gt_kps_mask=None,
                   pred_kps_cls=None,
                   ):
+        """_summary_
+
+        Args:
+            pred_traj_logits (bs, future_frame, 2): _description_
+            gt_traj (bs, future_frame, 4): _description_
+            gt_traj_mask (bs, future_frame, 1): _description_. Defaults to None.
+            pred_kps_logits (bs, num_kps, k*2): _description_. Defaults to None.
+            gt_kps (bs, num_kps, 4): _description_. Defaults to None.
+            gt_kps_mask (bs, num_kps, 1): _description_. Defaults to None.
+            pred_kps_cls (bs, num_kps, 6): _description_. Defaults to None.
+
+        Returns:
+            _type_: _description_
+        """
         
         device = pred_traj_logits.device
         loss = torch.tensor(0, dtype=torch.float32, device=device)
@@ -456,32 +470,36 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 loss += loss_keypoints
                 pred_traj_logits = torch.cat([pred_kps_logits, pred_traj_logits], dim=1)
             else:
-                b, s, c = gt_kps.shape
-                k_results = pred_kps_logits.reshape(b, s, self.k, -1)
+                b, num_kps, c = gt_kps.shape
+                k_results = pred_kps_logits.reshape(b, num_kps, self.k, -1)
 
                 # get loss of minimal loss from k results
-                k_future_key_points = gt_kps.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
+                k_future_key_points = gt_kps.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, num_kps, self.k, -1)
 
                 loss_keypoints = self.reg_kps_loss(k_results, k_future_key_points[..., :self.pred_dim].to(device))
                 # add loss on x, y (the last dimension)
-                loss_keypoints = loss_keypoints.sum(dim=-1)  # b, s, k
-                min_loss_kp, min_loss_kp_indices = torch.min(loss_keypoints, dim=2)  # b, s
+                loss_keypoints = loss_keypoints.sum(dim=-1)  # b, num_kps, k
+                min_loss_kp, min_loss_kp_indices = torch.min(loss_keypoints, dim=2)  # b, num_kps
+                # min_loss_kp = loss_keypoints.mean(dim=2) # option 1
                 min_loss_kp = (min_loss_kp.unsqueeze(-1) * gt_kps_mask).sum() / (gt_kps_mask.sum() + 1e-7)
                 
                 loss += min_loss_kp
                 
                 if self.next_token_scorer_decoder is not None:
-                    loss_kp_cls = self.cls_kps_loss(pred_kps_cls.reshape(b * s, self.k).to(torch.float64), min_loss_kp_indices.reshape(-1).long())
+                    pred_kps_cls_masked = pred_kps_cls[gt_kps_mask[...,0].to(torch.bool)] 
+                    min_loss_kp_indices_masked = min_loss_kp_indices[gt_kps_mask[...,0].to(torch.bool)]
+                    loss_kp_cls = self.cls_kps_loss(pred_kps_cls_masked.reshape(-1, self.k).to(torch.float64), min_loss_kp_indices_masked.reshape(-1).long())
                     loss += loss_kp_cls
+                    # loss += loss_kp_cls * 2 # option 2
                     
                     if self.training:
                         # concatenate the key points with predicted trajectory for evaluation
-                        selected_key_points = pred_kps_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
-                                              min_loss_kp_indices.reshape(-1), :].reshape(b, s, -1)
+                        selected_key_points = pred_kps_logits.reshape(b * num_kps, self.k, -1)[torch.arange(b * num_kps),
+                                              min_loss_kp_indices.reshape(-1), :].reshape(b, num_kps, -1)
                     else:
                         # concatenate the key points with predicted trajectory selected from the classifier for evaluation
-                        selected_key_points = pred_kps_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
-                                              pred_kps_cls.argmax(dim=-1).reshape(-1), :].reshape(b, s, -1)
+                        selected_key_points = pred_kps_logits.reshape(b * num_kps, self.k, -1)[torch.arange(b * num_kps),
+                                              pred_kps_cls.argmax(dim=-1).reshape(-1), :].reshape(b, num_kps, -1)
                     pred_traj_logits = torch.cat([selected_key_points, pred_traj_logits], dim=1)
                 else:
                     print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
