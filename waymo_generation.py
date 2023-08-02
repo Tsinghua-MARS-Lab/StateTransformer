@@ -231,31 +231,50 @@ def generate_batch_polylines_from_map(polylines, point_sampled_interval=1, vecto
     # assert center_dist.max() < 10
     return ret_polylines, ret_polylines_mask
 
-def create_map_data_for_center_objects(center_objects, heading, map_infos, center_offset):
-    polylines = torch.from_numpy(map_infos['all_polylines'].copy())
-    pts = list(zip(polylines[:, 0], polylines[:, 1]))
-    line = shapely.geometry.LineString(pts)
-    simplified_xyz_line = line.simplify(1)
-    simplified_x, simplified_y = simplified_xyz_line.xy
-    simplified_xyz = np.ones((len(simplified_x), 2)) * -1
-    mask = np.ones((len(simplified_x),))
-    simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-    
+def create_map_data_for_center_objects(center_objects, heading, map_infos):
     map_polylines = []
-    map_polylines_mask = []
-    for i, ego_pos in enumerate(center_objects):
-        cos_, sin_ = math.cos(-heading[i] - math.pi / 2), math.sin(-heading[i] - math.pi / 2)
-        simplified_xyz -= ego_pos.numpy()[:2]
-        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-        simplified_xyz[:, 1] *= -1
+    last_polyline_index = 0
+    polyline_index = []
+    for i, info in enumerate(map_infos['all_polylines']):
+        if len(info) == 0: continue
+        elif len(info) == 1:
+            map_polylines.append(info[:, :2])
+            polyline_index.append(last_polyline_index)
+            last_polyline_index += 1
+            continue 
+
+        pts = list(zip(info[:, 0], info[:, 1]))
+        line = shapely.geometry.LineString(pts)
+        simplified_xyz_line = line.simplify(1)
+        simplified_x, simplified_y = simplified_xyz_line.xy
+
+        assert len(simplified_x) == len(simplified_y) and len(simplified_x) > 0, len(simplified_x)
+
+        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
 
         map_polylines.append(simplified_xyz)
-        map_polylines_mask.append(mask)
+        polyline_index.append(last_polyline_index)
+        last_polyline_index += len(simplified_xyz)
+    
+    map_polylines = np.concatenate(map_polylines, axis=0)
 
-    map_polylines = np.stack(map_polylines)
-    map_polylines_mask = np.stack(map_polylines_mask)
+    num_objects, num_attrs = map_polylines.shape
+    num_center_objects = center_objects.shape[0]
+    assert center_objects.shape[0] == heading.shape[0]
+    assert center_objects.shape[1] in [3, 2]
 
-    return map_polylines, map_polylines_mask
+    map_polylines = torch.from_numpy(map_polylines).to(torch.float)
+    polylines = map_polylines.clone().view(1, num_objects, num_attrs).repeat(num_center_objects, 1,  1)
+    polylines[:, :, 0:center_objects.shape[1]] -= center_objects[:, None, :2]
+    polylines[:, :, 0:2] = rotate_points_along_z(
+        points=polylines[:, :, 0:2].view(num_center_objects, -1, 2),
+        angle=-heading
+    ).view(num_center_objects, num_objects, 2)
+
+    mask = np.ones_like(polylines)
+
+    return polylines, mask, polyline_index
 
 
 def create_map_data_for_center_objects_MTR(center_objects, heading, map_infos, center_offset):
@@ -364,33 +383,66 @@ def rotate_points_along_z(points, angle):
         points_rot = torch.cat((points_rot, points[:, :, 3:]), dim=-1)
     return points_rot.numpy() if is_numpy else points_rot
 
+def process_agents(agent_trajs):
+    agent_dict = {}
+    for i, traj in enumerate(agent_trajs): 
+        first_valid_frame, last_valid_frame = 999, -1
+        for t, frame in enumerate(traj):
+            if frame[-1] == 1:
+                if t < first_valid_frame: first_valid_frame = t
+                if t > last_valid_frame: last_valid_frame = t
+        
+        if last_valid_frame <= first_valid_frame: continue
 
-def check_numpy_to_torch(x):
-    if isinstance(x, np.ndarray):
-        return torch.from_numpy(x).float(), True
-    return x, False
+        if abs(traj[last_valid_frame, 0] - traj[first_valid_frame, 0]) + abs(traj[last_valid_frame, 1] - traj[first_valid_frame, 1]) < 0.1:
+            agent_dict[i] = traj[first_valid_frame].to(torch.float32)
+        else:
+            agent_dict[i] = traj
 
+    return agent_dict
+
+def create_map_data(map_infos):
+    map_polylines = []
+    last_polyline_index = 0
+    polyline_index = []
+    for i, info in enumerate(map_infos['all_polylines']):
+        if len(info) == 0: continue
+        elif len(info) == 1:
+            map_polylines.append(info[:, :2])
+            polyline_index.append(last_polyline_index)
+            last_polyline_index += 1
+            continue 
+
+        pts = list(zip(info[:, 0], info[:, 1]))
+        line = shapely.geometry.LineString(pts)
+        simplified_xyz_line = line.simplify(1)
+        simplified_x, simplified_y = simplified_xyz_line.xy
+
+        assert len(simplified_x) == len(simplified_y) and len(simplified_x) > 0, len(simplified_x)
+
+        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+
+        map_polylines.append(simplified_xyz)
+        polyline_index.append(last_polyline_index)
+        last_polyline_index += len(simplified_xyz)
+    
+    map_polylines = np.concatenate(map_polylines, axis=0, dtype=np.float32)
+    mask = np.ones_like(map_polylines, dtype=bool)
+
+    return map_polylines, mask, polyline_index
 
 def main(args):
     data_path = args.data_path
 
-    # observation_kwargs = dict(
-    #     max_dis=500,
-    #     high_res_raster_shape=[224, 224],  # for high resolution image, we cover 50 meters for delicated short-term actions
-    #     high_res_raster_scale=4.0,
-    #     low_res_raster_shape=[224, 224],  # for low resolution image, we cover 300 meters enough for 8 seconds straight line actions
-    #     low_res_raster_scale=0.77,
-    #     past_frame_num=10,
-    #     future_frame_num=80,
-    #     frame_sample_interval=1,
-    # )
-
-    def yield_data(shards, dl, dynamic_center):
+    def yield_data(shards, dl, output_path):
         for shard in shards:
             tf_dataset = dl.get_next_file(specify_file_index=shard)
             if tf_dataset is None:
                 continue
             
+            file_name = str(shard) + ".pkl"
+            dicts_to_save = {}
             for data in tf_dataset:
                 scenario = scenario_pb2.Scenario()
                 scenario.ParseFromString(bytearray(data.numpy()))
@@ -400,58 +452,41 @@ def main(args):
                 map_infos = decode_map_features_from_proto(scenario.map_features)
                 
                 agent_trajs = torch.from_numpy(track_infos['trajs'])  # (num_objects, num_timestamp, 10)
-                num_egos = track_index_to_predict.shape[0]
-
-                num_agents, num_frames, num_attrs = agent_trajs.shape
-                if dynamic_center:
-                    num_agents_input = 550
-                    agent_trajs_res = torch.zeros((num_egos, num_agents_input, num_frames, num_attrs))
-                    agent_trajs_res[:, :, 0, 0], agent_trajs_res[:, :, 0, 1] = 0, 0
-                    for frame in range(num_frames):
-                        center, heading = agent_trajs[track_index_to_predict, frame, :3], agent_trajs[track_index_to_predict, frame, 6]
-
-                        if frame < num_frames - 1: 
-                            agent_trajs_res[:, :num_agents, frame + 1, :] = transform_trajs_to_center_coords(agent_trajs[:, frame + 1, :], center, heading, 6, dynamic_center)
-
-                        if frame == 10:
-                            map_polylines_data, map_polylines_mask = create_map_data_for_center_objects(
-                                center_objects=center, heading=heading, map_infos=map_infos,
-                                center_offset=(30.0, 0),
-                            )   # (num_center_objects, num_topk_polylines, num_points_each_polyline, 9), (num_center_objects, num_topk_polylines, num_points_each_polyline)
-                        
-                        for i, track in enumerate(track_index_to_predict):
-                            if agent_trajs[track, frame, -1] == False:
-                                if frame < num_frames - 1: agent_trajs_res[i, :, frame + 1, -1] = False
-                else:
-                    center, heading = agent_trajs[track_index_to_predict, 10, :3], agent_trajs[track_index_to_predict, 10, 6]
-                    agent_trajs_res = transform_trajs_to_center_coords(agent_trajs, center, heading, 6, dynamic_center)
-                    map_polylines_data, map_polylines_mask = create_map_data_for_center_objects(
-                                center_objects=center, heading=heading, map_infos=map_infos,
-                                center_offset=(30.0, 0),
-                            )
-                
-                agent_trajs_res = agent_trajs_res.permute(0, 2, 1, 3)
-                ret_dict = {
-                    "agent_trajs": agent_trajs_res.to(torch.float),
-                    "track_index_to_predict": track_index_to_predict.view(-1, 1).to(torch.float),
+                ego_index = torch.tensor([idx for idx in track_index_to_predict if agent_trajs[idx, 10, -1] == 1], dtype=torch.int32)
+                # agent_dict = process_agents(agent_trajs=agent_trajs)
+                map_polylines_data, map_polylines_mask, polyline_index = create_map_data(map_infos=map_infos,
+                        )
+                    
+                dicts_to_save[scenario.scenario_id] = {
+                    "agent_trajs": agent_trajs,
+                    "track_index_to_predict": ego_index,
                     "map_polyline": map_polylines_data, 
                     "map_polylines_mask": map_polylines_mask,
+                    "polyline_index": polyline_index,
                     }
                 
-                yield ret_dict
-            # yield file_name
+                for ego_id in ego_index:
+                    yield {
+                        "file_name": file_name,
+                        "scenario_id": scenario.scenario_id,
+                        "ego_id": ego_id,
+                    }
+
+            with open(os.path.join(output_path, file_name), "wb") as f:
+                pickle.dump(dicts_to_save, f)
+                f.close()
     
     data_loader = WaymoDL(data_path=data_path)
-    # data_dic = data_loader.get_next_file(0)
     file_indices = []
     for i in range(args.num_proc):
         file_indices += range(data_loader.total_file_num)[i::args.num_proc]
 
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}')
-    
+
+    os.makedirs(args.output_path, exist_ok=True)
     waymo_dataset = Dataset.from_generator(yield_data,
-                                            gen_kwargs={'shards': file_indices, 'dl': data_loader, 'dynamic_center': args.dynamic_center},
+                                            gen_kwargs={'shards': file_indices, 'dl': data_loader, 'output_path': args.output_path},
                                             writer_batch_size=10, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
     print('Saving dataset')
@@ -463,41 +498,20 @@ if __name__ == '__main__':
     from pathlib import Path
     logging.basicConfig(level=os.environ.get('LOGLEVEL', 'INFO').upper())
 
-    # script demo
-    # python waymo_generation.py --cache_folder /public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/cache --num_proc 100
-
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument("--running_mode", type=int, default=1)
     parser.add_argument("--data_path", type=dict, default={
-            # "WAYMO_DATA_ROOT": "/home/shiduozhang/waymo",
-            # "WAYMO_DATA_ROOT": "/localdata_ssd/liderun/processed_0_10/",
-            # "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/processed",
-            # "SPLIT_DIR": {
-            #         'train': "processed_scenarios_training", 
-            #         'test': "processed_scenarios_validation"
-            #     },
-            # "INFO_FILE": {
-            #         'train': "processed_scenarios_training_infos.pkl", 
-            #         'test': "processed_scenarios_val_infos.pkl"
-            #     }
-            "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/uncompressed/scenario",
+            "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_prediction_v1.2.0/scenario",
             "SPLIT_DIR": {
                     'train': "training", 
                     'test': "validation"
                 },
         })
-    parser.add_argument('--starting_file_num', type=int, default=0)
-    parser.add_argument('--ending_file_num', type=int, default=1000)
-    parser.add_argument('--starting_scenario', type=int, default=-1)
-    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/waymo_debug_cache')
-
+    
     parser.add_argument('--train', default=False, action='store_true')   
-    parser.add_argument('--num_proc', type=int, default=10)
-
-    parser.add_argument('--sample_interval', type=int, default=5)
+    parser.add_argument('--num_proc', type=int, default=20)
+    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_prediction_v1.2.0/t4p_full/t4p_waymo')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_prediction_v1.2.0/t4p_full/waymo_cache')
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
-
-    parser.add_argument('--dynamic_center', type=bool, default=False)
 
     args_p = parser.parse_args()
     main(args_p)
