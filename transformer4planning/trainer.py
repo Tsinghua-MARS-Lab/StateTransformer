@@ -504,9 +504,12 @@ class PlanningTrainer(Trainer):
         if self.is_world_process_zero:
             progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval', dynamic_ncols=True)
         
-        eval_output_dir = './'
         model_path = self.model.model_args.model_pretrain_name_or_path
         model_name = model_path.split('/')[-3]+'___' + model_path.split('/')[-1]
+        
+        eval_output_dir = model_path + '/eval_output/'
+        os.makedirs(eval_output_dir, exist_ok=True)
+        
         log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, datetime.datetime.now().strftime('%Y%m%d-%H%M%S')))
         logger = common_utils.create_logger(log_file, rank=0)
         
@@ -548,7 +551,7 @@ class PlanningTrainer(Trainer):
 
         ret_dict = {}
 
-        with open(eval_output_dir + model_name + '_result.pkl', 'wb') as f:
+        with open(eval_output_dir + "result_" + model_name + '.pkl', 'wb') as f:
             pickle.dump(pred_dicts, f)
 
         result_str, result_dict = dataset.evaluation(

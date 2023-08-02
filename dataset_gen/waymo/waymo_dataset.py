@@ -304,7 +304,7 @@ class WaymoDataset(DatasetTemplate):
         ## generate the attributes for each object
         object_onehot_mask = torch.zeros((num_center_objects, num_objects, num_timestamps, 5))
         object_onehot_mask[:, obj_types == 'TYPE_VEHICLE', :, 0] = 1
-        object_onehot_mask[:, obj_types == 'TYPE_PEDESTRAIN', :, 1] = 1  # TODO: CHECK THIS TYPO
+        object_onehot_mask[:, obj_types == 'TYPE_PEDESTRIAN', :, 1] = 1  # TODO: CHECK THIS TYPO
         object_onehot_mask[:, obj_types == 'TYPE_CYCLIST', :, 2] = 1
         object_onehot_mask[torch.arange(num_center_objects), center_indices, :, 3] = 1
         object_onehot_mask[:, sdc_index, :, 4] = 1

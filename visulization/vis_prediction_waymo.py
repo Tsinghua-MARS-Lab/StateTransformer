@@ -65,11 +65,17 @@ class Scenario:
             pred_trajs = prediction['pred_trajs'][0]
             pred_scores = prediction['pred_scores']
 
+            valid_mask = (gt_trajs[:,-1] == 1)
+            valid_gt = gt_trajs[valid_mask]
+            
+            pred_len = pred_trajs.shape[0]
+            valid_pred = pred_trajs[valid_mask[-pred_len:]]
+            
             color = np.random.rand(3,)
             # visualize the gt trajectory
             ax.scatter(
-                gt_trajs[:, 0],
-                gt_trajs[:, 1],
+                valid_gt[:, 0],
+                valid_gt[:, 1],
                 linewidths=3,
                 color=color,
                 alpha=0.5,
@@ -79,8 +85,8 @@ class Scenario:
 
             # visualize the trajectory prediction
             ax.plot(
-                pred_trajs[:, 0],
-                pred_trajs[:, 1],
+                valid_pred[:, 0],
+                valid_pred[:, 1],
                 linewidth=3,
                 color=color,
                 alpha=1.0,
@@ -88,8 +94,8 @@ class Scenario:
             )
             
             ax.scatter(
-                pred_trajs[:, 0],
-                pred_trajs[:, 1],
+                valid_pred[:, 0],
+                valid_pred[:, 1],
                 marker='*',
                 linewidth=3,
                 color=color,
