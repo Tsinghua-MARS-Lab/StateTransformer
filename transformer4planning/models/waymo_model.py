@@ -101,18 +101,15 @@ class GPTModelWaymo(GPTModelNuPlan):
         self.agent_encoder = PointNetPolylineEncoder(
             in_channels=2,
             hidden_dim=64,
-            num_layers=3,
+            num_layers=2,
             out_channels=64
         )
         self.map_encoder = PointNetPolylineEncoder(
-            in_channels=9,
+            in_channels=2,
             hidden_dim=64,
-            num_layers=5,
-            num_pre_layers=3,
+            num_layers=2,
             out_channels=64
         )
-
-        self.map_downsampling = build_mlps(768 * 64, [128 * 64, 64])
 
         self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k * feature_dim)
         
@@ -224,7 +221,8 @@ class GPTModelWaymo(GPTModelNuPlan):
         map_polyline: num_egos, num_frames, num_polylines (768), num_points (20), 9
         """
         device = agent_trajs.device
-        num_egos, num_frames, _, _ = agent_trajs.shape
+        agent_trajs = agent_trajs.permute(0, 2, 1, 3)
+        _, num_frames, _, _ = agent_trajs.shape
         track_index_to_predict = track_index_to_predict.long()
         ego_trajs = []
         other_trajs = []
@@ -250,10 +248,10 @@ class GPTModelWaymo(GPTModelNuPlan):
         agent_mask = other_trajs[..., -1].to(torch.bool)
         other_trajs_pos = other_trajs[..., :2]
         agent_embedding = self.agent_encoder(other_trajs_pos, agent_mask)
-
+        
+        map_polyline = map_polyline.unsqueeze(1).repeat(1, num_frames - 1, 1, 1)
+        map_polylines_mask = map_polylines_mask.unsqueeze(1).repeat(1, num_frames - 1, 1, 1)[..., 0]
         map_embedding = self.map_encoder(map_polyline, map_polylines_mask.to(torch.bool))
-        map_embedding = self.map_downsampling(map_embedding.view(num_egos, -1))
-        map_embedding = map_embedding.unsqueeze(1).repeat(1, num_frames - 1, 1)
         
         input_embedding = torch.cat((ego_embedding, agent_embedding, map_embedding), dim=-1)
 

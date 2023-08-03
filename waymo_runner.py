@@ -409,7 +409,7 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(waymo_collate_func, autoregressive=model_args.autoregressive, **data_process.__dict__) if data_args.online_preprocess else waymo_collate_func_offline
+    collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, autoregressive=model_args.autoregressive, **data_process.__dict__) if data_args.online_preprocess else waymo_collate_func_offline
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
