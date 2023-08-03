@@ -9,7 +9,7 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="pretrain-nonauto-gpt",
+        default="pretrain-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
@@ -18,7 +18,7 @@ class ModelArguments:
         # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-762M-1data-boston",
         # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-1.5B-1data-boston",
         # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/1.5B-multicity",
-        default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/762M-multicity",
+        default = "/public/MARS/datasets/nuPlanCache/checkpoint/gpt30m_kp",
         # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/117M-multicity",
         # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
@@ -82,7 +82,7 @@ class ModelArguments:
         default="nuplan" # only for mmtransformer
     )
     with_traffic_light: Optional[bool] = field(
-        default=False
+        default=True
     )
     autoregressive: Optional[bool] = field(
         default=False
@@ -96,8 +96,6 @@ class ModelArguments:
         metadata={"help": "Whether to use next token scorer for prediction."},
     )
     past_seq: Optional[int] = field(
-        # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
-        # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
         default=10,
         metadata={"help": "past frames to include for prediction/planning."},
     )
@@ -111,14 +109,14 @@ class ModelArguments:
         default=True
     )
     raster_channels: Optional[int] = field(
-        default=0,
+        default=33,
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     predict_yaw: Optional[bool] = field(
         default=False
     )
     ar_future_interval: Optional[int] = field(
-        default=0,
+        default=20,
         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
     arf_x_random_walk: Optional[float] = field(
@@ -137,10 +135,22 @@ class ModelArguments:
         default=False
     )
     specified_key_points: Optional[bool] = field(
-        default=False
+        default=True
     )
     forward_specified_key_points: Optional[bool] = field(
+        default=True
+    )
+    token_scenario_tag: Optional[bool] = field(
         default=False
+    )
+    max_token_len: Optional[int] = field(
+        default=20
+    )
+    past_sample_interval: Optional[int] = field(
+        default=5
+    )
+    future_sample_interval: Optional[int] = field(
+        default=2
     )
 
 def rotate_array(origin, points, angle, tuple=False):
