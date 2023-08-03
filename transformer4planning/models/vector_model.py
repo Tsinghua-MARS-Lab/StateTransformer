@@ -1,9 +1,10 @@
-from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
+import os
 import torch
+import torch.nn as nn
+from transformers import GPT2Tokenizer
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.encoders import *
-from transformer4planning.models.decoders import *
+from transformer4planning.models.decoders import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
 class GPTAutoRegressiveModelVector(GPT2PreTrainedModel):
@@ -259,7 +260,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k  # ---- for loss
             
-            if self.next_token_scorer_decoder is not None:
+            if self.k > 1:
                 pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k  # ----- for loss
         
         # get loss
@@ -385,7 +386,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 # dist = -delta[..., 0]*delta[..., 0] - delta[..., 1]*delta[..., 1]
                 # pred_logits = dist[:, None, :]
                 
-                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
+                # pred_logits_index = pred_logits.argsort(dim=-1)
+                # selected_key_point = torch.zeros((batch_size, 1, 2), device=pred_logits.device, dtype=pred_logits.dtype)
+                
+                # for s_ind in range(3):
+                #     selected_key_point += key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits_index[:, 0, s_ind].reshape(-1), :].reshape(batch_size, 1, -1)
+                
+                # selected_key_point /= 3.0
+                
+                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)    
                 key_points_logit = selected_key_point
             else:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
@@ -490,7 +499,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     min_loss_kp_indices_masked = min_loss_kp_indices[gt_kps_mask[...,0].to(torch.bool)]
                     loss_kp_cls = self.cls_kps_loss(pred_kps_cls_masked.reshape(-1, self.k).to(torch.float64), min_loss_kp_indices_masked.reshape(-1).long())
                     loss += loss_kp_cls
-                    # loss += loss_kp_cls * 2 # option 2
+                    # loss += loss_kp_cls * 4 # option 2
                     
                     if self.training:
                         # concatenate the key points with predicted trajectory for evaluation
@@ -503,13 +512,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     pred_traj_logits = torch.cat([selected_key_points, pred_traj_logits], dim=1)
                 else:
                     print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
-                    pred_traj_logits = torch.cat([pred_kps_logits[0].reshape(b, s, -1), pred_traj_logits], dim=1)
+                    pred_traj_logits = torch.cat([pred_kps_logits[0].reshape(b, num_kps, -1), pred_traj_logits], dim=1)
                     
                 # evaluate accuracy if on eval
         if not self.training and self.clf_metrics is not None:
-            if self.next_token_scorer_decoder is not None:
+            if self.k > 1:
                 # classification on k predictions
-                predictions = torch.argmax(pred_kps_cls, dim=-1)  # b, s, k
+                predictions = torch.argmax(pred_kps_cls, dim=-1)  # b, num_kps, k
                 for _, metric in self.clf_metrics.items():
                     metric.add_batch(references=min_loss_kp_indices.reshape(-1), predictions=predictions.reshape(-1))
                     
