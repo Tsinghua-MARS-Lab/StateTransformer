@@ -15,6 +15,7 @@ from torch import nn
 from tqdm import tqdm
 import copy
 import json
+from easydict import EasyDict
 
 import datasets
 import numpy as np
@@ -38,6 +39,13 @@ from transformers.trainer_callback import DefaultFlowCallback
 from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
+
+from dataset_gen.waymo.waymo_dataset import WaymoDataset
+from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
+__all__ = {
+    'WaymoDataset': WaymoDataset,
+}
+    
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -172,7 +180,9 @@ class DataTrainingArguments:
     saved_valid_dataset_folder: Optional[str] = field(
         default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
     )
-
+    dataset_config_name: Optional[str] = field(
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
@@ -200,7 +210,9 @@ class DataTrainingArguments:
             )
         },
     )    
-
+    dataset_name: Optional[str] = field(
+        default=None, metadata={"help": "The dataset name from hugging face used to push the model."}
+    )
     dataset_scale: Optional[float] = field(
         default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
@@ -238,10 +250,10 @@ class DataProcessArguments:
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
     past_sample_interval: Optional[int] = field(
-        default=5
+        default=4
     )
     future_sample_interval: Optional[int] = field(
-        default=2
+        default=4
     )
     debug_raster_path: Optional[str] = field(
         default=None
@@ -249,6 +261,10 @@ class DataProcessArguments:
 
 
 def main():
+    # See all possible arguments in src/transformers/training_args.py
+    # or by passing the --help flag to this script.
+    # We now keep distinct sets of args, for a cleaner separation of concerns.
+
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
     model_args, data_args, config_args, data_process, training_args = parser.parse_args_into_dataclasses()
 
@@ -265,6 +281,9 @@ def main():
             else:
                 model_args.raster_channels = 1 + road_types + agent_types
 
+    # Set up pytorch backend
+    # if training_args.deepspeed is None:
+    #     torch.distributed.init_process_group(backend='nccl')
 
     # Setup logging
     logging.basicConfig(
@@ -292,23 +311,23 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Handle config loading and saving
-    # if config_args.load_model_config_from_path is not None:
-    #     # Load the data class object from the JSON file
-    #     model_parser = HfArgumentParser(ModelArguments)
-    #     model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
-    #     print(model_args)
-    #     logger.warning("Loading model args, this will overwrite model args from command lines!!!")
-    # if config_args.load_data_config_from_path is not None:
-    #     # Load the data class object from the JSON file
-    #     data_parser = HfArgumentParser(DataTrainingArguments)
-    #     data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
-    #     logger.warning("Loading data args, this will overwrite data args from command lines!!!")
-    # if config_args.save_model_config_to_path is not None:
-    #     with open(config_args.save_model_config_to_path, 'w') as f:
-    #         json.dump(model_args.__dict__, f, indent=4)
-    # if config_args.save_data_config_to_path is not None:
-    #     with open(config_args.save_data_config_to_path, 'w') as f:
-    #         json.dump(data_args.__dict__, f, indent=4)
+    if config_args.load_model_config_from_path is not None:
+        # Load the data class object from the JSON file
+        model_parser = HfArgumentParser(ModelArguments)
+        model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
+        print(model_args)
+        logger.warning("Loading model args, this will overwrite model args from command lines!!!")
+    if config_args.load_data_config_from_path is not None:
+        # Load the data class object from the JSON file
+        data_parser = HfArgumentParser(DataTrainingArguments)
+        data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
+        logger.warning("Loading data args, this will overwrite data args from command lines!!!")
+    if config_args.save_model_config_to_path is not None:
+        with open(config_args.save_model_config_to_path, 'w') as f:
+            json.dump(model_args.__dict__, f, indent=4)
+    if config_args.save_data_config_to_path is not None:
+        with open(config_args.save_data_config_to_path, 'w') as f:
+            json.dump(data_args.__dict__, f, indent=4)
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -335,113 +354,56 @@ def main():
     1. Pass None to load from data_args.saved_dataset_folder as the root folder path to load all sub-datasets of each city
     2. Pass the folder of an index files to load one sub-dataset of one city
     """
-    if data_args.datadic_path is None:
-        from datasets import disable_caching
-        disable_caching()
-        data_args.datadic_path = data_args.saved_dataset_folder
-        # loop all datasets
-        logger.info("Loading full set of datasets from {}".format(data_args.datadic_path))
-        assert os.path.isdir(data_args.datadic_path)
-        index_root = os.path.join(data_args.datadic_path, 'index')
-        root_folders = os.listdir(index_root)
-        if 'train' in root_folders:
-            # load training datasets
-            training_datasets = []
-            training_index_root_folders = os.path.join(index_root, 'train')
-            training_indices = os.listdir(training_index_root_folders)
-            for training_index in training_indices:
-                training_index_path = os.path.join(training_index_root_folders, training_index)
-                if os.path.isdir(training_index_path):
-                    # load training dataset
-                    logger.info("Loading training dataset {}".format(training_index_path))
-                    dataset = Dataset.load_from_disk(training_index_path)
-                    if dataset is not None:
-                        training_datasets.append(dataset)
-            train_dataset = _concatenate_map_style_datasets(training_datasets)
-            # add split column
-            train_dataset.features.update({'split': Value('string')})
-            train_dataset = train_dataset.add_column(name='split', column=['train'] * len(train_dataset))
-            train_dataset.set_format(type='torch')
-            train_samples = int(len(train_dataset) * float(data_args.dataset_scale))
-            train_dataset = train_dataset.select(range(train_samples))
-        else:
-            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-        
-        if training_args.do_eval and 'test' in root_folders:
-            # load test datasets
-            test_datasets = []
-            test_index_root_folders = os.path.join(index_root, 'test')
-            test_indices = os.listdir(test_index_root_folders)
-            for test_index in test_indices:
-                test_index_path = os.path.join(test_index_root_folders, test_index)
-                if os.path.isdir(test_index_path):
-                    # load test dataset
-                    logger.info("Loading test dataset {}".format(test_index_path))
-                    dataset = Dataset.load_from_disk(test_index_path)
-                    if dataset is not None:
-                        test_datasets.append(dataset)
-            test_dataset = _concatenate_map_style_datasets(test_datasets)
-            # add additional column for flagging test set
-            test_dataset.features.update({'split': Value('string')})
-            test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            test_dataset.set_format(type='torch')
-        else:
-            test_dataset = train_dataset
-        all_maps_dic = {}
-        all_pickles_dic = {}
-        map_folder = os.path.join(data_args.datadic_path, 'map')
-        for each_map in os.listdir(map_folder):
-            if each_map.endswith('.pkl'):
-                map_path = os.path.join(map_folder, each_map)
-                with open(map_path, 'rb') as f:
-                    map_dic = pickle.load(f)
-                map_name = each_map.split('.')[0]
-                all_maps_dic[map_name] = map_dic
+    
+    cfg_from_yaml_file("/home/QJ00367/danjiao/dlnets/transformer4planning/config/sample_config.yaml", cfg)
+    
+    if 'vector' in model_args.model_name:
+        use_raster = False
     else:
-        all_maps_dic = None
-        all_pickles_dic = None
-        if os.path.isdir(data_args.saved_dataset_folder):
-            logger.info("loading dataset...")
-            dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
-            dataset.features.update({'split': Value('string')})
-            dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
-            dataset.set_format(type='torch')
-            dataset.shuffle(seed=training_args.seed)
-            train_samples = int(len(dataset) * float(data_args.dataset_scale))
-            train_dataset = dataset.select(range(train_samples))
+        use_raster = True
+    
+    nuplan_dataset = dict()
+    
+    if training_args.do_train:
+        train_set = __all__[cfg.DATA_CONFIG.DATASET](
+            dataset_cfg=cfg.DATA_CONFIG,
+            training=True,
+            logger=logger, 
+            use_raster=use_raster
+        )
+        nuplan_dataset.update(train=train_set)
+    
+    if training_args.do_eval:
+        test_set = __all__[cfg.DATA_CONFIG.DATASET](
+            dataset_cfg=cfg.DATA_CONFIG,
+            training=False,
+            logger=logger, 
+            use_raster=use_raster
+        )
 
-            if training_args.do_eval:
-                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                # add additional column for flagging test set
-                test_dataset.features.update({'split': Value('string')})
-                test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            else:
-                test_dataset = dataset.select(range(train_samples))
-            test_dataset.set_format(type='torch')
-        else:
-            raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
-
-    # loop split info and update for test set
-    print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
-
-    nuplan_dataset = dict(
-        train=train_dataset.shuffle(seed=training_args.seed),
-        validation=test_dataset.shuffle(seed=training_args.seed),
-        test=test_dataset.shuffle(seed=training_args.seed),
-    )
+        nuplan_dataset.update(validation=test_set)
+    
+    if training_args.do_predict:
+        nuplan_dataset.update(test=test_set)
 
     # Load a model's pretrained weights from a path or from hugging face's model base
+    model_args.vector_encoder_cfg = cfg.MODEL
     model = build_models(model_args)
-    clf_metrics = dict(
-        accuracy=evaluate.load("accuracy"),
-        f1=evaluate.load("f1"),
-        precision=evaluate.load("precision"),
-        recall=evaluate.load("recall")
-    )
-    if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
+    if 'auto' in model_args.model_name and model_args.k == -1:
+        clf_metrics = dict(
+            accuracy=evaluate.load("accuracy"),
+            f1=evaluate.load("f1"),
+            precision=evaluate.load("precision"),
+            recall=evaluate.load("recall")
+        )
         model.clf_metrics = clf_metrics
     elif model_args.next_token_scorer:
-        assert model_args.k > 1 and model_args.ar_future_interval > 0, "ar_future_interval must be greater than 0 and k must be greater than 1"
+        clf_metrics = dict(
+            accuracy=evaluate.load("accuracy"),
+            f1=evaluate.load("f1"),
+            precision=evaluate.load("precision"),
+            recall=evaluate.load("recall")
+        )
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
@@ -452,12 +414,16 @@ def main():
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
+            
+        collate_fn = train_dataset.collate_batch
 
     if training_args.do_eval:
         eval_dataset = nuplan_dataset["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
+            
+        collate_fn = eval_dataset.collate_batch
 
     if training_args.do_predict:
         predict_dataset = nuplan_dataset["test"]
@@ -466,11 +432,6 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
-                         dic_path=data_args.datadic_path,
-                         all_maps_dic=all_maps_dic,
-                         all_pickles_dic=all_pickles_dic,
-                         **data_process.__dict__) if data_args.online_preprocess else None
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -496,6 +457,10 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
+        if data_args.dataset_name == 'waymo':
+            trainer.evaluate_waymo()
+            return
+            
         if model_args.autoregressive:
             result = trainer.evaluate()
             logger.info("***** Final Eval results *****")
@@ -543,30 +508,19 @@ def main():
                 all_bias_y = []
                 losses = []
                 loss_fn = torch.nn.MSELoss(reduction="mean")
-            
-            # def waymo_collate_fn(batch):
-            #     import collections
-            #     expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-            #
-            #     elem = batch[0]
-            #     if isinstance(elem, collections.abc.Mapping):
-            #         return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            #
-            # if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
-            #     # Todo: test waymo collate fn
-            #     collate_fn = waymo_collate_fn
 
 
             for itr, input in enumerate(tqdm(test_dataloader)):
                 # move batch to device
                 for each_key in input:
-                    if isinstance(input[each_key], type(torch.tensor(0))):
-                        input[each_key] = input[each_key].to("cuda")
+                    if isinstance(examples[each_key], type(torch.tensor(0))):
+                        input[each_key] = input[each_key].to(device)
 
-                eval_batch_size = training_args.per_device_eval_batch_size
-                if model_args.autoregressive or model_args.ar_future_interval > 0:
+                input_length = training_args.per_device_eval_batch_size
+                if model_args.autoregressive:
                     # Todo: add autoregressive predict
                     traj_pred = model.generate(**input)
+                    traj_label = model(**input)
                 else:
                     output = model(**copy.deepcopy(input))
                     traj_pred = output.logits                   
@@ -574,8 +528,8 @@ def main():
                         file_name = input['file_name']
                         current_frame_idx = input['frame_id']
                     except:
-                        file_name = ["null"] * eval_batch_size
-                        current_frame_idx = -1 * torch.ones(eval_batch_size)
+                        file_name = ["null"] * input_length
+                        current_frame_idx = -1 * torch.ones(input_length)
                     prediction_results['file_names'].extend(file_name)
                     prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
                     if data_args.dagger:
@@ -583,7 +537,7 @@ def main():
                         dagger_results['frame_id'].extend(list(current_frame_idx.cpu().numpy()))
                 
                 if model_args.predict_trajectory:
-                    if model_args.autoregressive:# trajectory label as token case
+                    if model_args.autoregressive:
                         trajectory_label = model.compute_normalized_points(input["trajectory"][:, 10:, :])
                         traj_pred = model.compute_normalized_points(traj_pred)
                         
@@ -594,13 +548,15 @@ def main():
                         else:
                             trajectory_label = input["trajectory_label"][:, 1::2, :]
 
-                    loss = loss_fn(trajectory_label[:, :, :2], traj_pred[:, -trajectory_label.shape[1]:, :2])
+                    # print("trajectory_label", trajectory_label[0, :, :2])
+                    # print("traj_pred", traj_pred[0, :, :2])
+                    loss = loss_fn(trajectory_label[:, :, :2], traj_pred[:, :, :2])
                     end_trajectory_label = trajectory_label[:, -1, :]
                     end_point = traj_pred[:, -1, :]
                     end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])
                     end_bias_y.append(end_trajectory_label[:, 1] - end_point[:, 1])
-                    all_bias_x.append(trajectory_label[:, :, 0] - traj_pred[:, -trajectory_label.shape[1]:, 0])
-                    all_bias_y.append(trajectory_label[:, :, 1] - traj_pred[:, -trajectory_label.shape[1]:, 1])
+                    all_bias_x.append(trajectory_label[:, :, 0] - traj_pred[:, :, 0])
+                    all_bias_y.append(trajectory_label[:, :, 1] - traj_pred[:, :, 1])
                     losses.append(loss)
 
             if model_args.predict_trajectory:
@@ -686,27 +642,16 @@ def main():
                         pickle.dump(y_bias_dagger_dic, handle)
                     print("dagger results save to {}".format(dagger_result_path))
 
-        # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
-        # metrics = predict_results.metrics
-        # max_predict_samples = (
-        #     data_args.max_predict_samples if data_args.max_predict_samples is not None else len(predict_dataset)
-        # )
-        # metrics["predict_samples"] = min(max_predict_samples, len(predict_dataset))
-
-        # trainer.log_metrics("predict", metrics)
-        # trainer.save_metrics("predict", metrics)
-
-        # if trainer.is_world_process_zero():
-        #     if training_args.predict_with_generate:
-        #         predictions = tokenizer.batch_decode(
-        #             predict_results.predictions, skip_special_tokens=True, clean_up_tokenization_spaces=True
-        #         )
-        #         predictions = [pred.strip() for pred in predictions]
-        #         output_prediction_file = os.path.join(training_args.output_dir, "generated_predictions.txt")
-        #         with open(output_prediction_file, "w") as writer:
-        #             writer.write("\n".join(predictions))
-
     kwargs = {"finetuned_from": model_args.model_pretrain_name_or_path, "tasks": "NuPlanPlanning"}
+    
+    # push to hub?
+    if data_args.dataset_name is not None:
+        kwargs["dataset_tags"] = data_args.dataset_name
+        if data_args.dataset_config_name is not None:
+            kwargs["dataset_args"] = data_args.dataset_config_name
+            kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
+        else:
+            kwargs["dataset"] = data_args.dataset_name
 
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)

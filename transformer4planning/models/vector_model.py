@@ -1,33 +1,29 @@
 from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
+import torch
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
-from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
+from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
-from transformers.generation.configuration_utils import GenerationConfig
-from transformer4planning.models.utils import *
-from transformer4planning.utils import *
-import torch.nn as nn
-import evaluate
-import copy
-
-class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
+class GPTAutoRegressiveModelVector(GPT2PreTrainedModel):
+    def forward(self, **kwargs):
+        pass
+    
+    
+class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
+        
         self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
         self.model_args = model_args
+        self.context_encoder = MTREncoder(kwargs["model_args"].vector_encoder_cfg.CONTEXT_ENCODER)
+        
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
-        if self.task == "waymo":
-            in_channels = 23
-        else:
-            in_channels = model_args.raster_channels
-        # print('Model initialized with raster channels: ', model_args.raster_channels)
-        n_embed = config.n_embd // 2
-        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
@@ -37,8 +33,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.key_points_decoder = None
         if self.predict_trajectory:
             out_features = 4 if model_args.predict_yaw else 2
-            if not self.model_args.pred_key_points_only:
-                self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
             if self.ar_future_interval > 0:
                 self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
         if self.k > 1:
@@ -50,6 +45,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         self.model_parallel = False
         self.device_map = None
         self.with_traffic_light = model_args.with_traffic_light
+        
         if self.model_args.token_scenario_tag:
             self.tag_tokenizer = GPT2Tokenizer.from_pretrained(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'))
             self.tag_tokenizer.pad_token = self.tag_tokenizer.eos_token
@@ -72,7 +68,6 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         )
         assert_device_map(self.device_map, len(self.transformer.h))
         self.transformer.parallelize(self.device_map)
-        self.cnn_downsample = self.cnn_downsample.to(self.transformer.first_device)
         self.traj_decoder = self.traj_decoder.to(self.transformer.first_device)
         self.model_parallel = True
 
@@ -84,7 +79,6 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         )
         self.transformer.deparallelize()
         self.transformer = self.transformer.to("cpu")
-        self.cnn_downsample = self.cnn_downsample.to("cpu")
         self.traj_decoder = self.traj_decoder.to("cpu")
         self.model_parallel = False
         torch.cuda.empty_cache()
@@ -99,10 +93,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
     def forward(
             self,
-            trajectory_label: Optional[torch.LongTensor] = None,
+            batch_size, input_dict, batch_sample_count,
             context_actions: Optional[torch.LongTensor] = None,
-            high_res_raster: Optional[torch.LongTensor] = None,
-            low_res_raster: Optional[torch.LongTensor] = None,
             past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
             attention_mask: Optional[torch.FloatTensor] = None,
             token_type_ids: Optional[torch.LongTensor] = None,
@@ -115,13 +107,27 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
             **kwargs
-    ):
-        # gpt non-autoregression version
+            ):
+        
+        batch_size = input_dict['obj_trajs'].shape[0]
+        # encoder
+        device = input_dict['obj_trajs'].device
+        batch_dict = self.context_encoder({'input_dict': input_dict, 
+                                           'batch_sample_count': batch_sample_count})
+        
+        obj_feature = batch_dict['obj_feature']
+        map_feature = batch_dict['map_feature']
+        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        state_embeds = state_embeds.max(dim=1)[0]
+        
+        # traj
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        device = high_res_raster.device
+        trajectory_label = input_dict['trajectory_label']
         pred_length = trajectory_label.shape[1]
-        scenario_type = kwargs.get("scenario_type", None)
-
+        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
+        
+        # action context
+        context_actions = input_dict['center_objects_past']
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -129,23 +135,10 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
-        device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        if self.task == "nuplan":
-            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-        elif self.task == "waymo":
-            high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-            low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-        batch_size, context_length, c, h, w = high_res_seq.shape
 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-
-        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+        # create OAOAOA..
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
             (batch_size, context_length * 2, n_embed),
@@ -155,7 +148,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
+
         if self.model_args.token_scenario_tag:
+            scenario_type = kwargs.get("scenario_type", None)
             scenario_tag_ids = list()
             for i in range(batch_size):
                 scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
@@ -179,8 +174,11 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 else:
                     selected_indices = [79, 39, 19, 9, 4]
                 future_key_points = trajectory_label[:, selected_indices, :]
+                future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
             else:
                 future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
 
             future_key_points_aug = future_key_points.clone()
@@ -240,9 +238,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             traj_logits = self.traj_decoder(traj_hidden_state)
             if self.task == "waymo":
                 loss_fct = MSELoss(reduction="none")
-                y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
-                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * y_mask).sum() / (
-                            y_mask.sum() + 1e-7)
+                # y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
+                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
+                            trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
             else:
                 if self.model_args.predict_yaw:
@@ -270,6 +268,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                     loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
                 else:
                     loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
+                
+                if self.task == "waymo":
+                    loss_to_add = (loss_to_add* future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 loss += loss_to_add
                 traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
             else:
@@ -286,7 +287,11 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 # add loss on x, y (the last dimension)
                 loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                loss += min_loss.mean()
+                
+                if self.task == "waymo":
+                    loss += (min_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
+                else:
+                    loss += min_loss.mean()
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
                     loss_fct = CrossEntropyLoss(reduction="mean")
@@ -327,48 +332,37 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         )
 
     @torch.no_grad()
-    def generate(self, **kwargs) -> torch.FloatTensor:
-        high_res_raster = kwargs.get("high_res_raster", None)
-        low_res_raster = kwargs.get("low_res_raster", None)
-        pred_length = kwargs.get("pred_length", None)
-        trajectory_label = kwargs.get("trajectory_label", None)
-        context_actions = kwargs.get("context_actions", None)
-        # pass the following infos during generate for one sample (non-batch) generate with KP checking
-        map_api = kwargs.get("map_api", None)
-        route_ids = kwargs.get("route_ids", None)
-        road_dic = kwargs.get("road_dic", None)
-        ego_pose = kwargs.get("ego_pose", None)
-        scenario_type = kwargs.get("scenario_type", None)
-        """
-        Used for generate with key points
-        """
-        device = high_res_raster.device
-        pred_length = trajectory_label.shape[1] if pred_length is None else pred_length
+    def generate(self, batch_size, input_dict, batch_sample_count, **kwargs) -> torch.FloatTensor:
         
-        if self.model_args.x_random_walk > 0:
+        batch_size = input_dict['obj_trajs'].shape[0]
+        # encoder
+        device = input_dict['obj_trajs'].device
+        batch_dict = self.context_encoder({'input_dict': input_dict, 
+                                           'batch_sample_count': batch_sample_count})
+        
+        obj_feature = batch_dict['obj_feature']
+        map_feature = batch_dict['map_feature']
+        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        state_embeds = state_embeds.max(dim=1)[0]
+        
+        # traj
+        trajectory_label = input_dict['trajectory_label']
+        pred_length = trajectory_label.shape[1]
+        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
+        
+        # action context
+        context_actions = input_dict['center_objects_past']
+        if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
-        if self.model_args.y_random_walk > 0:
+        if self.model_args.y_random_walk > 0 and self.training:
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
-        device = high_res_raster.device
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        if self.task == "nuplan":
-            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-        elif self.task == "waymo":
-            high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-            low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-        batch_size, context_length, c, h, w = high_res_seq.shape
 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-
-        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+        # create OAOAOA..
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
             (batch_size, context_length * 2, n_embed),
@@ -377,7 +371,9 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         )
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+        
         if self.model_args.token_scenario_tag:
+            scenario_type = kwargs.get("scenario_type", None)
             scenario_tag_ids = list()
             for i in range(batch_size):
                 scenario_tag_ids.append(torch.tensor(self.tag_tokenizer(scenario_type[i], max_length=self.model_args.max_token_len, padding='max_length')["input_ids"]).unsqueeze(0))
@@ -438,53 +434,6 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
             else:
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
-            off_road_checking = False
-            if self.task == "nuplan" and off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
-                # Check key points with map_api
-                from nuplan.common.actor_state.state_representation import Point2D
-                from nuplan.common.maps.maps_datatypes import SemanticMapLayer
-                pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
-                                                            ego_pose,
-                                                            ego_to_global=True)
-                nearest_road_block_id, distance_to_road_block = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.ROADBLOCK
-                )
-                nearest_road_blockc_id, distance_to_road_block_c = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.ROADBLOCK_CONNECTOR
-                )
-                nearest_lane_id, distance_to_lane = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.LANE
-                )
-                nearest_lanec_id, distance_to_lanec = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.LANE_CONNECTOR
-                )
-                # check if on route
-                if distance_to_road_block < distance_to_road_block_c:
-                    nearest = int(nearest_road_block_id)
-                    dist = distance_to_road_block
-                else:
-                    nearest = int(nearest_road_blockc_id)
-                    dist = distance_to_road_block_c
-                if distance_to_lane < distance_to_lanec:
-                    nearest_lane = int(nearest_lane_id)
-                else:
-                    nearest_lane = int(nearest_lanec_id)
-                if nearest not in route_ids or dist > 0.5:
-                    if int(nearest_lane) in road_dic:
-                        # move control point if off route
-                        pts = road_dic[int(nearest_lane)]['xyz'][:, :2]
-                        expanded_pred_pt = pred_key_point_global.copy()
-                        expanded_pred_pt = np.tile(expanded_pred_pt, (pts.shape[0], 1))
-                        distances = np.sqrt(np.sum((expanded_pred_pt - pts)**2, axis=1)).tolist()
-                        min_distance = min(distances)
-                        closest_pt_in_ego = change_coordination(pts[distances.index(min_distance), :2],
-                                                                ego_pose,
-                                                                ego_to_global=False)
-                        pred_key_point[0, 0, :2] = torch.tensor(closest_pt_in_ego, device=pred_key_point.device)
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
             input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
@@ -523,112 +472,5 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         else:
             raise ValueError("illegal k while generating trajectory", self.k)
 
-        return torch.cat([key_points_logits, traj_logits], dim=1)
-
-
-def build_models(model_args):
-    if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        if not model_args.autoregressive:
-            ModelCls = GPTNonAutoRegressiveModelVector
-            tag = 'Vector GPT nonauto'
-        else:
-            ModelCls = GPTAutoRegressiveModelVector
-            tag = 'Vector GPT auto'
-    elif 'gpt' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        if not model_args.autoregressive:
-            ModelCls = GPTNonAutoRegressiveModelNuplan
-            tag = 'GPT nonauto'
-        else:
-            ModelCls = GPTModelNuPlan
-            tag = 'GPT auto'
-    elif 'transxl' in model_args.model_name:
-        config_p = TransfoXLConfig()
-        config_p.pad_token_id = 0
-        config_p.eos_token_id = 0
-        config_p.n_layer = model_args.n_layers
-        config_p.d_embed = model_args.d_embed
-        config_p.d_model = model_args.d_model
-        config_p.d_inner = model_args.d_inner
-        ModelCls= TransfoXLModelNuPlan
-        tag = 'TransformerXL'
-    elif 'xlnet' in model_args.model_name:
-        config_p = XLNetConfig()
-        config_p.d_model = model_args.d_model
-        config_p.d_inner = model_args.d_inner
-        config_p.n_layer = model_args.n_layers
-        config_p.ff_activation = model_args.activation_function
-        ModelCls = XLNetModelNuplan
-        tag = 'XLNet'
-    elif 't5' in model_args.model_name:
-        config_p = T5Config()
-        config_p.num_heads=model_args.n_heads
-        config_p.d_model = model_args.d_model
-        config_p.d_kv = model_args.d_model//config_p.num_heads
-        config_p.d_ff = model_args.d_inner
-        config_p.num_layers = model_args.n_layers
-        ModelCls = T5ModelNuplan
-        tag = 'T5'
-    elif 'bert' in model_args.model_name:
-        config_p = DebertaV2Config()
-        config_p.hidden_size = model_args.d_model
-        config_p.intermediate_size = model_args.d_inner
-        config_p.num_hidden_layers = model_args.n_layers
-        config_p.hidden_act = model_args.activation_function
-        config_p.num_attention_heads = model_args.n_heads
-        ModelCls = DeBertaNuplan
-        tag = 'DeBerta'
-    elif 'mmtransformer' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        from transformer4planning.models.mmtransformer.model import MMTransformer
-        ModelCls = MMTransformer
-        tag = 'mmtransformer'
-    elif 'waymomodel' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        from .waymo_model import GPTModelWaymo
-        ModelCls = GPTModelWaymo
-        tag = 'waymomodel'
-    elif 'demo' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        from .waymo_model import GPTModelDemo
-        ModelCls = GPTModelDemo
-        tag = 'demo'
-    else:
-        raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
-    if 'scratch' in model_args.model_name:
-        model = ModelCls(config_p, model_args=model_args)
-        print('Scratch ' + tag + ' Initialized!')
-    elif 'pretrain' in model_args.model_name:
-        model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, config=config_p)
-        print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
-    elif 'transfer' in model_args.model_name:
-        model = ModelCls(config_p, model_args=model_args)
-        print('Transfer' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
-    return model
-
+        # return torch.cat([key_points_logits, traj_logits], dim=1)
+        return {'key_points_logits': key_points_logits, 'logits': traj_logits}

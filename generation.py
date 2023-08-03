@@ -16,11 +16,17 @@ import numpy as np
 def main(args):
     running_mode = args.running_mode
 
+    # data_path = {
+    #     'NUPLAN_DATA_ROOT': "/data_3/madanjiao" + "/nuplan/dataset",
+    #     'NUPLAN_MAPS_ROOT': "/data_3/madanjiao" + "/nuplan/dataset/maps",
+    #     'NUPLAN_DB_FILES': "/data_3/madanjiao" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
+    # }
+    
     data_path = {
         'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
         'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
         'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
-    }
+     }
     # data_path = {
     #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
     #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
@@ -363,6 +369,8 @@ def main(args):
                 with open(os.path.join(store_path, f"{map_name}.pkl"), "wb") as f:
                     pickle.dump(road_dic, f, protocol=pickle.HIGHEST_PROTOCOL)
                 print("Stored at ", os.path.join(store_path, f"{map_name}.pkl"))
+                
+                yield {'file_name': dl.file_names[0]}
                 break
             del dl
             break
