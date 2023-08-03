@@ -1,0 +1,6 @@
+control_tf_planner:
+  _target_: nuplan_garage.planning.simulation.planner.control_tf_planner.control_tf_planner.ControlTFPlanner
+  _convert_: 'all'
+
+  map_radius: 300 # Radius to consider around ego [m]
+  thread_safe: true

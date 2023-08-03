@@ -2,7 +2,6 @@ from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
-from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
 
 from transformers.generation.configuration_utils import GenerationConfig
 from transformer4planning.models.utils import *
@@ -78,6 +77,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
     @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
     def deparallelize(self):
+        if self.transformer.device == 'cpu':
+            return
         warnings.warn(
             "Like `parallelize`, `deparallelize` is deprecated and will be removed in v5 of Transformers.",
             FutureWarning,
@@ -99,8 +100,8 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
 
     def forward(
             self,
-            trajectory_label: Optional[torch.LongTensor] = None,
-            context_actions: Optional[torch.LongTensor] = None,
+            trajectory_label: Optional[torch.FloatTensor] = None,
+            context_actions: Optional[torch.FloatTensor] = None,
             high_res_raster: Optional[torch.LongTensor] = None,
             low_res_raster: Optional[torch.LongTensor] = None,
             past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
@@ -535,6 +536,7 @@ def build_models(model_args):
         config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
         if not model_args.autoregressive:
+            from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
             ModelCls = GPTNonAutoRegressiveModelVector
             tag = 'Vector GPT nonauto'
         else:
@@ -631,4 +633,3 @@ def build_models(model_args):
         model = ModelCls(config_p, model_args=model_args)
         print('Transfer' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
     return model
-
