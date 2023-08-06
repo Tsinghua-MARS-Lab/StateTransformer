@@ -30,12 +30,12 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
+from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
 from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
-from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 
@@ -58,9 +58,6 @@ class ModelArguments:
     predict_result_saving_dir: Optional[str] = field(
         default=False,
         metadata={"help": "The target folder to save prediction results."},
-    )
-    predict_trajectory: Optional[bool] = field(
-        default=True,
     )
     recover_obs: Optional[bool] = field(
         default=False,
@@ -159,6 +156,13 @@ class ModelArguments:
     )
     max_token_len: Optional[int] = field(
         default=20
+    )
+    resnet_type: Optional[str] = field(
+        default='resnet18',
+        metadata= {"help":"choose from ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']"}
+    )
+    pretrain_encoder: Optional[bool] = field(
+        default=False
     )
 
 @dataclass
