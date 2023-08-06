@@ -79,11 +79,21 @@ class RelationNetwork(nn.Module):
         return out
 
 
-class CNNDownSamplingResNet18(nn.Module):
-    def __init__(self, d_embed, in_channels):
-        super(CNNDownSamplingResNet18, self).__init__()
+class CNNDownSamplingResNet(nn.Module):
+    def __init__(self, d_embed, in_channels, resnet_type='resnet18', pretrain=False):
+        super(CNNDownSamplingResNet, self).__init__()
         import torchvision.models as models
-        self.cnn = models.resnet18(pretrained=False, num_classes=d_embed)
+        if resnet_type == 'resnet18':
+            self.cnn = models.resnet18(pretrained=pretrain, num_classes=d_embed)
+        elif resnet_type == 'resnet34':
+            self.cnn = models.resnet34(pretrained=pretrain, num_classes=d_embed)
+        elif resnet_type == 'resnet50':
+            self.cnn = models.resnet50(pretrained=pretrain, num_classes=d_embed)
+        elif resnet_type == 'resnet101':
+            self.cnn = models.resnet101(pretrained=pretrain, num_classes=d_embed)
+        elif resnet_type == 'resnet152':
+            self.cnn = models.resnet152(pretrained=pretrain, num_classes=d_embed)
+
         self.cnn = torch.nn.Sequential(*(list(self.cnn.children())[1:-1]))
         self.layer1 = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
@@ -149,3 +159,42 @@ class CNNEncoder(nn.Module):
         output = output.permute(0, 2, 3, 1)
         # assert output.shape == (len(x), 224, 224, config.d_embed), output.shape
         return output
+
+class PDMEncoder(nn.Module):
+    def __init__(self, history_dim, centerline_dim, hidden_dim):
+        super(PDMEncoder, self).__init__()
+        self.state_encoding = nn.Sequential(
+            nn.Linear(
+                history_dim * 3 * 3, hidden_dim
+            ),
+            nn.ReLU(),
+        )
+
+        self.centerline_encoding = nn.Sequential(
+            nn.Linear(centerline_dim * 3, hidden_dim),
+            nn.ReLU(),
+        )
+    
+    def forward(self, input):
+        
+        batch_size = input["ego_position"].shape[0]
+
+        ego_position = input["ego_position"].reshape(batch_size, -1).float()
+        ego_velocity = input["ego_velocity"].reshape(batch_size, -1).float()
+        ego_acceleration = input["ego_acceleration"].reshape(batch_size, -1).float()
+
+        # encode ego history states
+        state_features = torch.cat(
+            [ego_position, ego_velocity, ego_acceleration], dim=-1
+        )
+        state_encodings = self.state_encoding(state_features)
+
+        # encode planner centerline
+        planner_centerline = input["planner_centerline"].reshape(batch_size, -1).float()
+        centerline_encodings = self.centerline_encoding(planner_centerline)
+
+        # decode future trajectory
+        planner_features = torch.cat(
+            [state_encodings, centerline_encodings], dim=-1
+        )
+        return planner_features
