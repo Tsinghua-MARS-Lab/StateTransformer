@@ -64,7 +64,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           high_res_scale=4, low_res_scale=0.77,
                           road_types=20, agent_types=8, traffic_types=4,
                           past_sample_interval=5, future_sample_interval=2,
-                          debug_raster_path=None, all_maps_dic=None,
+                          debug_raster_path=None, all_maps_dic=None, all_pickles_dic=None,
                           frequency_change_rate=2):
     """
     WARNING: frame_rate has been change to 10 as default to generate new dataset pickles, this is automatically processed by hard-coded logits
