@@ -46,7 +46,7 @@ class PlanningGPTBase(GPT2PreTrainedModel):
         return position_ids
     
 
-class GPTNonAutoRegressiveModelNuplan(PlanningGPTBase):
+class TrajectoryGPT(PlanningGPTBase):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
         n_embed = config.n_embd // 2
@@ -412,7 +412,7 @@ class GPTNonAutoRegressiveModelNuplan(PlanningGPTBase):
         return torch.cat([key_points_logits, traj_logits], dim=1)
 
 
-class GPTVectorEncoderModelNuplan(PlanningGPTBase):
+class NuplanVectorEncoderGPT(PlanningGPTBase):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
         self.vector_encoder = PDMEncoder(
@@ -547,7 +547,7 @@ def build_models(model_args):
             config_p.n_inner = model_args.d_inner
             config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
-        ModelCls = GPTTrajectory
+        ModelCls = TrajectoryGPT
         tag = 'GPTTrajectory'
     elif 'transxl' in model_args.model_name:
         config_p = TransfoXLConfig()
