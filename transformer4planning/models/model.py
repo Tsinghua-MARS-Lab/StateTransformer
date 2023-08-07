@@ -10,7 +10,8 @@ import torch.nn as nn
 import evaluate
 import copy
 
-class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
+
+class GPTTrajectory(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config)
         self.transformer = GPT2Model(config)
@@ -249,8 +250,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 if self.model_args.predict_yaw:
                     loss += loss_fct(traj_logits, trajectory_label.to(device)) * self.model_args.trajectory_loss_rescale
                 else:
-                    loss += loss_fct(traj_logits[..., :2], trajectory_label[...,
-                                                           :2].to(device)) * self.model_args.trajectory_loss_rescale
+                    loss += loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * self.model_args.trajectory_loss_rescale
         else:
             traj_logits = torch.zeros_like(trajectory_label[..., :2])
 
@@ -337,9 +337,10 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         # pass the following infos during generate for one sample (non-batch) generate with KP checking
         map_api = kwargs.get("map_api", None)
         route_ids = kwargs.get("route_ids", None)
-        road_dic = kwargs.get("road_dic", None)
         ego_pose = kwargs.get("ego_pose", None)
+        road_dic = kwargs.get("road_dic", None)
         scenario_type = kwargs.get("scenario_type", None)
+        idm_reference_global = kwargs.get("idm_reference_global", None)
         """
         Used for generate with key points
         """
@@ -408,6 +409,7 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         key_points_num = future_key_points.shape[1]
         pred_key_points_during_generate = []
         # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
+
         # Loop for generation
         for i in range(key_points_num):
             # prepare attention mask
@@ -440,52 +442,29 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
             off_road_checking = False
-            if self.task == "nuplan" and off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
+            if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
                 # Check key points with map_api
-                from nuplan.common.actor_state.state_representation import Point2D
-                from nuplan.common.maps.maps_datatypes import SemanticMapLayer
+                # WARNING: WIP, do not use
                 pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
                                                             ego_pose,
                                                             ego_to_global=True)
-                nearest_road_block_id, distance_to_road_block = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.ROADBLOCK
-                )
-                nearest_road_blockc_id, distance_to_road_block_c = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.ROADBLOCK_CONNECTOR
-                )
-                nearest_lane_id, distance_to_lane = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.LANE
-                )
-                nearest_lanec_id, distance_to_lanec = map_api.get_distance_to_nearest_map_object(
-                    point=Point2D(pred_key_point_global[0], pred_key_point_global[1]),
-                    layer=SemanticMapLayer.LANE_CONNECTOR
-                )
-                # check if on route
-                if distance_to_road_block < distance_to_road_block_c:
-                    nearest = int(nearest_road_block_id)
-                    dist = distance_to_road_block
-                else:
-                    nearest = int(nearest_road_blockc_id)
-                    dist = distance_to_road_block_c
-                if distance_to_lane < distance_to_lanec:
-                    nearest_lane = int(nearest_lane_id)
-                else:
-                    nearest_lane = int(nearest_lanec_id)
+                closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
+                nearest = closest_lane_road_dic['road_id']
+                nearest_lane = closest_lane_road_dic['lane_id']
+                dist = closest_lane_road_dic['distance_to_road_block']
                 if nearest not in route_ids or dist > 0.5:
-                    if int(nearest_lane) in road_dic:
-                        # move control point if off route
-                        pts = road_dic[int(nearest_lane)]['xyz'][:, :2]
-                        expanded_pred_pt = pred_key_point_global.copy()
-                        expanded_pred_pt = np.tile(expanded_pred_pt, (pts.shape[0], 1))
-                        distances = np.sqrt(np.sum((expanded_pred_pt - pts)**2, axis=1)).tolist()
-                        min_distance = min(distances)
-                        closest_pt_in_ego = change_coordination(pts[distances.index(min_distance), :2],
-                                                                ego_pose,
-                                                                ego_to_global=False)
-                        pred_key_point[0, 0, :2] = torch.tensor(closest_pt_in_ego, device=pred_key_point.device)
+                    # off-road, move to nearest lane according to PDMPath
+                    dist = euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
+                    interpolate_point = center_path.interpolate(np.array([dist]))[0]
+                    print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
+                    pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
+
+            # if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
+            #     # replace last key point with IDM reference
+            #     idm_reference_lastpt_relative = change_coordination(idm_reference_global[1, :2],
+            #                                                         ego_pose,
+            #                                                         ego_to_global=False)
+            #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
             input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
@@ -520,11 +499,67 @@ class GPTNonAutoRegressiveModelNuplan(GPT2PreTrainedModel):
         elif self.k == 1:
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
             # use previous prediction during generation
+            # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
             key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
         else:
             raise ValueError("illegal k while generating trajectory", self.k)
-
+        # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
         return torch.cat([key_points_logits, traj_logits], dim=1)
+
+
+def query_current_lane(map_api, target_point):
+    """
+    Query the current road_block id and lane id given a point on the map with map_api from NuPlan.
+    Args:
+        map_api: NuPlan's Map Api
+        target_point: [x, y, ..] in global coordination
+    Returns:
+        {
+            'road_id': int,
+            'lane_id': int,
+            'distance_to_road_block': float,
+            'distance_to_lane': float
+        }
+    """
+    from nuplan.common.actor_state.state_representation import Point2D
+    from nuplan.common.maps.maps_datatypes import SemanticMapLayer
+    from nuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_path import PDMPath
+    point2d = Point2D(target_point[0], target_point[1])
+    nearest_road_block_id, distance_to_road_block = map_api.get_distance_to_nearest_map_object(
+        point=point2d,
+        layer=SemanticMapLayer.ROADBLOCK
+    )
+    nearest_road_blockc_id, distance_to_road_block_c = map_api.get_distance_to_nearest_map_object(
+        point=point2d,
+        layer=SemanticMapLayer.ROADBLOCK_CONNECTOR
+    )
+    nearest_lane_id, distance_to_lane = map_api.get_distance_to_nearest_map_object(
+        point=point2d,
+        layer=SemanticMapLayer.LANE
+    )
+    nearest_lanec_id, distance_to_lanec = map_api.get_distance_to_nearest_map_object(
+        point=point2d,
+        layer=SemanticMapLayer.LANE_CONNECTOR
+    )
+    # check if on route
+    if distance_to_road_block < distance_to_road_block_c:
+        nearest_road_blockc_id = int(nearest_road_block_id)
+        dist_to_road_block = distance_to_road_block
+    else:
+        nearest_road_blockc_id = int(nearest_road_blockc_id)
+        dist_to_road_block = distance_to_road_block_c
+    if distance_to_lane < distance_to_lanec:
+        nearest_lane = int(nearest_lane_id)
+        dist_to_nearest_lane = distance_to_lane
+    else:
+        nearest_lane = int(nearest_lanec_id)
+        dist_to_nearest_lane = distance_to_lanec
+    return {
+        'road_id': nearest_road_blockc_id,
+        'lane_id': nearest_lane,
+        'distance_to_road_block': dist_to_road_block,
+        'distance_to_lane': dist_to_nearest_lane
+    }
 
 
 def build_models(model_args):
@@ -544,17 +579,46 @@ def build_models(model_args):
             tag = 'Vector GPT auto'
     elif 'gpt' in model_args.model_name:
         config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        if not model_args.autoregressive:
-            ModelCls = GPTNonAutoRegressiveModelNuplan
-            tag = 'GPT nonauto'
+        if 'gpt-mini' in model_args.model_name:
+            """
+            Number of parameters: 300k
+            """
+            config_p.n_layer = 1
+            config_p.n_embd = config_p.d_model = 64
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 1
+        elif 'gpt-small' in model_args.model_name:
+            """
+            Number of parameters: 16M
+            """
+            config_p.n_layer = 4
+            config_p.n_embd = config_p.d_model = 256
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 8
+        elif 'gpt-medium' in model_args.model_name:
+            """
+            Number of parameters: 124M
+            """
+            config_p.n_layer = 12
+            config_p.n_embd = config_p.d_model = 768
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 12
+        elif 'gpt-large' in model_args.model_name:
+            """
+            Number of parameters: 1.5B
+            """
+            config_p.n_layer = 48
+            config_p.n_embd = config_p.d_model = 1600
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 25
         else:
-            ModelCls = GPTModelNuPlan
-            tag = 'GPT auto'
+            config_p.n_layer = model_args.n_layers
+            config_p.n_embd = model_args.d_embed
+            config_p.n_inner = model_args.d_inner
+            config_p.n_head = model_args.n_heads
+        config_p.activation_function = model_args.activation_function
+        ModelCls = GPTTrajectory
+        tag = 'GPTTrajectory'
     elif 'transxl' in model_args.model_name:
         config_p = TransfoXLConfig()
         config_p.pad_token_id = 0
