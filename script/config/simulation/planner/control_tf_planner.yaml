@@ -1,6 +1,0 @@
-control_tf_planner:
-  _target_: nuplan.planning.simulation.planner.planner.ControlTFPlanner
-  horizon_seconds: 10.0
-  sampling_time: 0.1
-  acceleration: [5.0, 5.0] # x (longitudinal), y (lateral)
-  thread_safe: true
