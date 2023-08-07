@@ -34,7 +34,7 @@ MODEL:
         NAME: MTREncoder
 
         NUM_OF_ATTN_NEIGHBORS: 16
-        NUM_INPUT_ATTR_AGENT: 29
+        NUM_INPUT_ATTR_AGENT: 9
         NUM_INPUT_ATTR_MAP: 9
         
         NUM_CHANNEL_IN_MLP_AGENT: 256

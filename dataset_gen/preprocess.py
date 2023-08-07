@@ -73,7 +73,7 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwa
         result[key] = default_collate([d[key] for d in new_batch])
     return result
 
-def waymo_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
+def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, autoregressive=False):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -82,11 +82,17 @@ def waymo_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwar
     The batch is the raw indexes data for one nuplan data item, each data in batch includes:
     road_ids, route_ids, traffic_ids, agent_ids, file_name, frame_id, map and timestamp.
     """
-    # online rasterize TODO:autoregressive function transfer
-    if autoregressive:
-        map_func = partial(waymo_preprocess, data_path=dic_path)
+    split = batch[0]["split"]
+    if split == "train":
+        assert dic_path is not None
+        data_path = dic_path
+    elif split ==  "test":
+        assert dic_valid_path is not None
+        data_path = dic_valid_path
     else:
         raise NotImplementedError
+    
+    map_func = partial(waymo_preprocess, data_path=data_path)
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
     #     batch = list(executor.map(map_func, batch))
     new_batch = list()
@@ -97,10 +103,10 @@ def waymo_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwar
         new_batch.append(rst)
     
     # process as data dictionary
-    result = dict()
+    input_dict = dict()
     for key in new_batch[0].keys():
         input_list = []
-        if key in ["agent_trajs", "map_polyline", "map_polylines_mask"]:
+        if key in ["agent_trajs", "map_polylines", "map_polylines_mask"]:
             dims = [b[key].shape[1] for b in new_batch]
             max_dim = max(dims)
 
@@ -115,8 +121,9 @@ def waymo_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwar
         else:
             input_list = [d[key] for d in new_batch]
             
-        result[key] = torch.cat(input_list, dim=0)
-    return result
+        input_dict[key] = torch.cat(input_list, dim=0)
+
+    return {"input_dict": input_dict}
 
 def waymo_collate_func_offline(batch, **encode_kwargs): 
     # process as data dictionary
@@ -775,7 +782,7 @@ def waymo_preprocess(sample, data_path=None):
     ret_dict = {
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),
-        "map_polyline": map_polylines_data, 
+        "map_polylines": map_polylines_data, 
         "map_polylines_mask": map_polylines_mask,
         }
     

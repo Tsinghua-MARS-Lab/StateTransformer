@@ -59,7 +59,7 @@ class WaymoDL:
         else:
             print('empty file', self.global_file_names[file_index])
             return None
-            
+
         # track_infos = info['track_infos']
         # trajs = track_infos['trajs']
         # obj_types = track_infos['object_type']
@@ -126,7 +126,7 @@ class WaymoDL:
         #         "scenario_id": info["scenario_id"]
         #     }
         #     data.append(data_ego)
-        return data
+        return data, self.global_file_names[file_index].split("/")[-1]
     
     def transform_trajs_to_ego(self, obj_trajs, center_xyz, center_heading, heading_index=6, rot_vel_index=[7, 8]):
         """

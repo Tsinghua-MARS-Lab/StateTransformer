@@ -173,6 +173,11 @@ python generation.py  --num_proc 96 --sample_interval 1 \
 --data_path train_boston  --only_index
 `
 
+### Generate WOMD training data dictionary and index
+
+`
+python waymo_generation.py  --num_proc 20 --train
+`
 
 
 ## To evaluate on NuBoard:

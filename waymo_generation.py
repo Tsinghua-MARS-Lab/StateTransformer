@@ -437,11 +437,11 @@ def main(args):
 
     def yield_data(shards, dl, output_path):
         for shard in shards:
-            tf_dataset = dl.get_next_file(specify_file_index=shard)
+            tf_dataset, file_name = dl.get_next_file(specify_file_index=shard)
             if tf_dataset is None:
                 continue
             
-            file_name = str(shard) + ".pkl"
+            file_name = file_name + ".pkl"
             dicts_to_save = {}
             for data in tf_dataset:
                 scenario = scenario_pb2.Scenario()
@@ -476,7 +476,7 @@ def main(args):
                 pickle.dump(dicts_to_save, f)
                 f.close()
     
-    data_loader = WaymoDL(data_path=data_path)
+    data_loader = WaymoDL(data_path=data_path, mode="train" if args.train else "test")
     file_indices = []
     for i in range(args.num_proc):
         file_indices += range(data_loader.total_file_num)[i::args.num_proc]
@@ -509,8 +509,8 @@ if __name__ == '__main__':
     
     parser.add_argument('--train', default=False, action='store_true')   
     parser.add_argument('--num_proc', type=int, default=20)
-    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_prediction_v1.2.0/t4p_full/t4p_waymo')
-    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_prediction_v1.2.0/t4p_full/waymo_cache')
+    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_prediction_v1.2.0/t4p_training/t4p_waymo')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_prediction_v1.2.0/t4p_training/waymo_cache')
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
 
     args_p = parser.parse_args()

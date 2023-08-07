@@ -3,6 +3,7 @@ from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
 from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
+from transformer4planning.models.vector_model_simple import VectorModel
 
 from transformers.generation.configuration_utils import GenerationConfig
 from transformer4planning.models.utils import *
@@ -609,16 +610,15 @@ def build_models(model_args):
         from .waymo_model import GPTModelWaymo
         ModelCls = GPTModelWaymo
         tag = 'waymomodel'
-    elif 'demo' in model_args.model_name:
+    elif 'vector' in model_args.model_name and 'waymo' in model_args.model_name:
         config_p = GPT2Config()
         config_p.n_layer = model_args.n_layers
         config_p.n_embd = model_args.d_embed
         config_p.n_inner = model_args.d_inner
         config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
-        from .waymo_model import GPTModelDemo
-        ModelCls = GPTModelDemo
-        tag = 'demo'
+        ModelCls = VectorModel
+        tag = "vectormodel"
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:
