@@ -31,6 +31,7 @@ from transformers import (
 )
 from transformer4planning.models.model import build_models
 from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
+from transformer4planning.utils import ModelArguments
 from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
@@ -42,128 +43,118 @@ from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-@dataclass
-class ModelArguments:
-    """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-    """
-    model_name: str = field(
-        default="scratch-gpt",
-        metadata={"help": "Name of a planning model backbone"}
-    )
-    model_pretrain_name_or_path: str = field(
-        default=None,
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    predict_result_saving_dir: Optional[str] = field(
-        default=False,
-        metadata={"help": "The target folder to save prediction results."},
-    )
-    recover_obs: Optional[bool] = field(
-        default=False,
-    )
-    teacher_forcing_obs: Optional[bool] = field(
-        default=False,
-    )
-    d_embed: Optional[int] = field(
-        default=256,
-    )
-    d_model: Optional[int] = field(
-        default=256,
-    )
-    d_inner: Optional[int] = field(
-        default=1024,
-    )
-    n_layers: Optional[int] = field(
-        default=4,
-    )
-    n_heads: Optional[int] = field(
-        default=8,
-    )
-    # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
-    activation_function: Optional[str] = field(
-        default = "gelu_new"
-    )
-    loss_fn: Optional[str] = field(
-        default="mse",
-    )
-    task: Optional[str] = field(
-        default="nuplan" # only for mmtransformer
-    )
-    with_traffic_light: Optional[bool] = field(
-        default=True
-    )
-    autoregressive: Optional[bool] = field(
-        default=False
-    )
-    k: Optional[int] = field(
-        default=1,
-        metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
-    )
-    next_token_scorer: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to use next token scorer for prediction."},
-    )
-    past_seq: Optional[int] = field(
-        # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
-        # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
-        default=10,
-        metadata={"help": "past frames to include for prediction/planning."},
-    )
-    x_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    y_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    tokenize_label: Optional[bool] = field(
-        default=True
-    )
-    raster_channels: Optional[int] = field(
-        default=33,
-        metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
-    )
-    predict_yaw: Optional[bool] = field(
-        default=False
-    )
-    ar_future_interval: Optional[int] = field(
-        default=0,
-        metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
-    )
-    arf_x_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    arf_y_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    trajectory_loss_rescale: Optional[float] = field(
-        default=1.0
-    )
-    visualize_prediction_to_path: Optional[str] = field(
-        default=None
-    )
-    pred_key_points_only: Optional[bool] = field(
-        default=False
-    )
-    specified_key_points: Optional[bool] = field(
-        default=False
-    )
-    forward_specified_key_points: Optional[bool] = field(
-        default=False
-    )
-    token_scenario_tag: Optional[bool] = field(
-        default=False
-    )
-    max_token_len: Optional[int] = field(
-        default=20
-    )
-    resnet_type: Optional[str] = field(
-        default='resnet18',
-        metadata= {"help":"choose from ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']"}
-    )
-    pretrain_encoder: Optional[bool] = field(
-        default=False
-    )
+# @dataclass
+# class ModelArguments:
+#     """
+#     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
+#     """
+#     model_name: str = field(
+#         default="scratch-gpt",
+#         metadata={"help": "Name of a planning model backbone"}
+#     )
+#     model_pretrain_name_or_path: str = field(
+#         default=None,
+#         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
+#     )
+#     predict_result_saving_dir: Optional[str] = field(
+#         default=False,
+#         metadata={"help": "The target folder to save prediction results."},
+#     )
+#     predict_trajectory: Optional[bool] = field(
+#         default=True,
+#     )
+#     d_embed: Optional[int] = field(
+#         default=256,
+#     )
+#     d_model: Optional[int] = field(
+#         default=256,
+#     )
+#     d_inner: Optional[int] = field(
+#         default=1024,
+#     )
+#     n_layers: Optional[int] = field(
+#         default=4,
+#     )
+#     n_heads: Optional[int] = field(
+#         default=8,
+#     )
+#     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
+#     activation_function: Optional[str] = field(
+#         default="silu"
+#     )
+#     loss_fn: Optional[str] = field(
+#         default="mse",
+#     )
+#     task: Optional[str] = field(
+#         default="nuplan" # only for mmtransformer
+#     )
+#     with_traffic_light: Optional[bool] = field(
+#         default=True
+#     )
+#     autoregressive: Optional[bool] = field(
+#         default=False
+#     )
+#     k: Optional[int] = field(
+#         default=1,
+#         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
+#     )
+#     next_token_scorer: Optional[bool] = field(
+#         default=False,
+#         metadata={"help": "Whether to use next token scorer for prediction."},
+#     )
+#     past_seq: Optional[int] = field(
+#         # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
+#         # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
+#         default=10,
+#         metadata={"help": "past frames to include for prediction/planning."},
+#     )
+#     x_random_walk: Optional[float] = field(
+#         default=0.0
+#     )
+#     y_random_walk: Optional[float] = field(
+#         default=0.0
+#     )
+#     tokenize_label: Optional[bool] = field(
+#         default=True
+#     )
+#     raster_channels: Optional[int] = field(
+#         default=33,
+#         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
+#     )
+#     predict_yaw: Optional[bool] = field(
+#         default=False
+#     )
+#     ar_future_interval: Optional[int] = field(
+#         default=0,
+#         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
+#     )
+#     arf_x_random_walk: Optional[float] = field(
+#         default=0.0
+#     )
+#     arf_y_random_walk: Optional[float] = field(
+#         default=0.0
+#     )
+#     trajectory_loss_rescale: Optional[float] = field(
+#         default=1.0
+#     )
+#     visualize_prediction_to_path: Optional[str] = field(
+#         default=None
+#     )
+#     pred_key_points_only: Optional[bool] = field(
+#         default=False
+#     )
+#     specified_key_points: Optional[bool] = field(
+#         default=False
+#     )
+#     forward_specified_key_points: Optional[bool] = field(
+#         default=False
+#     )
+#     token_scenario_tag: Optional[bool] = field(
+#         default=False
+#     )
+#     max_token_len: Optional[int] = field(
+#         default=20
+#     )
 
 @dataclass
 class DataTrainingArguments:

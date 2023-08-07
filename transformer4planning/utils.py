@@ -3,41 +3,19 @@ from typing import Optional
 import numpy as np
 import math
 
+
 @dataclass
 class ModelArguments:
     """
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="pretrain-gpt",
+        default="scratch-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
-        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-117M-1data-boston/training_results/checkpoint-20800",
-        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-30M-1data-boston/training_results/checkpoint-20000",
-        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-762M-1data-boston",
-        # default="/public/MARS/datasets/nuPlanCache/checkpoint/corl/gpt-1.5B-1data-boston",
-        # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/1.5B-multicity",
-        default = "/public/MARS/datasets/nuPlanCache/checkpoint/gpt30m_kp",
-        # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/117M-multicity",
-        # default = "/public/MARS/datasets/nuPlanCache/checkpoint/corl/30M-multicity",
+        default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    use_multi_city: bool = field(
-        default=False
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_auth_token: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
-        },
     )
     predict_result_saving_dir: Optional[str] = field(
         default=False,
@@ -45,12 +23,6 @@ class ModelArguments:
     )
     predict_trajectory: Optional[bool] = field(
         default=True,
-    )
-    recover_obs: Optional[bool] = field(
-        default=False,
-    )
-    teacher_forcing_obs: Optional[bool] = field(
-        default=False,
     )
     d_embed: Optional[int] = field(
         default=256,
@@ -69,14 +41,10 @@ class ModelArguments:
     )
     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
     activation_function: Optional[str] = field(
-        default = "gelu_new"
+        default="silu"
     )
     loss_fn: Optional[str] = field(
         default="mse",
-    )
-    next_token_scorer: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to use next token scorer for prediction."},
     )
     task: Optional[str] = field(
         default="nuplan" # only for mmtransformer
@@ -143,14 +111,11 @@ class ModelArguments:
     token_scenario_tag: Optional[bool] = field(
         default=False
     )
+    token_scenario_tag: Optional[bool] = field(
+        default=False
+    )
     max_token_len: Optional[int] = field(
         default=20
-    )
-    past_sample_interval: Optional[int] = field(
-        default=5
-    )
-    future_sample_interval: Optional[int] = field(
-        default=2
     )
 
 def rotate_array(origin, points, angle, tuple=False):
@@ -177,14 +142,14 @@ def rotate_array(origin, points, angle, tuple=False):
 def change_coordination(target_point, ego_center, ego_to_global=False):
     target_point_new = target_point.copy()
     if ego_to_global:
-        cos_, sin_ = math.cos(ego_center[3]), math.sin(ego_center[3])
+        cos_, sin_ = math.cos(ego_center[-1]), math.sin(ego_center[-1])
         # global to ego
         new_x, new_y = target_point_new[0] * cos_ - target_point_new[1] * sin_, \
                        target_point_new[0] * sin_ + target_point_new[1] * cos_
         target_point_new[0], target_point_new[1] = new_x, new_y
         target_point_new[:2] += ego_center[:2]
     else:
-        cos_, sin_ = math.cos(-ego_center[3]), math.sin(-ego_center[3])
+        cos_, sin_ = math.cos(-ego_center[-1]), math.sin(-ego_center[-1])
         target_point_new[:2] -= ego_center[:2]
         # global to ego
         new_x, new_y = target_point_new[0] * cos_ - target_point_new[1] * sin_, \
