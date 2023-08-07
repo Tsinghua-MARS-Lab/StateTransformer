@@ -85,21 +85,25 @@ class CNNDownSamplingResNet(nn.Module):
         import torchvision.models as models
         if resnet_type == 'resnet18':
             self.cnn = models.resnet18(pretrained=pretrain, num_classes=d_embed)
+            cls_feature_dim = 512
         elif resnet_type == 'resnet34':
             self.cnn = models.resnet34(pretrained=pretrain, num_classes=d_embed)
+            cls_feature_dim = 512
         elif resnet_type == 'resnet50':
             self.cnn = models.resnet50(pretrained=pretrain, num_classes=d_embed)
+            cls_feature_dim = 2048
         elif resnet_type == 'resnet101':
             self.cnn = models.resnet101(pretrained=pretrain, num_classes=d_embed)
+            cls_feature_dim = 2048
         elif resnet_type == 'resnet152':
             self.cnn = models.resnet152(pretrained=pretrain, num_classes=d_embed)
-
+            cls_feature_dim = 2048
         self.cnn = torch.nn.Sequential(*(list(self.cnn.children())[1:-1]))
         self.layer1 = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         )
         self.classifier = nn.Sequential(
-            nn.Linear(in_features=512, out_features=d_embed, bias=True)
+            nn.Linear(in_features=cls_feature_dim, out_features=d_embed, bias=True)
         )
         # self.cnn = models.vgg11(pretrained=False, num_classes=config.d_embed)
         # self.cnn.features = self.cnn.features[1:]
