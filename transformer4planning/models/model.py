@@ -70,33 +70,6 @@ class GPTNonAutoRegressiveModelNuplan(PlanningGPTBase):
         self.clf_metrics = None
         # Initialize weights and apply final processing
         self.post_init()
-
-class GPTVectorEncoderModelNuplan(PlanningGPTBase):
-    def __init__(self, config, **kwargs):
-        super().__init__(config, **kwargs)
-        self.vector_encoder = PDMEncoder(
-            history_dim=self.model_args.past_seq, 
-            centerline_dim=120,
-            hidden_dim=config.n_embd
-        )
-        self.traj_decoder = None
-        self.k = int(self.model_args.k)
-
-        self.next_token_scorer_decoder = None
-        self.key_points_decoder = None
-        out_features = 4 if self.model_args.predict_yaw else 2
-        if not self.model_args.pred_key_points_only:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
-        if self.ar_future_interval > 0:
-            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
-        if self.k > 1:
-            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
-
-        self.clf_metrics = None
-        # Initialize weights and apply final processing
-        self.post_init()
-
-        
     
     def get_features(self, **kwargs):
         high_res_raster = kwargs.get("high_res_raster", None)
@@ -206,7 +179,7 @@ class GPTVectorEncoderModelNuplan(PlanningGPTBase):
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
             return_dict=return_dict,
-            **kwargs
+            # **kwargs
         )
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
@@ -460,6 +433,31 @@ class GPTVectorEncoderModelNuplan(PlanningGPTBase):
 
         return torch.cat([key_points_logits, traj_logits], dim=1)
 
+
+class GPTVectorEncoderModelNuplan(PlanningGPTBase):
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
+        self.vector_encoder = PDMEncoder(
+            history_dim=self.model_args.past_seq, 
+            centerline_dim=120,
+            hidden_dim=config.n_embd
+        )
+        self.traj_decoder = None
+        self.k = int(self.model_args.k)
+
+        self.next_token_scorer_decoder = None
+        self.key_points_decoder = None
+        out_features = 4 if self.model_args.predict_yaw else 2
+        if not self.model_args.pred_key_points_only:
+            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+        if self.ar_future_interval > 0:
+            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
+        if self.k > 1:
+            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
+
+        self.clf_metrics = None
+        # Initialize weights and apply final processing
+        self.post_init()
 
 def build_models(model_args):
     if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
