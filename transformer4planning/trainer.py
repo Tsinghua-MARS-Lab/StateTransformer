@@ -601,7 +601,7 @@ class PlanningTrainer(Trainer):
                 
                 input_dict = batch_dict['input_dict']
 
-                pred_length = batch_dict['input_dict']['center_gt_trajs_src'].shape[1]
+                pred_length = input_dict['center_gt_trajs_src'].shape[1] - input_dict['current_time_index'][0] - 1
                 pred_trajs = batch_pred_dicts['logits'][:, None, -pred_length:, :]
                 pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
                 center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
@@ -618,11 +618,11 @@ class PlanningTrainer(Trainer):
                 pred_dict_list = []
                 for obj_idx in range(num_center_objects):
                     single_pred_dict = {
-                        'scenario_id': input_dict['scenario_id'],
+                        'scenario_id': str(input_dict['scenario_id'][obj_idx]),
                         'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
                         'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
                         'object_id': input_dict['center_objects_id'][obj_idx],
-                        'object_type': input_dict['center_objects_type'][obj_idx],
+                        'object_type': str(input_dict['center_objects_type'][obj_idx]),
                         'gt_trajs': input_dict['center_gt_trajs_src'][obj_idx].cpu().numpy(),
                         'track_index_to_predict': input_dict['track_index_to_predict'][obj_idx].cpu().numpy()
                     }
@@ -650,9 +650,6 @@ class PlanningTrainer(Trainer):
         logger.info('Generate label finished(sec_per_example: %.4f second).' % sec_per_example)
 
         ret_dict = {}
-
-        with open(eval_output_dir + "result_" + model_name + '.pkl', 'wb') as f:
-            pickle.dump(pred_dicts, f)
 
         try:
             num_modes_for_eval = pred_dicts[0]['pred_trajs'].shape[0]

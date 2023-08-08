@@ -7,9 +7,7 @@ import argparse
 
 import pickle
 
-import math
 import numpy as np
-import cv2
 import shapely
 
 import torch
@@ -107,7 +105,7 @@ def main(args):
                         "file_name": file_name,
                         "scenario_id": scenario.scenario_id,
                     }
-                    
+
             if len(dicts_to_save.keys()) > 0:
                 with open(os.path.join(output_path, file_name), "wb") as f:
                     pickle.dump(dicts_to_save, f)
@@ -138,7 +136,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument("--data_path", type=dict, default={
-            "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_motion/waymo_open_dataset_motion_v_1_0_0/uncompressed/scenario/",
+            "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_prediction_v1.2.0/scenario/",
             "SPLIT_DIR": {
                     'train': "training", 
                     'test': "validation"
@@ -149,8 +147,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_dict', default=False, action='store_true')
     parser.add_argument('--interactive', default=False, action='store_true')
     
-    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_validation/t4p_waymo')
-    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_validation/waymo_cache')
+    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_training/t4p_waymo')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_training/waymo_cache')
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
 
     parser.add_argument('--num_proc', type=int, default=20)

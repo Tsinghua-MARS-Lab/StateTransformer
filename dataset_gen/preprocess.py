@@ -120,14 +120,11 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, autoregressive
                 input_list.append(padded_input)
         else:
             input_list = [d[key] for d in new_batch]
-        
-        if key in ["scenario_id", "center_objects_type"]: 
-            result = []
-            for d in new_batch: result += d[key]
-            input_dict[key] = result
-            continue
 
-        input_dict[key] = torch.cat(input_list, dim=0)
+        if key in ["scenario_id", "center_objects_type"]:
+            input_dict[key] = np.concatenate(input_list, axis=0).reshape(-1)
+        else:
+            input_dict[key] = torch.cat(input_list, dim=0)
 
     return {"input_dict": input_dict}
 
@@ -770,11 +767,11 @@ def waymo_preprocess(sample, data_path=None):
         "map_polylines_mask": map_polylines_mask,
         "current_time_index": torch.tensor(current_time_index, dtype=torch.int32).repeat(num_ego).view(-1, 1),
         # for evaluation
-        "scenario_id": [scenario_id] * (num_ego),
+        "scenario_id": np.array([scenario_id] * num_ego).reshape(-1, 1),
         "center_objects_world": center_objects_world,
-        "center_gt_trajs_src": agent_trajs[track_index_to_predict, current_time_index + 1:],
+        "center_gt_trajs_src": agent_trajs[track_index_to_predict],
         "center_objects_id": torch.tensor(data['center_objects_id'], dtype=torch.int32).view(-1, 1),
-        "center_objects_type": list(data['center_objects_type']),
+        "center_objects_type": np.array(data['center_objects_type']).reshape(-1, 1),
         }
     
     return ret_dict

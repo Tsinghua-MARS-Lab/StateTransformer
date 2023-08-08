@@ -176,7 +176,7 @@ python generation.py  --num_proc 96 --sample_interval 1 \
 ### Generate WOMD training data dictionary and index
 
 `
-python waymo_generation.py  --num_proc 20 --train
+python waymo_generation.py --train --save_dict
 `
 
 

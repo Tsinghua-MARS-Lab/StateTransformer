@@ -3,7 +3,7 @@
 export CUDA_VISIBLE_DEVICES=7;
 python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_interactive.py \
         --model_name pretrain-vector-waymo \
-        --model_pretrain_name_or_path /localdata_ssd/liderun/ckpts/checkpoint-490000 \
+        --model_pretrain_name_or_path /localdata_ssd/liderun/tmp/t4p_waymo_vector/training_results/checkpoint-490000\
         --saved_dataset_folder /localdata_ssd/liderun/t4p_validation/waymo_cache/t4p_waymo \
         --output_dir /localdata_ssd/liderun/tmp/t4p_waymo_vector/training_results \
         --run_name waymo-debug \
