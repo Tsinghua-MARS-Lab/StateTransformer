@@ -180,6 +180,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            future_key_points = None
+            future_key_points_gt_mask = None
             # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
             # attention_mask[:, context_length * 2:] = 0
         elif self.ar_future_interval > 0:
@@ -245,8 +247,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-        # expected shape for pred trajectory is (b, pred_length, 4)
-        pred_traj_logits = self.traj_decoder(traj_hidden_state)   # ---- for loss
+        pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
+        pred_kps_logits = None
+        pred_kps_cls = None
         
         if self.ar_future_interval > 0:
             """
@@ -258,10 +261,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             """
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
             future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
-            pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k  # ---- for loss
+            pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state)  # (b, num_kps, 4/2*k)
             
             if self.k > 1:
-                pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k  # ----- for loss
+                pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # (b, num_kps, k)
         
         # get loss
         pred_traj_logits, loss = self.calc_loss(pred_traj_logits=pred_traj_logits, 
@@ -452,9 +455,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         """_summary_
 
         Args:
-            pred_traj_logits (bs, future_frame, 2): _description_
-            gt_traj (bs, future_frame, 4): _description_
-            gt_traj_mask (bs, future_frame, 1): _description_. Defaults to None.
+            pred_traj_logits (bs, pred_len, 2): _description_
+            gt_traj (bs, pred_len, 4): _description_
+            gt_traj_mask (bs, pred_len, 1): _description_. Defaults to None.
             pred_kps_logits (bs, num_kps, k*2): _description_. Defaults to None.
             gt_kps (bs, num_kps, 4): _description_. Defaults to None.
             gt_kps_mask (bs, num_kps, 1): _description_. Defaults to None.
@@ -473,7 +476,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         if self.ar_future_interval > 0:
             if self.k == 1:
-                loss_keypoints = self.reg_trj_loss(pred_kps_logits, gt_kps[..., :self.pred_dim].to(device))
+                loss_keypoints = self.reg_kps_loss(pred_kps_logits, gt_kps[..., :self.pred_dim].to(device))
                 loss_keypoints = (loss_keypoints* gt_kps_mask).sum() / (gt_kps_mask.sum() + 1e-7)
                 
                 loss += loss_keypoints
