@@ -460,7 +460,7 @@ def main():
     results = {}
     if training_args.do_eval:
         if data_args.dataset_name == 'waymo':
-            trainer.evaluate_waymo()
+            trainer.evaluate_interactive()
             return
             
         if model_args.autoregressive:

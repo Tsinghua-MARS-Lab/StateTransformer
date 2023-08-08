@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-python -m torch.distributed.run --nproc_per_node=8 runner_waymo_simple.py \
-        --model_name scratch-vector-waymo --model_pretrain_name_or_path None \
+python -m torch.distributed.run --nproc_per_node=8 runner_interactive.py \
+        --model_name scratch-interactive-waymo --model_pretrain_name_or_path None \
         --saved_dataset_folder /localdata_ssd/liderun/t4p_training/waymo_cache/t4p_waymo \
-        --output_dir /localdata_ssd/liderun/tmp/t4p_waymo_vector/training_results  \
-        --logging_dir /localdata_ssd/liderun/tmp/t4p_waymo_vector/training_logs \
+        --output_dir /localdata_ssd/liderun/tmp/t4p_waymo_interactive/training_results  \
+        --logging_dir /localdata_ssd/liderun/tmp/t4p_waymo_interactive/training_logs \
         --run_name waymo-debug --num_train_epochs 20 \
         --per_device_train_batch_size 8 --warmup_steps 50 \
         --weight_decay 0.01 --logging_steps 2 --save_strategy steps \
         --save_steps 5000 --dataloader_num_workers 10 \
         --save_total_limit 10  --predict_trajectory True --ar_future_interval 5 --specified_key_points True\
-        --dataloader_drop_last True --do_train --do_eval \
+        --dataloader_drop_last True --do_train \
         --d_embed 256 --d_model 256 --d_inner 1024 --n_layers 4 --n_heads 4 \
         --activation_function silu --dataset_scale 1 \
         --task waymo --with_traffic_light True --k 6 \
@@ -17,8 +17,6 @@ python -m torch.distributed.run --nproc_per_node=8 runner_waymo_simple.py \
         --datadic_path /localdata_ssd/liderun/t4p_training/t4p_waymo/ \
         --remove_unused_columns False --future_sample_interval 1 \
         --past_sample_interval 1 \
-        --saved_valid_dataset_folder /localdata_ssd/liderun/t4p_validation/waymo_cache/t4p_waymo \
-        --datadic_valid_path /localdata_ssd/liderun/t4p_validation/t4p_waymo/ \
         --overwrite_output_dir --loss_fn mse
 
 # python -m torch.distributed.run --nproc_per_node=8 runner_waymo.py \

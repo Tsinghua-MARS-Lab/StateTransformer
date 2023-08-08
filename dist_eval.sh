@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 
-export CUDA_VISIBLE_DEVICES=0;
-python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_waymo.py \
-        --model_name pretrain-vector-gpt \
-        --model_pretrain_name_or_path /data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results/checkpoint-61000 \
-        --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
-        --output_dir /data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results  \
-        --run_name gpt_mse_FI1_PI1_k1_test \
-        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --predict_trajectory True --ar_future_interval 5 --specified_key_points True \
+export CUDA_VISIBLE_DEVICES=7;
+python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_interactive.py \
+        --model_name pretrain-vector-waymo \
+        --model_pretrain_name_or_path /localdata_ssd/liderun/ckpts/checkpoint-490000 \
+        --saved_dataset_folder /localdata_ssd/liderun/t4p_validation/waymo_cache/t4p_waymo \
+        --output_dir /localdata_ssd/liderun/tmp/t4p_waymo_vector/training_results \
+        --run_name waymo-debug \
+        --per_device_eval_batch_size 8 --dataloader_num_workers 10 --predict_trajectory True --ar_future_interval 5 --specified_key_points True \
         --dataloader_drop_last True \
         --d_embed 256 --d_model 256 --d_inner 1024 --n_layers 4 --n_heads 4 \
         --activation_function silu --dataset_scale 1 \
         --dataset_name waymo --task waymo \
-        --with_traffic_light True --k 1 \
+        --with_traffic_light True --k 6 \
         --online_preprocess True \
-        --datadic_path /data_3/madanjiao/nuplan/online_demo/mini_demo \
+        --datadic_path /localdata_ssd/liderun/t4p_validation/t4p_waymo/ \
         --remove_unused_columns False --future_sample_interval 1 \
         --past_sample_interval 1 --do_eval\
-        --saved_valid_dataset_folder /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
+        --saved_valid_dataset_folder /localdata_ssd/liderun/t4p_validation/waymo_cache/t4p_waymo \
+        --datadic_valid_path /localdata_ssd/liderun/t4p_validation/t4p_waymo/ \
         --overwrite_output_dir --loss_fn mse
 
 # python -m torch.distributed.run --nproc_per_node=1 runner_waymo.py \

@@ -120,37 +120,16 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, autoregressive
                 input_list.append(padded_input)
         else:
             input_list = [d[key] for d in new_batch]
-            
+        
+        if key in ["scenario_id", "center_objects_type"]: 
+            result = []
+            for d in new_batch: result += d[key]
+            input_dict[key] = result
+            continue
+
         input_dict[key] = torch.cat(input_list, dim=0)
 
     return {"input_dict": input_dict}
-
-def waymo_collate_func_offline(batch, **encode_kwargs): 
-    # process as data dictionary
-    result = dict()
-    
-    for key in batch[0].keys():
-        if key == "agent_trajs":
-            assert len(batch[0][key].shape) == 4
-            _, T, _, H = batch[0][key].shape
-            ego_length, agent_length = [], []
-            for d in batch:
-                ego_length.append(d[key].shape[0])
-                agent_length.append(d[key].shape[2])
-                
-            ego_length_total = sum(ego_length)
-            max_length = max(agent_length)
-
-            agent_trajs = torch.zeros((ego_length_total, T, max_length, H))
-            last_ego = 0
-            for i, d in enumerate(batch): 
-                agent_trajs[last_ego:last_ego + ego_length[i], :, :agent_length[i], :] = d[key]
-                last_ego = last_ego + ego_length[i]
-            
-            result[key] = agent_trajs
-            
-        else: result[key] = torch.cat([d[key] for d in batch], dim=0)
-    return result
 
 def augmentation():
     pass
@@ -768,13 +747,18 @@ def waymo_preprocess(sample, data_path=None):
     with open(os.path.join(data_path, filename), "rb") as f:
         info = pickle.load(f)
 
-    data = info[sample["scenario_id"]]
+    scenario_id = sample["scenario_id"]
+    data = info[scenario_id]
     
     agent_trajs = data['agent_trajs']  # (num_objects, num_timestamp, 10)
+    current_time_index = data["current_time_index"]
     track_index_to_predict = data['track_index_to_predict'].to(torch.long)
     map_polyline = torch.from_numpy(data["map_polyline"])
 
-    center, heading = agent_trajs[track_index_to_predict, 10, :3], agent_trajs[track_index_to_predict, 10, 6]
+    num_ego = len(track_index_to_predict)
+
+    center_objects_world = agent_trajs[track_index_to_predict, current_time_index]
+    center, heading = center_objects_world[..., :3], center_objects_world[..., 6]
     agent_trajs_res = transform_to_center(agent_trajs, center, heading, heading_index=6)
     map_polylines_data = transform_to_center(map_polyline, center, heading, no_time_dim=True)
     map_polylines_mask = torch.from_numpy(data["map_polylines_mask"]).unsqueeze(0).repeat(len(track_index_to_predict), 1, 1, )
@@ -784,6 +768,13 @@ def waymo_preprocess(sample, data_path=None):
         "track_index_to_predict": track_index_to_predict.view(-1, 1),
         "map_polylines": map_polylines_data, 
         "map_polylines_mask": map_polylines_mask,
+        "current_time_index": torch.tensor(current_time_index, dtype=torch.int32).repeat(num_ego).view(-1, 1),
+        # for evaluation
+        "scenario_id": [scenario_id] * (num_ego),
+        "center_objects_world": center_objects_world,
+        "center_gt_trajs_src": agent_trajs[track_index_to_predict, current_time_index + 1:],
+        "center_objects_id": torch.tensor(data['center_objects_id'], dtype=torch.int32).view(-1, 1),
+        "center_objects_type": list(data['center_objects_type']),
         }
     
     return ret_dict
@@ -824,7 +815,7 @@ def transform_to_center(obj_trajs, center_xyz, center_heading, heading_index=Non
             angle=-center_heading
         ).view(num_center_objects, num_objects, num_frame, 2)
 
-        if heading_index is not None:obj_trajs[:, :, :, heading_index] -= center_heading[:, None, None]
+        if heading_index is not None: obj_trajs[:, :, :, heading_index] -= center_heading[:, None, None]
 
     return obj_trajs
 
