@@ -1,0 +1,28 @@
+dataset_info:
+  data_root: '/data/waymo_open_dataset/mtr_processed_data/v1'
+  split_dir: {
+      'train': 'processed_scenarios_training', 
+      'test': 'processed_scenarios_validation'
+  }
+  info_file: {
+      'train': 'processed_scenarios_training_infos.pkl', 
+      'test': 'processed_scenarios_val_infos.pkl'
+  }
+
+  object_type: ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
+
+  sample_interval: {
+      'train': 10, 
+      'val': 1
+  }
+
+time_info:
+  time_set_interval: 10
+
+  time_sample_num: 5
+  time_sample_interval: 2
+
+input_feature:
+  polyline_point_num: 20
+  polyline_subsample_interval: 4
+
