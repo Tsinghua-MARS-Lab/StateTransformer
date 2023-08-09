@@ -2,16 +2,10 @@ from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
-from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
-from transformer4planning.models.vector_model_interactive import EncoderSimple
 
-from transformers.generation.configuration_utils import GenerationConfig
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
 import torch.nn as nn
-import evaluate
-import copy
-
 
 class GPTTrajectory(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):

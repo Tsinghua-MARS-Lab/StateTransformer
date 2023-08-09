@@ -1,6 +1,6 @@
 import torch
-from torch import nn, Tensor
-import numpy as np
+from torch import nn
+from encoder.mtr_encoder import MTREncoder
 
 class RelationNetwork(nn.Module):
     """docstring for RelationNetwork"""
@@ -149,3 +149,48 @@ class CNNEncoder(nn.Module):
         output = output.permute(0, 2, 3, 1)
         # assert output.shape == (len(x), 224, 224, config.d_embed), output.shape
         return output
+
+class SimpleEncoder(MTREncoder):
+    def __init__(self, config):
+        super().__init__(config)
+        self.map_polyline_encoder = nn.Sequential(nn.Linear(2, 128, bias=False), nn.ReLU(),
+                                                  nn.Linear(128, 256, bias=False), nn.ReLU(),
+                                                  nn.Linear(256, 256, bias=True), nn.ReLU(),)
+
+    def forward(self, input_dict):
+        past_trajs = input_dict['agent_trajs'][:, :, :11, :]
+        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
+
+        num_center_objects, num_objects, num_timestamps, _ = past_trajs.shape
+        agent_trajs_mask = past_trajs[..., -1] > 0
+        map_polylines_mask = map_polylines_mask[..., 0] > 0
+        # apply polyline encoder
+        obj_polylines_feature = self.agent_polyline_encoder(past_trajs, agent_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)   
+        map_polylines_feature = self.map_polyline_encoder(map_polylines)  # (num_center_objects, num_polylines, C)
+        map_polylines_feature, _ = torch.max(map_polylines_feature, dim=1, keepdim=True)
+        map_polylines_feature = map_polylines_feature.repeat(1, num_timestamps, 1)
+
+        agents_attention_mask = agent_trajs_mask.view(num_center_objects, -1)
+        map_attention_mask = torch.ones((num_center_objects, num_timestamps), device=past_trajs.device, dtype=torch.bool)
+
+        n_out_embed = obj_polylines_feature.shape[-1]
+        global_token_feature = torch.cat((obj_polylines_feature.view(num_center_objects, num_objects*num_timestamps, n_out_embed), map_polylines_feature), dim=1) 
+        global_token_mask = torch.cat((agents_attention_mask, map_attention_mask), dim=1)
+
+        obj_trajs_pos = past_trajs[..., :3]
+        map_polylines_center = torch.zeros((num_center_objects, num_timestamps, 3), device=past_trajs.device)
+        global_token_pos = torch.cat((obj_trajs_pos.contiguous().view(num_center_objects, num_objects*num_timestamps, -1), map_polylines_center), dim=1)
+
+        if self.use_local_attn:
+            global_token_feature = self.apply_local_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos,
+                num_of_neighbors=self.model_cfg.NUM_OF_ATTN_NEIGHBORS
+            )
+        else:
+            global_token_feature = self.apply_global_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
+            )
+
+        global_token_feature_max, _ = torch.max(global_token_feature.view(num_center_objects, -1, num_timestamps, 256), dim=1)
+
+        return global_token_feature_max.squeeze(1)
