@@ -1,61 +1,22 @@
 from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
 from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.encoders import *
+from transformer4planning.models.encoders import (NuplanRasterizeEncoder,)
 from transformer4planning.models.decoders import *
 from transformer4planning.models.model_legacy import *
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
 import torch.nn as nn
 
-class PlanningGPTBase(GPT2PreTrainedModel):
-    def __init__(self, config, **kwargs):
-        super().__init__(config)
-        self.transformer = GPT2Model(config)
-        self.model_args = kwargs["model_args"]
-        self.loss_fn = self.model_args.loss_fn
-        self.ar_future_interval = self.model_args.ar_future_interval
-        self.task = self.model_args.task    
-        self.in_channels = 23 if self.task == "waymo" else self.model_args.raster_channels
-        self.model_parallel = False
-        self.device_map = None
-        self.with_traffic_light = self.model_args.with_traffic_light
-
-        if self.model_args.token_scenario_tag:
-            self.tag_tokenizer = GPT2Tokenizer.from_pretrained(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'))
-            self.tag_tokenizer.pad_token = self.tag_tokenizer.eos_token
-            self.tag_embedding = nn.Embedding(self.tag_tokenizer.vocab_size, config.n_embd)
-
-    def get_features(self, **kwargs):
-        raise NotImplementedError
-    
-    def trajectory_augmentation(self, target_traj, x_noise_scale, y_noise_scale, expanded_indices=1):
-        if self.training and x_noise_scale > 0:
-            x_noise = torch.rand(target_traj.shape, device=target_traj.device) * x_noise_scale * 2 - x_noise_scale
-            target_traj[..., 0] += x_noise * expanded_indices
-        if self.training and y_noise_scale > 0:
-            y_noise = torch.rand(target_traj.shape, device=target_traj.device) * y_noise_scale * 2 - y_noise_scale
-            target_traj[..., 1] += y_noise * expanded_indices
-        return target_traj
-    
-    def _prepare_attention_mask_for_generation(self, input_embeds):
-        return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
-
-    def _prepare_position_ids_for_generation(self, attention_mask):
-        position_ids = attention_mask.long().cumsum(-1) - 1
-        position_ids.masked_fill_(attention_mask == 0, 1)
-        return position_ids
-    
-
-class TrajectoryGPT(PlanningGPTBase):
+class TrajectoryGPT(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
-        n_embed = config.n_embd // 2
-        self.cnn_downsample = CNNDownSamplingResNet(n_embed, in_channels=self.in_channels, 
-                                                    resnet_type=self.model_args.resnet_type, pretrain=self.model_args.pretrain_encoder)
-        self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
-
+        self.transformer = GPT2Model(config)
+        self.model_args = kwargs["model_args"]
         self.traj_decoder = None
         self.k = int(self.model_args.k)
+        self.ar_future_interval = self.model_args.ar_future_interval
+        self.model_parallel = False
+        self.device_map = None
 
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
@@ -70,86 +31,35 @@ class TrajectoryGPT(PlanningGPTBase):
         self.clf_metrics = None
         # Initialize weights and apply final processing
         self.post_init()
+        self.build_encoder()
     
-    def get_features(self, **kwargs):
-        high_res_raster = kwargs.get("high_res_raster", None)
-        low_res_raster = kwargs.get("low_res_raster", None)
-        context_actions = kwargs.get("context_actions", None)
-        trajectory_label = kwargs.get("trajectory_label", None)
-        scenario_type = kwargs.get("scenario_type", None)
-        context_length = kwargs.get("context_length", None)
-        pred_length = kwargs.get("pred_length", None)
-        device = high_res_raster.device if high_res_raster is not None else None
-        # add noise to context actions
-        context_actions = self.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
-        
-        # raster observation encoding & context action ecoding
-        action_embeds = self.action_m_embed(context_actions)
-        if self.task == "nuplan":
-            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-        elif self.task == "waymo":
-            high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-            low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-        batch_size, context_length, c, h, w = high_res_seq.shape
+    def build_encoder(self):
+        if self.model_args.task == "nuplan":
+            # TODO: add raster/vector encoder configuration item
+            if "raster" in self.model_args.model_name:
+                cnn_kwargs = dict(
+                    d_embed=self.config.n_embd // 2,
+                    in_channels=self.model_args.raster_channels,
+                    resnet_type=self.model_args.resnet_type, 
+                    pretrain=self.model_args.pretrain_encoder
+                )
+                action_kwargs = dict(
+                    d_embed=self.config.n_embd
+                )
+                tokenizer_kwargs = dict(
+                    dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                    d_embed=self.config.n_embd,
+                )
+                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
+    
+    def _prepare_attention_mask_for_generation(self, input_embeds):
+        return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-
-        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
-        n_embed = action_embeds.shape[-1]
-        input_embeds = torch.zeros(
-            (batch_size, context_length * 2, n_embed),
-            dtype=torch.float32,
-            device=device
-        )
-        input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
-        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
-        
-        # scenario tag encoding
-        if self.model_args.token_scenario_tag:
-            scenario_tag_ids = torch.tensor(self.tag_tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
-            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
-            assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
-            input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
-
-        # add keypoints encoded embedding
-        if self.ar_future_interval == 0:
-            input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-
-        elif self.ar_future_interval > 0:
-            # use autoregressive future interval
-            if self.model_args.specified_key_points:
-                # 80, 40, 20, 10, 5
-                if self.model_args.forward_specified_key_points:
-                    selected_indices = [4, 9, 19, 39, 79]
-                else:
-                    selected_indices = [79, 39, 19, 9, 4]
-                future_key_points = trajectory_label[:, selected_indices, :]
-                indices = torch.tensor(selected_indices, device=device, dtype=float) / 80.0                   
-            else:
-                future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-                indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
-                selected_indices = None
-            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
-            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
-            # argument future trajectory
-            future_key_points_aug = self.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
-            if not self.model_args.predict_yaw:
-                # keep the same information when generating future points
-                future_key_points_aug[:, :, 2:] = 0
-
-            future_key_embeds = self.action_m_embed(future_key_points_aug)
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-        else:
-            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
-
-        return input_embeds, future_key_points, selected_indices
-
+    def _prepare_position_ids_for_generation(self, attention_mask):
+        position_ids = attention_mask.long().cumsum(-1) - 1
+        position_ids.masked_fill_(attention_mask == 0, 1)
+        return position_ids
+    
     def forward(
             self,
             trajectory_label: Optional[torch.LongTensor] = None,
@@ -174,7 +84,7 @@ class TrajectoryGPT(PlanningGPTBase):
             pred_length=pred_length,
             context_length=context_length,
         )
-        input_embeds, future_key_points, _ = self.get_features(**feature_inputs)
+        input_embeds, future_key_points, _ = self.encoder(**feature_inputs)
         
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
@@ -187,13 +97,13 @@ class TrajectoryGPT(PlanningGPTBase):
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         loss = torch.tensor(0, dtype=torch.float32, device=device)
-        if 'mse' in self.loss_fn:
+        if 'mse' in self.model_args.loss_fn:
             loss_fct = nn.MSELoss(reduction="mean")
-        elif 'l1' in self.loss_fn:
+        elif 'l1' in self.model_args.loss_fn:
             loss_fct = nn.SmoothL1Loss()
         if not self.model_args.pred_key_points_only:
             traj_logits = self.traj_decoder(traj_hidden_state)
-            if self.task == "waymo":
+            if self.model_args.task == "waymo":
                 loss_fct = MSELoss(reduction="none")
                 y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
                 _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * y_mask).sum() / (
@@ -311,7 +221,7 @@ class TrajectoryGPT(PlanningGPTBase):
             context_length=context_length,
         )
 
-        input_embeds, _, selected_indices = self.get_features(**feature_inputs)
+        input_embeds, _, selected_indices = self.encoder(**feature_inputs)
         
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 
@@ -322,7 +232,7 @@ class TrajectoryGPT(PlanningGPTBase):
         else:
             future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
-        future_key_embeds_dummy = self.action_m_embed(future_key_points)
+        future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
         key_points_num = future_key_points.shape[1]
         input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
@@ -376,7 +286,7 @@ class TrajectoryGPT(PlanningGPTBase):
             #                                                         ego_pose,
             #                                                         ego_to_global=False)
             #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
-            key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+            key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
             input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
             pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
@@ -410,32 +320,6 @@ class TrajectoryGPT(PlanningGPTBase):
             raise ValueError("illegal k while generating trajectory", self.k)
         # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
         return torch.cat([key_points_logits, traj_logits], dim=1)
-
-
-class NuplanVectorEncoderGPT(PlanningGPTBase):
-    def __init__(self, config, **kwargs):
-        super().__init__(config, **kwargs)
-        self.vector_encoder = PDMEncoder(
-            history_dim=self.model_args.past_seq, 
-            centerline_dim=120,
-            hidden_dim=config.n_embd
-        )
-        self.traj_decoder = None
-        self.k = int(self.model_args.k)
-
-        self.next_token_scorer_decoder = None
-        self.key_points_decoder = None
-        out_features = 4 if self.model_args.predict_yaw else 2
-        if not self.model_args.pred_key_points_only:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
-        if self.ar_future_interval > 0:
-            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
-        if self.k > 1:
-            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
-
-        self.clf_metrics = None
-        # Initialize weights and apply final processing
-        self.post_init()
         
 def query_current_lane(map_api, target_point):
     """
