@@ -10,7 +10,7 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="scratch-gpt",
+        default="scratch-mini-gpt-raster",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
@@ -116,6 +116,12 @@ class ModelArguments:
     )
     max_token_len: Optional[int] = field(
         default=20
+    )
+    resnet_type: Optional[str] = field(
+        default="resnet18"
+    )
+    pretrain_encoder: Optional[bool] = field(
+        default=False
     )
 
 def rotate_array(origin, points, angle, tuple=False):
