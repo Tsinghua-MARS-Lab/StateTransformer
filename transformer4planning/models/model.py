@@ -29,7 +29,7 @@ class GPTTrajectory(GPT2PreTrainedModel):
             self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
         elif self.data_form == "vector":
             other_config = kwargs["other_config"]
-            self.context_encoder = EncoderSimple(other_config.CONTEXT_ENCODER)
+            self.context_encoder = SimpleEncoder(other_config.CONTEXT_ENCODER)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None

@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from encoder.mtr_encoder import MTREncoder
+from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
 class RelationNetwork(nn.Module):
     """docstring for RelationNetwork"""
