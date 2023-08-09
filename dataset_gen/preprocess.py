@@ -73,7 +73,7 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwa
         result[key] = default_collate([d[key] for d in new_batch])
     return result
 
-def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, autoregressive=False):
+def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=False):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -92,7 +92,7 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, autoregressive
     else:
         raise NotImplementedError
     
-    map_func = partial(waymo_preprocess, data_path=data_path)
+    map_func = partial(waymo_preprocess, interactive=interactive, data_path=data_path)
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
     #     batch = list(executor.map(map_func, batch))
     new_batch = list()
@@ -739,7 +739,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return['low_res_raster'] = np.array(low_res_rasters_list, dtype=bool).transpose(1, 2, 0, 3).reshape(224, 224, -1)
     return result_to_return
 
-def waymo_preprocess(sample, data_path=None):
+def waymo_preprocess(sample, interactive=False, data_path=None):
     filename = sample["file_name"]
     with open(os.path.join(data_path, filename), "rb") as f:
         info = pickle.load(f)

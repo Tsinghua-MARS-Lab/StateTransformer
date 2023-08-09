@@ -116,6 +116,15 @@ class ModelArguments:
     max_token_len: Optional[int] = field(
         default=20
     )
+    interactive: Optional[bool] = field(
+        default=False
+    )
+    data_form: Optional[str] = field(
+        default="vector"
+    )
+    config_path: Optional[str] = field(
+        default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+    )
 
 def rotate_array(origin, points, angle, tuple=False):
     """

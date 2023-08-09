@@ -169,6 +169,12 @@ class ModelArguments:
     max_token_len: Optional[int] = field(
         default=20
     )
+    interactive: Optional[bool] = field(
+        default=False
+    )
+    data_form: Optional[str] = field(
+        default="vector"
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -433,7 +439,7 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, dic_valid_path=data_args.datadic_valid_path, autoregressive=model_args.autoregressive)
+    collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, dic_valid_path=data_args.datadic_valid_path, interactive=model_args.interactive)
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above

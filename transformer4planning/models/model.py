@@ -3,7 +3,7 @@ from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.encoders import *
 from transformer4planning.models.decoders import *
 from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
-from transformer4planning.models.vector_model_interactive import VectorModel
+from transformer4planning.models.vector_model_interactive import EncoderSimple
 
 from transformers.generation.configuration_utils import GenerationConfig
 from transformer4planning.models.utils import *
@@ -23,13 +23,19 @@ class GPTTrajectory(GPT2PreTrainedModel):
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
-        if self.task == "waymo":
-            in_channels = 23
-        else:
-            in_channels = model_args.raster_channels
-        # print('Model initialized with raster channels: ', model_args.raster_channels)
-        n_embed = config.n_embd // 2
-        self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        self.data_form = model_args.data_form
+        if self.data_form == "raster":
+            if self.task == "waymo":
+                in_channels = 23
+            else:
+                in_channels = model_args.raster_channels
+
+            # print('Model initialized with raster channels: ', model_args.raster_channels)
+            n_embed = config.n_embd // 2
+            self.cnn_downsample = CNNDownSamplingResNet18(n_embed, in_channels=in_channels)
+        elif self.data_form == "vector":
+            other_config = kwargs["other_config"]
+            self.context_encoder = EncoderSimple(other_config.CONTEXT_ENCODER)
         self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
@@ -74,7 +80,8 @@ class GPTTrajectory(GPT2PreTrainedModel):
         )
         assert_device_map(self.device_map, len(self.transformer.h))
         self.transformer.parallelize(self.device_map)
-        self.cnn_downsample = self.cnn_downsample.to(self.transformer.first_device)
+        if self.data_form == "raster": self.cnn_downsample = self.cnn_downsample.to(self.transformer.first_device)
+        elif self.data_form == "vector": self.context_encoder = self.context_encoder.to(self.transformer.first_device)
         self.traj_decoder = self.traj_decoder.to(self.transformer.first_device)
         self.model_parallel = True
 
@@ -88,7 +95,8 @@ class GPTTrajectory(GPT2PreTrainedModel):
         )
         self.transformer.deparallelize()
         self.transformer = self.transformer.to("cpu")
-        self.cnn_downsample = self.cnn_downsample.to("cpu")
+        if self.data_form == "raster": self.cnn_downsample = self.cnn_downsample.to("cpu")
+        elif self.data_form == "vector": self.context_encoder = self.context_encoder.to("cpu")
         self.traj_decoder = self.traj_decoder.to("cpu")
         self.model_parallel = False
         torch.cuda.empty_cache()
@@ -100,56 +108,74 @@ class GPTTrajectory(GPT2PreTrainedModel):
         position_ids = attention_mask.long().cumsum(-1) - 1
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
+    
+    def get_input_embeds(self, **kwargs):
+        if self.data_form == "raster":
+            high_res_raster = kwargs.get("high_res_raster")
+            low_res_raster = kwargs.get("low_res_raster")
+            trajectory_label = kwargs.get("trajectory_label")
+            context_actions = kwargs.get("context_actions")
 
-    def forward(
-            self,
-            trajectory_label: Optional[torch.FloatTensor] = None,
-            context_actions: Optional[torch.FloatTensor] = None,
-            high_res_raster: Optional[torch.LongTensor] = None,
-            low_res_raster: Optional[torch.LongTensor] = None,
-            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-            attention_mask: Optional[torch.FloatTensor] = None,
-            token_type_ids: Optional[torch.LongTensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            head_mask: Optional[torch.FloatTensor] = None,
-            encoder_hidden_states: Optional[torch.Tensor] = None,
-            encoder_attention_mask: Optional[torch.FloatTensor] = None,
-            use_cache: Optional[bool] = None,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
-            **kwargs
-    ):
-        # gpt non-autoregression version
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        device = high_res_raster.device
-        pred_length = trajectory_label.shape[1]
-        scenario_type = kwargs.get("scenario_type", None)
+            device = high_res_raster.device
+            pred_length = trajectory_label.shape[1]
+            scenario_type = kwargs.get("scenario_type", None)
 
+            # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
+            if self.task == "nuplan":
+                high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
+                low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
+            elif self.task == "waymo":
+                high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+                low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+            batch_size, context_length, c, h, w = high_res_seq.shape
+
+            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+
+        elif self.data_form == "vector":
+            input_dict = kwargs.get("input_dict")
+
+            agent_trajs = input_dict['agent_trajs']
+            batch_size = input_dict['agent_trajs'].shape[0]
+            device = input_dict['agent_trajs'].device
+            track_index_to_predict = input_dict["track_index_to_predict"]
+
+            state_embeds = self.context_encoder(input_dict)
+
+            ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
+            ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
+
+            trajectory_label = ego_trajs[:, 11:, [0, 1, 2, 6]]
+            pred_length = trajectory_label.shape[1]
+            if self.task == "waymo": trajectory_label_mask = ego_trajs[:, 11:, -1].unsqueeze(-1)
+            
+            # action context
+            context_actions = ego_trajs[:, :11, [0, 1, 2, 6]]
+            if self.model_args.x_random_walk > 0 and self.training:
+                x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
+                context_actions[:, :, 0] += x_noise[:, :, 0]
+            if self.model_args.y_random_walk > 0 and self.training:
+                y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
+                context_actions[:, :, 1] += y_noise[:, :, 1]
+
+            action_embeds = self.action_m_embed(context_actions)
+        else:
+            raise NotImplementedError
+        
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
         if self.model_args.y_random_walk > 0 and self.training:
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
-
-        device = high_res_raster.device
+        
         action_embeds = self.action_m_embed(context_actions)
-        context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        if self.task == "nuplan":
-            high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-            low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.with_traffic_light)
-        elif self.task == "waymo":
-            high_res_seq = cat_raster_seq_for_waymo(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-            low_res_seq = cat_raster_seq_for_waymo(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
-        batch_size, context_length, c, h, w = high_res_seq.shape
+        context_length = context_actions.shape[1]
 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-
-        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
         n_embed = action_embeds.shape[-1]
         input_embeds = torch.zeros(
             (batch_size, context_length * 2, n_embed),
@@ -171,7 +197,7 @@ class GPTTrajectory(GPT2PreTrainedModel):
         if self.ar_future_interval == 0:
             # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+                                    torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
             # attention_mask[:, context_length * 2:] = 0
         elif self.ar_future_interval > 0:
@@ -183,8 +209,10 @@ class GPTTrajectory(GPT2PreTrainedModel):
                 else:
                     selected_indices = [79, 39, 19, 9, 4]
                 future_key_points = trajectory_label[:, selected_indices, :]
+                if self.task == "waymo": future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
             else:
                 future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                if self.task == "waymo": future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
 
             future_key_points_aug = future_key_points.clone()
@@ -210,30 +238,36 @@ class GPTTrajectory(GPT2PreTrainedModel):
 
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+                                    torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
             # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
+        
+        info_dict = {}
+        info_dict.update({
+            "trajectory_label": trajectory_label,
+        })
+        if self.task == "waymo":
+            info_dict.update({
+                            "trajectory_label_mask": trajectory_label_mask,
+                            })
+        if self.ar_future_interval > 0: 
+            info_dict.update({
+                            "context_length": context_length,
+                            "future_key_points": future_key_points,
+                            })
+            if self.task == "waymo":
+                info_dict.update({
+                                "future_key_points_gt_mask": future_key_points_gt_mask,
+                                })
+        return input_embeds, info_dict
 
-        transformer_outputs = self.transformer(
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=input_embeds,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
-
-        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+    def get_output(self, hidden_state, info_dict):
+        device = hidden_state.device
+        trajectory_label = info_dict["trajectory_label"]
+        pred_length = trajectory_label.shape[1]
+        traj_hidden_state = hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         loss = torch.tensor(0, dtype=torch.float32, device=device)
         if 'mse' in self.loss_fn:
@@ -243,10 +277,10 @@ class GPTTrajectory(GPT2PreTrainedModel):
         if not self.model_args.pred_key_points_only:
             traj_logits = self.traj_decoder(traj_hidden_state)
             if self.task == "waymo":
+                trajectory_label_mask = info_dict["trajectory_label_mask"]
                 loss_fct = MSELoss(reduction="none")
-                y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
-                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * y_mask).sum() / (
-                            y_mask.sum() + 1e-7)
+                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
+                            trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
             else:
                 if self.model_args.predict_yaw:
@@ -264,8 +298,12 @@ class GPTTrajectory(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
+
+            context_length = info_dict["context_length"]
+            future_key_points = info_dict["future_key_points"]
+
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -273,6 +311,9 @@ class GPTTrajectory(GPT2PreTrainedModel):
                     loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
                 else:
                     loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
+                if self.task == "waymo":
+                    future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
+                    loss_to_add = (loss_to_add* future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 loss += loss_to_add
                 traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
             else:
@@ -289,7 +330,11 @@ class GPTTrajectory(GPT2PreTrainedModel):
                 # add loss on x, y (the last dimension)
                 loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                loss += min_loss.mean()
+                if self.task == "waymo":
+                    future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
+                    loss += (min_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
+                else:
+                    loss += min_loss.mean()
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
                     loss_fct = CrossEntropyLoss(reduction="mean")
@@ -315,6 +360,47 @@ class GPTTrajectory(GPT2PreTrainedModel):
                 predictions = torch.argmax(pred_logits, dim=-1)  # b, s, k
                 for _, metric in self.clf_metrics.items():
                     metric.add_batch(references=min_loss_indices.reshape(-1), predictions=predictions.reshape(-1))
+
+        return loss, traj_logits
+
+
+    def forward(
+            self,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            encoder_hidden_states: Optional[torch.Tensor] = None,
+            encoder_attention_mask: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            **kwargs
+    ):
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        input_embeds, info_dict = self.get_input_embeds(**kwargs)
+
+        transformer_outputs = self.transformer(
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=input_embeds,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+
+        loss, traj_logits = self.get_output(transformer_outputs_hidden_state, info_dict)
 
         if not return_dict:
             output = (traj_logits,) + transformer_outputs[1:]
@@ -667,29 +753,13 @@ def build_models(model_args):
         from transformer4planning.models.mmtransformer.model import MMTransformer
         ModelCls = MMTransformer
         tag = 'mmtransformer'
-    elif 'waymomodel' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        from .waymo_model import GPTModelWaymo
-        ModelCls = GPTModelWaymo
-        tag = 'waymomodel'
-    elif 'vector' in model_args.model_name and 'waymo' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        ModelCls = VectorModel
-        tag = "vectormodel"
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
+    if model_args.data_form == "vector":
+        from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
+        cfg_from_yaml_file(model_args.config_path, cfg)
     if 'scratch' in model_args.model_name:
-        model = ModelCls(config_p, model_args=model_args)
+        model = ModelCls(config_p, model_args=model_args, other_config=cfg)
         print('Scratch ' + tag + ' Initialized!')
     elif 'pretrain' in model_args.model_name:
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, config=config_p)
