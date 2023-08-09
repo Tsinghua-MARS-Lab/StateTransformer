@@ -68,6 +68,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.pred_dim = 4
         else:
             self.pred_dim = 2 
+            
+        if self.model_args.token_scenario_tag:
+            self.scenario_type_len = self.model_args.max_token_len
+        else:
+            self.scenario_type_len = 0
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -259,8 +264,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
-            scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 - 1:self.scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state)  # (b, num_kps, 4/2*k)
             
             if self.k > 1:
@@ -338,9 +342,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             scenario_tag_ids = torch.stack(scenario_tag_ids, dim=0).to(device)
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids).squeeze(1)
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
-            scenario_type_len = self.model_args.max_token_len
-        else:
-            scenario_type_len = 0
 
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
         # use autoregressive future interval
@@ -361,67 +362,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
                                   torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         key_points_num = future_key_points.shape[1]
-        pred_key_points_during_generate = []
-        # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
-        # Loop for generation
-        for i in range(key_points_num):
-            # prepare attention mask
-            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            # attention_mask[:, context_length * 2 + i + 1:] = 0
-            # position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-            input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
-            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
-            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-            transformer_output = self.transformer(
-                inputs_embeds=input_embeds_current,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                # **input_kwargs
-            )
-            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            future_key_point_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
-
-            if self.k > 1:
-                key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
-                pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
-                
-                # delta = (key_points_logit.reshape(batch_size, self.k, -1) - future_key_points_gt[:, [i], :2])
-                # dist = -delta[..., 0]*delta[..., 0] - delta[..., 1]*delta[..., 1]
-                # pred_logits = dist[:, None, :]
-                
-                # pred_logits_index = pred_logits.argsort(dim=-1)
-                # selected_key_point = torch.zeros((batch_size, 1, 2), device=pred_logits.device, dtype=pred_logits.dtype)
-                
-                # for s_ind in range(3):
-                #     selected_key_point += key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits_index[:, 0, s_ind].reshape(-1), :].reshape(batch_size, 1, -1)
-                
-                # selected_key_point /= 3.0
-                
-                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)    
-                key_points_logit = selected_key_point
-            else:
-                key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
-            pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
-            if self.model_args.predict_yaw:
-                pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
-            else:
-                pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
-
-            key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-            # replace embed at the next position
-            input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
-            pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+        
+        pred_key_points_during_generate, input_embeds = self.greedy_search(input_embeds, context_length, key_points_num)
+        
         # generate remaining trajectory
-        # prepare attention mask
-        # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-        # attention_mask[:, context_length * 2 + key_points_num:] = 0
-        # position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
             # attention_mask=attention_mask,
             attention_mask=None,
             position_ids=None,
-            # **input_kwargs
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
@@ -430,7 +379,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             traj_logits = self.traj_decoder(traj_hidden_state)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 - 1:self.scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
 
         if self.k > 1:
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
@@ -526,3 +475,61 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     metric.add_batch(references=min_loss_kp_indices.reshape(-1), predictions=predictions.reshape(-1))
                     
         return pred_traj_logits, loss
+    
+    def greedy_search(self, input_embeds, context_length, key_points_num):
+        # Loop for generation
+        device = input_embeds.device
+        batch_size = input_embeds.shape[0]
+        pred_key_points_during_generate = []
+        
+        for i in range(key_points_num):
+            # prepare attention mask
+            input_embeds_current = input_embeds[:, :self.scenario_type_len + context_length * 2 + i, :]
+            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+            transformer_output = self.transformer(
+                inputs_embeds=input_embeds_current,
+                attention_mask=attention_mask,
+                position_ids=position_ids
+            )
+            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
+
+            if self.k > 1:
+                key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
+                pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
+                
+                # delta = (key_points_logit.reshape(batch_size, self.k, -1) - future_key_points_gt[:, [i], :2])
+                # dist = -delta[..., 0]*delta[..., 0] - delta[..., 1]*delta[..., 1]
+                # pred_logits = dist[:, None, :]
+                
+                # pred_logits_index = pred_logits.argsort(dim=-1)
+                # selected_key_point = torch.zeros((batch_size, 1, 2), device=pred_logits.device, dtype=pred_logits.dtype)
+                
+                # for s_ind in range(3):
+                #     selected_key_point += key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits_index[:, 0, s_ind].reshape(-1), :].reshape(batch_size, 1, -1)
+                
+                # selected_key_point /= 3.0
+                
+                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)    
+                key_points_logit = selected_key_point
+            else:
+                key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
+            pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
+            pred_key_point[:, 0, :self.pred_dim] = key_points_logit[:, 0, :]
+
+            key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+            # replace embed at the next position
+            input_embeds[:, self.scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+            pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+            
+        return pred_key_points_during_generate, input_embeds
+    
+    def beam_search(self, input_embeds):
+        '''
+        input_embeds: (bs, context_length*2, n_embed)
+        
+        
+        kpts_embeds: (bs*num_kps, context_length*2, n_embed)
+        '''
+        

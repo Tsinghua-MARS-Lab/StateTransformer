@@ -194,5 +194,17 @@
             "console": "integratedTerminal",
             "justMyCode": false,
         },
+        {
+            "name": "default",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "python": "/home/QJ00367/anaconda3/envs/trans4planning/bin/python",
+            "env": {"CUDA_VISIBLE_DEVICES":"0"},
+            "cwd": "${workspaceFolder}/",
+            "args": [],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
     ]
 }
