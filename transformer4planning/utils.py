@@ -123,6 +123,9 @@ class ModelArguments:
     pretrain_encoder: Optional[bool] = field(
         default=False
     )
+    encoder_type: Optional[str] = field(
+        default='raster'
+    )
 
 def rotate_array(origin, points, angle, tuple=False):
     """

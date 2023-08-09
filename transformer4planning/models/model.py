@@ -36,7 +36,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             # TODO: add raster/vector encoder configuration item
-            if "raster" in self.model_args.model_name:
+            if "raster" in self.model_args.encoder_type:
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
