@@ -10,11 +10,11 @@ class AugmentationMixin(nn.Module):
     
     def trajectory_augmentation(self, target_traj, x_noise_scale, y_noise_scale, expanded_indices=1):
         if self.training and x_noise_scale > 0:
-            x_noise = torch.rand(target_traj.shape, device=target_traj.device) * x_noise_scale * 2 - x_noise_scale
-            target_traj[..., 0] += x_noise * expanded_indices
+            x_noise = (torch.rand(target_traj.shape, device=target_traj.device) * x_noise_scale * 2 - x_noise_scale) * expanded_indices
+            target_traj[..., 0] += x_noise[..., 0] 
         if self.training and y_noise_scale > 0:
-            y_noise = torch.rand(target_traj.shape, device=target_traj.device) * y_noise_scale * 2 - y_noise_scale
-            target_traj[..., 1] += y_noise * expanded_indices
+            y_noise = (torch.rand(target_traj.shape, device=target_traj.device) * y_noise_scale * 2 - y_noise_scale) * expanded_indices
+            target_traj[..., 1] += y_noise[..., 1]
         return target_traj
 
     def raster_augmentation(self, raster):

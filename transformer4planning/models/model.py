@@ -1,8 +1,6 @@
-from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
+from transformers import GPT2Model, GPT2PreTrainedModel
 from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.encoders import (NuplanRasterizeEncoder,)
 from transformer4planning.models.decoders import *
-from transformer4planning.models.model_legacy import *
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
 import torch.nn as nn
@@ -35,6 +33,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     
     def build_encoder(self):
         if self.model_args.task == "nuplan":
+            from transformer4planning.models.encoders import (NuplanRasterizeEncoder,)
             # TODO: add raster/vector encoder configuration item
             if "raster" in self.model_args.encoder_type:
                 cnn_kwargs = dict(
@@ -51,7 +50,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     d_embed=self.config.n_embd,
                 )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
-    
+            elif "vector" in self.model_args.encoder_type:
+                raise NotImplementedError
+            else:
+                raise AttributeError("encoder_type should be either raster or vector")
+
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
 
@@ -62,8 +65,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     
     def forward(
             self,
-            trajectory_label: Optional[torch.LongTensor] = None,
-            context_actions: Optional[torch.LongTensor] = None,
+            trajectory_label: Optional[torch.FloatTensor] = None,
+            context_actions: Optional[torch.FloatTensor] = None,
             high_res_raster: Optional[torch.LongTensor] = None,
             low_res_raster: Optional[torch.LongTensor] = None,
             scenario_type: Optional[str] = None,          
