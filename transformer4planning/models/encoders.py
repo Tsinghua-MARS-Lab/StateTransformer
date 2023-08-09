@@ -169,7 +169,7 @@ class PDMEncoder(nn.Module):
         )
     
     def forward(self, input):
-        
+        # TODO: fix feature input& complete the forward function
         batch_size = input["ego_position"].shape[0]
 
         ego_position = input["ego_position"].reshape(batch_size, -1).float()
