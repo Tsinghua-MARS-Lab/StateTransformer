@@ -7,8 +7,7 @@ import os
 import torch
 from functools import partial
 from torch.utils.data._utils.collate import default_collate
-from transformer4planning.utils import generate_contour_pts
-from transformer4planning.preprocess.utils import save_raster
+from transformer4planning.utils import generate_contour_pts, save_raster
 
 def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
@@ -51,12 +50,22 @@ def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwa
         new_batch.append(rst)
 
     if len(new_batch) == 0:
-        return None
+        return {}
     
     # process as data dictionary
     result = dict()
     for key in new_batch[0].keys():
-        result[key] = default_collate([d[key] for d in new_batch])
+        if key is None:
+            continue
+        list_of_dvalues = []
+        for d in new_batch:
+            if d[key] is not None:
+                list_of_dvalues.append(d[key])
+            elif key == "scenario_type":
+                list_of_dvalues.append('Unknown')
+            else:
+                print('Error: None value', key, d[key])   # scenario_type might be none for older dataset
+        result[key] = default_collate(list_of_dvalues)
     return result
 
 def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
@@ -64,8 +73,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           high_res_scale=4, low_res_scale=0.77,
                           road_types=20, agent_types=8, traffic_types=4,
                           past_sample_interval=5, future_sample_interval=2,
-                          debug_raster_path=None, all_maps_dic=None, all_pickles_dic=None,
-                          frequency_change_rate=2):
+                          debug_raster_path=None, all_maps_dic=None, all_pickles_dic=None, agent_dic=None,
+                          frequency_change_rate=2, **kwargs):
     """
     WARNING: frame_rate has been change to 10 as default to generate new dataset pickles, this is automatically processed by hard-coded logits
     :param sample: a dictionary containing the following keys:
@@ -118,26 +127,30 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     # load agent and traffic dictionaries
     # WARNING: load some pickles can be extremely slow costs about 500-1000 seconds for las vegas map
-    pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
-
-    if os.path.exists(pickle_path):
-        # current_time = time.time()
-        # print('loading data from disk ', split, map, filename)
-        with open(pickle_path, "rb") as f:
-            data_dic = pickle.load(f)
-            if 'agent_dic' in data_dic:
-                agent_dic = data_dic["agent_dic"]
-            elif 'agent' in data_dic:
-                agent_dic = data_dic['agent']
-            else:
-                raise ValueError(f'cannot find agent_dic or agent in pickle file, keys: {data_dic.keys()}')
-        # time_spent = time.time() - current_time
-        # print('loading data from disk done ', split, map, filename, time_spent, 'total frames: ', agent_dic['ego']['pose'].shape[0])
-        # if split == 'test':
-        #     print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
+    if agent_dic is not None:
+        pass
+    elif filename is not None:
+        pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
+        if os.path.exists(pickle_path):
+            # current_time = time.time()
+            # print('loading data from disk ', split, map, filename)
+            with open(pickle_path, "rb") as f:
+                data_dic = pickle.load(f)
+                if 'agent_dic' in data_dic:
+                    agent_dic = data_dic["agent_dic"]
+                elif 'agent' in data_dic:
+                    agent_dic = data_dic['agent']
+                else:
+                    raise ValueError(f'cannot find agent_dic or agent in pickle file, keys: {data_dic.keys()}')
+            # time_spent = time.time() - current_time
+            # print('loading data from disk done ', split, map, filename, time_spent, 'total frames: ', agent_dic['ego']['pose'].shape[0])
+            # if split == 'test':
+            #     print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
+        else:
+            print(f"Error: cannot load {filename} from {data_path} with {map}")
+            return None
     else:
-        print(f"Error: cannot load {filename} from {data_path} with {map}")
-        return None
+        assert False, 'either filename or agent_dic should be provided for online process'
 
     # if new version of data, using relative frame_id
     relative_frame_id = True if 'starting_frame' in agent_dic['ego'] else False
@@ -193,7 +206,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
         simplified_xyz[:, 1] *= -1
-        simplified_xyz[:, 1] *= y_inverse
+        simplified_xyz[:, 0] *= y_inverse
         high_res_route = (simplified_xyz * high_res_scale + raster_shape[0] // 2).astype('int32')
         low_res_route = (simplified_xyz * low_res_scale + raster_shape[0] // 2).astype('int32')
 
@@ -214,7 +227,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
         simplified_xyz[:, 1] *= -1
-        simplified_xyz[:, 1] *= y_inverse
+        simplified_xyz[:, 0] *= y_inverse
         high_res_road = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
         low_res_road = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
         if road_type in [5, 17, 18, 19]:
@@ -242,7 +255,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
         simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:, 1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
         simplified_xyz[:, 1] *= -1
-        simplified_xyz[:, 1] *= y_inverse
+        simplified_xyz[:, 0] *= y_inverse
         high_res_traffic = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
         low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
         # traffic state order is GREEN, RED, YELLOW, UNKNOWN
@@ -285,7 +298,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                             direction=-pose[3])
             rect_pts = np.array(rect_pts, dtype=np.int32)
-            rect_pts[:, 1] *= y_inverse
+            rect_pts[:, 0] *= y_inverse
             # draw on high resolution
             rect_pts_high_res = (high_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
             # example: if frame_interval = 10, past frames = 40
@@ -342,7 +355,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         if not os.path.exists(debug_raster_path):
             os.makedirs(debug_raster_path)
         image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
-        if split == 'test':
+        # if split == 'test':
+        if map == 'sg-one-north':
             save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past), image_file_name, split,
                         high_res_scale, low_res_scale)
 
@@ -350,6 +364,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["map"] = sample['map']
     result_to_return["split"] = sample['split']
     result_to_return["frame_id"] = sample['frame_id']
+    result_to_return["scenario_type"] = 'Unknown'
     try:
         result_to_return["scenario_type"] = sample["scenario_type"]
     except:
@@ -363,6 +378,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     del road_dic
 
     return result_to_return
+
 
 def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
                              frame_rate=20, past_seconds=2, future_seconds=8,
