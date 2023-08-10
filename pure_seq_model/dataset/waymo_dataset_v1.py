@@ -1,11 +1,13 @@
 import torch
 import pickle
+import os
 
 from typing import Dict, List, Tuple, cast
 from omegaconf import DictConfig
 import numpy as np
 import numpy.typing as npt
 from utils.torch_geometry import global_state_se2_tensor_to_local, coordinates_to_local_frame
+from utils.base_math import angle_to_range
 
 
 class WaymoDatasetV1(torch.utils.data.Dataset):
@@ -23,34 +25,35 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
     # for each time set (time_set_num is 9-1)
 
     # map:
-    # lane: [8, n, 20, 19], feature info:[x, y, dir_x, dir_y, next_x, next_y, speed_limit, Freeway, SurfaceStreet, BikeLane,
+    # lane: [n, 20, 19], feature info:[x, y, dir_x, dir_y, next_x, next_y, speed_limit, Freeway, SurfaceStreet, BikeLane,
     #        Unknown, Arrow_Stop, Arrow_Caution, Arrow_Go, Stop, Caution, Go, Flashing_Stop, Flashing_Caution]
-    # road_line: [8, n, 20, 14], feature info:[x, y, dir_x, dir_y, next_x, next_y,
+    # road_line: [n, 20, 14], feature info:[x, y, dir_x, dir_y, next_x, next_y,
     #        BrokenSingleWhite, SolidSingleWhite, SolidDoubleWhite, BrokenSingleYellow, BrokenDoubleYellow, SolidSingleYellow, SolidDoubleYellow, PassingDoubleYellow]
-    # road_edge: [8, n, 20, 8], feature info:[x, y, dir_x, dir_y, next_x, next_y, RoadEdgeBoundary, RoadEdgeMedian]
-    # stop_sign+crosswalk+speed_bump: [8, x, 20, 9], feature info:[x, y, dir_x, dir_y, next_x, next_y, StopSign, Crosswalk, SpeedBump]
-    # mask*4: [8, n, 20]
+    # road_edge: [n, 20, 8], feature info:[x, y, dir_x, dir_y, next_x, next_y, RoadEdgeBoundary, RoadEdgeMedian]
+    # stop_sign+crosswalk+speed_bump: [x, 20, 9], feature info:[x, y, dir_x, dir_y, next_x, next_y, StopSign, Crosswalk, SpeedBump]
+    # mask*4: [n, 20]
 
     # agent, agent will appear only if current step and next step are valid:
-    # ego: [8, 1, 5*time_sample_num + 5], feature info:[x, y, heading, v_x, v_y, ... , length, width, TYPE_VEHICLE, TYPE_PEDESTRAIN, TYPE_CYCLIST]
-    # agent: [8, n, 5*time_sample_num + 5], feature info:[x, y, heading, v_x, v_y, ... , length, width, TYPE_VEHICLE, TYPE_PEDESTRAIN, TYPE_CYCLIST]
+    # ego: [1, 5*time_sample_num + 5], feature info:[x, y, heading, v_x, v_y, ... , length, width, TYPE_VEHICLE, TYPE_PEDESTRAIN, TYPE_CYCLIST]
+    # agent: [n, 5*time_sample_num + 5], feature info:[x, y, heading, v_x, v_y, ... , length, width, TYPE_VEHICLE, TYPE_PEDESTRAIN, TYPE_CYCLIST]
 
     # label:
-    # ego: [8, 1, 5*time_sample_num]
-    # agent: [8, n, 5*time_sample_num]
+    # ego: [1, 5*time_sample_num], feature info:[delta_x, delta_y, heading, v_x, v_y, ... ,]
+    # agent: [n, 5*time_sample_num], feature info:[delta_x, delta_y, heading, v_x, v_y, ... ,]
     # agent_to_predict_num: int
 
     # for the whole scenario, the output data is:
-    # Dict[lane: List[List[torch.Tensor(8, n, 20, 18)]], road_line: ...]
-    # the outer list length equal to batch size, the inner list length equal to time_set_num(i.e. 9-1=8)
+    # Dict[lane: List[List[torch.Tensor(n, 20, 18)]], road_line: ...]
+    # the outer list length equal to batch size, the inner list length equal to time_set_num(i.e. 9-1=8), n is variable for each time set
 
     def __init__(self, dataset_config: DictConfig, mode: str, logger=None):
         self.mode = mode
         self.dataset_config = dataset_config
+        self.logger = logger
 
-        self.data_root = self.dataset_config.data_info.data_root
-        self.data_path = self.data_root / self.dataset_config.data_info.split_dir[self.mode]
-        self.infos = self.get_all_infos(self.data_root / self.dataset_config.data_info.info_file[self.mode])
+        self.data_root = self.dataset_config.dataset_info.data_root
+        self.data_path = os.path.join(self.data_root, self.dataset_config.dataset_info.split_dir[self.mode])
+        self.infos = self.get_all_infos(os.path.join(self.data_root, self.dataset_config.dataset_info.info_file[self.mode]))
 
         self.logger.info(f'Total scenes after filters: {len(self.infos)}')
 
@@ -59,7 +62,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         with open(info_path, 'rb') as f:
             src_infos = pickle.load(f)
 
-        infos = src_infos[::self.dataset_config.data_info.sample_interval[self.mode]]
+        infos = src_infos[::self.dataset_config.dataset_info.sample_interval[self.mode]]
         self.logger.info(f'Total scenes before filters: {len(infos)}')
 
         return infos
@@ -70,7 +73,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
     def __getitem__(self, index):
         info = self.infos[index]
         scene_id = info['scenario_id']
-        with open(self.data_path / f'sample_{scene_id}.pkl', 'rb') as f:
+        with open(os.path.join(self.data_path, f'sample_{scene_id}.pkl'), 'rb') as f:
             info = pickle.load(f)
 
         # get current time index, time set num, first time index. 
@@ -154,6 +157,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
             'ego_label_list': [ego_label_list],
             'agent_feature_list': [agent_feature_list],
             'agent_label_list': [agent_label_list],
+            'agent_to_predict_num': [len(valid_agent_to_predict)]
         }
         return feature_dict
 
@@ -174,7 +178,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         time_set_interval = self.dataset_config.time_info.time_set_interval
 
         # build ego feature
-        ego_feature = torch.tensor([1, 5*time_sample_num + 5])
+        ego_feature = torch.zeros([1, 5*time_sample_num + 5])
         for i in range(time_sample_num):
             ego_feature[0, 0+i*5] = trajs[ego_index, time_index - i*time_sample_interval, 0] # x
             ego_feature[0, 1+i*5] = trajs[ego_index, time_index - i*time_sample_interval, 1] # y
@@ -186,11 +190,12 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         ego_feature[0, 5*time_sample_num+2] = 1 # ego type, vehicle
 
         # build ego label
-        ego_label = torch.tensor([1, 5*time_sample_num])
+        ego_label = torch.zeros([1, 5*time_sample_num])
         for i in range(time_sample_num):
-            ego_label[0, 0+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 0] # x
-            ego_label[0, 1+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 1] # y
-            ego_label[0, 2+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 6] # heading
+            ego_label[0, 0+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 0]-trajs[ego_index, time_index - i*time_sample_interval, 0]  # x
+            ego_label[0, 1+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 1]-trajs[ego_index, time_index - i*time_sample_interval, 1] # y
+            ego_label[0, 2+i*5] = angle_to_range(
+                trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 6]-trajs[ego_index, time_index - i*time_sample_interval, 6]) # heading
             ego_label[0, 3+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 7] # v_x
             ego_label[0, 4+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 8] # v_y
 
@@ -232,15 +237,15 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         agent_type = [object_type[i] for i in agent_list]
         
         # build agent feature tensor
-        agent_feature = torch.tensor([agent_tensor.size(0), 5*time_sample_num + 5])
+        agent_feature = torch.zeros([agent_tensor.size(0), 5*time_sample_num + 5])
         for i in range(time_sample_num):
             agent_feature[:, 0+i*5] = agent_tensor[:, time_index - i*time_sample_interval, 0] # x
             agent_feature[:, 1+i*5] = agent_tensor[:, time_index - i*time_sample_interval, 1] # y
             agent_feature[:, 2+i*5] = agent_tensor[:, time_index - i*time_sample_interval, 6] # heading
             agent_feature[:, 3+i*5] = agent_tensor[:, time_index - i*time_sample_interval, 7] # v_x
             agent_feature[:, 4+i*5] = agent_tensor[:, time_index - i*time_sample_interval, 8] # v_y
-        agent_feature[:, 5*time_sample_num+0] = trajs[:, time_index, 3] # length
-        agent_feature[:, 5*time_sample_num+1] = trajs[:, time_index, 4] # width
+        agent_feature[:, 5*time_sample_num+0] = agent_tensor[:, time_index, 3] # length
+        agent_feature[:, 5*time_sample_num+1] = agent_tensor[:, time_index, 4] # width
 
         for i in range(agent_tensor.size(0)):
             if agent_type[i] == 'TYPE_VEHICLE':
@@ -251,11 +256,12 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
                 agent_feature[i, 5*time_sample_num+4] = 1
 
         # build agent label tensor
-        agent_label = torch.tensor([agent_tensor.size(0), 5*time_sample_num])
+        agent_label = torch.zeros([agent_tensor.size(0), 5*time_sample_num])
         for i in range(time_sample_num):
-            agent_label[:, 0+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 0] # x
-            agent_label[:, 1+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 1] # y
-            agent_label[:, 2+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 6] # heading
+            agent_label[:, 0+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 0]-trajs[:, time_index - i*time_sample_interval, 0] # x
+            agent_label[:, 1+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 1]-trajs[:, time_index - i*time_sample_interval, 1] # y
+            agent_label[:, 2+i*5] = angle_to_range(
+                agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 6]-trajs[:, time_index - i*time_sample_interval, 6]) # heading
             agent_label[:, 3+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 7] # v_x
             agent_label[:, 4+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 8] # v_y
 
@@ -288,6 +294,8 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
                 map_feature_list.append(one_map_feature_tensor)
                 map_feature_mask_list.append(one_map_feature_mask)
 
+        if len(map_feature_list) == 0:
+            return None, None
         map_feature_feature = torch.stack(map_feature_list)
         map_feature_mask = torch.stack(map_feature_mask_list)
         return map_feature_feature, map_feature_mask
@@ -295,7 +303,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
     def build_one_map_feature_tensor_except_lane(self, polylines: torch.Tensor, feature_type: str):
         polyline_point_num = self.dataset_config.map_feature.polyline_point_num
         polyline_subsample_interval = self.dataset_config.map_feature.polyline_subsample_interval
-        polyline_valid_points = polylines.size(0) // polyline_subsample_interval
+        polyline_valid_points = (polylines.size(0)-1) // polyline_subsample_interval + 1
 
         pos_feature_tensor = torch.zeros(polyline_point_num, 6)
         map_feature_mask = torch.zeros(polyline_point_num)
@@ -303,7 +311,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         pos_feature_tensor[:polyline_valid_points, 0:2] = polylines[::polyline_subsample_interval, 0:2] # x, y
         pos_feature_tensor[:polyline_valid_points, 2:4] = polylines[::polyline_subsample_interval, 3:5] # dir_x, dir_y
         pos_feature_tensor[:polyline_valid_points-1, 4:6] = polylines[polyline_subsample_interval::polyline_subsample_interval, 0:2] # next_x, next_y
-        pos_feature_tensor[-1, 4:6] = pos_feature_tensor[-1: 0:2]
+        pos_feature_tensor[polyline_valid_points-1, 4:6] = pos_feature_tensor[polyline_valid_points-1, 0:2]
         map_feature_mask[:polyline_valid_points] = 1
 
         if feature_type == 'road_line':
@@ -375,7 +383,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
     def build_one_lane_feature_tensor(self, polylines: torch.Tensor, lane_traffic_light_state: str, speed_limit: float):
         polyline_point_num = self.dataset_config.map_feature.polyline_point_num
         polyline_subsample_interval = self.dataset_config.map_feature.polyline_subsample_interval
-        polyline_valid_points = polylines.size(0) // polyline_subsample_interval
+        polyline_valid_points = (polylines.size(0)-1) // polyline_subsample_interval + 1
 
         pos_feature_tensor = torch.zeros(polyline_point_num, 7)
         map_feature_mask = torch.zeros(polyline_point_num)
@@ -383,7 +391,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         pos_feature_tensor[:polyline_valid_points, 0:2] = polylines[::polyline_subsample_interval, 0:2] # x, y
         pos_feature_tensor[:polyline_valid_points, 2:4] = polylines[::polyline_subsample_interval, 3:5] # dir_x, dir_y
         pos_feature_tensor[:polyline_valid_points-1, 4:6] = polylines[polyline_subsample_interval::polyline_subsample_interval, 0:2] # next_x, next_y
-        pos_feature_tensor[-1, 4:6] = pos_feature_tensor[-1: 0:2]
+        pos_feature_tensor[polyline_valid_points-1, 4:6] = pos_feature_tensor[polyline_valid_points-1, 0:2]
         pos_feature_tensor[:polyline_valid_points-1, 6] = speed_limit # speed_limit
         map_feature_mask[:polyline_valid_points] = 1
 
@@ -418,3 +426,27 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         map_feature_tensor = torch.cat([pos_feature_tensor, one_hot_tensor, traffic_light_tensor], dim=1)
 
         return map_feature_tensor, map_feature_mask
+    
+    def collate_batch(self, batch_list):
+        feature_dict = {
+            'lane_feature_list': [],
+            'lane_mask_list': [],
+            'road_line_feature_list': [],
+            'road_line_mask_list': [],
+            'road_edge_feature_list': [],
+            'road_edge_mask_list': [],
+            'map_others_feature_list': [],
+            'map_others_mask_list': [],
+
+            'ego_feature_list': [],
+            'ego_label_list': [],
+            'agent_feature_list': [],
+            'agent_label_list': [],
+            'agent_to_predict_num': []
+        }
+
+        for one_data in batch_list:
+            for key in feature_dict.keys():
+                feature_dict[key].append(one_data[key][0])
+
+        return feature_dict
