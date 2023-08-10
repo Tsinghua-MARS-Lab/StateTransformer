@@ -217,7 +217,7 @@ class PlanningTrainer(Trainer):
                     ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                     fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                     fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
-                    if self.model.model_args.pred_yaw:
+                    if self.model.model_args.predict_yaw:
                         heading_error = prediction_trajectory_in_batch[:, :, -1] - trajectory_label_in_batch[:, :, -1]
                     if self.model.k >= 1:
                         prediction_trajectory_in_batch_by_gen = self.model.generate(**inputs)
@@ -232,7 +232,7 @@ class PlanningTrainer(Trainer):
                         ade_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                         fde_x_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                         fde_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
-                        if self.model.model_args.pred_yaw:
+                        if self.model.model_args.predict_yaw:
                             heading_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, -1] - trajectory_label_in_batch[:, :, -1]
                     else:
                         raise ValueError(f'unknown k for auto-regression future keypoints: {self.model.k}')
@@ -241,7 +241,7 @@ class PlanningTrainer(Trainer):
                     ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                     fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                     fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
-                    if self.model.model_args.pred_yaw:
+                    if self.model.model_args.predict_yaw:
                         heading_error = prediction_trajectory_in_batch[:, :, -1] - trajectory_label_in_batch[:, :, -1]
 
             if self.model.model_args.visualize_prediction_to_path is not None and self.is_world_process_zero:
@@ -283,7 +283,7 @@ class PlanningTrainer(Trainer):
             fde = torch.sqrt(fde_x_error.flatten() ** 2 + fde_y_error.flatten() ** 2)
             fde = fde.mean()
             self.eval_result['fde'].append(float(fde))
-            if self.model.model_args.pred_yaw:
+            if self.model.model_args.predict_yaw:
                 heading_error = torch.abs(heading_error).mean()
                 self.eval_result['heading_error'].append(float(heading_error))
 
@@ -323,7 +323,7 @@ class PlanningTrainer(Trainer):
                     fde_key_points_by_gen = torch.sqrt(fde_x_error_key_points_by_gen.flatten() ** 2 + fde_y_error_key_points_by_gen.flatten() ** 2)
                     fde_key_points_by_gen = fde_key_points_by_gen.mean()
                     self.eval_result['fde_keypoints_gen'].append(float(fde_key_points_by_gen))
-                    if self.model.model_args.pred_yaw:
+                    if self.model.model_args.predict_yaw:
                         heading_error_by_gen = torch.abs(heading_error_by_gen).mean()
                         self.eval_result['heading_error_by_gen'].append(float(heading_error_by_gen))
 
