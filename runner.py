@@ -358,7 +358,9 @@ def main():
                             all_pickles_dic=all_pickles_dic,
                             **data_process.__dict__) if data_args.online_preprocess else None
     elif model_args.data_form == "vector" and model_args.task == "waymo":
-        collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, dic_valid_path=data_args.datadic_valid_path, interactive=model_args.interactive)
+        collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
+                             dic_valid_path=data_args.datadic_valid_path, 
+                             interactive=model_args.interactive)
     else:
         raise NotImplementedError
     
@@ -386,11 +388,7 @@ def main():
 
     # Evaluation
     results = {}
-    if training_args.do_eval:
-        if data_args.dataset_name == 'waymo':
-            trainer.evaluate_interactive()
-            return
-            
+    if training_args.do_eval:            
         if model_args.autoregressive:
             result = trainer.evaluate()
             logger.info("***** Final Eval results *****")

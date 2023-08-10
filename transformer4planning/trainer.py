@@ -350,6 +350,8 @@ class PlanningTrainer(Trainer):
             }
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+        print(eval_output.keys())
+        exit()
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics

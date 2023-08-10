@@ -749,7 +749,8 @@ def waymo_preprocess(sample, interactive=False, data_path=None):
     
     agent_trajs = data['agent_trajs']  # (num_objects, num_timestamp, 10)
     current_time_index = data["current_time_index"]
-    track_index_to_predict = data['track_index_to_predict'].to(torch.long)
+    if interactive: track_index_to_predict = sample["interactive_index"].to(torch.long)
+    else: track_index_to_predict = data['track_index_to_predict'].to(torch.long)
     map_polyline = torch.from_numpy(data["map_polyline"])
 
     num_ego = len(track_index_to_predict)
@@ -759,7 +760,7 @@ def waymo_preprocess(sample, interactive=False, data_path=None):
     agent_trajs_res = transform_to_center(agent_trajs, center, heading, heading_index=6)
     map_polylines_data = transform_to_center(map_polyline, center, heading, no_time_dim=True)
     map_polylines_mask = torch.from_numpy(data["map_polylines_mask"]).unsqueeze(0).repeat(len(track_index_to_predict), 1, 1, )
-
+    
     ret_dict = {
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),

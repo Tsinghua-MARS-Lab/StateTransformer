@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 export CUDA_VISIBLE_DEVICES=7;
 python -m torch.distributed.run --nproc_per_node=1 runner.py \
-        --model_name scratch-gpt --task waymo --data_form vector --do_train \
+        --model_name scratch-gpt --task waymo --data_form vector --do_train --do_eval \
         --model_pretrain_name_or_path None \
         --saved_dataset_folder /localdata_ssd/liderun/t4p_training/waymo_cache/t4p_waymo \
         --datadic_path /localdata_ssd/liderun/t4p_training/t4p_waymo/ \
-        --run_name waymo-debug \
+        --saved_valid_dataset_folder /localdata_ssd/liderun/t4p_validation/waymo_cache/t4p_waymo \
+        --datadic_valid_path /localdata_ssd/liderun/t4p_validation/t4p_waymo/ \
+        --run_name waymo-debug --evaluation_strategy steps --eval_steps 100 \
         --num_train_epochs 20 --per_device_train_batch_size 8 \
         --warmup_steps 50 --weight_decay 0.01 \
         --logging_steps 2 --save_strategy steps --save_steps 5000 --save_total_limit 10 \
@@ -17,7 +19,7 @@ python -m torch.distributed.run --nproc_per_node=1 runner.py \
         --overwrite_output_dir \
         --output_dir /localdata_ssd/liderun/tmp/t4p_waymo_interactive/training_results \
         --logging_dir /localdata_ssd/liderun/tmp/t4p_waymo_interactive/training_logs \
-        --max_train_samples 140
+        --max_train_samples 50 --max_eval_samples 10
 
 # python -m torch.distributed.run --nproc_per_node=8 runner_waymo.py \
 #         --model_name scratch-gpt --model_pretrain_name_or_path None \
