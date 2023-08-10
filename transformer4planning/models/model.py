@@ -300,38 +300,39 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
             else:
                 pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
-            # generate remaining trajectory
-            transformer_output = self.transformer(
-                inputs_embeds=input_embeds,
-                attention_mask=None,
-                position_ids=None,
-            )
-            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-            # expected shape for pred trajectory is (b, pred_length, 4)
-            if self.traj_decoder is not None:
-                traj_logits = self.traj_decoder(traj_hidden_state)
-            else:
-                traj_logits = trajectory_label_dummy[..., :2]
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
 
-            if self.k > 1:
-                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-                pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-                selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
-                                      torch.arange(batch_size * key_points_num),
-                                      pred_logits.argmax(dim=-1).reshape(-1),
-                                      :].reshape(batch_size, key_points_num, -1)
-                key_points_logits = selected_key_points
-            elif self.k == 1:
-                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
-                # use previous prediction during generation
-                # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
-                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
-            else:
-                raise ValueError("illegal k while generating trajectory", self.k)
-            # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
-            return torch.cat([key_points_logits, traj_logits], dim=1)
+        # generate remaining trajectory
+        transformer_output = self.transformer(
+            inputs_embeds=input_embeds,
+            attention_mask=None,
+            position_ids=None,
+        )
+        transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+        # expected shape for pred trajectory is (b, pred_length, 4)
+        if self.traj_decoder is not None:
+            traj_logits = self.traj_decoder(traj_hidden_state)
+        else:
+            traj_logits = trajectory_label_dummy[..., :2]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+
+        if self.k > 1:
+            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+            pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
+            selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
+                                  torch.arange(batch_size * key_points_num),
+                                  pred_logits.argmax(dim=-1).reshape(-1),
+                                  :].reshape(batch_size, key_points_num, -1)
+            key_points_logits = selected_key_points
+        elif self.k == 1:
+            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
+            # use previous prediction during generation
+            # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
+            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
+        else:
+            raise ValueError("illegal k while generating trajectory", self.k)
+        # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
+        return torch.cat([key_points_logits, traj_logits], dim=1)
 
 
 def query_current_lane(map_api, target_point):
