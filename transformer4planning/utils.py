@@ -126,6 +126,16 @@ class ModelArguments:
     encoder_type: Optional[str] = field(
         default='raster'
     )
+    past_sample_interval: Optional[int] = field(
+        default=5
+    )
+    future_sample_interval: Optional[int] = field(
+        default=2
+    )
+    debug_raster_path: Optional[str] = field(
+        default=None
+    )
+
 
 def rotate_array(origin, points, angle, tuple=False):
     """
@@ -152,7 +162,7 @@ def change_coordination(target_point, ego_center, ego_to_global=False):
     target_point_new = target_point.copy()
     if ego_to_global:
         cos_, sin_ = math.cos(ego_center[-1]), math.sin(ego_center[-1])
-        # global to ego
+        # ego to global
         new_x, new_y = target_point_new[0] * cos_ - target_point_new[1] * sin_, \
                        target_point_new[0] * sin_ + target_point_new[1] * cos_
         target_point_new[0], target_point_new[1] = new_x, new_y
