@@ -10,7 +10,7 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="scratch-gpt",
+        default="scratch-mini-gpt-raster",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
@@ -64,8 +64,6 @@ class ModelArguments:
         metadata={"help": "Whether to use next token scorer for prediction."},
     )
     past_seq: Optional[int] = field(
-        # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
-        # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
         default=10,
         metadata={"help": "past frames to include for prediction/planning."},
     )
@@ -86,7 +84,7 @@ class ModelArguments:
         default=False
     )
     ar_future_interval: Optional[int] = field(
-        default=0,
+        default=20,
         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
     arf_x_random_walk: Optional[float] = field(
@@ -105,9 +103,12 @@ class ModelArguments:
         default=False
     )
     specified_key_points: Optional[bool] = field(
-        default=False
+        default=True
     )
     forward_specified_key_points: Optional[bool] = field(
+        default=True
+    )
+    token_scenario_tag: Optional[bool] = field(
         default=False
     )
     token_scenario_tag: Optional[bool] = field(
@@ -115,6 +116,15 @@ class ModelArguments:
     )
     max_token_len: Optional[int] = field(
         default=20
+    )
+    resnet_type: Optional[str] = field(
+        default="resnet18"
+    )
+    pretrain_encoder: Optional[bool] = field(
+        default=False
+    )
+    encoder_type: Optional[str] = field(
+        default='raster'
     )
     interactive: Optional[bool] = field(
         default=False
