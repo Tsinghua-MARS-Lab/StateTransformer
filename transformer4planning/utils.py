@@ -129,10 +129,7 @@ class ModelArguments:
     interactive: Optional[bool] = field(
         default=False
     )
-    data_form: Optional[str] = field(
-        default="vector"
-    )
-    config_path: Optional[str] = field(
+    mtr_config_path: Optional[str] = field(
         default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
     )
 

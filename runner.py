@@ -9,12 +9,10 @@ import os
 import sys
 import pickle
 import copy
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import Optional
 import torch
-from torch import nn
 from tqdm import tqdm
 import copy
-import json
 
 import datasets
 import numpy as np
@@ -30,16 +28,13 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
-from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
 from transformer4planning.utils import ModelArguments
 from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
-from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
-from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
-from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
+from datasets import Dataset, Value
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -136,7 +131,7 @@ class DataProcessArguments:
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
-    model_args, data_args, config_args, data_process, training_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, _, data_process, training_args = parser.parse_args_into_dataclasses()
 
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
@@ -352,13 +347,15 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    if model_args.data_form == "raster" and model_args.task == "nuplan":
+    if model_args.encoder_type == "raster" and model_args.task == "nuplan":
+        from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
         collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
                             dic_path=data_args.datadic_path,
                             all_maps_dic=all_maps_dic,
                             all_pickles_dic=all_pickles_dic,
                             **data_process.__dict__) if data_args.online_preprocess else None
-    elif model_args.data_form == "vector" and model_args.task == "waymo":
+    elif model_args.encoder_type == "vector" and model_args.task == "waymo":
+        from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
                              dic_valid_path=data_args.datadic_valid_path, 
                              interactive=model_args.interactive)

@@ -16,10 +16,8 @@ from datasets import Dataset
 import torch
 import torch.nn as nn
 import logging
-import shutil
 import os
 import numpy as np
-from dataset_gen.waymo.waymo_eval import waymo_evaluation
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -498,7 +496,6 @@ class PlanningTrainer(Trainer):
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
     ) -> Dict[str, float]:
-        
         self.model.eval()
         
         dataloader = self.get_eval_dataloader(eval_dataset)
@@ -573,7 +570,7 @@ class PlanningTrainer(Trainer):
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
     ) -> Dict[str, float]:
-        
+        from dataset_gen.waymo.waymo_eval import waymo_evaluation
         self.model.eval()
         
         dataloader = self.get_eval_dataloader(eval_dataset)
