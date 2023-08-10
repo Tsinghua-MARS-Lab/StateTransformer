@@ -6,7 +6,7 @@ from transformers.models.xlnet import XLNetConfig, XLNetModel, XLNetPreTrainedMo
 from transformers.models.xlnet.modeling_xlnet import XLNetLMHeadModelOutput
 from transformers.models.t5 import T5Config,T5Model, T5PreTrainedModel
 from transformers.models.deberta_v2 import DebertaV2Config, DebertaV2Model, DebertaV2PreTrainedModel
-from transformer4planning.models.encoders import *
+from transformer4planning.models.encoder.encoders import *
 from transformer4planning.models.decoders import *
 from transformer4planning.models.utils import *
 from transformers.generation.configuration_utils import GenerationConfig

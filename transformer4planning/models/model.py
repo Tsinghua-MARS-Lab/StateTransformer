@@ -41,7 +41,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     
     def build_encoder(self):
         if self.task == "nuplan":
-            from transformer4planning.models.encoders import (NuplanRasterizeEncoder,)
+            from transformer4planning.models.encoder.encoders import (NuplanRasterizeEncoder,)
             # TODO: add raster/vector encoder configuration item
             if "raster" in self.encoder_type:
                 cnn_kwargs = dict(
@@ -64,7 +64,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
         elif self.task == "waymo":
-            from transformer4planning.models.encoders import WaymoVectorizeEncoder
+            from transformer4planning.models.encoder.mtr_encoder import WaymoVectorizeEncoder
             from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
             cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
             action_kwargs = dict(

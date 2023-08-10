@@ -262,7 +262,7 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
 
 if __name__ == "__main__":
     import datasets
-    from transformer4planning.models.encoders import PDMEncoder 
+    from transformer4planning.models.encoder.encoders import PDMEncoder 
     map_api = dict()
     for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
         map_api[map] = get_maps_api(map_root="/home/shiduozhang/nuplan/dataset/maps",
