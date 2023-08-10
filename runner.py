@@ -113,21 +113,6 @@ class ConfigArguments:
         default=None, metadata={"help": "load data config to a json file if not None"}
     )
 
-@dataclass
-class DataProcessArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    past_sample_interval: Optional[int] = field(
-        default=5
-    )
-    future_sample_interval: Optional[int] = field(
-        default=2
-    )
-    debug_raster_path: Optional[str] = field(
-        default=None
-    )
-
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
@@ -138,7 +123,7 @@ def main():
         road_types = 20
         agent_types = 8
         traffic_types = 4
-        past_sample_number = int(2 * 20 / data_process.past_sample_interval)  # past_seconds-2, frame_rate-20
+        past_sample_number = int(2 * 20 / model_args.past_sample_interval)  # past_seconds-2, frame_rate-20
         if 'auto' not in model_args.model_name:
             # will cast into each frame
             if model_args.with_traffic_light:
@@ -267,7 +252,9 @@ def main():
             test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
             test_dataset.set_format(type='torch')
         else:
+            print('Testset not found, using training set as test set')
             test_dataset = train_dataset
+
         all_maps_dic = {}
         all_pickles_dic = {}
         map_folder = os.path.join(data_args.datadic_path, 'map')
@@ -353,15 +340,12 @@ def main():
                             dic_path=data_args.datadic_path,
                             all_maps_dic=all_maps_dic,
                             all_pickles_dic=all_pickles_dic,
-                            **data_process.__dict__) if data_args.online_preprocess else None
+                            **model_args.__dict__) if data_args.online_preprocess else None
     elif model_args.encoder_type == "vector" and model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
                              dic_valid_path=data_args.datadic_valid_path, 
                              interactive=model_args.interactive)
-    else:
-        raise NotImplementedError
-    
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -370,7 +354,6 @@ def main():
         callbacks=[CustomCallback,],
         data_collator=collate_fn
     )
-    
     trainer.pop_callback(DefaultFlowCallback)
 
     # Training
