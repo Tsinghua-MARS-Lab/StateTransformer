@@ -7,8 +7,7 @@ import os
 import torch
 from functools import partial
 from torch.utils.data._utils.collate import default_collate
-from transformer4planning.utils import generate_contour_pts
-from transformer4planning.preprocess.utils import save_raster
+from transformer4planning.utils import generate_contour_pts, save_raster
 
 def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
