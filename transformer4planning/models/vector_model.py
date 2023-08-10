@@ -313,7 +313,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
         
         # action context
-        context_actions = input_dict['center_objects_past']
+        context_actions = input_dict['center_objects_past']  # TODO: check val
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -363,39 +363,55 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                                   torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         key_points_num = future_key_points.shape[1]
         
-        pred_key_points_during_generate, input_embeds = self.greedy_search(input_embeds, context_length, key_points_num)
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * 2
         
-        # generate remaining trajectory
-        transformer_output = self.transformer(
-            inputs_embeds=input_embeds,
-            # attention_mask=attention_mask,
-            attention_mask=None,
-            position_ids=None,
-        )
-        transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
-        # expected shape for pred trajectory is (b, pred_length, 4)
-        if self.traj_decoder is not None:
-            traj_logits = self.traj_decoder(traj_hidden_state)
-        else:
-            traj_logits = trajectory_label_dummy[..., :2]
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 - 1:self.scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+        # greedy search
+        # pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
+        
+        # beam_search
+        pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
+        
+        all_traj_logits = []
+        all_kps_logits = []
+        
+        for m_i in range(input_embeds_kpts.shape[1]):
+            input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_len+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
+            transformer_output = self.transformer(
+                inputs_embeds=input_embeds,
+                attention_mask=None,
+                position_ids=None,
+            )
+            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            
+            # get traj_logits
+            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
+            traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
+            all_traj_logits.append(traj_logits[:, None, :, :])
 
-        if self.k > 1:
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-            pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-            selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[torch.arange(batch_size * key_points_num),
-                                  pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, key_points_num, -1)
-            key_points_logits = selected_key_points
-        elif self.k == 1:
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
-            # use previous prediction during generation
-            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
-        else:
-            raise ValueError("illegal k while generating trajectory", self.k)
+            # get key_points_logits
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len - 1:tot_scenario_contenxt_len + future_key_points.shape[1] - 1, :]
 
-        # return torch.cat([key_points_logits, traj_logits], dim=1)
-        return {'key_points_logits': key_points_logits, 'logits': traj_logits}
+            if self.k > 1:
+                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, kps_num, 4/2*k
+                pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, kps_num, k
+                selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[torch.arange(batch_size * key_points_num),
+                                    pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, key_points_num, -1)
+                key_points_logits = selected_key_points # b, kps_num, 4/2
+            elif self.k == 1:
+                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, kps_num, 4/2
+                # use previous prediction during generation
+                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
+            else:
+                raise ValueError("illegal k while generating trajectory", self.k)
+            
+            all_kps_logits.append(key_points_logits[:, None, :, :])
+        
+        all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
+        all_kps_logits = torch.cat(all_kps_logits, dim=1) # (bs, n_mode, kps_num, 4/2)
+        all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
+        # all_traj_scores = kpts_scores[:, :, -1].softmax(-1) # (bs, n_mode)
+
+        return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
     
     def calc_loss(self, pred_traj_logits, gt_traj, gt_traj_mask=None, 
                   pred_kps_logits=None, gt_kps=None, gt_kps_mask=None,
@@ -476,16 +492,26 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     
         return pred_traj_logits, loss
     
-    def greedy_search(self, input_embeds, context_length, key_points_num):
-        # Loop for generation
+    def greedy_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num):
+        '''
+        input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
+        
+        return:
+            input_embeds_kpts: (bs, 1, num_kps, n_embed)
+            kpts_scores: (bs, 1, num_kps)
+        '''
+        
         device = input_embeds.device
-        batch_size = input_embeds.shape[0]
+        batch_size, cur_len, n_embed = input_embeds.shape
         pred_key_points_during_generate = []
+        
+        input_embeds_kpts = torch.zeros((batch_size, 1, key_points_num, n_embed), device=device)
+        kpts_scores = torch.zeros((batch_size, 1, key_points_num), device=device)
         
         for i in range(key_points_num):
             # prepare attention mask
-            input_embeds_current = input_embeds[:, :self.scenario_type_len + context_length * 2 + i, :]
-            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+            input_embeds_current = input_embeds[:, :tot_scenario_contenxt_len + i, :]
+            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=device)
             position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
                 inputs_embeds=input_embeds_current,
@@ -493,25 +519,25 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 position_ids=position_ids
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            future_key_point_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len + i - 1, :].reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
-                pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
+                pred_kps_score = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
                 
                 # delta = (key_points_logit.reshape(batch_size, self.k, -1) - future_key_points_gt[:, [i], :2])
                 # dist = -delta[..., 0]*delta[..., 0] - delta[..., 1]*delta[..., 1]
-                # pred_logits = dist[:, None, :]
+                # pred_kps_score = dist[:, None, :]
                 
-                # pred_logits_index = pred_logits.argsort(dim=-1)
-                # selected_key_point = torch.zeros((batch_size, 1, 2), device=pred_logits.device, dtype=pred_logits.dtype)
+                # pred_kps_score_index = pred_kps_score.argsort(dim=-1)
+                # selected_key_point = torch.zeros((batch_size, 1, 2), device=pred_kps_score.device, dtype=pred_kps_score.dtype)
                 
                 # for s_ind in range(3):
-                #     selected_key_point += key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits_index[:, 0, s_ind].reshape(-1), :].reshape(batch_size, 1, -1)
+                #     selected_key_point += key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_kps_score_index[:, 0, s_ind].reshape(-1), :].reshape(batch_size, 1, -1)
                 
                 # selected_key_point /= 3.0
                 
-                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)    
+                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_kps_score.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)    
                 key_points_logit = selected_key_point
             else:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
@@ -520,16 +546,87 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
-            input_embeds[:, self.scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+            input_embeds[:, tot_scenario_contenxt_len + i, :] = key_point_embed[:, 0, :]
+            input_embeds_kpts[:, 0, i, :] = key_point_embed[:, 0, :]
+            kpts_scores[:, :, i] = pred_kps_score.max(-1)[0]
             pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
             
-        return pred_key_points_during_generate, input_embeds
+        return pred_key_points_during_generate, input_embeds_kpts, kpts_scores
     
-    def beam_search(self, input_embeds):
+    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num):
         '''
-        input_embeds: (bs, context_length*2, n_embed)
+        input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
         
-        
-        kpts_embeds: (bs*num_kps, context_length*2, n_embed)
+        return:
+            k_input_embeds_kpts: (bs, k, num_kps, n_embed)
+            k_kpts_scores: (bs, k, num_kps)
+            pred_key_points_during_generate: [(bs, self.k, 4)] * key_points_num
         '''
+
+        assert self.k > 1
         
+        device = input_embeds.device
+        batch_size, tot_len, n_embed = input_embeds.shape
+        pred_key_points_during_generate = []
+        
+        k_input_embeds_kpts = torch.zeros((batch_size, self.k, key_points_num, n_embed), device=device)
+        k_kpts_scores = torch.zeros((batch_size, self.k, key_points_num), device=device)
+        k_input_embeds = input_embeds[:, None, :, :].repeat(1, self.k, 1, 1)
+        
+        for i in range(key_points_num):
+            # prepare attention mask
+            k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_contenxt_len + i, :].view(batch_size*self.k, -1, n_embed)
+            attention_mask = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
+            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+            transformer_output = self.transformer(
+                inputs_embeds=k_input_embeds_current,
+                attention_mask=attention_mask,
+                position_ids=position_ids
+            )
+            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, [tot_scenario_contenxt_len + i - 1], :] # (bs*k, 1, n_embed)
+
+            # get topk kps
+            pred_kps_logit = self.key_points_decoder(future_key_point_hidden_state) # (bs*k, 1, 4/2 *k)
+            pred_kps_logit = pred_kps_logit.view(batch_size, self.k*self.k, self.pred_dim) # (bs, k*k, 2)
+            
+            pred_kps_score = self.next_token_scorer_decoder(future_key_point_hidden_state)  # (bs*k, 1, k)
+            pred_kps_score = pred_kps_score.view(batch_size, self.k*self.k) # (bs, k*k)
+            
+            if i == 0:
+                topk_indx = torch.arange(self.k)[None, :].repeat(batch_size, 1) # (bs, k)
+                topk_score = pred_kps_score[:, :self.k]
+            else:
+                topk_score, topk_indx = torch.topk(pred_kps_score, dim=-1, k =self.k) # (bs, k)
+                
+            topk_group = torch.div(topk_indx, self.k, rounding_mode='floor')
+            
+            pred_kps_logit_topk = []
+            for k_ in range(self.k):
+                pred_kps_logit_topk.append(pred_kps_logit[torch.arange(batch_size), topk_indx[:, k_], :][:, None, :]) 
+            pred_kps_logit_topk = torch.cat(pred_kps_logit_topk, dim=1) # (bs, self.k, 2)
+
+            pred_kps_logit_topk = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, self.k, 2), device=device)), dim=-1) # (bs, self.k, 4)
+
+            # get kps topk embeds
+            pred_kps_logit_topk_embed = self.action_m_embed(pred_kps_logit_topk)  # b, self.k, n_embed
+
+            k_input_embeds[:, :, tot_scenario_contenxt_len + i, :] = pred_kps_logit_topk_embed
+            k_input_embeds_kpts[:, :, i, :] = pred_kps_logit_topk_embed
+            k_kpts_scores[:, :, i] = topk_score
+            
+            if i > 0:
+                k_input_embeds_kpts_prev = torch.zeros((batch_size, self.k, i, n_embed), device=device)
+                k_kpts_scores_prev = torch.zeros((batch_size, self.k, i), device=device)
+                
+                for p_i in range(self.k):
+                    k_input_embeds_kpts_prev[:, p_i, :, :] = k_input_embeds_kpts[torch.arange(batch_size), topk_group[:, p_i], :i, :]
+                    k_kpts_scores_prev[:, p_i, :] = k_kpts_scores[torch.arange(batch_size), topk_group[:, p_i], :i]
+                
+                k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :] = k_input_embeds_kpts_prev
+                k_input_embeds_kpts[:, :, :i, :] = k_input_embeds_kpts_prev
+                k_kpts_scores[:, :, :i] = k_kpts_scores_prev
+            
+            pred_key_points_during_generate.append(pred_kps_logit_topk)
+            
+        return pred_key_points_during_generate, k_input_embeds_kpts, k_kpts_scores

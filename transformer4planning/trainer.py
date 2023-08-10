@@ -542,6 +542,9 @@ class PlanningTrainer(Trainer):
                 logger.info(f'eval: batch_iter={i}/{len(dataloader)}, batch_size={batch_size}, iter_cost={second_each_iter:.2f}s, '
                             f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
                             f'{disp_str}')
+            
+            # if i > 1000:    
+            #     break
 
         if self.is_world_process_zero:
             progress_bar.close()
