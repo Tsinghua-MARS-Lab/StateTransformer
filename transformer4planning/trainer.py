@@ -285,6 +285,8 @@ class PlanningTrainer(Trainer):
             self.eval_result['fde'].append(float(fde))
             if self.model.model_args.predict_yaw:
                 heading_error = torch.abs(heading_error).mean()
+                if 'heading_error' not in self.eval_result:
+                    self.eval_result['heading_error'] = []
                 self.eval_result['heading_error'].append(float(heading_error))
 
             if self.model.ar_future_interval > 0:
@@ -324,6 +326,8 @@ class PlanningTrainer(Trainer):
                     fde_key_points_by_gen = fde_key_points_by_gen.mean()
                     self.eval_result['fde_keypoints_gen'].append(float(fde_key_points_by_gen))
                     if self.model.model_args.predict_yaw:
+                        if 'heading_error_by_gen' not in self.eval_result:
+                            self.eval_result['heading_error_by_gen'] = []
                         heading_error_by_gen = torch.abs(heading_error_by_gen).mean()
                         self.eval_result['heading_error_by_gen'].append(float(heading_error_by_gen))
 
