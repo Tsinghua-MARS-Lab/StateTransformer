@@ -10,7 +10,7 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="scratch-mini-gpt-raster",
+        default="scratch-mini-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
@@ -20,9 +20,6 @@ class ModelArguments:
     predict_result_saving_dir: Optional[str] = field(
         default=False,
         metadata={"help": "The target folder to save prediction results."},
-    )
-    predict_trajectory: Optional[bool] = field(
-        default=True,
     )
     d_embed: Optional[int] = field(
         default=256,
@@ -84,7 +81,7 @@ class ModelArguments:
         default=False
     )
     ar_future_interval: Optional[int] = field(
-        default=20,
+        default=0,
         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
     arf_x_random_walk: Optional[float] = field(
@@ -103,7 +100,7 @@ class ModelArguments:
         default=False
     )
     specified_key_points: Optional[bool] = field(
-        default=True
+        default=False
     )
     forward_specified_key_points: Optional[bool] = field(
         default=True
@@ -118,13 +115,15 @@ class ModelArguments:
         default=20
     )
     resnet_type: Optional[str] = field(
-        default="resnet18"
+        default="resnet18",
+        metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
     pretrain_encoder: Optional[bool] = field(
-        default=False
+        default=False,
     )
     encoder_type: Optional[str] = field(
-        default='raster'
+        default='raster',
+        metadata={"help": "choose from [raster, vector]"}
     )
 
 def rotate_array(origin, points, angle, tuple=False):
