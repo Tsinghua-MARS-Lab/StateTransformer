@@ -189,8 +189,8 @@
             "env": {"CUDA_VISIBLE_DEVICES":"0"},
             "cwd": "${workspaceFolder}/",
             "args": [
-                "--pkl_file", "result_vector_gpt_small_k1_reverseKP5_masked_ep100___checkpoint-61000.pkl",
-                "--out_folder", "/data_3/madanjiao/model_res/vector_gpt_small_k1_reverseKP5_masked_ep100/training_results/checkpoint-61000/figs",
+                "--pkl_file", "/data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_masked_ep100_cls10/training_results/checkpoint-80000/eval_output/result_vector_gpt_small_k6_reverseKP5_masked_ep100_cls10___checkpoint-80000_20230809-234318.pkl",
+                "--out_folder", "/data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_masked_ep100_cls10/training_results/checkpoint-80000/figs_test",
             ],
             "console": "integratedTerminal",
             "justMyCode": false,

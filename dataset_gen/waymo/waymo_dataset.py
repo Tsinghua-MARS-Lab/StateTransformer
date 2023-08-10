@@ -484,6 +484,7 @@ class WaymoDataset(DatasetTemplate):
             batch_dict:
                 pred_scores: (num_center_objects, num_modes)
                 pred_trajs: (num_center_objects, num_modes, num_timestamps, 2)
+                pred_keyspoints: (num_center_objects, num_modes, num_kps, 2)
 
               input_dict:
                 center_objects_world: (num_center_objects, 10)
@@ -495,8 +496,8 @@ class WaymoDataset(DatasetTemplate):
 
         pred_length = batch_dict['input_dict']['trajectory_label'].shape[1]
         pred_trajs = batch_pred_dicts['logits'][:, :, -pred_length:, :]
-        # pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
         pred_scores = batch_pred_dicts['scores']
+        pred_kps = batch_pred_dicts['key_points_logits']
         center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
 
         num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
@@ -507,6 +508,13 @@ class WaymoDataset(DatasetTemplate):
             angle=center_objects_world[:, 6].view(num_center_objects)
         ).view(num_center_objects, num_modes, num_timestamps, num_feat)
         pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+        
+        num_center_objects, num_modes, num_kps, num_kps_feat = pred_kps.shape
+        pred_kps_world = common_utils.rotate_points_along_z(
+            points=pred_kps.view(num_center_objects, num_modes * num_kps, num_kps_feat),
+            angle=center_objects_world[:, 6].view(num_center_objects)
+        ).view(num_center_objects, num_modes, num_kps, num_kps_feat)
+        pred_kps_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
 
         pred_dict_list = []
         for obj_idx in range(num_center_objects):
@@ -514,6 +522,7 @@ class WaymoDataset(DatasetTemplate):
                 'scenario_id': input_dict['scenario_id'][obj_idx],
                 'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
                 'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
+                'pred_kps': pred_kps_world[obj_idx, :].cpu().numpy(),
                 'object_id': input_dict['center_objects_id'][obj_idx],
                 'object_type': input_dict['center_objects_type'][obj_idx],
                 'gt_trajs': input_dict['center_gt_trajs_src'][obj_idx].cpu().numpy(),

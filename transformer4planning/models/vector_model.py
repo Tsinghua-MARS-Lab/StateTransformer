@@ -73,6 +73,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.scenario_type_len = self.model_args.max_token_len
         else:
             self.scenario_type_len = 0
+        
+        # self.generate_method = "greedy_search"
+        self.generate_method = 'beam_search'
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -365,16 +368,18 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         tot_scenario_contenxt_len = self.scenario_type_len + context_length * 2
         
-        # greedy search
-        # pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
-        
-        # beam_search
-        pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
+        if self.generate_method == 'greedy_search':
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
+        elif self.generate_method == 'beam_search':
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
+        else:
+            raise ValueError("generate_method has not yet been implemented ", self.generate_method)
         
         all_traj_logits = []
         all_kps_logits = []
+        n_mode = input_embeds_kpts.shape[1]
         
-        for m_i in range(input_embeds_kpts.shape[1]):
+        for m_i in range(n_mode):
             input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_len+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
             transformer_output = self.transformer(
                 inputs_embeds=input_embeds,
@@ -387,29 +392,21 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
             traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
             all_traj_logits.append(traj_logits[:, None, :, :])
-
-            # get key_points_logits
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len - 1:tot_scenario_contenxt_len + future_key_points.shape[1] - 1, :]
-
-            if self.k > 1:
-                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, kps_num, 4/2*k
-                pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, kps_num, k
-                selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[torch.arange(batch_size * key_points_num),
-                                    pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, key_points_num, -1)
-                key_points_logits = selected_key_points # b, kps_num, 4/2
-            elif self.k == 1:
-                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, kps_num, 4/2
-                # use previous prediction during generation
-                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
-            else:
-                raise ValueError("illegal k while generating trajectory", self.k)
             
-            all_kps_logits.append(key_points_logits[:, None, :, :])
-        
         all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
-        all_kps_logits = torch.cat(all_kps_logits, dim=1) # (bs, n_mode, kps_num, 4/2)
-        all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
-        # all_traj_scores = kpts_scores[:, :, -1].softmax(-1) # (bs, n_mode)
+        all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
+        
+        kpts_scores = kpts_scores.softmax(dim=1) # (bs, k, num_kps)
+        
+        # use accumulated score
+        all_traj_scores = torch.ones((batch_size, n_mode), device=device)
+        
+        for k_i in range(key_points_num):
+            all_traj_scores *= kpts_scores[:, :, k_i]
+        all_traj_scores = all_traj_scores / all_traj_scores.sum()
+        
+        # use last score
+        # all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
 
         return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
     
@@ -499,11 +496,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         return:
             input_embeds_kpts: (bs, 1, num_kps, n_embed)
             kpts_scores: (bs, 1, num_kps)
+            pred_key_points_during_generate: (bs, self.k, num_kps, 4)
         '''
         
         device = input_embeds.device
         batch_size, cur_len, n_embed = input_embeds.shape
-        pred_key_points_during_generate = []
+        pred_key_points_during_generate = torch.zeros((batch_size, 1, key_points_num, self.pred_dim), device=device)
         
         input_embeds_kpts = torch.zeros((batch_size, 1, key_points_num, n_embed), device=device)
         kpts_scores = torch.zeros((batch_size, 1, key_points_num), device=device)
@@ -549,7 +547,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embeds[:, tot_scenario_contenxt_len + i, :] = key_point_embed[:, 0, :]
             input_embeds_kpts[:, 0, i, :] = key_point_embed[:, 0, :]
             kpts_scores[:, :, i] = pred_kps_score.max(-1)[0]
-            pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+            pred_key_points_during_generate[:, 0, i, :] = pred_key_point[:, 0, :self.pred_dim]
             
         return pred_key_points_during_generate, input_embeds_kpts, kpts_scores
     
@@ -560,16 +558,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         return:
             k_input_embeds_kpts: (bs, k, num_kps, n_embed)
             k_kpts_scores: (bs, k, num_kps)
-            pred_key_points_during_generate: [(bs, self.k, 4)] * key_points_num
+            pred_key_points_during_generate: (bs, self.k, num_kps, 4)
         '''
 
         assert self.k > 1
         
         device = input_embeds.device
         batch_size, tot_len, n_embed = input_embeds.shape
-        pred_key_points_during_generate = []
+        pred_key_points_during_generate = torch.zeros((batch_size, self.k, key_points_num, self.pred_dim), device=device)
         
-        k_input_embeds_kpts = torch.zeros((batch_size, self.k, key_points_num, n_embed), device=device)
         k_kpts_scores = torch.zeros((batch_size, self.k, key_points_num), device=device)
         k_input_embeds = input_embeds[:, None, :, :].repeat(1, self.k, 1, 1)
         
@@ -612,7 +609,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_kps_logit_topk_embed = self.action_m_embed(pred_kps_logit_topk)  # b, self.k, n_embed
 
             k_input_embeds[:, :, tot_scenario_contenxt_len + i, :] = pred_kps_logit_topk_embed
-            k_input_embeds_kpts[:, :, i, :] = pred_kps_logit_topk_embed
             k_kpts_scores[:, :, i] = topk_score
             
             if i > 0:
@@ -620,13 +616,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 k_kpts_scores_prev = torch.zeros((batch_size, self.k, i), device=device)
                 
                 for p_i in range(self.k):
-                    k_input_embeds_kpts_prev[:, p_i, :, :] = k_input_embeds_kpts[torch.arange(batch_size), topk_group[:, p_i], :i, :]
+                    k_input_embeds_kpts_prev[:, p_i, :, :] = k_input_embeds[torch.arange(batch_size), topk_group[:, p_i], tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :]
                     k_kpts_scores_prev[:, p_i, :] = k_kpts_scores[torch.arange(batch_size), topk_group[:, p_i], :i]
                 
                 k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :] = k_input_embeds_kpts_prev
-                k_input_embeds_kpts[:, :, :i, :] = k_input_embeds_kpts_prev
                 k_kpts_scores[:, :, :i] = k_kpts_scores_prev
             
-            pred_key_points_during_generate.append(pred_kps_logit_topk)
+            pred_key_points_during_generate[:, :, i, :] = pred_kps_logit_topk[:, :, :self.pred_dim]
+            k_input_embeds_kpts = k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + key_points_num, :]
             
         return pred_key_points_during_generate, k_input_embeds_kpts, k_kpts_scores
