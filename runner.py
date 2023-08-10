@@ -30,13 +30,13 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
+from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
 from transformer4planning.utils import ModelArguments
 from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
-from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 
