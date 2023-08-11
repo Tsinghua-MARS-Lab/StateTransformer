@@ -349,6 +349,35 @@ class PlanningTrainer(Trainer):
         if len(logits) == 1:
             logits = logits[0]
 
+        if self.model.task == "waymo" and self.model.encoder_type == "vector":
+            input_dict = inputs['input_dict']
+            pred_length = input_dict['center_gt_trajs_src'].shape[1] - input_dict['current_time_index'][0] - 1
+            pred_trajs = logits[:, None, -pred_length:, :]
+            pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
+            center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
+            num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
+            # assert num_feat == 7
+
+            pred_trajs_world = common_utils.rotate_points_along_z(
+                points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
+                angle=center_objects_world[:, 6].view(num_center_objects)
+            ).view(num_center_objects, num_modes, num_timestamps, num_feat)
+            pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+
+            pred_dict = []
+            for obj_idx in range(num_center_objects):
+                single_pred_dict = {
+                    'scenario_id': str(input_dict['scenario_id'][obj_idx]),
+                    'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
+                    'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
+                    'object_id': input_dict['center_objects_id'][obj_idx],
+                    'object_type': str(input_dict['center_objects_type'][obj_idx]),
+                    'gt_trajs': input_dict['center_gt_trajs_src'][obj_idx].cpu().numpy(),
+                    'track_index_to_predict': input_dict['track_index_to_predict'][obj_idx].cpu().numpy()
+                }
+                pred_dict.append(single_pred_dict)
+
+            self.pred_dicts_list += pred_dict
         return (loss, logits, None)
 
     def evaluation_loop(
@@ -366,7 +395,10 @@ class PlanningTrainer(Trainer):
                 'fde': [],
             }
         self.eval_itr = 0
-        
+        if self.model.task == "waymo" and self.model.encoder_type == "vector": 
+            prediction_loss_only = False
+            self.pred_dicts_list = []
+
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
 
         result = dict()
@@ -382,6 +414,26 @@ class PlanningTrainer(Trainer):
         logging.info("***** Eval results *****")
         logging.info(f"{result}")
         self.log(result)
+
+        
+        if self.model.task == "waymo" and self.model.encoder_type == "vector":
+            from dataset_gen.waymo.waymo_eval import waymo_evaluation
+            logging.info('*************** Performance of WOMD *****************' )
+            try:
+                num_modes_for_eval = self.pred_dicts_list[0]['pred_trajs'].shape[0]
+            except:
+                num_modes_for_eval = 6
+            metric_results, result_format_str = waymo_evaluation(pred_dicts=self.pred_dicts_list, num_modes_for_eval=num_modes_for_eval)
+
+            metric_result_str = '\n'
+            for key in metric_results:
+                metric_results[key] = metric_results[key]
+                metric_result_str += '%s: %.4f \n' % (key, metric_results[key])
+            metric_result_str += '\n'
+            metric_result_str += result_format_str
+
+            print(metric_result_str)
+            logging.info('****************Evaluation done.*****************')
 
         return eval_output
 
@@ -581,110 +633,4 @@ class PlanningTrainer(Trainer):
         ret_dict.update(result_dict)
 
         logger.info('Result is save to %s' % eval_output_dir)
-        logger.info('****************Evaluation done.*****************')
-        
-    def evaluate_interactive(
-        self,
-        eval_dataset: Optional[Dataset] = None,
-        ignore_keys: Optional[List[str]] = None,
-        metric_key_prefix: str = "eval",
-    ) -> Dict[str, float]:
-        from dataset_gen.waymo.waymo_eval import waymo_evaluation
-        self.model.eval()
-        
-        dataloader = self.get_eval_dataloader(eval_dataset)
-        dataset = dataloader.dataset
-        
-        if self.is_world_process_zero:
-            progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval', dynamic_ncols=True)
-        
-        model_path = self.model.model_args.model_pretrain_name_or_path
-        model_name = model_path.split('/')[-3]+'___' + model_path.split('/')[-1]
-        
-        eval_output_dir = model_path + '/eval_output/'
-        os.makedirs(eval_output_dir, exist_ok=True)
-        
-        log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, datetime.datetime.now().strftime('%Y%m%d-%H%M%S')))
-        logger = common_utils.create_logger(log_file, rank=0)
-        
-        start_time = time.time()
-        logger_iter_interval = 1000
-        
-        pred_dicts = []
-        for i, batch_dict in enumerate(dataloader):
-            with torch.no_grad():
-                batch_dict = self._prepare_inputs(batch_dict)
-                batch_pred_dicts = self.model.generate(**batch_dict)
-                # batch_pred_dicts = self.model(**batch_dict)
-                
-                input_dict = batch_dict['input_dict']
-
-                pred_length = input_dict['center_gt_trajs_src'].shape[1] - input_dict['current_time_index'][0] - 1
-                pred_trajs = batch_pred_dicts['logits'][:, None, -pred_length:, :]
-                pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
-                center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
-
-                num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
-                # assert num_feat == 7
-
-                pred_trajs_world = common_utils.rotate_points_along_z(
-                    points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
-                    angle=center_objects_world[:, 6].view(num_center_objects)
-                ).view(num_center_objects, num_modes, num_timestamps, num_feat)
-                pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
-
-                pred_dict_list = []
-                for obj_idx in range(num_center_objects):
-                    single_pred_dict = {
-                        'scenario_id': str(input_dict['scenario_id'][obj_idx]),
-                        'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
-                        'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
-                        'object_id': input_dict['center_objects_id'][obj_idx],
-                        'object_type': str(input_dict['center_objects_type'][obj_idx]),
-                        'gt_trajs': input_dict['center_gt_trajs_src'][obj_idx].cpu().numpy(),
-                        'track_index_to_predict': input_dict['track_index_to_predict'][obj_idx].cpu().numpy()
-                    }
-                    pred_dict_list.append(single_pred_dict)
-
-                pred_dicts += pred_dict_list
-
-            disp_dict = {}
-
-            if self.is_world_process_zero and (i % logger_iter_interval == 0 or i == 0 or i + 1== len(dataloader)):
-                past_time = progress_bar.format_dict['elapsed']
-                second_each_iter = past_time / max(i, 1.0)
-                remaining_time = second_each_iter * (len(dataloader) - i)
-                disp_str = ', '.join([f'{key}={val:.3f}' for key, val in disp_dict.items() if key != 'lr'])
-                batch_size = batch_dict.get('batch_size', None)
-                logger.info(f'eval: batch_iter={i}/{len(dataloader)}, batch_size={batch_size}, iter_cost={second_each_iter:.2f}s, '
-                            f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
-                            f'{disp_str}')
-
-        if self.is_world_process_zero:
-            progress_bar.close()
-
-        logger.info('*************** Performance of EPOCH *****************' )
-        sec_per_example = (time.time() - start_time) / len(dataloader.dataset)
-        logger.info('Generate label finished(sec_per_example: %.4f second).' % sec_per_example)
-
-        ret_dict = {}
-
-        try:
-            num_modes_for_eval = pred_dicts[0]['pred_trajs'].shape[0]
-        except:
-            num_modes_for_eval = 6
-        metric_results, result_format_str = waymo_evaluation(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval)
-
-        metric_result_str = '\n'
-        for key in metric_results:
-            metric_results[key] = metric_results[key]
-            metric_result_str += '%s: %.4f \n' % (key, metric_results[key])
-        metric_result_str += '\n'
-        metric_result_str += result_format_str
-
-        logger.info(metric_result_str)
-        ret_dict.update(metric_results)
-
-        logger.info('Result is save to %s' % eval_output_dir)
-        logger.info('****************Evaluation done.*****************')
-        
+        logger.info('****************Evaluation done.*****************')        
