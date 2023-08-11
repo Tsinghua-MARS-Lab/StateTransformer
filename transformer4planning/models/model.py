@@ -221,7 +221,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
-        if self.model.task == "nuplan" and self.model.encoder_type == "raster":
+        if self.task == "nuplan" and self.encoder_type == "raster":
             high_res_raster = kwargs.get("high_res_raster", None)
             low_res_raster = kwargs.get("low_res_raster", None)
             pred_length = kwargs.get("pred_length", None)
@@ -249,12 +249,23 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 pred_length=pred_length,
                 context_length=context_length,
             ) 
-        elif self.model.task == "waymo" and self.model.encoder_type == "vector":
-            feature_inputs = dict(input_dict=kwargs.get("input_dict"))
+        elif self.task == "waymo" and self.encoder_type == "vector":
+            input_dict = kwargs.get("input_dict")
+            feature_inputs = dict(
+                input_dict=input_dict
+            )
         else:
             raise NotImplementedError
         
         input_embeds, info_dict = self.encoder(**feature_inputs)
+
+        if self.task == "waymo" and self.encoder_type == "vector":
+            trajectory_label = info_dict["trajectory_label"]
+            device = trajectory_label.device
+            batch_size, pred_length = trajectory_label.shape[:2]
+            context_length = info_dict["context_length"]
+            idm_reference_global = None
+
         selected_indices = info_dict["selected_indices"]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 

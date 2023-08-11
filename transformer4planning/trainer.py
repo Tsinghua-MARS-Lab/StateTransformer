@@ -366,6 +366,7 @@ class PlanningTrainer(Trainer):
                 'fde': [],
             }
         self.eval_itr = 0
+        
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
 
         result = dict()
