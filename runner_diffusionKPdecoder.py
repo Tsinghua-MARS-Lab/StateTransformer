@@ -130,9 +130,9 @@ def main():
         "TRAIN_FINI_IDX": 1400000, # max: 2136264
         "TEST_INIT_IDX": 0,
         "TEST_FINI_IDX": 195000,# max: 195871
-        "TRAJ_OR_KEYPOINTS": 'keypoints'
+        "TRAJ_OR_KEYPOINTS": 'keypoints',
         "NUM_KEY_POINTS": 5,
-        "FEATURE_SEQ_LENTH": 16
+        "FEATURE_SEQ_LENTH": 16,
     }
 
     # Validate that TRAJ_OR_KEYPOINTS has an acceptable value
