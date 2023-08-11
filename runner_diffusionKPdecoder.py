@@ -193,7 +193,7 @@ def main():
     FEATURE_SEQ_LENTH = HYPERPARAMS["FEATURE_SEQ_LENTH"]
     assert SAVING_K == 1, ''
     pl.seed_everything(SEED)
-    diffusionDecoder = DiffusionDecoderTFBased(1024,256,2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=256,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS)
+    diffusionDecoder = DiffusionDecoderTFBased(1024,256,2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=FEAT_DIM,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS)
     diffusionDecoder.to("cuda")
 
     model = diffusionDecoder
