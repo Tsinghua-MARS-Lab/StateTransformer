@@ -6,7 +6,7 @@
                                                     # and set the key_points_diffusion_decoder_load_from to be the best_model.pth file that is generated and saved by this runner_diffusionKPdecoder.py program.
 import torch
 import pytorch_lightning as pl
-from transformer4planning.models.diffusion_decoder.diffusion_decoders_tfbased import DiffusionDecoderTFBased, DiffusionDecoderTFBasedForKeyPoints
+from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBased, DiffusionDecoderTFBasedForKeyPoints
 from tqdm import tqdm
 from torch.utils.data import Sampler, DataLoader
 import datetime
@@ -28,7 +28,8 @@ class Tensor_Dataset(torch.utils.data.Dataset):
         for i in range(start_idx,finish_idx+1):
             self.traj_filename_list.append(self.pth_dir_path + traj_label_name+str(i)+'.pth')
             self.cond_filename_list.append(self.pth_dir_path + traj_hidden_state_name+str(i)+'.pth')
-        print("Now check if all files exist for {} set...".format(split))
+        print("Now checking if all files exist for {} set...".format(split))
+        
         for traj_file, cond_file in tqdm(zip(self.traj_filename_list, self.cond_filename_list)):
             assert os.path.exists(traj_file), f'{traj_file} does not exist!'
             assert os.path.exists(cond_file), f'{cond_file} does not exist!'
@@ -130,6 +131,8 @@ def main():
         "TEST_INIT_IDX": 0,
         "TEST_FINI_IDX": 195000,# max: 195871
         "TRAJ_OR_KEYPOINTS": 'keypoints'
+        "NUM_KEY_POINTS": 5,
+        "FEATURE_SEQ_LENTH": 16
     }
 
     # Validate that TRAJ_OR_KEYPOINTS has an acceptable value
@@ -184,9 +187,11 @@ def main():
     TEST_INIT_IDX = HYPERPARAMS["TEST_INIT_IDX"]
     TEST_FINI_IDX = HYPERPARAMS["TEST_FINI_IDX"]
     TRAJ_OR_KEYPOINTS = HYPERPARAMS["TRAJ_OR_KEYPOINTS"]
+    NUM_KEY_POINTS = HYPERPARAMS["NUM_KEY_POINTS"]
+    FEATURE_SEQ_LENTH = HYPERPARAMS["FEATURE_SEQ_LENTH"]
     assert SAVING_K == 1, ''
     pl.seed_everything(SEED)
-    diffusionDecoder = DiffusionDecoderTFBased(1024,256,2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=FEAT_DIM,input_feature_seq_lenth=16)
+    diffusionDecoder = DiffusionDecoderTFBased(1024,256,2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=FEAT_DIM,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS)
     diffusionDecoder.to("cuda")
 
     model = diffusionDecoder

@@ -437,12 +437,13 @@ def query_current_lane(map_api, target_point):
 
 class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
-        assert self.k==0,'Currently not supported.'
+        
         super().__init__(config, **kwargs)
         self.transformer = GPT2Model(config)
         self.model_args = kwargs["model_args"]
         self.traj_decoder = None
         self.k = int(self.model_args.k)
+        assert self.k==1,'Currently not supported.'
         self.ar_future_interval = self.model_args.ar_future_interval
         self.model_parallel = False
         self.device_map = None
@@ -453,7 +454,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         if not self.model_args.pred_key_points_only:
             self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
         if self.ar_future_interval > 0:
-            self.key_points_decoder = DiffusionDecoderTFBasedForKeyPoints(config.n_inner, config.n_embd, out_features=out_features * self.k)
+            self.key_points_decoder = DiffusionDecoderTFBasedForKeyPoints(config.n_inner, config.n_embd, out_features=out_features * self.k, num_key_points = self.model_args.key_points_num, input_feature_seq_lenth = self.model_args.diffusion_condition_sequence_lenth)
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
 

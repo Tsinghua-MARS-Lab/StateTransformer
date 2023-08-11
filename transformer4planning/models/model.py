@@ -452,11 +452,11 @@ def build_models(model_args):
                 ModelCls = TrajectoryGPT
                 tag = 'GPTTrajectory'
             else:
-                from transformer4planning.models.diffusion_KP_models import TrajectoryGPTDiffusionKPDecoder
+                from transformer4planning.models.diffusion_KP_model import TrajectoryGPTDiffusionKPDecoder
                 ModelCls = TrajectoryGPTDiffusionKPDecoder
                 tag = 'GPTTrajectory with Diffusion Key Point Decoder'
         else:
-            from transformer4planning.models.diffusion_KP_Models import TrajectoryGPTFeatureGen
+            from transformer4planning.models.diffusion_KP_model import TrajectoryGPTFeatureGen
             ModelCls = TrajectoryGPTFeatureGen
             tag = 'GPTTrajectory: Model For Generating and Saving Features used for training DiffusionKeyPointDecoder'
     elif 'transxl' in model_args.model_name:
