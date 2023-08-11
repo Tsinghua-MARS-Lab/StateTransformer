@@ -15,41 +15,11 @@ import numpy as np
 
 def main(args):
     running_mode = args.running_mode
-
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/data_3/madanjiao" + "/nuplan/dataset",
-    #     'NUPLAN_MAPS_ROOT': "/data_3/madanjiao" + "/nuplan/dataset/maps",
-    #     'NUPLAN_DB_FILES': "/data_3/madanjiao" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
-    # }
-    
     data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_ssd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_ssd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_ssd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path),
-     }
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
-    #     'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
-    #     'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_singapore",
-    # }
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-    #     'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-    #     'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
-    #     # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
-    # }
-    data_path = {
-        'NUPLAN_DATA_ROOT': "/localdata_hdd" + "/nuplan/dataset",
-        'NUPLAN_MAPS_ROOT': "/localdata_hdd" + "/nuplan/dataset/maps",
-        'NUPLAN_DB_FILES': "/localdata_hdd" + "/nuplan/dataset/nuplan-v1.1/{}".format(args.data_path)
-        # 'NUPLAN_DB_FILES': "/public/MARS/datasets/nuPlan/nuplan-v1.1/{}".format(args.data_path)
+        'NUPLAN_DATA_ROOT': args.dataset_root,
+        'NUPLAN_MAPS_ROOT': os.path.join(args.dataset_root, "maps"),
+        'NUPLAN_DB_FILES': os.path.join(args.dataset_root, "nuplan-v1.1", args.data_path),
     }
-    # data_path = {
-    #     'NUPLAN_DATA_ROOT': "/Volumes/Elements SE/nuPlan",
-    #     'NUPLAN_MAPS_ROOT': "/Volumes/Elements SE/nuPlan/maps",
-    #     'NUPLAN_DB_FILES': "/Volumes/Elements SE/nuPlan/nuplan-v1.1/{}".format(args.data_path)
-    # }
-
     road_path = args.road_dic_path
     if args.use_nsm:
         nsm_labels = None
@@ -67,19 +37,6 @@ def main(args):
     # check starting or ending number
     starting_file_num = args.starting_file_num if args.starting_file_num != -1 else None
     max_file_num = args.ending_file_num - starting_file_num if args.ending_file_num != -1 and starting_file_num is not None else None
-    # dl = NuPlanDL(scenario_to_start=0,
-    #             file_to_start=0,
-    #             max_file_number=1,
-    #             data_path=data_path, db=None, gt_relation_path=None,
-    #             road_dic_path=None,
-    #             running_mode=running_mode)
-    # loaded_dic, _ = dl.get_next_file()
-    # map = loaded_dic["map"]
-    # with open(f"{map}.pkl", "wb") as f:
-    #     pickle.dump(loaded_dic["road"], f)
-    # scenarios, zero_file = dl.get_scenario_num()
-    # print("Total scenario number is", scenarios, "zeros files", zero_file)
-    # exit()
     observation_kwargs = dict(
         max_dis=300,
         high_res_raster_shape=[224, 224], # for high resolution image, we cover 50 meters for delicated short-term actions
@@ -96,112 +53,22 @@ def main(args):
     # loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=20)
     # obs = get_observation_for_nsm(observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
     # obs = get_observation_for_autoregression_basedon_previous_coor(observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
-    def yield_data(shards, filter_info=None):
-        for shard in shards:
-            # loaded_dic = dl.get_next_file(specify_file_index=shard)
-            # file_name = dl.file_names[shard]
-            dl = NuPlanDL(scenario_to_start=starting_scenario,
-                          file_to_start=shard,
-                          max_file_number=1,
-                          data_path=data_path, db=None, gt_relation_path=None,
-                          road_dic_path=road_path,
-                          running_mode=running_mode)
-            loaded_dic = dl.get_next_file(specify_file_index=0)
-            file_name = dl.file_names[0]
-            if args.use_nsm:
-                nsm_result = nsm_labels[file_name] if file_name in nsm_labels else None
-                if args.use_nsm and nsm_result is None:
-                    print('ERROR: not found, ', file_name, nsm_labels['file_names'])
-                    continue
-                if loaded_dic is None:
-                    print('Ending data loading, No more file to load, current index is: ', shard)
-                    break
-            else:
-                nsm_result = None
-            total_frames = len(loaded_dic['lidar_pc_tokens'])
+    if args.filter_by_scenario_type:
+        filter_scenario = ["starting_straight_traffic_light_intersection_traversal","high_lateral_acceleration",
+        "changing_lane", "high_magnitude_speed", "low_magnitude_speed", "starting_left_turn",
+        "starting_right_turn", "stopping_with_lead", "following_lane_with_lead","near_multiple_vehicles",
+        "traversing_pickup_dropoff", "behind_long_vehicle", "waiting_for_pedestrian_to_cross", "stationary_in_traffic"]
+    else:
+        filter_scenario = None
 
-            frames_to_sample = list(range(observation_kwargs['past_frame_num'] + 1,
-                                          total_frames - observation_kwargs['future_frame_num'], args.sample_interval))
-            if filter_info is not None:
-                # only generate data for filtered frames
-                frames_to_sample = []
+    if args.scenario_filter_yaml_path is not None:
+        import yaml
+        with open(args.scenario_filter_yaml_path) as file:
+            loaded_yaml = yaml.full_load(file)
+            scenarios_to_keep = loaded_yaml["scenario_tokens"]
+    else:
+        scenarios_to_keep = None
 
-                if file_name not in filter_info:
-                    print('ERROR, file name not found after filter, ', file_name, list(filter_info.keys())[:10])
-                    continue
-                filter_info_this_file = filter_info[file_name]
-                frames = filter_info_this_file['frame_index']
-                ranks = filter_info_this_file['rank']
-                assert len(frames) == len(ranks), f'ERROR, frame and rank length not match, {len(frames)}, {len(ranks)}'
-                for idx, frame_idx in enumerate(frames):
-                    data_rank = ranks[idx]
-                    # loop for current frame
-                    if data_rank < args.filter_rank:
-                        # augment frames
-                        interval = observation_kwargs["frame_sample_interval"]
-                        frames_to_sample += list(range(frame_idx - interval, frame_idx + interval,
-                                                       int(interval * 2 / args.scaling_factor_for_dagger)))
-                        if len(frames_to_sample) == 0:
-                            print('test: ', frame_idx, interval, args.scaling_factor_for_dagger)
-                if len(frames_to_sample) == 0:
-                    print('ERROR, no frames to add, ', frames, ranks)
-                frames_to_sample = list(set(frames_to_sample))
-
-            for t in frames_to_sample:
-
-                if args.use_nsm:
-                    current_frame_is_valid = nsm_result['valid_frames'][t]
-                    target_frame_is_valid = nsm_result['valid_frames'][t + observation_kwargs['frame_sample_interval']]
-                    # sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1, observation_kwargs["frame_sample_interval"]))
-                    # include future frames
-                    sample_frames = list(range(t - observation_kwargs["past_frame_num"], t + 1 + 80))
-                    skip = False
-                    for frame in sample_frames:
-                        if len(nsm_result['goal_actions_weights_per_frame'][frame]) == 0:
-                            skip = True
-                            break
-                        if len(nsm_result['current_actions_weights_per_frame'][frame]) == 0:
-                            skip = True
-                            break
-                    if skip:
-                        continue
-                        # if current_goal_maneuver.value == target_goal_maneuver.value: # downsampling
-                    #     if np.random.rand() > args.sample_rate:
-                    #         continue
-                    if not current_frame_is_valid or not target_frame_is_valid:
-                        continue
-                    if len(nsm_result['goal_actions_weights_per_frame']) < t - observation_kwargs[
-                        'frame_sample_interval'] - 1:
-                        continue
-                    if len(nsm_result['current_actions_weights_per_frame']) < t - observation_kwargs[
-                        'frame_sample_interval'] - 1:
-                        continue
-
-                # if args.auto_regressive:
-                #     observation_dic = get_observation_for_autoregression_nsm(
-                #         observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
-                # else:
-                observation_dic = get_observation_for_nsm(
-                    observation_kwargs, loaded_dic, t, total_frames, nsm_result=nsm_result)
-                other_info = {
-                    'file_name': file_name,
-                    'scenario_id': '',  # empty for NuPlan
-                    'time_stamp': loaded_dic['lidar_pc_tokens'][t].timestamp,
-                    'frame_index': t,
-                    'map_name': dl.current_dataset[0].map_name,
-                    'lidar_token': loaded_dic['lidar_pc_tokens'][t].token,
-                }
-                if observation_dic is not None:
-                    observation_dic.update(other_info)
-                    yield observation_dic
-                else:
-                    continue
-            del dl
-        
-    filter_scenario = ["starting_straight_traffic_light_intersection_traversal","high_lateral_acceleration",
-    "changing_lane", "high_magnitude_speed", "low_magnitude_speed", "starting_left_turn",
-    "starting_right_turn", "stopping_with_lead", "following_lane_with_lead","near_multiple_vehicles",
-    "traversing_pickup_dropoff", "behind_long_vehicle", "waiting_for_pedestrian_to_cross", "stationary_in_traffic"]  
     def yield_data_by_scenario(shards):
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
@@ -257,7 +124,8 @@ def main(args):
 
             while not dl.end:
                 loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval,
-                                            map_name=args.map_name)
+                                            map_name=args.map_name,
+                                            scenarios_to_keep=scenarios_to_keep)
                 if loaded_dic is None:
                     continue
                 if loaded_dic["skip"]:
@@ -545,6 +413,7 @@ if __name__ == '__main__':
     #             'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
     #         })
     parser.add_argument("--data_path", type=str, default="train_singapore")
+    parser.add_argument("--dataset_root", type=str, default="/localdata_hdd/nuplan/dataset")
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
     parser.add_argument("--nsm_label_path", type=str,
                         default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")
@@ -575,5 +444,7 @@ if __name__ == '__main__':
     # parser.add_argument('--save_playback', default=True, action='store_true')
     parser.add_argument('--map_name', type=str, default=None)
     parser.add_argument('--save_map', default=False, action='store_true')
+    parser.add_argument('--scenario_filter_yaml_path', type=str, default=None)
+    parser.add_argument('--filter_by_scenario_type', default=False, action='store_true')
     args_p = parser.parse_args()
     main(args_p)

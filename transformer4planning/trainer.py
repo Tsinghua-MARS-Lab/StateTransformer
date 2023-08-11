@@ -217,6 +217,8 @@ class PlanningTrainer(Trainer):
                     ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                     fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                     fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
+                    if self.model.model_args.predict_yaw:
+                        heading_error = prediction_trajectory_in_batch[:, :, -1] - trajectory_label_in_batch[:, :, -1]
                     if self.model.k >= 1:
                         prediction_trajectory_in_batch_by_gen = self.model.generate(**inputs)
                         length_of_trajectory = trajectory_label_in_batch.shape[1]
@@ -230,6 +232,8 @@ class PlanningTrainer(Trainer):
                         ade_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                         fde_x_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                         fde_y_error_by_gen = prediction_trajectory_in_batch_by_gen[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
+                        if self.model.model_args.predict_yaw:
+                            heading_error_by_gen = prediction_trajectory_in_batch_by_gen[:, :, -1] - trajectory_label_in_batch[:, :, -1]
                     else:
                         raise ValueError(f'unknown k for auto-regression future keypoints: {self.model.k}')
                 else:
@@ -237,6 +241,8 @@ class PlanningTrainer(Trainer):
                     ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
                     fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                     fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
+                    if self.model.model_args.predict_yaw:
+                        heading_error = prediction_trajectory_in_batch[:, :, -1] - trajectory_label_in_batch[:, :, -1]
 
             if self.model.model_args.visualize_prediction_to_path is not None and self.is_world_process_zero:
                 # WARNING: only use it for one time evaluation, or slowing the evaluation significantly
@@ -273,14 +279,15 @@ class PlanningTrainer(Trainer):
             ade = torch.sqrt(ade_x_error.flatten() ** 2 + ade_y_error.flatten() ** 2)
             ade = ade.mean()
             self.eval_result['ade'].append(float(ade))
-            # self.eval_result['ade'] = (ade + self.eval_result['ade'] * self.eval_itr)/(self.eval_itr + 1)
-            # self.eval_result['ade'] = float(self.eval_result['ade'])  # tensor to float to save in json
             # compute fde
             fde = torch.sqrt(fde_x_error.flatten() ** 2 + fde_y_error.flatten() ** 2)
             fde = fde.mean()
             self.eval_result['fde'].append(float(fde))
-            # self.eval_result['fde'] = (fde + self.eval_result['fde'] * self.eval_itr)/(self.eval_itr + 1)
-            # self.eval_result['fde'] = float(self.eval_result['fde'])  # tensor to float to save in json
+            if self.model.model_args.predict_yaw:
+                heading_error = torch.abs(heading_error).mean()
+                if 'heading_error' not in self.eval_result:
+                    self.eval_result['heading_error'] = []
+                self.eval_result['heading_error'].append(float(heading_error))
 
             if self.model.ar_future_interval > 0:
                 if 'ade_keypoints' not in self.eval_result:
@@ -290,14 +297,10 @@ class PlanningTrainer(Trainer):
                 ade_key_points = torch.sqrt(ade_x_error_key_points.flatten() ** 2 + ade_y_error_key_points.flatten() ** 2)
                 ade_key_points = ade_key_points.mean()
                 self.eval_result['ade_keypoints'].append(float(ade_key_points))
-                # self.eval_result['ade_keypoints'] = (ade_key_points + self.eval_result['ade_keypoints'] * self.eval_itr) / (self.eval_itr + 1)
-                # self.eval_result['ade_keypoints'] = float(self.eval_result['ade_keypoints'])  # tensor to float to save in json
                 # compute fde
                 fde_key_points = torch.sqrt(fde_x_error_key_points.flatten() ** 2 + fde_y_error_key_points.flatten() ** 2)
                 fde_key_points = fde_key_points.mean()
                 self.eval_result['fde_keypoints'].append(float(fde_key_points))
-                # self.eval_result['fde_keypoints'] = (fde_key_points + self.eval_result['fde_keypoints'] * self.eval_itr) / (self.eval_itr + 1)
-                # self.eval_result['fde_keypoints'] = float(self.eval_result['fde_keypoints'])  # tensor to float to save in json
 
                 if self.model.k >= 1:
                     # evaluate through generate function
@@ -322,6 +325,11 @@ class PlanningTrainer(Trainer):
                     fde_key_points_by_gen = torch.sqrt(fde_x_error_key_points_by_gen.flatten() ** 2 + fde_y_error_key_points_by_gen.flatten() ** 2)
                     fde_key_points_by_gen = fde_key_points_by_gen.mean()
                     self.eval_result['fde_keypoints_gen'].append(float(fde_key_points_by_gen))
+                    if self.model.model_args.predict_yaw:
+                        if 'heading_error_by_gen' not in self.eval_result:
+                            self.eval_result['heading_error_by_gen'] = []
+                        heading_error_by_gen = torch.abs(heading_error_by_gen).mean()
+                        self.eval_result['heading_error_by_gen'].append(float(heading_error_by_gen))
 
         self.eval_itr += 1
         if prediction_loss_only:
@@ -495,40 +503,40 @@ class PlanningTrainer(Trainer):
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
     ) -> Dict[str, float]:
-        
+
         self.model.eval()
-        
+
         dataloader = self.get_eval_dataloader(eval_dataset)
         dataset = dataloader.dataset
-        
+
         if self.is_world_process_zero:
             progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval', dynamic_ncols=True)
-        
+
         model_path = self.model.model_args.model_pretrain_name_or_path
         model_name = model_path.split('/')[-3]+'___' + model_path.split('/')[-1]
-        
+
         eval_output_dir = model_path + '/eval_output/'
         os.makedirs(eval_output_dir, exist_ok=True)
         
         cur_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
         log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, cur_time))
         logger = common_utils.create_logger(log_file, rank=0)
-        
+
         start_time = time.time()
         logger_iter_interval = 1000
-        
+
         pred_dicts = []
         for i, batch_dict in enumerate(dataloader):
             with torch.no_grad():
                 batch_dict = self._prepare_inputs(batch_dict)
                 batch_pred_dicts = self.model.generate(**batch_dict)
                 # batch_pred_dicts = self.model(**batch_dict)
-                
+
                 if 'vector' in self.model.model_args.model_name:
                     final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
                 else:
                     final_pred_dicts = dataset.generate_prediction_dicts({'input_dict': batch_dict}, batch_pred_dicts)
-                    
+
                 pred_dicts += final_pred_dicts
 
             disp_dict = {}
@@ -559,7 +567,7 @@ class PlanningTrainer(Trainer):
             pickle.dump(pred_dicts, f)
 
         result_str, result_dict = dataset.evaluation(
-            pred_dicts, 
+            pred_dicts,
         )
 
         logger.info(result_str)
@@ -567,4 +575,3 @@ class PlanningTrainer(Trainer):
 
         logger.info('Result is save to %s' % eval_output_dir)
         logger.info('****************Evaluation done.*****************')
-        

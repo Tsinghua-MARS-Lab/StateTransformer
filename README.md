@@ -297,3 +297,5 @@ or
 
 `python nuplan/planning/script/run_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
 
+### Statics Simulation Scores
+`python script/run_metric_scores.py --file_path ... --save_dir ... --exp_name ... --simulation_type ...`

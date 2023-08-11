@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--file_path",
     type=str,
-    default = "/home/sunq/nuplan/exp/exp/simulation/open_loop_boxes/2023.08.02.22.05.25/metrics/planner_expert_final_l2_error_within_bound.parquet"
+    default = "/home/sunq/nuplan/exp/exp/simulation/open_loop_boxes/2023.08.04.11.46.26/"
 )
 parser.add_argument(
     "--save_dir",
@@ -30,10 +30,34 @@ parser.add_argument(
 def convert_parquet_to_csv(args):
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
-    table = pq.read_table(args.file_path)
-    df = table.to_pandas()
-    save_path = os.path.join(args.save_dir, f"{args.exp_name}", f"{args.simulation_type}.csv")
-    df.to_csv(save_path, index=False)
+
+    # assume metrics follow nuplan simulation's default setting
+    aggregator_metric_folder = os.path.join(args.file_path, "aggregator_metric")
+    if os.path.isdir(aggregator_metric_folder):
+        for file in os.listdir(aggregator_metric_folder):
+            if file.endswith(".parquet"):
+                table = pq.read_table(os.path.join(aggregator_metric_folder, file))
+                df = table.to_pandas()
+                save_folder = os.path.join(args.save_dir, f"{args.exp_name}", f"{args.simulation_type}")
+                if not os.path.exists(save_folder):
+                    os.makedirs(save_folder)
+                save_path = os.path.join(args.save_dir, f"{args.exp_name}", f"{args.simulation_type}", f"{file.split('.')[0]}.csv")
+                df.to_csv(save_path, index=False)
+                print(f"save {save_path}")
+    metrics_folder = os.path.join(args.file_path, "metrics")
+    if os.path.isdir(metrics_folder):
+        for file in os.listdir(metrics_folder):
+            if file.endswith(".parquet"):
+                table = pq.read_table(os.path.join(metrics_folder, file))
+                df = table.to_pandas()
+                save_folder = os.path.join(args.save_dir, f"{args.exp_name}", f"{args.simulation_type}")
+                if not os.path.exists(save_folder):
+                    os.makedirs(save_folder)
+                save_path = os.path.join(args.save_dir, f"{args.exp_name}", f"{args.simulation_type}", f"{file.split('.')[0]}.csv")
+                df.to_csv(save_path, index=False)
+                print(f"save {save_path}")
+    # save_path = os.path.join(args.save_dir, f"{args.exp_name}", f"{args.simulation_type}.csv")
+    # df.to_csv(save_path, index=False)
 
 if __name__ == "__main__":
     args = parser.parse_args()
