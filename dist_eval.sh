@@ -7,7 +7,7 @@ python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_wa
         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
         --output_dir /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_masked_ep100_cls10/training_results  \
         --run_name gpt_mse_FI1_PI1_k1_test \
-        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --predict_trajectory True --ar_future_interval 5 --specified_key_points True \
+        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --predict_trajectory True --ar_future_interval 5 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True \
         --d_embed 256 --d_model 256 --d_inner 1024 --n_layers 4 --n_heads 4 \
         --activation_function silu --dataset_scale 1 \
