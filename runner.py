@@ -43,6 +43,7 @@ from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
+# Change ModelArguments in transformer4planning.utils
 # @dataclass
 # class ModelArguments:
 #     """
@@ -453,6 +454,7 @@ def main():
                          all_maps_dic=all_maps_dic,
                          all_pickles_dic=all_pickles_dic,
                          **model_args.__dict__) if data_args.online_preprocess else None
+    org_model = copy.deepcopy(model)
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -462,7 +464,65 @@ def main():
         data_collator=collate_fn
     )
     trainer.pop_callback(DefaultFlowCallback)
+    
+    if model_args.key_points_diffusion_decoder_load_from is not None:
+        pretrained_model = copy.deepcopy(trainer.model)
+        print("Now loading pretrained key_points_diffusion_decoder.")
+        pretrained_key_points_diffusion_decoder = torch.load(model_args.key_points_diffusion_decoder_load_from).to("cpu")
+        pretrained_model.key_points_decoder = pretrained_key_points_diffusion_decoder
 
+        # load pretrained model, then substitude the key_points_decoder with ours.
+
+        trainer = PlanningTrainer(
+            model=pretrained_model,  # the instantiated 🤗 Transformers model to be trained
+            args=training_args,  # training arguments, defined above
+            train_dataset=train_dataset if training_args.do_train else None,
+            eval_dataset=eval_dataset if training_args.do_eval else None,
+            callbacks=[CustomCallback,],
+            data_collator=collate_fn
+        )
+        trainer.pop_callback(DefaultFlowCallback)
+        
+    if model_args.generate_diffusion_dataset_for_key_points_decoder:
+        # First we generate the testing set for our diffusion decoder.
+        
+        try:
+            if model_args.autoregressive or True:
+                result = trainer.evaluate()
+                logger.info("***** Final Eval results *****")
+                logger.info(f"  {result}")
+                hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
+                evaluate.save("./results/", ** result, ** hyperparams)
+                logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
+        except Exception as e:
+            # The code would throw an exception at the end of evaluation loop since we return None in evaluation step
+            # But this is not a big deal since we have just saved everything we need in the model's forward method.
+            # print(e)
+            pass
+        
+        # Then we generate the training set for our diffusion decoder.
+        # Since it's way more faster to run a evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
+        try:
+            model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
+            trainer = PlanningTrainer(
+                model=model,
+                args=training_args,
+                train_dataset=None,
+                eval_dataset=train_dataset,
+                callbacks=[CustomCallback,],
+                data_collator=collate_fn
+            )
+            trainer.pop_callback(DefaultFlowCallback)
+            results = {}
+            result = trainer.evaluate()
+            logger.info("***** Final Eval results *****")
+            logger.info(f"  {result}")
+            hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
+            evaluate.save("./results/", ** result, ** hyperparams)
+            logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
+        except Exception as e:
+            pass
+    
     # Training
     if training_args.do_train:
         checkpoint = None

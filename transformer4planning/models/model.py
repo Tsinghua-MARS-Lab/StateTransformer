@@ -445,8 +445,20 @@ def build_models(model_args):
             config_p.n_inner = model_args.d_inner
             config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
-        ModelCls = TrajectoryGPT
-        tag = 'GPTTrajectory'
+        
+        
+        if not model_args.generate_diffusion_dataset_for_key_points_decoder:
+            if 'diffusion_KP_decoder' not in model_args.model_name:
+                ModelCls = TrajectoryGPT
+                tag = 'GPTTrajectory'
+            else:
+                from transformer4planning.models.diffusion_KP_models import TrajectoryGPTDiffusionKPDecoder
+                ModelCls = TrajectoryGPTDiffusionKPDecoder
+                tag = 'GPTTrajectory with Diffusion Key Point Decoder'
+        else:
+            from transformer4planning.models.diffusion_KP_Models import TrajectoryGPTFeatureGen
+            ModelCls = TrajectoryGPTFeatureGen
+            tag = 'GPTTrajectory: Model For Generating and Saving Features used for training DiffusionKeyPointDecoder'
     elif 'transxl' in model_args.model_name:
         config_p = TransfoXLConfig()
         config_p.pad_token_id = 0

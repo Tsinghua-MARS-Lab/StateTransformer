@@ -135,6 +135,15 @@ class ModelArguments:
     debug_raster_path: Optional[str] = field(
         default=None
     )
+    generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
+        default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
+    )
+    diffusion_dataset_save_dir: Optional[str] = field(
+        default = None, metadata = {"help": "The path of the dir to save the diffusion dataset to be generated for Diffusion KeyPoint Decoder."}
+    )
+    key_points_diffusion_decoder_load_from: Optional[str] = field(
+        default = None, metadata = {"help": "From which file to load the pretrained key_points_diffusion_decoder."}
+    )
 
 
 def rotate_array(origin, points, angle, tuple=False):
