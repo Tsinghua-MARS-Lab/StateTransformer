@@ -1,0 +1,6 @@
+wandb
+__pycache__
+build
+*.egg-info
+*.so
+*.sh
