@@ -367,7 +367,7 @@ class PlanningTrainer(Trainer):
             }
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
-        print(self.eval_result["ade"], self.eval_result["fde"])
+
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics
@@ -581,6 +581,7 @@ class PlanningTrainer(Trainer):
 
         logger.info('Result is save to %s' % eval_output_dir)
         logger.info('****************Evaluation done.*****************')
+        
     def evaluate_interactive(
         self,
         eval_dataset: Optional[Dataset] = None,
