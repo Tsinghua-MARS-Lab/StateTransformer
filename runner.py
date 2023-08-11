@@ -30,7 +30,6 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
-from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
 from transformer4planning.utils import ModelArguments
 from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
@@ -42,119 +41,6 @@ from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
-
-# @dataclass
-# class ModelArguments:
-#     """
-#     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-#     """
-#     model_name: str = field(
-#         default="scratch-gpt",
-#         metadata={"help": "Name of a planning model backbone"}
-#     )
-#     model_pretrain_name_or_path: str = field(
-#         default=None,
-#         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-#     )
-#     predict_result_saving_dir: Optional[str] = field(
-#         default=False,
-#         metadata={"help": "The target folder to save prediction results."},
-#     )
-#     predict_trajectory: Optional[bool] = field(
-#         default=True,
-#     )
-#     d_embed: Optional[int] = field(
-#         default=256,
-#     )
-#     d_model: Optional[int] = field(
-#         default=256,
-#     )
-#     d_inner: Optional[int] = field(
-#         default=1024,
-#     )
-#     n_layers: Optional[int] = field(
-#         default=4,
-#     )
-#     n_heads: Optional[int] = field(
-#         default=8,
-#     )
-#     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
-#     activation_function: Optional[str] = field(
-#         default="silu"
-#     )
-#     loss_fn: Optional[str] = field(
-#         default="mse",
-#     )
-#     task: Optional[str] = field(
-#         default="nuplan" # only for mmtransformer
-#     )
-#     with_traffic_light: Optional[bool] = field(
-#         default=True
-#     )
-#     autoregressive: Optional[bool] = field(
-#         default=False
-#     )
-#     k: Optional[int] = field(
-#         default=1,
-#         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
-#     )
-#     next_token_scorer: Optional[bool] = field(
-#         default=False,
-#         metadata={"help": "Whether to use next token scorer for prediction."},
-#     )
-#     past_seq: Optional[int] = field(
-#         # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
-#         # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
-#         default=10,
-#         metadata={"help": "past frames to include for prediction/planning."},
-#     )
-#     x_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     y_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     tokenize_label: Optional[bool] = field(
-#         default=True
-#     )
-#     raster_channels: Optional[int] = field(
-#         default=33,
-#         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
-#     )
-#     predict_yaw: Optional[bool] = field(
-#         default=False
-#     )
-#     ar_future_interval: Optional[int] = field(
-#         default=0,
-#         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
-#     )
-#     arf_x_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     arf_y_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     trajectory_loss_rescale: Optional[float] = field(
-#         default=1.0
-#     )
-#     visualize_prediction_to_path: Optional[str] = field(
-#         default=None
-#     )
-#     pred_key_points_only: Optional[bool] = field(
-#         default=False
-#     )
-#     specified_key_points: Optional[bool] = field(
-#         default=False
-#     )
-#     forward_specified_key_points: Optional[bool] = field(
-#         default=False
-#     )
-#     token_scenario_tag: Optional[bool] = field(
-#         default=False
-#     )
-#     max_token_len: Optional[int] = field(
-#         default=20
-#     )
 
 @dataclass
 class DataTrainingArguments:
@@ -461,11 +347,23 @@ def main():
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
-                         dic_path=data_args.datadic_path,
-                         all_maps_dic=all_maps_dic,
-                         all_pickles_dic=all_pickles_dic,
-                         **data_process.__dict__) if data_args.online_preprocess else None
+    if model_args.task == "nuplan":
+        from transformer4planning.preprocess import (nuplan_collate_func, pdm_collate_func)
+        if model_args.encoder_type == "raster":
+            collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
+                                dic_path=data_args.datadic_path,
+                                all_maps_dic=all_maps_dic,
+                                all_pickles_dic=all_pickles_dic,
+                                **data_process.__dict__) if data_args.online_preprocess else None
+        elif model_args.encoder_type == "vector":
+            from nuplan.common.maps.nuplan_map.map_factory import get_maps_api
+            map_api = dict()
+            for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
+                map_api[map] = get_maps_api(map_root="/public/MARS/datasets/nuPlan/nuplan-maps-v1.1",
+                                    map_version="nuplan-maps-v1.0",
+                                    map_name=map
+                                    )
+            collate_fn = partial(pdm_collate_func, dic_path=data_args.datadic_path, map_api=map_api)
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -538,19 +436,6 @@ def main():
                 all_bias_y = []
                 losses = []
                 loss_fn = torch.nn.MSELoss(reduction="mean")
-            
-            # def waymo_collate_fn(batch):
-            #     import collections
-            #     expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-            #
-            #     elem = batch[0]
-            #     if isinstance(elem, collections.abc.Mapping):
-            #         return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            #
-            # if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
-            #     # Todo: test waymo collate fn
-            #     collate_fn = waymo_collate_fn
-
 
             for itr, input in enumerate(tqdm(test_dataloader)):
                 # move batch to device

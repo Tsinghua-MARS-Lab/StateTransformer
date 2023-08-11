@@ -3,6 +3,7 @@ import gc
 import pickle
 import numpy as np
 import torch
+import math
 from typing import List
 from shapely.geometry import Polygon, Point
 from functools import partial
@@ -115,7 +116,19 @@ def load_route_dicts(route_roadblock_ids: List[str], map_api) -> None:
             route_lane_dict[lane.id] = lane
     return route_lane_dict, route_roadblock_dict
 
-def get_starting_lane(ego_position, driviable_area_map, route_lane_dict):
+def build_geometry(ego_position, ego_shape):
+    from nuplan.common.geometry.transform import translate_longitudinally_and_laterally
+    half_width = ego_shape[0] / 2
+    half_length = ego_shape[1] / 2
+    corners = [
+        tuple(translate_longitudinally_and_laterally(StateSE2(ego_position[0], ego_position[1], ego_position[-1]), half_length, half_width).point),
+        tuple(translate_longitudinally_and_laterally(StateSE2(ego_position[0], ego_position[1], ego_position[-1]), -half_length, half_width).point),
+        tuple(translate_longitudinally_and_laterally(StateSE2(ego_position[0], ego_position[1], ego_position[-1]), -half_length, -half_width).point),
+        tuple(translate_longitudinally_and_laterally(StateSE2(ego_position[0], ego_position[1], ego_position[-1]), half_length, -half_width).point),
+    ]
+    return Polygon(corners)
+
+def get_starting_lane(ego_position, driviable_area_map, route_lane_dict, ego_shape):
     """
     Returns the most suitable starting lane, in ego's vicinity.
     :param ego_state: state of ego-vehicle
@@ -136,8 +149,9 @@ def get_starting_lane(ego_position, driviable_area_map, route_lane_dict):
             if edge.contains_point(Point(*ego_position[:2])):
                 starting_lane = edge
                 break
-
-            distance = edge.polygon.distance(ego_state.car_footprint.geometry)
+            # TODO: ego_state.car_footprint.geometry mapping
+            geometry = build_geometry(ego_shape, ego_position)
+            distance = edge.polygon.distance(geometry)
             if distance < closest_distance:
                 starting_lane = edge
                 closest_distance = distance
@@ -210,6 +224,7 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
     map = sample["map"]
     split = sample["split"]
     frame_id = sample["frame_id"]
+    scenario_type = sample.get("scenario_type", None)
     map_api = map_api[map]
     route_ids = sample["route_ids"].tolist()
     pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
@@ -226,12 +241,13 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
         print(f"Error: cannot load {filename} from {data_path} with {map}")
         return None
     # convert ego poses to nuplan format (x, y, heading)
-    ego_poses = agent_dic["ego"]["pose"][frame_id - past_seconds * frame_rate:frame_id].copy()
+    ego_poses = agent_dic["ego"]["pose"][(frame_id - past_seconds * frame_rate)//2:frame_id//2].copy()
+    ego_shape = agent_dic["ego"]["shape"][0]
     nuplan_ego_poses = [StateSE2(x=ego_pose[0], y=ego_pose[1], heading=ego_pose[-1]) for ego_pose in ego_poses]
     anchor_ego_pose = nuplan_ego_poses[-1]
     ego_position = convert_absolute_to_relative_poses(anchor_ego_pose, nuplan_ego_poses)
-    ego_velocities = compute_derivative(ego_position, interval=0.05, drop_z_axis=True) # (bsz, 4) -> (bsz, 3)
-    ego_accelerations = compute_derivative(ego_velocities, interval=0.05, drop_z_axis=False) # (bsz, 3) -> (bsz, 3)
+    ego_velocities = compute_derivative(ego_position, interval=0.1, drop_z_axis=True) # (bsz, 4) -> (bsz, 3)
+    ego_accelerations = compute_derivative(ego_velocities, interval=0.1, drop_z_axis=False) # (bsz, 3) -> (bsz, 3)
 
     # build drivable area map and extract centerline
     divable_area_map = get_drivable_area_map(map_api, ego_poses[-1], map_radius=map_radius)
@@ -242,7 +258,7 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
     gc.disable()
     route_ids = route_roadblock_correction(ego_poses[-1], map_api, init_route_dict)
     route_lane_dict, route_block_dict = load_route_dicts(route_ids, map_api)
-    current_lane = get_starting_lane(ego_poses[-1], divable_area_map, route_lane_dict)
+    current_lane = get_starting_lane(ego_poses[-1], divable_area_map, route_lane_dict, ego_shape)
     centerline = PDMPath(get_discrete_centerline(current_lane, route_block_dict, route_lane_dict))
     current_progress = centerline.project(Point(*anchor_ego_pose.array))
     centerline_progress_values = (
@@ -253,11 +269,21 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
         centerline.interpolate(centerline_progress_values, as_array=True),
     )
 
+    cos_, sin_ = math.cos(-ego_poses[-1][-1]), math.sin(-ego_poses[-1][-1])
+    trajectory_label = agent_dic["ego"]["pose"][frame_id//2:frame_id//2 + 80, :].copy()
+    trajectory_label -= ego_poses[-1]
+    traj_x = trajectory_label[:, 0].copy()
+    traj_y = trajectory_label[:, 1].copy()
+    trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
+    trajectory_label[:, 1] = traj_x * sin_ + traj_y * cos_
+
     return dict(
         ego_position=ego_position,
         ego_velocity=ego_velocities,
         ego_acceleration=ego_accelerations,
         planner_centerline=planner_centerline,
+        scenario_type=scenario_type,
+        trajectory_label=trajectory_label
     )
 
 if __name__ == "__main__":

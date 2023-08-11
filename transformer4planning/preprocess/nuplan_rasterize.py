@@ -285,7 +285,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                             direction=-pose[3])
             rect_pts = np.array(rect_pts, dtype=np.int32)
-            rect_pts[:, 1] *= y_inverse
+            rect_pts[:, 0] *= y_inverse
             # draw on high resolution
             rect_pts_high_res = (high_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
             # example: if frame_interval = 10, past frames = 40
@@ -306,7 +306,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
                               ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                               np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
-    rotated_poses[:, 1] *= y_inverse
+    rotated_poses[:, 0] *= y_inverse
     for i in sample_frames_in_past:
         action = rotated_poses[i//frequency_change_rate]  # hard-coded frequency change
         context_actions.append(action)
@@ -326,7 +326,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     traj_y = trajectory_label[:, 1].copy()
     trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
     trajectory_label[:, 1] = traj_x * sin_ + traj_y * cos_
-    trajectory_label[:, 1] *= y_inverse
+    trajectory_label[:, 0] *= y_inverse
 
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
     rasters_low_res = cv2.merge(rasters_low_res_channels).astype(bool)

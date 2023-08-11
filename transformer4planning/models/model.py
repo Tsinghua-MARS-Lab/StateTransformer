@@ -33,27 +33,33 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            from transformer4planning.models.encoders import (NuplanRasterizeEncoder,)
+            from transformer4planning.models.encoders import (NuplanRasterizeEncoder, PDMEncoder)
             # TODO: add raster/vector encoder configuration item
-            if "raster" in self.model_args.encoder_type:
-                cnn_kwargs = dict(
-                    d_embed=self.config.n_embd // 2,
-                    in_channels=self.model_args.raster_channels,
-                    resnet_type=self.model_args.resnet_type, 
-                    pretrain=self.model_args.pretrain_encoder
-                )
-                action_kwargs = dict(
-                    d_embed=self.config.n_embd
-                )
-                tokenizer_kwargs = dict(
-                    dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
-                    d_embed=self.config.n_embd,
-                )
-                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
-            elif "vector" in self.model_args.encoder_type:
-                raise NotImplementedError
-            else:
-                raise AttributeError("encoder_type should be either raster or vector")
+            tokenizer_kwargs = dict(
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                d_embed=self.config.n_embd,
+            )
+            if self.model_args.task == "nuplan":
+                if "raster" in self.model_args.encoder_type:
+                    cnn_kwargs = dict(
+                        d_embed=self.config.n_embd // 2,
+                        in_channels=self.model_args.raster_channels,
+                        resnet_type=self.model_args.resnet_type, 
+                        pretrain=self.model_args.pretrain_encoder
+                    )
+                    action_kwargs = dict(
+                        d_embed=self.config.n_embd
+                    )
+                    self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
+                elif "vector" in self.model_args.encoder_type:
+                    pdm_kwargs = dict(
+                        hidden_dim=self.config.n_embd,
+                        centerline_dim=120,
+                        history_dim=20
+                    )
+                    self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
+                else:
+                    raise AttributeError("encoder_type should be either raster or vector")
 
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -64,30 +70,24 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         return position_ids
     
     def forward(
-            self,
-            trajectory_label: Optional[torch.FloatTensor] = None,
-            context_actions: Optional[torch.FloatTensor] = None,
-            high_res_raster: Optional[torch.LongTensor] = None,
-            low_res_raster: Optional[torch.LongTensor] = None,
-            scenario_type: Optional[str] = None,          
+            self,     
             return_dict: Optional[bool] = None,
             **kwargs
     ):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        device = high_res_raster.device
+        trajectory_label = kwargs.get("trajectory_label", None)
+        assert trajectory_label is not None, "trajectory_label should not be None"
+        device = trajectory_label.device
         batch_size, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        feature_inputs = dict(
-            high_res_raster=high_res_raster,
-            low_res_raster=low_res_raster,
-            context_actions=context_actions,
-            trajectory_label=trajectory_label,
-            scenario_type=scenario_type,
-            pred_length=pred_length,
-            context_length=context_length,
+        context_length = kwargs.get("context_actions", torch.zeros(1, 10)).shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
+        kwargs.update(
+            dict(
+                pred_length=pred_length,
+                context_length=context_length
+            )
         )
-        input_embeds, future_key_points, _ = self.encoder(**feature_inputs)
+        input_embeds, future_key_points, _ = self.encoder(**kwargs)
         
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
@@ -195,36 +195,30 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
-        high_res_raster = kwargs.get("high_res_raster", None)
-        low_res_raster = kwargs.get("low_res_raster", None)
-        pred_length = kwargs.get("pred_length", None)
         trajectory_label = kwargs.get("trajectory_label", None)
+        assert trajectory_label is not None
         context_actions = kwargs.get("context_actions", None)
         # pass the following infos during generate for one sample (non-batch) generate with KP checking
         map_api = kwargs.get("map_api", None)
         route_ids = kwargs.get("route_ids", None)
         ego_pose = kwargs.get("ego_pose", None)
         road_dic = kwargs.get("road_dic", None)
-        scenario_type = kwargs.get("scenario_type", None)
         idm_reference_global = kwargs.get("idm_reference_global", None)
         """
         Used for generate with key points
         """
-        device = high_res_raster.device
+        device = trajectory_label.device
         batch_size, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1]
+        context_length = context_actions.shape[1] if context_actions is not None else 20
         
-        feature_inputs = dict(
-            high_res_raster=high_res_raster,
-            low_res_raster=low_res_raster,
-            context_actions=context_actions,
-            trajectory_label=trajectory_label,
-            scenario_type=scenario_type,
-            pred_length=pred_length,
-            context_length=context_length,
+        kwargs.update(
+            dict(
+                pred_length=pred_length,
+                context_length=context_length,
+            )
         )
 
-        input_embeds, _, selected_indices = self.encoder(**feature_inputs)
+        input_embeds, _, selected_indices = self.encoder(**kwargs)
         
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 

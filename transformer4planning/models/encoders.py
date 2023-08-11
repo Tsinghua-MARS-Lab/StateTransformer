@@ -53,20 +53,9 @@ class CNNDownSamplingResNet(nn.Module):
         output = self.classifier(x.squeeze(-1).squeeze(-1))
         return output
     
-
-class NuplanRasterizeEncoder(AugmentationMixin):
-    def __init__(self, 
-                 cnn_kwargs:Dict, 
-                 action_kwargs:Dict,
-                 tokenizer_kwargs:Dict = None,
-                 model_args = None
-                 ):
+class EncoderBase(nn.Module):
+    def __init__(self, model_args, tokenizer_kwargs):
         super().__init__()
-        self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None), 
-                                                    in_channels=cnn_kwargs.get("in_channels", None), 
-                                                    resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
-                                                    pretrain=cnn_kwargs.get("pretrain", False))
-        self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh()) # 2*embed is because the cnn downsample will be apply to both high&low resolution rasters
         self.token_scenario_tag = model_args.token_scenario_tag
         self.ar_future_interval = model_args.ar_future_interval
         self.model_args = model_args
@@ -74,8 +63,42 @@ class NuplanRasterizeEncoder(AugmentationMixin):
             self.tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_kwargs.get("dirpath", None))
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tokenizer.vocab_size, tokenizer_kwargs.get("d_embed", None))    
- 
-    
+
+    def forward(self, **kwargs):
+        raise NotImplemented
+
+    def select_keypoints(self, trajectory_label):
+        device = trajectory_label.device
+        # use autoregressive future interval
+        if self.model_args.specified_key_points:
+            # 80, 40, 20, 10, 5
+            if self.model_args.forward_specified_key_points:
+                selected_indices = [4, 9, 19, 39, 79]
+            else:
+                selected_indices = [79, 39, 19, 9, 4]
+            future_key_points = trajectory_label[:, selected_indices, :]
+            indices = torch.tensor(selected_indices, device=device, dtype=float) / 80.0                   
+        else:
+            future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+            indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
+            selected_indices = None
+        
+        return future_key_points, selected_indices, indices
+
+class NuplanRasterizeEncoder(EncoderBase, AugmentationMixin):
+    def __init__(self, 
+                 cnn_kwargs:Dict, 
+                 action_kwargs:Dict,
+                 tokenizer_kwargs:Dict = None,
+                 model_args = None
+                 ):
+        super().__init__(model_args, tokenizer_kwargs)
+        self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None), 
+                                                    in_channels=cnn_kwargs.get("in_channels", None), 
+                                                    resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
+                                                    pretrain=cnn_kwargs.get("pretrain", False))
+        self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        
     def forward(self, **kwargs):
         high_res_raster = kwargs.get("high_res_raster", None)
         low_res_raster = kwargs.get("low_res_raster", None)
@@ -124,19 +147,7 @@ class NuplanRasterizeEncoder(AugmentationMixin):
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
         elif self.ar_future_interval > 0:
-            # use autoregressive future interval
-            if self.model_args.specified_key_points:
-                # 80, 40, 20, 10, 5
-                if self.model_args.forward_specified_key_points:
-                    selected_indices = [4, 9, 19, 39, 79]
-                else:
-                    selected_indices = [79, 39, 19, 9, 4]
-                future_key_points = trajectory_label[:, selected_indices, :]
-                indices = torch.tensor(selected_indices, device=device, dtype=float) / 80.0                   
-            else:
-                future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-                indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
-                selected_indices = None
+            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
@@ -153,41 +164,88 @@ class NuplanRasterizeEncoder(AugmentationMixin):
 
         return input_embeds, future_key_points, selected_indices
 
-class PDMEncoder(nn.Module):
-    def __init__(self, history_dim, centerline_dim, hidden_dim):
-        super(PDMEncoder, self).__init__()
-        self.state_encoding = nn.Sequential(
+class PDMEncoder(EncoderBase, AugmentationMixin):
+    def __init__(self, 
+                 pdm_kwargs:Dict,
+                 tokenizer_kwargs:Dict = None,
+                 model_args = None):
+        super(PDMEncoder, self).__init__(model_args, tokenizer_kwargs)
+        # 3*3 means 3d pos, 3d vel & 3d acc concat
+        self.state_embed = nn.Sequential(
             nn.Linear(
-                history_dim * 3 * 3, hidden_dim
+                3 * 3, pdm_kwargs.get("hidden_dim", None)
             ),
             nn.ReLU(),
         )
 
-        self.centerline_encoding = nn.Sequential(
-            nn.Linear(centerline_dim * 3, hidden_dim),
+        self.centerline_embed = nn.Sequential(
+            nn.Linear(pdm_kwargs.get("centerline_dim") * 3, pdm_kwargs.get("hidden_dim")),
             nn.ReLU(),
         )
+
+        self.action_m_embed = nn.Sequential(
+            nn.Linear(4, pdm_kwargs.get("hidden_dim")),
+            nn.Tanh()
+        )
     
-    def forward(self, input):
-        # TODO: fix feature input& complete the forward function
-        batch_size = input["ego_position"].shape[0]
-
-        ego_position = input["ego_position"].reshape(batch_size, -1).float()
-        ego_velocity = input["ego_velocity"].reshape(batch_size, -1).float()
-        ego_acceleration = input["ego_acceleration"].reshape(batch_size, -1).float()
-
-        # encode ego history states
+    def forward(self, **kwargs):
+        """
+        PDM feature include ego history states, planner centerline, and scenario type
+        """
+        batch_size = kwargs.get("ego_position").shape[0]
+        ego_position = kwargs.get("ego_position").float() # shape (bsz, history_dim, 3)
+        ego_velocity = kwargs.get("ego_velocity").float() # shape (bsz, history_dim, 3)
+        ego_acceleration = kwargs.get("ego_acceleration").float() # shape (bsz, history_dim, 3)
+        planner_centerline = kwargs.get("planner_centerline").reshape(batch_size, -1).float() # (bsz, centerline_num, 3) -> (bsz, centerline_dim * 3)
+        scenario_type = kwargs.get("scenario_type")
+        trajectory_label = kwargs.get("trajectory_label", None)
+        pred_length = kwargs.get("pred_length", trajectory_label.shape[1])
+        device = ego_position.device if ego_position is not None else None
+        
+        # encode ego history states, with shape of (bsz, history_dim, 9)
         state_features = torch.cat(
             [ego_position, ego_velocity, ego_acceleration], dim=-1
         )
-        state_encodings = self.state_encoding(state_features)
+        state_encodings = self.state_embed(state_features)
 
         # encode planner centerline
-        planner_centerline = input["planner_centerline"].reshape(batch_size, -1).float()
-        centerline_encodings = self.centerline_encoding(planner_centerline)
+        centerline_encodings = self.centerline_embed(planner_centerline)
 
         # decode future trajectory
-        planner_features = torch.cat(
-            [state_encodings, centerline_encodings], dim=-1
+        planner_embed = torch.cat(
+            [state_encodings, centerline_encodings.unsqueeze(1)], dim=1
         )
-        return planner_features
+
+        if self.token_scenario_tag:
+            scenario_tag_ids = torch.tensor(self.tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
+            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
+            assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
+            planner_embed = torch.cat([scenario_tag_embeds, planner_embed], dim=1)
+        
+        # use trajectory label to build keypoints
+        if self.ar_future_interval > 0:
+            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
+            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
+            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+            # argument future trajectory
+            future_key_points_aug = self.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
+            if not self.model_args.predict_yaw:
+                # keep the same information when generating future points
+                future_key_points_aug[:, :, 2:] = 0
+
+            future_key_embeds = self.action_m_embed(future_key_points_aug)
+            planner_embed = torch.cat([planner_embed, future_key_embeds, 
+                                       torch.zeros((batch_size, pred_length, planner_embed.shape[-1]), device=device)], dim=1)
+
+        else:
+            planner_embed = torch.cat([planner_embed, 
+                                       torch.zeros((batch_size, pred_length, planner_embed.shape[-1]), device=device)], dim=1)
+        return planner_embed, future_key_points, selected_indices    
+
+
+        
+
+        
+
+
+        

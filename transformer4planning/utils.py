@@ -103,9 +103,6 @@ class ModelArguments:
         default=False
     )
     forward_specified_key_points: Optional[bool] = field(
-        default=True
-    )
-    token_scenario_tag: Optional[bool] = field(
         default=False
     )
     token_scenario_tag: Optional[bool] = field(
