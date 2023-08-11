@@ -468,7 +468,10 @@ def main():
     if model_args.key_points_diffusion_decoder_load_from is not None:
         pretrained_model = copy.deepcopy(trainer.model)
         print("Now loading pretrained key_points_diffusion_decoder.")
-        pretrained_key_points_diffusion_decoder = torch.load(model_args.key_points_diffusion_decoder_load_from).to("cpu")
+        from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBased, DiffusionDecoderTFBasedForKeyPoints
+        state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
+        pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=256,num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
+        pretrained_key_points_diffusion_decoder.load_state_dict(state_dict) 
         pretrained_model.key_points_decoder = pretrained_key_points_diffusion_decoder
 
         # load pretrained model, then substitude the key_points_decoder with ours.
@@ -522,6 +525,8 @@ def main():
             logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
         except Exception as e:
             pass
+        
+        assert False, 'The generation has been done.'
     
     # Training
     if training_args.do_train:

@@ -145,7 +145,7 @@ class NewDecoderTFBased(nn.Module):
             self.state_encoder1 = DecoderResCat(hidden_size,in_features,800)
             self.state_encoder2 = DecoderResCat(1600,800,feat_dim)
         elif feat_dim == 1024:
-            print("This is suggested and used: feat_dim=1024.")
+            # print("This is suggested and used: feat_dim=1024.")
             self.state_encoder1 = DecoderResCat(hidden_size,in_features,1600)
             self.state_encoder2 = DecoderResCat(3200,1600,feat_dim)
         else:
@@ -480,7 +480,7 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
             self.state_encoder1 = DecoderResCat(hidden_size,in_features,800)
             self.state_encoder2 = DecoderResCat(1600,800,feat_dim)
         elif feat_dim == 1024:
-            print("This is suggested and used: feat_dim=1024.")
+            # print("This is suggested and used: feat_dim=1024.")
             self.state_encoder1 = DecoderResCat(hidden_size,in_features,1600)
             self.state_encoder2 = DecoderResCat(3200,1600,feat_dim)
         else:

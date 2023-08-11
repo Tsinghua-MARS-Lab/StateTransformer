@@ -688,7 +688,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         
         # for i in range(key_points_num): Loop for generation: We do not need this loop.
         if 2 == 2: # we actually only go through our transformer backbone twice. The first time is to generate the keypoints features, and the second time is to generate the traj features.
-            input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
+            input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 , :]
             attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
             position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
@@ -699,7 +699,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             future_key_point_hidden_state = transformer_outputs_hidden_state[:,
                                             :scenario_type_len + context_length * 2 # We use first part of transformer output as the condition for diffusion keypoint decoder.
-                                            :].reshape(batch_size, 1, -1)
+                                            :]# .reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 # TODO: use diffusion keypoint decoder to accomplish this part.
@@ -711,7 +711,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
             else:
                 key_points_logit, its_scores = self.key_points_decoder.sample_forward(future_key_point_hidden_state)
                 # key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
-            pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
+            pred_key_point = torch.zeros((batch_size, key_points_num, 4), device=device)
             if self.model_args.predict_yaw:
                 # pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
                 pred_key_point[:, :, :] = key_points_logit[:, :, :]
@@ -760,7 +760,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
             key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, pred_key_point.shape[-2], -1)  # b, 1, n_embed
             # replace embed at the next position
             # input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
-            input_embeds[:, scenario_type_len + context_length * 2 + key_points_num, :] = key_point_embed[:, :, :]
+            input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = key_point_embed[:, :, :]
             if self.model_args.predict_yaw:
                 # pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
                 pred_key_points_during_generate.append(pred_key_point[:, :, :])

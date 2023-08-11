@@ -79,7 +79,9 @@ def do_test(model, dataloader, current_min_loss, saving_dir):
     if avg_val_loss < current_min_loss:
         if not os.path.exists(saving_dir):
             os.makedirs(saving_dir)
-        torch.save(model, saving_dir + 'best_model.pth')
+        model.to("cpu")
+        torch.save(model.state_dict(), saving_dir + 'best_model.pth')
+        model.to("cuda")
         print("Best model saved: val loss decreased from {} to {}".format(current_min_loss, avg_val_loss))
     wandb.log({"avg_val_loss":avg_val_loss.item()})
     return avg_val_loss
@@ -191,7 +193,7 @@ def main():
     FEATURE_SEQ_LENTH = HYPERPARAMS["FEATURE_SEQ_LENTH"]
     assert SAVING_K == 1, ''
     pl.seed_everything(SEED)
-    diffusionDecoder = DiffusionDecoderTFBased(1024,256,2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=FEAT_DIM,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS)
+    diffusionDecoder = DiffusionDecoderTFBased(1024,256,2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=256,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS)
     diffusionDecoder.to("cuda")
 
     model = diffusionDecoder
