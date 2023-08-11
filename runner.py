@@ -115,8 +115,8 @@ class ConfigArguments:
 
 
 def main():
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
-    model_args, data_args, _, data_process, training_args = parser.parse_args_into_dataclasses()
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
+    model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
 
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
@@ -336,7 +336,7 @@ def main():
     # Initialize our Trainer
     if model_args.encoder_type == "raster" and model_args.task == "nuplan":
         from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
-        collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
+        collate_fn = partial(nuplan_collate_func,
                             dic_path=data_args.datadic_path,
                             all_maps_dic=all_maps_dic,
                             all_pickles_dic=all_pickles_dic,

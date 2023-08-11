@@ -12,6 +12,9 @@ class BaseEncoder(nn.Module):
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tokenizer.vocab_size, tokenizer_kwargs.get("d_embed", None)) 
             self.max_token_len = tokenizer_kwargs.tokenizer_kwargs
+            self.token_scenario_tag = True
+        else:
+            self.token_scenario_tag = False
     
     def trajectory_augmentation(self, target_traj, x_noise_scale, y_noise_scale, expanded_indices=1):
         if self.training and x_noise_scale > 0:
@@ -125,8 +128,9 @@ class NuplanRasterizeEncoder(BaseEncoder):
         context_actions = kwargs.get("context_actions", None)
         trajectory_label = kwargs.get("trajectory_label", None)
         scenario_type = kwargs.get("scenario_type", None)
-        context_length = kwargs.get("context_length", None)
-        pred_length = kwargs.get("pred_length", None)
+
+        context_length = context_actions.shape[1]
+        pred_length = trajectory_label.shape[1]
         device = high_res_raster.device if high_res_raster is not None else None
         # add noise to context actions
         context_actions = self.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
@@ -154,12 +158,13 @@ class NuplanRasterizeEncoder(BaseEncoder):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
         
-        input_embeds, future_key_points, _ = self.prepare_with_future(input_embeds, trajectory_label, scenario_type, (batch_size, pred_length, n_embed), device)
+        input_embeds, future_key_points, selected_indices = self.prepare_with_future(input_embeds, trajectory_label, scenario_type, (batch_size, pred_length, n_embed), device)
 
         info_dict = {
             "trajectory_label": trajectory_label,
             "context_length": context_length,
             "future_key_points": future_key_points,
+            "selected_indices": selected_indices,
         }
 
         return input_embeds, info_dict

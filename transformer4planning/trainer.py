@@ -190,7 +190,18 @@ class PlanningTrainer(Trainer):
                 fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                 fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
             else:
-                trajectory_label_in_batch = inputs["trajectory_label"].clone()
+                if self.model.task == "waymo" and self.model.encoder_type == "vector":
+                    input_dict = inputs["input_dict"]
+                    agent_trajs = input_dict['agent_trajs']
+                    ego_trajs = [traj[input_dict["track_index_to_predict"][i], :, :] for i, traj in enumerate(agent_trajs)]
+                    ego_trajs = torch.stack(ego_trajs, dim=0).to(self.model.device).squeeze(1)
+
+                    trajectory_label_in_batch = ego_trajs[:, 11:, [0, 1, 2, 6]].clone()
+                elif self.model.task == "nuplan" and self.model.encoder_type == "raster":
+                    trajectory_label_in_batch = inputs["trajectory_label"].clone()
+                else:
+                    raise NotImplementedError
+                
                 if isinstance(logits, tuple):
                     prediction_trajectory_in_batch = logits[0]
                 else:
@@ -356,8 +367,7 @@ class PlanningTrainer(Trainer):
             }
         self.eval_itr = 0
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
-        print(eval_output.keys())
-        exit()
+        print(self.eval_result["ade"], self.eval_result["fde"])
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics

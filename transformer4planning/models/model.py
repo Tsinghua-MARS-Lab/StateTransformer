@@ -221,34 +221,41 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
-        high_res_raster = kwargs.get("high_res_raster", None)
-        low_res_raster = kwargs.get("low_res_raster", None)
-        pred_length = kwargs.get("pred_length", None)
-        trajectory_label = kwargs.get("trajectory_label", None)
-        context_actions = kwargs.get("context_actions", None)
-        # pass the following infos during generate for one sample (non-batch) generate with KP checking
-        map_api = kwargs.get("map_api", None)
-        route_ids = kwargs.get("route_ids", None)
-        ego_pose = kwargs.get("ego_pose", None)
-        road_dic = kwargs.get("road_dic", None)
-        scenario_type = kwargs.get("scenario_type", None)
-        idm_reference_global = kwargs.get("idm_reference_global", None)
-        """
-        Used for generate with key points
-        """
-        device = high_res_raster.device
-        batch_size, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1]
-        feature_inputs = dict(
-            high_res_raster=high_res_raster,
-            low_res_raster=low_res_raster,
-            context_actions=context_actions,
-            trajectory_label=trajectory_label,
-            scenario_type=scenario_type,
-            pred_length=pred_length,
-            context_length=context_length,
-        )
-        input_embeds, _, selected_indices = self.encoder(**feature_inputs)
+        if self.model.task == "nuplan" and self.model.encoder_type == "raster":
+            high_res_raster = kwargs.get("high_res_raster", None)
+            low_res_raster = kwargs.get("low_res_raster", None)
+            pred_length = kwargs.get("pred_length", None)
+            trajectory_label = kwargs.get("trajectory_label", None)
+            context_actions = kwargs.get("context_actions", None)
+            # pass the following infos during generate for one sample (non-batch) generate with KP checking
+            map_api = kwargs.get("map_api", None)
+            route_ids = kwargs.get("route_ids", None)
+            ego_pose = kwargs.get("ego_pose", None)
+            road_dic = kwargs.get("road_dic", None)
+            scenario_type = kwargs.get("scenario_type", None)
+            idm_reference_global = kwargs.get("idm_reference_global", None)
+            """
+            Used for generate with key points
+            """
+            device = high_res_raster.device
+            batch_size, pred_length = trajectory_label.shape[:2]
+            context_length = context_actions.shape[1]
+            feature_inputs = dict(
+                high_res_raster=high_res_raster,
+                low_res_raster=low_res_raster,
+                context_actions=context_actions,
+                trajectory_label=trajectory_label,
+                scenario_type=scenario_type,
+                pred_length=pred_length,
+                context_length=context_length,
+            ) 
+        elif self.model.task == "waymo" and self.model.encoder_type == "vector":
+            feature_inputs = dict(input_dict=kwargs.get("input_dict"))
+        else:
+            raise NotImplementedError
+        
+        input_embeds, info_dict = self.encoder(**feature_inputs)
+        selected_indices = info_dict["selected_indices"]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
@@ -358,8 +365,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             raise ValueError("illegal k while generating trajectory", self.k)
         # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
         return torch.cat([key_points_logits, traj_logits], dim=1)
-
-
+    
 def query_current_lane(map_api, target_point):
     """
     Query the current road_block id and lane id given a point on the map with map_api from NuPlan.

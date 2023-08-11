@@ -269,6 +269,7 @@ class WaymoVectorizeEncoder(BaseEncoder):
             "context_length": context_length,
             "future_key_points": future_key_points,
             "future_key_points_gt_mask": future_key_points_gt_mask,
+            "selected_indices": selected_indices,
         }
 
         return input_embeds, info_dict
