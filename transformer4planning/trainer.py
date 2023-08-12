@@ -517,8 +517,9 @@ class PlanningTrainer(Trainer):
 
         eval_output_dir = model_path + '/eval_output/'
         os.makedirs(eval_output_dir, exist_ok=True)
-
-        log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, datetime.datetime.now().strftime('%Y%m%d-%H%M%S')))
+        
+        cur_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, cur_time))
         logger = common_utils.create_logger(log_file, rank=0)
 
         start_time = time.time()
@@ -549,6 +550,9 @@ class PlanningTrainer(Trainer):
                 logger.info(f'eval: batch_iter={i}/{len(dataloader)}, batch_size={batch_size}, iter_cost={second_each_iter:.2f}s, '
                             f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
                             f'{disp_str}')
+            
+            # if i > 100:    
+            #     break
 
         if self.is_world_process_zero:
             progress_bar.close()
@@ -559,7 +563,7 @@ class PlanningTrainer(Trainer):
 
         ret_dict = {}
 
-        with open(eval_output_dir + "result_" + model_name + '.pkl', 'wb') as f:
+        with open(eval_output_dir + "result_" + model_name + '_' + cur_time + '.pkl', 'wb') as f:
             pickle.dump(pred_dicts, f)
 
         result_str, result_dict = dataset.evaluation(
