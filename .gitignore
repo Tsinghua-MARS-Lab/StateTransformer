@@ -6,3 +6,4 @@ build
 *.png
 **log_eval*
 *.pkl
+.vscode
