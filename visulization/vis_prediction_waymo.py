@@ -6,6 +6,7 @@ import matplotlib.patches as patches
 from matplotlib.collections import PatchCollection
 from matplotlib import cm
 from tqdm import tqdm
+import torch
 
 import tensorflow as tf
 from waymo_open_dataset.protos import scenario_pb2
@@ -62,14 +63,10 @@ class Scenario:
         for prediction in predictions:
             gt_trajs = prediction['gt_trajs']
             object_id = prediction['object_id']
-            pred_trajs = prediction['pred_trajs'][0]
-            pred_scores = prediction['pred_scores']
+            pred_scores = torch.from_numpy(prediction['pred_scores']).softmax(0)
 
             valid_mask = (gt_trajs[:,-1] == 1)
             valid_gt = gt_trajs[valid_mask]
-            
-            pred_len = pred_trajs.shape[0]
-            valid_pred = pred_trajs[valid_mask[-pred_len:]]
             
             color = np.random.rand(3,)
             # visualize the gt trajectory
@@ -82,27 +79,6 @@ class Scenario:
                 facecolors='none',
                 zorder=5,
             )
-
-            # visualize the trajectory prediction
-            ax.plot(
-                valid_pred[:, 0],
-                valid_pred[:, 1],
-                linewidth=3,
-                color=color,
-                alpha=1.0,
-                zorder=5,
-            )
-            
-            ax.scatter(
-                valid_pred[:, 0],
-                valid_pred[:, 1],
-                marker='*',
-                linewidth=3,
-                color=color,
-                alpha=1.0,
-                zorder=5,
-            )
-
             # visualize the starting point
             ax.scatter(
                 gt_trajs[current_time_idx, 0],
@@ -116,6 +92,36 @@ class Scenario:
                 zorder=5,
             )
 
+            num_mode = prediction['pred_trajs'].shape[0]
+            for t_i in range(num_mode):
+                pred_trajs = prediction['pred_trajs'][t_i]
+                pred_len = pred_trajs.shape[0]
+                valid_pred = pred_trajs[valid_mask[-pred_len:]]
+                # visualize the trajectory prediction
+                ax.plot(
+                    valid_pred[:, 0],
+                    valid_pred[:, 1],
+                    linewidth=2,
+                    color=color,
+                    alpha=1.0,
+                    zorder=5,
+                )
+                
+                ax.text(valid_pred[-1, 0]+1, valid_pred[-1, 1]+1, 's:%f'% (pred_scores[t_i]), color=color)
+                
+                if "pred_kps" in prediction:
+                    pred_kps = prediction['pred_kps'][t_i] # (num_kps, 2)
+                    ax.scatter(
+                        pred_kps[:, 0],
+                        pred_kps[:, 1],
+                        marker='*',
+                        linewidth=5,
+                        color=color,
+                        alpha=1.0,
+                        zorder=5,
+                    )
+
+            
         f.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
 
         # save the image to output_file

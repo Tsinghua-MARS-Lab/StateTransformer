@@ -1,6 +1,11 @@
-wandb
 __pycache__
+data/
 build
-*.egg-info
+**egg-info**
 *.so
+*.png
+**log_eval*
+*.pkl
+.vscode
 *.sh
+wandb
