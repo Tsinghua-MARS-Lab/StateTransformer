@@ -113,7 +113,7 @@ def main():
     NAME = '200032-256FeatDim-run-LargeTFBased-keypoints_0.65TrainAllTest'
     HYPERPARAMS = {
         "NAME": NAME,
-        "SEED": 114514,
+        "SEED": 42,
         "FEAT_DIM": 256,
         "BATCH_SIZE": 512,
         "NUM_WORKERS": 5,
