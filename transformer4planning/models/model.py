@@ -87,11 +87,27 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         position_ids = attention_mask.long().cumsum(-1) - 1
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
+    
+    def from_joint_to_marginal(self, hidden_state, info_dict):
+        agents_num_per_scenario = info_dict["agents_num_per_scenario"]
+        scenario_num, _, _ = hidden_state.shape
+        assert len(agents_num_per_scenario) == scenario_num
+        hidden_state_marginal = []
+        for i in range(scenario_num):
+            agents_num = agents_num_per_scenario[i]
+            for j in range(agents_num):
+                hidden_state_marginal.append(hidden_state[i, j::agents_num, :])
+
+        hidden_state_marginal = torch.stack(hidden_state_marginal)
+
+        return hidden_state_marginal
 
     def get_output(self, hidden_state, info_dict):
         device = hidden_state.device
         trajectory_label = info_dict["trajectory_label"]
         pred_length = trajectory_label.shape[1]
+
+        if self.model_args.interactive: hidden_state = self.from_joint_to_marginal(hidden_state, info_dict)
         traj_hidden_state = hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         loss = torch.tensor(0, dtype=torch.float32, device=device)
@@ -197,8 +213,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         input_embeds, info_dict = self.encoder(**kwargs)
 
+        attention_mask = None
+        if self.model_args.interactive: attention_mask = info_dict["input_embeds_mask"]
+
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
+            attention_mask=attention_mask,
             return_dict=return_dict,
         )
 
@@ -278,6 +298,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
         future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
         key_points_num = future_key_points.shape[1]
+
+        if self.model_args.interactive:
+            input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
+            
         input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
         # Loop for generation
@@ -344,13 +368,23 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
 
+        
+        if self.model_args.interactive:
+            input_embeds = self.encoder.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=False)
+            attention_mask = info_dict["input_embeds_mask"]
+        else:
+            attention_mask = None
         # generate remaining trajectory
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
-            attention_mask=None,
+            attention_mask=attention_mask,
             position_ids=None,
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+
+        if self.model_args.interactive: 
+            transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
+
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         if self.traj_decoder is not None:

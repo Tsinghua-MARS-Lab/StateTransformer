@@ -3,12 +3,14 @@ import glob
 import tensorflow as tf
 
 class WaymoDL:
-    def __init__(self, data_path=None, mode="train"):
+    def __init__(self, data_path=None, mode="train", interactive=False):
         
         assert data_path is not None and mode in ["train", "test"]
 
         self.data_root = data_path["WAYMO_DATA_ROOT"]
-        self.data_path = os.path.join(self.data_root, data_path["SPLIT_DIR"][mode])
+        self.split_dir = data_path["SPLIT_DIR"][mode]
+        if mode == "test" and interactive == True: self.split_dir += "_interactive"
+        self.data_path = os.path.join(self.data_root, self.split_dir)
         src_files = glob.glob(os.path.join(self.data_path, '*.tfrecord*'))
         src_files.sort()
         

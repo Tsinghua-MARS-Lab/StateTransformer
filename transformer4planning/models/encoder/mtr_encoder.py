@@ -215,14 +215,39 @@ class WaymoVectorizeEncoder(BaseEncoder):
                  tokenizer_kwargs:Dict = None,
                  model_args = None
                  ):
-        super().__init__()
+        super().__init__(tokenizer_kwargs)
         self.model_args = model_args
         self.token_scenario_tag = model_args.token_scenario_tag
         self.ar_future_interval = model_args.ar_future_interval
         self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
  
-    
+    def from_marginal_to_joint(self, hidden_state, info_dict, update_info_dict=False):
+        device = hidden_state.device
+        agents_num_per_scenario = info_dict["agents_num_per_scenario"]
+        max_agents_num = max(agents_num_per_scenario)
+        scenario_num = len(agents_num_per_scenario)
+        feature_length, hidden_dim = hidden_state.shape[-2:]
+        hidden_state_joint = torch.zeros((scenario_num, max_agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
+        input_embeds_mask = torch.zeros((scenario_num, max_agents_num * feature_length), dtype=torch.bool, device=device)
+        agent_index_global = 0
+        for i in range(scenario_num):
+            agents_num = agents_num_per_scenario[i]
+            scenario_embeds = torch.zeros((agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
+            for j in range(agents_num):
+                scenario_embeds[j::agents_num, :] = hidden_state[agent_index_global]
+                agent_index_global += 1
+
+            hidden_state_joint[i, :agents_num * feature_length, :] = scenario_embeds
+            input_embeds_mask[i, :agents_num * feature_length] = 1
+        
+        if update_info_dict:
+            info_dict.update({
+                "input_embeds_mask": input_embeds_mask,
+            })
+        
+        return hidden_state_joint
+
     def forward(self, **kwargs):
         input_dict = kwargs.get("input_dict")
         agent_trajs = input_dict['agent_trajs']
@@ -257,7 +282,7 @@ class WaymoVectorizeEncoder(BaseEncoder):
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
         input_embeds, future_key_points, selected_indices = self.prepare_with_future(input_embeds, trajectory_label, None, (batch_size, pred_length, n_embed), device)
-        
+
         if selected_indices is not None:
             future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
         else:
@@ -272,14 +297,21 @@ class WaymoVectorizeEncoder(BaseEncoder):
             "selected_indices": selected_indices,
         }
 
+        if self.model_args.interactive:
+            info_dict.update({
+                "agents_num_per_scenario": input_dict["agents_num_per_scenario"],
+            })
+            input_embeds = self.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=True)
+
         return input_embeds, info_dict
     
 class SimpleEncoder(MTREncoder):
     def __init__(self, config):
         super().__init__(config)
+        self.output_dim = config.D_MODEL
         self.map_polyline_encoder = nn.Sequential(nn.Linear(2, 128, bias=False), nn.ReLU(),
                                                   nn.Linear(128, 256, bias=False), nn.ReLU(),
-                                                  nn.Linear(256, 256, bias=True), nn.ReLU(),)
+                                                  nn.Linear(256, self.output_dim, bias=True), nn.ReLU(),)
 
     def forward(self, input_dict):
         past_trajs = input_dict['agent_trajs'][:, :, :11, :]
@@ -315,6 +347,6 @@ class SimpleEncoder(MTREncoder):
                 x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
             )
 
-        global_token_feature_max, _ = torch.max(global_token_feature.view(num_center_objects, -1, num_timestamps, 256), dim=1)
+        global_token_feature_max, _ = torch.max(global_token_feature.view(num_center_objects, -1, num_timestamps, self.output_dim), dim=1)
 
         return global_token_feature_max.squeeze(1)

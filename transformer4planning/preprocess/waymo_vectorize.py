@@ -57,6 +57,8 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=Fa
         else:
             input_dict[key] = torch.cat(input_list, dim=0)
 
+    if interactive: input_dict["agents_num_per_scenario"] = [len(d["track_index_to_predict"]) for d in new_batch]
+
     return {"input_dict": input_dict}
 
 def waymo_preprocess(sample, interactive=False, data_path=None):

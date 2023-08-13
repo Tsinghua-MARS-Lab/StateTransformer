@@ -111,7 +111,7 @@ def main(args):
                     pickle.dump(dicts_to_save, f)
                     f.close()
     
-    data_loader = WaymoDL(data_path=data_path, mode="train" if args.train else "test")
+    data_loader = WaymoDL(data_path=data_path, mode="train" if args.train else "test", interactive=args.interactive)
     file_indices = []
     for i in range(args.num_proc):
         file_indices += range(data_loader.total_file_num)[i::args.num_proc]
