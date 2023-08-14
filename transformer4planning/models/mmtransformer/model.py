@@ -7,7 +7,7 @@ from transformers.modeling_outputs import Seq2SeqLMOutput, SequenceClassifierOut
 from transformer4planning.models.TransformerXL.model import *
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.nsm import NSMDecoder
-from transformer4planning.models.encoders import *
+from transformer4planning.models.encoder.encoders import *
 from transformer4planning.models.decoders import *
 
 

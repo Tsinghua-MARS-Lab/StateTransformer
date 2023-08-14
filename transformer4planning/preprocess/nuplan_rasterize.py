@@ -9,7 +9,7 @@ from functools import partial
 from torch.utils.data._utils.collate import default_collate
 from transformer4planning.utils import generate_contour_pts, save_raster
 
-def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
+def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  

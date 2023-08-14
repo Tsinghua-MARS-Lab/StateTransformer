@@ -2,9 +2,6 @@
 # Published at NeurIPS 2022
 # Written by Shaoshuai Shi 
 # All Rights Reserved
-
-
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -207,3 +204,171 @@ class MTREncoder(nn.Module):
         batch_dict['map_pos'] = map_polylines_center
 
         return batch_dict
+    
+from typing import Dict
+from transformer4planning.models.encoder.encoders import EncoderBase, AugmentationMixin
+
+class WaymoVectorizeEncoder(EncoderBase, AugmentationMixin):
+    def __init__(self, 
+                 mtr_config,
+                 action_kwargs:Dict,
+                 tokenizer_kwargs:Dict = None,
+                 model_args = None
+                 ):
+        super().__init__(tokenizer_kwargs)
+        self.model_args = model_args
+        self.token_scenario_tag = model_args.token_scenario_tag
+        self.ar_future_interval = model_args.ar_future_interval
+        self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
+        self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+ 
+    def from_marginal_to_joint(self, hidden_state, info_dict, update_info_dict=False):
+        device = hidden_state.device
+        agents_num_per_scenario = info_dict["agents_num_per_scenario"]
+        max_agents_num = max(agents_num_per_scenario)
+        scenario_num = len(agents_num_per_scenario)
+        feature_length, hidden_dim = hidden_state.shape[-2:]
+        hidden_state_joint = torch.zeros((scenario_num, max_agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
+        input_embeds_mask = torch.zeros((scenario_num, max_agents_num * feature_length), dtype=torch.bool, device=device)
+        agent_index_global = 0
+        for i in range(scenario_num):
+            agents_num = agents_num_per_scenario[i]
+            scenario_embeds = torch.zeros((agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
+            for j in range(agents_num):
+                scenario_embeds[j::agents_num, :] = hidden_state[agent_index_global]
+                agent_index_global += 1
+
+            hidden_state_joint[i, :agents_num * feature_length, :] = scenario_embeds
+            input_embeds_mask[i, :agents_num * feature_length] = 1
+        
+        if update_info_dict:
+            info_dict.update({
+                "input_embeds_mask": input_embeds_mask,
+            })
+        
+        return hidden_state_joint
+
+    def forward(self, **kwargs):
+        input_dict = kwargs.get("input_dict")
+        agent_trajs = input_dict['agent_trajs']
+        batch_size = agent_trajs.shape[0]
+        device = agent_trajs.device
+        track_index_to_predict = input_dict["track_index_to_predict"]
+
+        state_embeds = self.context_encoder(input_dict)
+
+        ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
+        ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
+
+        trajectory_label = ego_trajs[:, 11:, [0, 1, 2, 6]]
+        pred_length = trajectory_label.shape[1]
+        trajectory_label_mask = ego_trajs[:, 11:, -1].unsqueeze(-1)
+        context_actions = ego_trajs[:, :11, [0, 1, 2, 6]]
+
+        # add noise to context actions
+        context_actions = self.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
+        
+        action_embeds = self.action_m_embed(context_actions)
+        context_length = context_actions.shape[1]
+
+        n_embed = action_embeds.shape[-1]
+        input_embeds = torch.zeros(
+            (batch_size, context_length * 2, n_embed),
+            dtype=torch.float32,
+            device=device
+        )
+        input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
+        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+
+        future_embeds_shape = (batch_size, pred_length, n_embed)
+        # add keypoints encoded embedding
+        if self.ar_future_interval == 0:
+            input_embeds = torch.cat([input_embeds,
+                                      torch.zeros((future_embeds_shape), device=device)], dim=1)
+
+        elif self.ar_future_interval > 0:
+            # use autoregressive future interval
+            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
+            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
+            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+            # argument future trajectory
+            future_key_points_aug = self.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
+            if not self.model_args.predict_yaw:
+                # keep the same information when generating future points
+                future_key_points_aug[:, :, 2:] = 0
+
+            future_key_embeds = self.action_m_embed(future_key_points_aug)
+            input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                      torch.zeros(future_embeds_shape, device=device)], dim=1)
+        else:
+            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
+
+        if selected_indices is not None:
+            future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
+        else:
+            future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+        
+        info_dict = {
+            "trajectory_label": trajectory_label,
+            "trajectory_label_mask": trajectory_label_mask,
+            "context_length": context_length,
+            "future_key_points": future_key_points,
+            "future_key_points_gt_mask": future_key_points_gt_mask,
+            "selected_indices": selected_indices,
+        }
+
+        if self.model_args.interactive:
+            info_dict.update({
+                "agents_num_per_scenario": input_dict["agents_num_per_scenario"],
+            })
+            input_embeds = self.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=True)
+
+        return input_embeds, info_dict
+    
+class SimpleEncoder(MTREncoder):
+    def __init__(self, config):
+        super().__init__(config)
+        self.output_dim = config.D_MODEL
+        self.map_polyline_encoder = nn.Sequential(nn.Linear(2, 128, bias=False), nn.ReLU(),
+                                                  nn.Linear(128, 256, bias=False), nn.ReLU(),
+                                                  nn.Linear(256, self.output_dim, bias=True), nn.ReLU(),)
+
+    def forward(self, **kwargs):
+        input_dict = kwargs.get("input_dict", None)
+        assert input_dict is not None, "input_dict is None, check model inputs"
+        past_trajs = input_dict['agent_trajs'][:, :, :11, :]
+        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
+
+        num_center_objects, num_objects, num_timestamps, _ = past_trajs.shape
+        agent_trajs_mask = past_trajs[..., -1] > 0
+        map_polylines_mask = map_polylines_mask[..., 0] > 0
+        # apply polyline encoder
+        obj_polylines_feature = self.agent_polyline_encoder(past_trajs, agent_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)   
+        map_polylines_feature = self.map_polyline_encoder(map_polylines)  # (num_center_objects, num_polylines, C)
+        map_polylines_feature, _ = torch.max(map_polylines_feature, dim=1, keepdim=True)
+        map_polylines_feature = map_polylines_feature.repeat(1, num_timestamps, 1)
+
+        agents_attention_mask = agent_trajs_mask.view(num_center_objects, -1)
+        map_attention_mask = torch.ones((num_center_objects, num_timestamps), device=past_trajs.device, dtype=torch.bool)
+
+        n_out_embed = obj_polylines_feature.shape[-1]
+        global_token_feature = torch.cat((obj_polylines_feature.view(num_center_objects, num_objects*num_timestamps, n_out_embed), map_polylines_feature), dim=1) 
+        global_token_mask = torch.cat((agents_attention_mask, map_attention_mask), dim=1)
+
+        obj_trajs_pos = past_trajs[..., :3]
+        map_polylines_center = torch.zeros((num_center_objects, num_timestamps, 3), device=past_trajs.device)
+        global_token_pos = torch.cat((obj_trajs_pos.contiguous().view(num_center_objects, num_objects*num_timestamps, -1), map_polylines_center), dim=1)
+
+        if self.use_local_attn:
+            global_token_feature = self.apply_local_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos,
+                num_of_neighbors=self.model_cfg.NUM_OF_ATTN_NEIGHBORS
+            )
+        else:
+            global_token_feature = self.apply_global_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
+            )
+
+        global_token_feature_max, _ = torch.max(global_token_feature.view(num_center_objects, -1, num_timestamps, self.output_dim), dim=1)
+
+        return global_token_feature_max.squeeze(1)

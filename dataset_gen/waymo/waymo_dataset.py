@@ -112,7 +112,7 @@ class WaymoDataset(DatasetTemplate):
             obj_types=obj_types, scene_id=scene_id
         )
 
-        (obj_trajs_data, obj_trajs_mask, obj_trajs_pos, obj_trajs_last_pos, obj_trajs_future_state, obj_trajs_future_mask, center_gt_trajs, center_gt_trajs_labels,
+        (obj_trajs_data, obj_trajs_mask, obj_trajs_pos, obj_trajs_last_pos, obj_trajs_future_state, obj_trajs_future_mask, center_gt_past_trajs, center_gt_trajs, center_gt_trajs_labels,
             center_gt_trajs_mask, center_gt_final_valid_idx,
             track_index_to_predict_new, sdc_track_index_new, obj_types, obj_ids) = self.create_agent_data_for_center_objects(
             center_objects=center_objects, obj_trajs_past=obj_trajs_past, obj_trajs_future=obj_trajs_future,
@@ -131,7 +131,8 @@ class WaymoDataset(DatasetTemplate):
             'obj_ids': obj_ids,
 
             'center_objects_world': center_objects,
-            "center_objects_past": center_objects_past[..., [0,1,2,6]], # (x, y, z, l, w, h, heading, vx, vy, valid)
+            "center_objects_past": center_gt_past_trajs, # (x, y, z, rot)
+            # "center_objects_past": center_objects_past[..., [0,1,2,6]], # (x, y, z, l, w, h, heading, vx, vy, valid)
             'trajectory_label': center_gt_trajs_labels, # ( x, y, z, heading)
             'center_objects_id': np.array(track_infos['object_id'])[track_index_to_predict],
             'center_objects_type': np.array(track_infos['object_type'])[track_index_to_predict],
@@ -164,7 +165,7 @@ class WaymoDataset(DatasetTemplate):
             self, center_objects, obj_trajs_past, obj_trajs_future, track_index_to_predict, sdc_track_index, timestamps,
             obj_types, obj_ids
         ):
-        obj_trajs_data, obj_trajs_mask, obj_trajs_future_state, obj_trajs_future_mask, obj_trajs_future_labels = self.generate_centered_trajs_for_agents(
+        obj_trajs_data, obj_trajs_mask, center_gt_past_trajs, obj_trajs_future_state, obj_trajs_future_mask, obj_trajs_future_labels = self.generate_centered_trajs_for_agents(
             center_objects=center_objects, obj_trajs_past=obj_trajs_past,
             obj_types=obj_types, center_indices=track_index_to_predict,
             sdc_index=sdc_track_index, timestamps=timestamps, obj_trajs_future=obj_trajs_future
@@ -211,7 +212,7 @@ class WaymoDataset(DatasetTemplate):
             center_gt_final_valid_idx[cur_valid_mask] = k
 
         return (obj_trajs_data, obj_trajs_mask > 0, obj_trajs_pos, obj_trajs_last_pos,
-            obj_trajs_future_state, obj_trajs_future_mask, center_gt_trajs, center_gt_trajs_labels, center_gt_trajs_mask, center_gt_final_valid_idx,
+            obj_trajs_future_state, obj_trajs_future_mask, center_gt_past_trajs, center_gt_trajs, center_gt_trajs_labels, center_gt_trajs_mask, center_gt_final_valid_idx,
             track_index_to_predict_new, sdc_track_index_new, obj_types, obj_ids)
 
     def get_interested_agents(self, track_index_to_predict, obj_trajs_full, current_time_index, obj_types, scene_id):
@@ -333,6 +334,10 @@ class WaymoDataset(DatasetTemplate):
 
         ret_obj_valid_mask = obj_trajs[:, :, :, -1]  # (num_center_obejcts, num_objects, num_timestamps)  # TODO: CHECK THIS, 20220322
         ret_obj_trajs[ret_obj_valid_mask == 0] = 0
+        
+        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6]]
+        ret_center_past_trajs_mask = obj_trajs[np.arange(len(center_indices)), center_indices, :, -1]
+        ret_center_past_trajs[ret_center_past_trajs_mask == 0] = 0
 
         ##  generate label for future trajectories
         obj_trajs_future = torch.from_numpy(obj_trajs_future).float()
@@ -348,7 +353,7 @@ class WaymoDataset(DatasetTemplate):
         ret_obj_trajs_future[ret_obj_valid_mask_future == 0] = 0
         ret_obj_trajs_labels[ret_obj_valid_mask_future == 0] = 0
 
-        return ret_obj_trajs.numpy(), ret_obj_valid_mask.numpy(), ret_obj_trajs_future.numpy(), ret_obj_valid_mask_future.numpy(), ret_obj_trajs_labels.numpy()
+        return ret_obj_trajs.numpy(), ret_obj_valid_mask.numpy(), ret_center_past_trajs.numpy(), ret_obj_trajs_future.numpy(), ret_obj_valid_mask_future.numpy(), ret_obj_trajs_labels.numpy()
 
     @staticmethod
     def generate_batch_polylines_from_map(polylines, point_sampled_interval=1, vector_break_dist_thresh=1.0, num_points_each_polyline=20):
@@ -484,6 +489,7 @@ class WaymoDataset(DatasetTemplate):
             batch_dict:
                 pred_scores: (num_center_objects, num_modes)
                 pred_trajs: (num_center_objects, num_modes, num_timestamps, 2)
+                pred_keyspoints: (num_center_objects, num_modes, num_kps, 2)
 
               input_dict:
                 center_objects_world: (num_center_objects, 10)
@@ -494,8 +500,9 @@ class WaymoDataset(DatasetTemplate):
         input_dict = batch_dict['input_dict']
 
         pred_length = batch_dict['input_dict']['trajectory_label'].shape[1]
-        pred_trajs = batch_pred_dicts['logits'][:, None, -pred_length:, :]
-        pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
+        pred_trajs = batch_pred_dicts['logits'][:, :, -pred_length:, :]
+        pred_scores = batch_pred_dicts['scores']
+        pred_kps = batch_pred_dicts['key_points_logits']
         center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
 
         num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
@@ -506,6 +513,13 @@ class WaymoDataset(DatasetTemplate):
             angle=center_objects_world[:, 6].view(num_center_objects)
         ).view(num_center_objects, num_modes, num_timestamps, num_feat)
         pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+        
+        num_center_objects, num_modes, num_kps, num_kps_feat = pred_kps.shape
+        pred_kps_world = common_utils.rotate_points_along_z(
+            points=pred_kps.view(num_center_objects, num_modes * num_kps, num_kps_feat),
+            angle=center_objects_world[:, 6].view(num_center_objects)
+        ).view(num_center_objects, num_modes, num_kps, num_kps_feat)
+        pred_kps_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
 
         pred_dict_list = []
         for obj_idx in range(num_center_objects):
@@ -513,6 +527,7 @@ class WaymoDataset(DatasetTemplate):
                 'scenario_id': input_dict['scenario_id'][obj_idx],
                 'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
                 'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
+                'pred_kps': pred_kps_world[obj_idx, :].cpu().numpy(),
                 'object_id': input_dict['center_objects_id'][obj_idx],
                 'object_type': input_dict['center_objects_type'][obj_idx],
                 'gt_trajs': input_dict['center_gt_trajs_src'][obj_idx].cpu().numpy(),

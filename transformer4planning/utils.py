@@ -10,7 +10,7 @@ class ModelArguments:
     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
     """
     model_name: str = field(
-        default="scratch-mini-gpt-raster",
+        default="scratch-mini-gpt",
         metadata={"help": "Name of a planning model backbone"}
     )
     model_pretrain_name_or_path: str = field(
@@ -20,9 +20,6 @@ class ModelArguments:
     predict_result_saving_dir: Optional[str] = field(
         default=False,
         metadata={"help": "The target folder to save prediction results."},
-    )
-    predict_trajectory: Optional[bool] = field(
-        default=True,
     )
     d_embed: Optional[int] = field(
         default=256,
@@ -39,9 +36,9 @@ class ModelArguments:
     n_heads: Optional[int] = field(
         default=8,
     )
-    # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
     activation_function: Optional[str] = field(
-        default="silu"
+        default="silu",
+        metadata={"help": "Activation function, to be selected in the list `[relu, silu, gelu, tanh, gelu_new]"},
     )
     loss_fn: Optional[str] = field(
         default="mse",
@@ -106,9 +103,6 @@ class ModelArguments:
         default=True
     )
     forward_specified_key_points: Optional[bool] = field(
-        default=True
-    )
-    token_scenario_tag: Optional[bool] = field(
         default=False
     )
     token_scenario_tag: Optional[bool] = field(
@@ -118,13 +112,15 @@ class ModelArguments:
         default=20
     )
     resnet_type: Optional[str] = field(
-        default="resnet18"
+        default="resnet18",
+        metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
     pretrain_encoder: Optional[bool] = field(
-        default=False
+        default=False,
     )
     encoder_type: Optional[str] = field(
-        default='raster'
+        default='raster',
+        metadata={"help": "choose from [raster, vector]"}
     )
     past_sample_interval: Optional[int] = field(
         default=5
@@ -153,8 +149,12 @@ class ModelArguments:
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default = None, metadata = {"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
-    
-
+    interactive: Optional[bool] = field(
+        default=False
+    )
+    mtr_config_path: Optional[str] = field(
+        default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+    )
 
 def rotate_array(origin, points, angle, tuple=False):
     """

@@ -16,7 +16,6 @@ from datasets import Dataset
 import torch
 import torch.nn as nn
 import logging
-import shutil
 import os
 import numpy as np
 
@@ -191,7 +190,18 @@ class PlanningTrainer(Trainer):
                 fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                 fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
             else:
-                trajectory_label_in_batch = inputs["trajectory_label"].clone()
+                if self.model.task == "waymo" and self.model.encoder_type == "vector":
+                    input_dict = inputs["input_dict"]
+                    agent_trajs = input_dict['agent_trajs']
+                    ego_trajs = [traj[input_dict["track_index_to_predict"][i], :, :] for i, traj in enumerate(agent_trajs)]
+                    ego_trajs = torch.stack(ego_trajs, dim=0).to(self.model.device).squeeze(1)
+
+                    trajectory_label_in_batch = ego_trajs[:, 11:, [0, 1, 2, 6]].clone()
+                elif self.model.task == "nuplan" and self.model.encoder_type == "raster":
+                    trajectory_label_in_batch = inputs["trajectory_label"].clone()
+                else:
+                    raise NotImplementedError
+                
                 if isinstance(logits, tuple):
                     prediction_trajectory_in_batch = logits[0]
                 else:
@@ -344,6 +354,35 @@ class PlanningTrainer(Trainer):
         if len(logits) == 1:
             logits = logits[0]
 
+        if self.model.task == "waymo" and self.model.encoder_type == "vector":
+            input_dict = inputs['input_dict']
+            pred_length = input_dict['center_gt_trajs_src'].shape[1] - input_dict['current_time_index'][0] - 1
+            pred_trajs = logits[:, None, -pred_length:, :]
+            pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
+            center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
+            num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
+            # assert num_feat == 7
+
+            pred_trajs_world = common_utils.rotate_points_along_z(
+                points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
+                angle=center_objects_world[:, 6].view(num_center_objects)
+            ).view(num_center_objects, num_modes, num_timestamps, num_feat)
+            pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+
+            pred_dict = []
+            for obj_idx in range(num_center_objects):
+                single_pred_dict = {
+                    'scenario_id': str(input_dict['scenario_id'][obj_idx]),
+                    'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
+                    'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
+                    'object_id': input_dict['center_objects_id'][obj_idx],
+                    'object_type': str(input_dict['center_objects_type'][obj_idx]),
+                    'gt_trajs': input_dict['center_gt_trajs_src'][obj_idx].cpu().numpy(),
+                    'track_index_to_predict': input_dict['track_index_to_predict'][obj_idx].cpu().numpy()
+                }
+                pred_dict.append(single_pred_dict)
+
+            self.pred_dicts_list += pred_dict
         return (loss, logits, None)
 
     def evaluation_loop(
@@ -361,6 +400,10 @@ class PlanningTrainer(Trainer):
                 'fde': [],
             }
         self.eval_itr = 0
+        if self.model.task == "waymo" and self.model.encoder_type == "vector": 
+            prediction_loss_only = False
+            self.pred_dicts_list = []
+
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
         if self.model.model_args.generate_diffusion_dataset_for_key_points_decoder:
             return None
@@ -377,6 +420,26 @@ class PlanningTrainer(Trainer):
         logging.info("***** Eval results *****")
         logging.info(f"{result}")
         self.log(result)
+
+        
+        if self.model.task == "waymo" and self.model.encoder_type == "vector":
+            from dataset_gen.waymo.waymo_eval import waymo_evaluation
+            logging.info('*************** Performance of WOMD *****************' )
+            try:
+                num_modes_for_eval = self.pred_dicts_list[0]['pred_trajs'].shape[0]
+            except:
+                num_modes_for_eval = 6
+            metric_results, result_format_str = waymo_evaluation(pred_dicts=self.pred_dicts_list, num_modes_for_eval=num_modes_for_eval)
+
+            metric_result_str = '\n'
+            for key in metric_results:
+                metric_results[key] = metric_results[key]
+                metric_result_str += '%s: %.4f \n' % (key, metric_results[key])
+            metric_result_str += '\n'
+            metric_result_str += result_format_str
+
+            print(metric_result_str)
+            logging.info('****************Evaluation done.*****************')
 
         return eval_output
 
@@ -510,7 +573,6 @@ class PlanningTrainer(Trainer):
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
     ) -> Dict[str, float]:
-
         self.model.eval()
 
         dataloader = self.get_eval_dataloader(eval_dataset)
@@ -524,8 +586,9 @@ class PlanningTrainer(Trainer):
 
         eval_output_dir = model_path + '/eval_output/'
         os.makedirs(eval_output_dir, exist_ok=True)
-
-        log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, datetime.datetime.now().strftime('%Y%m%d-%H%M%S')))
+        
+        cur_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, cur_time))
         logger = common_utils.create_logger(log_file, rank=0)
 
         start_time = time.time()
@@ -556,6 +619,9 @@ class PlanningTrainer(Trainer):
                 logger.info(f'eval: batch_iter={i}/{len(dataloader)}, batch_size={batch_size}, iter_cost={second_each_iter:.2f}s, '
                             f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
                             f'{disp_str}')
+            
+            # if i > 100:    
+            #     break
 
         if self.is_world_process_zero:
             progress_bar.close()
@@ -566,7 +632,7 @@ class PlanningTrainer(Trainer):
 
         ret_dict = {}
 
-        with open(eval_output_dir + "result_" + model_name + '.pkl', 'wb') as f:
+        with open(eval_output_dir + "result_" + model_name + '_' + cur_time + '.pkl', 'wb') as f:
             pickle.dump(pred_dicts, f)
 
         result_str, result_dict = dataset.evaluation(
@@ -577,4 +643,4 @@ class PlanningTrainer(Trainer):
         ret_dict.update(result_dict)
 
         logger.info('Result is save to %s' % eval_output_dir)
-        logger.info('****************Evaluation done.*****************')
+        logger.info('****************Evaluation done.*****************')        
