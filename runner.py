@@ -223,7 +223,10 @@ def main():
                     dataset = Dataset.load_from_disk(index_path)
                     if dataset is not None:
                         datasets.append(dataset)
-            dataset = _concatenate_map_style_datasets(datasets)
+                else:
+                    break
+            if len(datasets) > 0: dataset = _concatenate_map_style_datasets(datasets)
+            else: dataset = Dataset.load_from_disk(index_root_folders)
             # add split column
             dataset.features.update({'split': Value('string')})
             dataset = dataset.add_column(name='split', column=[split] * len(dataset))
@@ -247,16 +250,17 @@ def main():
         if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
             val_dataset = load_dataset("val", False)
 
-        all_maps_dic = {}
-        all_pickles_dic = {}
-        map_folder = os.path.join(data_args.datadic_path, 'map')
-        for each_map in os.listdir(map_folder):
-            if each_map.endswith('.pkl'):
-                map_path = os.path.join(map_folder, each_map)
-                with open(map_path, 'rb') as f:
-                    map_dic = pickle.load(f)
-                map_name = each_map.split('.')[0]
-                all_maps_dic[map_name] = map_dic
+        if model_args.task == "nuplan":
+            all_maps_dic = {}
+            all_pickles_dic = {}
+            map_folder = os.path.join(data_args.datadic_path, 'map')
+            for each_map in os.listdir(map_folder):
+                if each_map.endswith('.pkl'):
+                    map_path = os.path.join(map_folder, each_map)
+                    with open(map_path, 'rb') as f:
+                        map_dic = pickle.load(f)
+                    map_name = each_map.split('.')[0]
+                    all_maps_dic[map_name] = map_dic
     else:
         all_maps_dic = None
         all_pickles_dic = None
@@ -351,7 +355,7 @@ def main():
         if model_args.encoder_type == "vector":
             collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
                                 dic_valid_path=data_args.datadic_valid_path, 
-                                interactive=model_args.interactive)
+                                interaction=model_args.interaction)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
     else:

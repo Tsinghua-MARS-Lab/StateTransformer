@@ -63,7 +63,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
-        elif self.task == "waymo":
+        elif self.model_args.task == "waymo":
             from transformer4planning.models.encoder.mtr_encoder import WaymoVectorizeEncoder
             from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
             cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
@@ -119,7 +119,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         )
         input_embeds, info_dict = self.encoder(**kwargs)
 
-        attention_mask = info_dict["input_embeds_mask"] if self.model_args.interactive else None
+        attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
         
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
@@ -139,7 +139,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             loss_fct = nn.SmoothL1Loss()
         if not self.model_args.pred_key_points_only:
             traj_logits = self.traj_decoder(traj_hidden_state)
-            if self.model_args.task == "waymo":
+            if self.model_args.model_args.task == "waymo":
                 trajectory_label_mask = info_dict["trajectory_label_mask"]
                 loss_fct = MSELoss(reduction="none")
                 _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
@@ -171,7 +171,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
                 else:
                     loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
-                if self.task == "waymo":
+                if self.model_args.task == "waymo":
                     future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
                     loss_to_add = (loss_to_add* future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 loss += loss_to_add
@@ -190,7 +190,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 # add loss on x, y (the last dimension)
                 loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                if self.task == "waymo":
+                if self.model_args.task == "waymo":
                     future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
                     loss += (min_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 else:
@@ -282,7 +282,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
         key_points_num = future_key_points.shape[1]
 
-        if self.model_args.interactive:
+        if self.model_args.interaction:
             input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
         input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
@@ -351,7 +351,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
 
 
-        if self.model_args.interactive:
+        if self.model_args.interaction:
             input_embeds = self.encoder.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=False)
             attention_mask = info_dict["input_embeds_mask"]
         else:
@@ -364,7 +364,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
 
-        if self.model_args.interactive: 
+        if self.model_args.interaction: 
             transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]

@@ -40,6 +40,9 @@ def create_map_data(map_infos):
         polyline_index.append(last_polyline_index)
         last_polyline_index += len(simplified_xyz)
     
+    if len(map_polylines) == 0:
+        return np.zeros((1, 2), dtype=np.float32), np.zeros((1, 2), dtype=bool), [0]
+    
     map_polylines = np.concatenate(map_polylines, axis=0, dtype=np.float32)
     mask = np.ones_like(map_polylines, dtype=bool)
 
@@ -48,7 +51,7 @@ def create_map_data(map_infos):
 def main(args):
     data_path = args.data_path
 
-    def yield_data(shards, dl, save_dict, output_path, interactive):
+    def yield_data(shards, dl, save_dict, output_path, interaction):
         for shard in shards:
             tf_dataset, file_name = dl.get_next_file(specify_file_index=shard)
             if tf_dataset is None:
@@ -69,8 +72,7 @@ def main(args):
                     current_time_index = scenario.current_time_index
                     ego_index = torch.tensor([idx for idx in track_index_to_predict if agent_trajs[idx, current_time_index, -1] == 1], dtype=torch.int32)
                     # agent_dict = process_agents(agent_trajs=agent_trajs)
-                    map_polylines_data, map_polylines_mask, polyline_index = create_map_data(map_infos=map_infos,
-                            )
+                    map_polylines_data, map_polylines_mask, polyline_index = create_map_data(map_infos=map_infos)
                         
                     dicts_to_save[scenario.scenario_id] = {
                         "agent_trajs": agent_trajs,
@@ -84,21 +86,21 @@ def main(args):
                         'center_objects_type': np.array(track_infos['object_type'])[track_index_to_predict],
                         }
                 
-                if interactive:
-                    interactive_agents = scenario.objects_of_interest
-                    if len(interactive_agents) == 0:
+                if interaction:
+                    interaction_agents = scenario.objects_of_interest
+                    if len(interaction_agents) == 0:
                         continue
                     
-                    assert len(interactive_agents) == 2
-                    interactive_index = [i for i, cur_data in enumerate(scenario.tracks) if cur_data.id in interactive_agents]
+                    assert len(interaction_agents) == 2
+                    interaction_index = [i for i, cur_data in enumerate(scenario.tracks) if cur_data.id in interaction_agents]
 
-                    if len(interactive_index) != 2: 
+                    if len(interaction_index) != 2: 
                         continue
 
                     yield {
                             "file_name": file_name,
                             "scenario_id": scenario.scenario_id,
-                            "interactive_index": interactive_index,
+                            "interaction_index": interaction_index,
                         }
                 else:
                     yield {
@@ -111,7 +113,7 @@ def main(args):
                     pickle.dump(dicts_to_save, f)
                     f.close()
     
-    data_loader = WaymoDL(data_path=data_path, mode="train" if args.train else "test", interactive=args.interactive)
+    data_loader = WaymoDL(data_path=data_path, mode=args.mode, interaction=args.interaction)
     file_indices = []
     for i in range(args.num_proc):
         file_indices += range(data_loader.total_file_num)[i::args.num_proc]
@@ -122,7 +124,7 @@ def main(args):
     os.makedirs(args.output_path, exist_ok=True)
     waymo_dataset = Dataset.from_generator(yield_data,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader, 'save_dict':
-                                                        args.save_dict, 'output_path': args.output_path, 'interactive': args.interactive},
+                                                        args.save_dict, 'output_path': args.output_path, 'interaction': args.interaction},
                                             writer_batch_size=10, cache_dir=args.cache_folder,
                                             num_proc=args.num_proc)
     print('Saving dataset')
@@ -139,16 +141,17 @@ if __name__ == '__main__':
             "WAYMO_DATA_ROOT": "/public/MARS/datasets/waymo_prediction_v1.2.0/scenario/",
             "SPLIT_DIR": {
                     'train': "training", 
-                    'test': "validation"
+                    'val': "validation",
+                    'test': "testing",
                 },
         })
     
-    parser.add_argument('--train', default=False, action='store_true')  
+    parser.add_argument('--mode', type=str, default="train")  
     parser.add_argument('--save_dict', default=False, action='store_true')
-    parser.add_argument('--interactive', default=False, action='store_true')
+    parser.add_argument('--interaction', default=False, action='store_true')
     
-    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_training/t4p_waymo')
-    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_training/waymo_cache')
+    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_testing/data_dict')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_testing/waymo_cache')
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
 
     parser.add_argument('--num_proc', type=int, default=20)

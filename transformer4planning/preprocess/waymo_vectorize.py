@@ -4,7 +4,7 @@ import os
 import torch
 from functools import partial
 
-def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=False):
+def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interaction=False):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -23,7 +23,7 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=Fa
     else:
         raise NotImplementedError
     
-    map_func = partial(waymo_preprocess, interactive=interactive, data_path=data_path)
+    map_func = partial(waymo_preprocess, interaction=interaction, data_path=data_path)
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
     #     batch = list(executor.map(map_func, batch))
     new_batch = list()
@@ -57,11 +57,11 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=Fa
         else:
             input_dict[key] = torch.cat(input_list, dim=0)
 
-    if interactive: input_dict["agents_num_per_scenario"] = [len(d["track_index_to_predict"]) for d in new_batch]
+    if interaction: input_dict["agents_num_per_scenario"] = [len(d["track_index_to_predict"]) for d in new_batch]
 
     return {"input_dict": input_dict}
 
-def waymo_preprocess(sample, interactive=False, data_path=None):
+def waymo_preprocess(sample, interaction=False, data_path=None):
     filename = sample["file_name"]
     with open(os.path.join(data_path, filename), "rb") as f:
         info = pickle.load(f)
@@ -71,7 +71,7 @@ def waymo_preprocess(sample, interactive=False, data_path=None):
     
     agent_trajs = data['agent_trajs']  # (num_objects, num_timestamp, 10)
     current_time_index = data["current_time_index"]
-    if interactive: track_index_to_predict = sample["interactive_index"].to(torch.long)
+    if interaction: track_index_to_predict = sample["interaction_index"].to(torch.long)
     else: track_index_to_predict = data['track_index_to_predict'].to(torch.long)
     map_polyline = torch.from_numpy(data["map_polyline"])
 

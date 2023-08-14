@@ -215,7 +215,7 @@ class WaymoVectorizeEncoder(EncoderBase, AugmentationMixin):
                  tokenizer_kwargs:Dict = None,
                  model_args = None
                  ):
-        super().__init__(tokenizer_kwargs)
+        super().__init__(model_args, tokenizer_kwargs)
         self.model_args = model_args
         self.token_scenario_tag = model_args.token_scenario_tag
         self.ar_future_interval = model_args.ar_future_interval
@@ -317,7 +317,7 @@ class WaymoVectorizeEncoder(EncoderBase, AugmentationMixin):
             "selected_indices": selected_indices,
         }
 
-        if self.model_args.interactive:
+        if self.model_args.interaction:
             info_dict.update({
                 "agents_num_per_scenario": input_dict["agents_num_per_scenario"],
             })
