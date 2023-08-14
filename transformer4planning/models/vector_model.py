@@ -63,6 +63,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.reg_kps_loss = self.reg_trj_loss
         
         self.cls_kps_loss = CrossEntropyLoss(reduction="mean")
+        self.cls_kps_loss_weight = 1
         
         if self.model_args.predict_yaw:
             self.pred_dim = 4
@@ -396,17 +397,16 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
         all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
         
-        kpts_scores = kpts_scores.softmax(dim=1) # (bs, k, num_kps)
-        
         # use accumulated score
-        all_traj_scores = torch.ones((batch_size, n_mode), device=device)
+        all_traj_scores = torch.ones((batch_size, n_mode), device=device) # (bs, n_mode)
         
-        for k_i in range(key_points_num):
-            all_traj_scores *= kpts_scores[:, :, k_i]
+        # for k_i in range(key_points_num):
+        #     all_traj_scores *= kpts_scores[:, :, k_i]
+        # all_traj_scores = all_traj_scores / all_traj_scores.sum()
+        
+        # kpts_score: accumulated score
+        all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
         all_traj_scores = all_traj_scores / all_traj_scores.sum()
-        
-        # use last score
-        # all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
 
         return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
     
@@ -463,8 +463,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     pred_kps_cls_masked = pred_kps_cls[gt_kps_mask[...,0].to(torch.bool)] 
                     min_loss_kp_indices_masked = min_loss_kp_indices[gt_kps_mask[...,0].to(torch.bool)]
                     loss_kp_cls = self.cls_kps_loss(pred_kps_cls_masked.reshape(-1, self.k).to(torch.float64), min_loss_kp_indices_masked.reshape(-1).long())
-                    loss += loss_kp_cls
-                    # loss += loss_kp_cls * 4 # option 2
+                    loss += (loss_kp_cls * self.cls_kps_loss_weight)
                     
                     if self.training:
                         # concatenate the key points with predicted trajectory for evaluation
@@ -588,12 +587,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_kps_logit = pred_kps_logit.view(batch_size, self.k*self.k, self.pred_dim) # (bs, k*k, 2)
             
             pred_kps_score = self.next_token_scorer_decoder(future_key_point_hidden_state)  # (bs*k, 1, k)
-            pred_kps_score = pred_kps_score.view(batch_size, self.k*self.k) # (bs, k*k)
+            pred_kps_score = pred_kps_score.view(batch_size, self.k, self.k).softmax(-1) # (bs, k, k)
             
             if i == 0:
                 topk_indx = torch.arange(self.k)[None, :].repeat(batch_size, 1) # (bs, k)
-                topk_score = pred_kps_score[:, :self.k]
+                topk_score = pred_kps_score[:, 0, :self.k]
             else:
+                # pred_kps_score_accum = k_kpts_scores[:, :, [i-1]].repeat(1, 1, self.k) * pred_kps_score
+                # pred_kps_score = pred_kps_score_accum.view(batch_size, self.k*self.k) # (bs, k*k)
+                pred_kps_score = pred_kps_score.view(batch_size, self.k*self.k) # (bs, k*k)
                 topk_score, topk_indx = torch.topk(pred_kps_score, dim=-1, k =self.k) # (bs, k)
                 
             topk_group = torch.div(topk_indx, self.k, rounding_mode='floor')
@@ -607,7 +609,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
             # get kps topk embeds
             pred_kps_logit_topk_embed = self.action_m_embed(pred_kps_logit_topk)  # b, self.k, n_embed
-
+            
             k_input_embeds[:, :, tot_scenario_contenxt_len + i, :] = pred_kps_logit_topk_embed
             k_kpts_scores[:, :, i] = topk_score
             
@@ -621,6 +623,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 
                 k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :] = k_input_embeds_kpts_prev
                 k_kpts_scores[:, :, :i] = k_kpts_scores_prev
+                
+                k_kpts_scores[:, :, i] *= k_kpts_scores[:, :, i-1]
             
             pred_key_points_during_generate[:, :, i, :] = pred_kps_logit_topk[:, :, :self.pred_dim]
             k_input_embeds_kpts = k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + key_points_num, :]
