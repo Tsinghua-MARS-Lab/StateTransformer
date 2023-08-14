@@ -51,7 +51,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
-        self.action_m_embed = nn.Sequential(nn.Linear(4, config.n_embd), nn.Tanh())
+        self.action_m_embed = nn.Sequential(nn.Linear(4, llm_config.n_embd), nn.Tanh())
 
         self.traj_decoder = None
         self.k = int(self.model_args.k)
@@ -60,12 +60,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.key_points_decoder = None
         if self.predict_trajectory:
             out_features = 4 if model_args.predict_yaw else 2
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+            self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
             if self.ar_future_interval > 0:
-                self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
-                self.end_point_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
+                self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
+                self.end_point_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
         if self.k > 1:
-            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
+            self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
 
         self.clf_metrics = None
 
