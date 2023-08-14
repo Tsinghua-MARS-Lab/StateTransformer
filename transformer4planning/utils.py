@@ -36,9 +36,9 @@ class ModelArguments:
     n_heads: Optional[int] = field(
         default=8,
     )
-    # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
     activation_function: Optional[str] = field(
-        default="silu"
+        default="silu",
+        metadata={"help": "Activation function, to be selected in the list `[relu, silu, gelu, tanh, gelu_new]"},
     )
     loss_fn: Optional[str] = field(
         default="mse",
@@ -100,7 +100,7 @@ class ModelArguments:
         default=False
     )
     specified_key_points: Optional[bool] = field(
-        default=False
+        default=True
     )
     forward_specified_key_points: Optional[bool] = field(
         default=False
