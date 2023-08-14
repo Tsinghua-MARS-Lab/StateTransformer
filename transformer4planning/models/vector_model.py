@@ -65,6 +65,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
+        
+        self.use_anchor = True
+        if self.use_anchor:
+            self.anchor_num = 64
+            self.anchor_cls_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= self.anchor_num)
+            self.anchor_len = 1
+            self.cls_anchor_loss = CrossEntropyLoss(reduction="mean")
 
         self.clf_metrics = None
 
@@ -200,8 +207,19 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         )
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
-
-
+        
+        # add anchor embedding
+        if self.use_anchor:
+            center_obj_types = input_dict['center_objects_type']
+            center_obj_anchor_pts = [self.intention_points[center_obj_types[i]].unsqueeze(0) for i in range(batch_size)]
+            center_obj_anchor_pts = torch.cat(center_obj_anchor_pts, dim=0) # (bs, 64, 2)
+            dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_anchor_pts, dim=2)
+            anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+            anchor_GT_logits = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] # (bs, 2)
+            anchor_embedding = self.action_m_embed(torch.cat([anchor_GT_logits, torch.zeros((batch_size, 2), device=device)], dim = 1)).unsqueeze(1)
+            input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
+        
+        # add scenario_embedding
         if self.model_args.token_scenario_tag:
             scenario_type = kwargs.get("scenario_type", None)
             scenario_tag_ids = list()
@@ -288,6 +306,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         pred_kps_logits = None
         pred_kps_cls = None
         
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * 2 + self.anchor_len
+        
+        if self.use_anchor:
+            pred_anchor_embed = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len-1-self.anchor_len : tot_scenario_contenxt_len-1, :] # (bs, anchor_len, n_embed)
+            pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed) # (bs, anchor_len, 64)
+
         if self.ar_future_interval > 0:
             """
             for example:
@@ -296,7 +320,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 - 1:self.scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len - 1:tot_scenario_contenxt_len + future_key_points.shape[1] - 1, :]
             pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state)  # (b, num_kps, 4/2*k)
             
             if self.k > 1:
@@ -310,6 +335,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                               gt_kps=future_key_points, 
                               gt_kps_mask=future_key_points_gt_mask,
                               pred_kps_cls=pred_kps_cls,
+                              pred_anchor_cls=pred_anchor_cls,
+                              gt_anchor_cls=anchor_GT_cls
                               )
 
         if not return_dict:
@@ -395,7 +422,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                                   torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         key_points_num = future_key_points.shape[1]
         
-        tot_scenario_contenxt_len = self.scenario_type_len + context_length * 2
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * 2 + self.anchor_len
         
         if self.generate_method == 'greedy_search':
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
@@ -442,6 +469,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
     def calc_loss(self, pred_traj_logits, gt_traj, gt_traj_mask=None, 
                   pred_kps_logits=None, gt_kps=None, gt_kps_mask=None,
                   pred_kps_cls=None,
+                  pred_anchor_cls=None,
+                  gt_anchor_cls=None
                   ):
         """_summary_
 
@@ -453,6 +482,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             gt_kps (bs, num_kps, 4): _description_. Defaults to None.
             gt_kps_mask (bs, num_kps, 1): _description_. Defaults to None.
             pred_kps_cls (bs, num_kps, 6): _description_. Defaults to None.
+            
+            pred_anchor_cls=None, # (bs, anchor_len, 64)
+            gt_anchor_cls=None # (bs, )
 
         Returns:
             _type_: _description_
@@ -461,10 +493,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         device = pred_traj_logits.device
         loss = torch.tensor(0, dtype=torch.float32, device=device)
 
+        # loss traj
         loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
         loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
         loss += loss_traj
 
+        # loss kps
         if self.ar_future_interval > 0:
             if self.k == 1:
                 loss_keypoints = self.reg_kps_loss(pred_kps_logits, gt_kps[..., :self.pred_dim].to(device))
@@ -506,8 +540,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 else:
                     print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
                     pred_traj_logits = torch.cat([pred_kps_logits[0].reshape(b, num_kps, -1), pred_traj_logits], dim=1)
-                    
-                # evaluate accuracy if on eval
+        
+        # loss anchor
+        if self.use_anchor:
+            loss_anchor = self.cls_anchor_loss(pred_anchor_cls.reshape(-1, self.anchor_num).to(torch.float64), gt_anchor_cls.reshape(-1).long())
+            loss += loss_anchor
+        
+        # evaluate accuracy if on eval
         if not self.training and self.clf_metrics is not None:
             if self.k > 1:
                 # classification on k predictions
