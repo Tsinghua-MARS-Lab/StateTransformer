@@ -9,12 +9,10 @@ import os
 import sys
 import pickle
 import copy
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import Optional
 import torch
-from torch import nn
 from tqdm import tqdm
 import copy
-import json
 
 import datasets
 import numpy as np
@@ -34,10 +32,9 @@ from transformer4planning.utils import ModelArguments
 from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
 from torch.utils.data import DataLoader
-from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
 
-from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
+from datasets import Dataset, Value
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -119,7 +116,7 @@ class ConfigArguments:
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
-    model_args, data_args, config_args, training_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
 
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
@@ -287,7 +284,7 @@ def main():
     # loop split info and update for test set
     print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
 
-    nuplan_dataset = dict(
+    dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
         validation=test_dataset.shuffle(seed=training_args.seed),
         test=val_dataset.shuffle(seed=training_args.seed),
@@ -311,19 +308,19 @@ def main():
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
             os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / 8))
-        train_dataset = nuplan_dataset["train"]
+        train_dataset = dataset_dict["train"]
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
 
     if training_args.do_eval:
-        eval_dataset = nuplan_dataset["validation"]
+        eval_dataset = dataset_dict["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
     if training_args.do_predict:
-        predict_dataset = nuplan_dataset["test"]
+        predict_dataset = dataset_dict["test"]
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
             predict_dataset = predict_dataset.select(range(max_predict_samples))
@@ -350,10 +347,16 @@ def main():
                                  dic_path=data_args.datadic_path, 
                                  map_api=map_api)
     elif model_args.task == "waymo":
-        raise NotImplementedError
+        from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
+        if model_args.encoder_type == "vector":
+            collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
+                                dic_valid_path=data_args.datadic_valid_path, 
+                                interactive=model_args.interactive)
+        elif model_args.encoder_type == "raster":
+            raise NotImplementedError
     else:
         raise AttributeError("task must be nuplan or waymo")
-    
+
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above

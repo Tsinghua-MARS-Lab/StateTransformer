@@ -157,3 +157,4 @@ dmypy.json
 __pycache__
 
 .vscode
+.gitignore

@@ -131,7 +131,12 @@ class ModelArguments:
     debug_raster_path: Optional[str] = field(
         default=None
     )
-
+    interactive: Optional[bool] = field(
+        default=False
+    )
+    mtr_config_path: Optional[str] = field(
+        default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+    )
 
 def rotate_array(origin, points, angle, tuple=False):
     """
