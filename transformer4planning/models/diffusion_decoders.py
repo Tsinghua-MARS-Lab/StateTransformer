@@ -444,7 +444,7 @@ def uniform_positional_embedding(key_point_num, feat_dim):
 
 class NewDecoderTFBasedForKeyPoints(nn.Module):
     def __init__(self,hidden_size,in_features,out_features=4,layer=7,feat_dim=1024,input_feature_seq_lenth=16,key_point_num=5,
-                 specified_key_points = specified_key_points, forward_specified_key_points = forward_specified_key_points,):
+                 specified_key_points = True, forward_specified_key_points = False,):
         super().__init__()
         self.out_features = out_features
         if feat_dim == 512:
