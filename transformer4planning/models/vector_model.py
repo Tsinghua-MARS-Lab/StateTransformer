@@ -66,12 +66,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
         
-        self.use_anchor = True
+        self.use_anchor = False
+        
         if self.use_anchor:
             self.anchor_num = 64
             self.anchor_cls_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= self.anchor_num)
             self.anchor_len = 1
             self.cls_anchor_loss = CrossEntropyLoss(reduction="mean")
+        else:
+            self.anchor_len = 0
 
         self.clf_metrics = None
 
