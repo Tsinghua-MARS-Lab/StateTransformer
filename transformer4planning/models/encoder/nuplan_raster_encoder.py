@@ -72,9 +72,12 @@ class NuplanRasterizeEncoder(EncoderBase):
         context_actions = kwargs.get("context_actions", None)
         trajectory_label = kwargs.get("trajectory_label", None)
         scenario_type = kwargs.get("scenario_type", None)
-        context_length = kwargs.get("context_length", None)
-        pred_length = kwargs.get("pred_length", None)
-        device = high_res_raster.device if high_res_raster is not None else None
+
+        assert trajectory_label is not None, "trajectory_label should not be None"
+        device = trajectory_label.device
+        _, pred_length = trajectory_label.shape[:2]
+        context_length = context_actions.shape[1] if context_actions is not None else -1 # -1 in case of pdm encoder 
+
         # add noise to context actions
         context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
         
@@ -131,7 +134,11 @@ class NuplanRasterizeEncoder(EncoderBase):
         info_dict = {
             "future_key_points": future_key_points,
             "selected_indices": selected_indices,
+            "trajectory_label": trajectory_label,
+            "pred_length": pred_length,
+            "context_length": context_length,
         }
+
         return input_embeds, info_dict
     
 

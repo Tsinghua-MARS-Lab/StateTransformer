@@ -1,9 +1,9 @@
-from transformers import GPT2Model, GPT2PreTrainedModel
-from transformer4planning.models.GPT2.models import *
+from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Config
 from transformer4planning.models.decoders import *
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
 import torch.nn as nn
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 
 class TrajectoryGPT(GPT2PreTrainedModel):
@@ -34,7 +34,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            
             # TODO: add raster/vector encoder configuration item
             tokenizer_kwargs = dict(
                 dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
@@ -42,7 +41,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             )
             
             if "raster" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import NuplanRasterizeEncoder
+                from transformer4planning.models.encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
@@ -54,7 +53,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import PDMEncoder
+                from transformer4planning.models.encoder import PDMEncoder
                 pdm_kwargs = dict(
                     hidden_dim=self.config.n_embd,
                     centerline_dim=120,
@@ -106,21 +105,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     ):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        trajectory_label = kwargs.get("trajectory_label", None)
-        assert trajectory_label is not None, "trajectory_label should not be None"
-        device = trajectory_label.device
-        batch_size, pred_length = trajectory_label.shape[:2]
-        context_actions = kwargs.get("context_actions", None)
-        context_length = context_actions.shape[1] if context_actions is not None else -1 # -1 in case of pdm encoder 
-        kwargs.update(
-            dict(
-                pred_length=pred_length,
-                context_length=context_length
-            )
-        )
         input_embeds, info_dict = self.encoder(**kwargs)
 
         attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
+        device = input_embeds.device
         
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
@@ -130,6 +118,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         )
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+        
+        pred_length = info_dict["pred_length"]
+        trajectory_label = info_dict["trajectory_label"]
+        context_length = info_dict["context_length"]
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
@@ -140,9 +132,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             loss_fct = nn.SmoothL1Loss()
         if not self.model_args.pred_key_points_only:
             traj_logits = self.traj_decoder(traj_hidden_state)
-            if self.model_args.model_args.task == "waymo":
+            if self.model_args.task == "waymo":
                 trajectory_label_mask = info_dict["trajectory_label_mask"]
-                loss_fct = MSELoss(reduction="none")
+                loss_fct = nn.MSELoss(reduction="none")
                 _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
                             trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
@@ -183,7 +175,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
                 # get loss of minimal loss from k results
                 k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
-                loss_fct_key_points = MSELoss(reduction="none")
+                loss_fct_key_points = nn.MSELoss(reduction="none")
                 if self.model_args.predict_yaw:
                     loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device))
                 else:
@@ -198,7 +190,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     loss += min_loss.mean()
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-                    loss_fct = CrossEntropyLoss(reduction="mean")
+                    loss_fct = nn.CrossEntropyLoss(reduction="mean")
                     loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
                     loss += loss_to_add
                     if self.training:
@@ -245,9 +237,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         For waymo generation, the input include a `input_dict` and waymo encoder processes it in its 
         forward function.
         """
-        trajectory_label = kwargs.get("trajectory_label", None)
-        assert trajectory_label is not None
-        context_actions = kwargs.get("context_actions", None)
         # pass the following infos during generate for one sample (non-batch) generate with KP checking
         map_api = kwargs.get("map_api", None)
         route_ids = kwargs.get("route_ids", None)
@@ -257,19 +246,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         """
         Used for generate with key points
         """
-        device = trajectory_label.device
-        batch_size, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1] if context_actions is not None else 20
-        
-        kwargs.update(
-            dict(
-                pred_length=pred_length,
-                context_length=context_length,
-            )
-        )
-
+       
         input_embeds, info_dict  = self.encoder(**kwargs)
+
         selected_indices = info_dict["selected_indices"]
+        pred_length = info_dict["pred_length"]
+        trajectory_label = info_dict["trajectory_label"]
+        context_length = info_dict["context_length"]
+
+        device = input_embeds.device
+        batch_size = trajectory_label.shape[0]
 
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 

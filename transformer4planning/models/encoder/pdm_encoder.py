@@ -45,6 +45,11 @@ class PDMEncoder(EncoderBase):
         pred_length = kwargs.get("pred_length", trajectory_label.shape[1])
         device = ego_position.device if ego_position is not None else None
         
+        assert trajectory_label is not None, "trajectory_label should not be None"
+        _, pred_length = trajectory_label.shape[:2]
+        context_actions = kwargs.get("context_actions", None)
+        context_length = context_actions.shape[1] if context_actions is not None else -1 # -1 in case of pdm encoder 
+
         # encode ego history states, with shape of (bsz, history_dim, 9)
         state_features = torch.cat(
             [ego_position, ego_velocity, ego_acceleration], dim=-1
@@ -86,7 +91,10 @@ class PDMEncoder(EncoderBase):
         
         info_dict = {
             "future_key_points": future_key_points,
-            " selected_indices" :selected_indices,
+            "selected_indices": selected_indices,
+            "trajectory_label": trajectory_label,
+            "pred_length": pred_length,
+            "context_length": context_length,
         }
         
         return planner_embed, info_dict

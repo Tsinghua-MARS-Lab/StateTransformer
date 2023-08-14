@@ -210,7 +210,7 @@ def main():
         assert os.path.isdir(data_args.datadic_path)
         index_root = os.path.join(data_args.datadic_path, 'index')
         root_folders = os.listdir(index_root)
-        
+
         def load_dataset(split='train', select=False):
             datasets = []
             index_root_folders = os.path.join(index_root, split)
@@ -289,7 +289,7 @@ def main():
             raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # loop split info and update for test set
-    print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
+    print('TrainingSet: ', train_dataset, '\nValidationSet', val_dataset, '\nTestingSet', test_dataset)
 
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
@@ -356,9 +356,7 @@ def main():
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":
-            collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
-                                dic_valid_path=data_args.datadic_valid_path, 
-                                interaction=model_args.interaction)
+            collate_fn = partial(waymo_collate_func, data_path=data_args.datadic_path, interaction=model_args.interaction)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
     else:

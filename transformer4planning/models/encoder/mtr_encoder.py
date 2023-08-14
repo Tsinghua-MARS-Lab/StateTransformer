@@ -249,24 +249,28 @@ class WaymoVectorizeEncoder(EncoderBase):
         return hidden_state_joint
 
     def forward(self, **kwargs):
-        input_dict = kwargs.get("input_dict")
-        agent_trajs = input_dict['agent_trajs']
+        agent_trajs = kwargs.get('agent_trajs')
         batch_size = agent_trajs.shape[0]
         device = agent_trajs.device
-        track_index_to_predict = input_dict["track_index_to_predict"]
+        track_index_to_predict = kwargs.get("track_index_to_predict")
+        current_time_index = kwargs.get("current_time_index")[0]
 
-        state_embeds = self.context_encoder(input_dict)
+        state_embeds = self.context_encoder(
+            agent_trajs[:, :, :current_time_index + 1, :],
+            map_polylines=kwargs.get("map_polylines"),
+            map_polylines_mask=kwargs.get("map_polylines_mask"),
+        )
 
         ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
         ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
 
-        trajectory_label = ego_trajs[:, 11:, [0, 1, 2, 6]]
+        trajectory_label = ego_trajs[:, current_time_index + 1:, [0, 1, 2, 6]]
         pred_length = trajectory_label.shape[1]
-        trajectory_label_mask = ego_trajs[:, 11:, -1].unsqueeze(-1)
-        context_actions = ego_trajs[:, :11, [0, 1, 2, 6]]
+        trajectory_label_mask = ego_trajs[:, current_time_index + 1:, -1].unsqueeze(-1)
+        context_actions = ego_trajs[:, :current_time_index + 1, [0, 1, 2, 6]]
 
         # add noise to context actions
-        context_actions = self.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
+        context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
         
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]
@@ -292,7 +296,7 @@ class WaymoVectorizeEncoder(EncoderBase):
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
-            future_key_points_aug = self.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
+            future_key_points_aug = self.augmentation.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
             if not self.model_args.predict_yaw:
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
@@ -311,6 +315,7 @@ class WaymoVectorizeEncoder(EncoderBase):
         info_dict = {
             "trajectory_label": trajectory_label,
             "trajectory_label_mask": trajectory_label_mask,
+            "pred_length": pred_length,
             "context_length": context_length,
             "future_key_points": future_key_points,
             "future_key_points_gt_mask": future_key_points_gt_mask,
@@ -319,7 +324,7 @@ class WaymoVectorizeEncoder(EncoderBase):
 
         if self.model_args.interaction:
             info_dict.update({
-                "agents_num_per_scenario": input_dict["agents_num_per_scenario"],
+                "agents_num_per_scenario": kwargs.get("agents_num_per_scenario"),
             })
             input_embeds = self.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=True)
 
@@ -333,12 +338,7 @@ class SimpleEncoder(MTREncoder):
                                                   nn.Linear(128, 256, bias=False), nn.ReLU(),
                                                   nn.Linear(256, self.output_dim, bias=True), nn.ReLU(),)
 
-    def forward(self, **kwargs):
-        input_dict = kwargs.get("input_dict", None)
-        assert input_dict is not None, "input_dict is None, check model inputs"
-        past_trajs = input_dict['agent_trajs'][:, :, :11, :]
-        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
-
+    def forward(self, past_trajs, map_polylines, map_polylines_mask):
         num_center_objects, num_objects, num_timestamps, _ = past_trajs.shape
         agent_trajs_mask = past_trajs[..., -1] > 0
         map_polylines_mask = map_polylines_mask[..., 0] > 0
