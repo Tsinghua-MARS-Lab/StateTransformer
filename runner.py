@@ -247,7 +247,7 @@ def main():
         if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
             val_dataset = load_dataset("val", False)
         else:
-            print('Validation set not found, using training set as test set')
+            print('Validation set not found, using training set as val set')
             val_dataset = train_dataset
 
         all_maps_dic = {}
