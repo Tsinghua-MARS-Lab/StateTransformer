@@ -249,6 +249,9 @@ def main():
         
         if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
             val_dataset = load_dataset("val", False)
+        else:
+            print('Validation set not found, using training set as test set')
+            val_dataset = train_dataset
 
         if model_args.task == "nuplan":
             all_maps_dic = {}
@@ -290,8 +293,8 @@ def main():
 
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
-        validation=test_dataset.shuffle(seed=training_args.seed),
-        test=val_dataset.shuffle(seed=training_args.seed),
+        validation=val_dataset.shuffle(seed=training_args.seed),
+        test=test_dataset.shuffle(seed=training_args.seed),
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
