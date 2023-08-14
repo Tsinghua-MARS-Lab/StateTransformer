@@ -30,6 +30,9 @@ class WaymoDataset(DatasetTemplate):
 
         self.infos = self.get_all_infos(self.data_root / self.dataset_cfg.INFO_FILE[self.mode])
         self.logger.info(f'Total scenes after filters: {len(self.infos)}')
+        
+        self.obj_dist_thres = 1000
+        self.do_filter = False
 
     def get_all_infos(self, info_path):
         self.logger.info(f'Start to load infos from {info_path}')
@@ -102,15 +105,28 @@ class WaymoDataset(DatasetTemplate):
         obj_types = np.array(track_infos['object_type'])
         obj_ids = np.array(track_infos['object_id'])
         obj_trajs_full = track_infos['trajs']  # (num_objects, num_timestamp, 10)
-        obj_trajs_past = obj_trajs_full[:, :current_time_index + 1]
-        obj_trajs_future = obj_trajs_full[:, current_time_index + 1:]
-
+        
         center_objects, center_objects_past, track_index_to_predict = self.get_interested_agents(
             track_index_to_predict=track_index_to_predict,
             obj_trajs_full=obj_trajs_full,
             current_time_index=current_time_index,
             obj_types=obj_types, scene_id=scene_id
         )
+
+        # filter objects
+        if self.do_filter:
+            dist_start = np.linalg.norm(obj_trajs_full[:, 0, :2][None, ...] - center_objects[:, None, :2], ord=2, axis=-1)
+            dist_end = np.linalg.norm(obj_trajs_full[:, -1, :2][None, ...] - center_objects[:, None, :2], ord=2, axis=-1)
+            obj_mask = np.logical_or((dist_start.min(0) < self.obj_dist_thres),(dist_end.min(0) < self.obj_dist_thres))
+            obj_trajs_full = obj_trajs_full[obj_mask]
+            obj_types = obj_types[obj_mask]
+            obj_ids = obj_ids[obj_mask]
+            
+            obj_full_valid_index_cnt = obj_mask.cumsum(axis=0)
+            track_index_to_predict = obj_full_valid_index_cnt[track_index_to_predict] - 1
+        
+        obj_trajs_past = obj_trajs_full[:, :current_time_index + 1]
+        obj_trajs_future = obj_trajs_full[:, current_time_index + 1:]
 
         (obj_trajs_data, obj_trajs_mask, obj_trajs_pos, obj_trajs_last_pos, obj_trajs_future_state, obj_trajs_future_mask, center_gt_past_trajs, center_gt_trajs, center_gt_trajs_labels,
             center_gt_trajs_mask, center_gt_final_valid_idx,
