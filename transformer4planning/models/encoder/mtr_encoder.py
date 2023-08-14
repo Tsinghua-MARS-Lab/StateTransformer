@@ -206,9 +206,9 @@ class MTREncoder(nn.Module):
         return batch_dict
     
 from typing import Dict
-from transformer4planning.models.encoder.encoders import BaseEncoder
+from transformer4planning.models.encoder.encoders import EncoderBase, AugmentationMixin
 
-class WaymoVectorizeEncoder(BaseEncoder):
+class WaymoVectorizeEncoder(EncoderBase, AugmentationMixin):
     def __init__(self, 
                  mtr_config,
                  action_kwargs:Dict,
@@ -254,7 +254,6 @@ class WaymoVectorizeEncoder(BaseEncoder):
         batch_size = agent_trajs.shape[0]
         device = agent_trajs.device
         track_index_to_predict = input_dict["track_index_to_predict"]
-        device = agent_trajs.device
 
         state_embeds = self.context_encoder(input_dict)
 
@@ -281,7 +280,28 @@ class WaymoVectorizeEncoder(BaseEncoder):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
-        input_embeds, future_key_points, selected_indices = self.prepare_with_future(input_embeds, trajectory_label, None, (batch_size, pred_length, n_embed), device)
+        future_embeds_shape = (batch_size, pred_length, n_embed)
+        # add keypoints encoded embedding
+        if self.ar_future_interval == 0:
+            input_embeds = torch.cat([input_embeds,
+                                      torch.zeros((future_embeds_shape), device=device)], dim=1)
+
+        elif self.ar_future_interval > 0:
+            # use autoregressive future interval
+            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
+            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
+            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+            # argument future trajectory
+            future_key_points_aug = self.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
+            if not self.model_args.predict_yaw:
+                # keep the same information when generating future points
+                future_key_points_aug[:, :, 2:] = 0
+
+            future_key_embeds = self.action_m_embed(future_key_points_aug)
+            input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                      torch.zeros(future_embeds_shape, device=device)], dim=1)
+        else:
+            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
         if selected_indices is not None:
             future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
@@ -313,7 +333,9 @@ class SimpleEncoder(MTREncoder):
                                                   nn.Linear(128, 256, bias=False), nn.ReLU(),
                                                   nn.Linear(256, self.output_dim, bias=True), nn.ReLU(),)
 
-    def forward(self, input_dict):
+    def forward(self, **kwargs):
+        input_dict = kwargs.get("input_dict", None)
+        assert input_dict is not None, "input_dict is None, check model inputs"
         past_trajs = input_dict['agent_trajs'][:, :, :11, :]
         map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
 

@@ -19,50 +19,6 @@ class AugmentationMixin(nn.Module):
 
     def raster_augmentation(self, raster):
         raise NotImplementedError
-    
-    def prepare_with_future(self, input_embeds, trajectory_label, scenario_type, future_embeds_shape, device):
-        # scenario tag encoding
-        if self.token_scenario_tag:
-            scenario_tag_ids = torch.tensor(self.tokenizer(text=scenario_type, max_length=self.max_token_len, padding='max_length')["input_ids"])
-            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
-            assert scenario_tag_embeds.shape[1] == self.max_token_len, f'{scenario_tag_embeds.shape} vs {self.max_token_len}'
-            input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
-
-        # add keypoints encoded embedding
-        if self.ar_future_interval == 0:
-            input_embeds = torch.cat([input_embeds,
-                                      torch.zeros(future_embeds_shape, device=device)], dim=1)
-
-        elif self.ar_future_interval > 0:
-            # use autoregressive future interval
-            if self.model_args.specified_key_points:
-                # 80, 40, 20, 10, 5
-                if self.model_args.forward_specified_key_points:
-                    selected_indices = [4, 9, 19, 39, 79]
-                else:
-                    selected_indices = [79, 39, 19, 9, 4]
-                future_key_points = trajectory_label[:, selected_indices, :]
-                indices = torch.tensor(selected_indices, device=device, dtype=float) / 80.0                   
-            else:
-                future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-                indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
-                selected_indices = None
-            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
-            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
-            # argument future trajectory
-            future_key_points_aug = self.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
-            if not self.model_args.predict_yaw:
-                # keep the same information when generating future points
-                future_key_points_aug[:, :, 2:] = 0
-
-            future_key_embeds = self.action_m_embed(future_key_points_aug)
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros(future_embeds_shape, device=device)], dim=1)
-        else:
-            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
-        
-        return input_embeds, future_key_points, selected_indices
-
 
 class CNNDownSamplingResNet(nn.Module):
     def __init__(self, d_embed, in_channels, resnet_type='resnet18', pretrain=False):
@@ -106,13 +62,23 @@ class EncoderBase(nn.Module):
         if self.token_scenario_tag:
             self.tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_kwargs.get("dirpath", None))
             self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.tag_embedding = nn.Embedding(self.tokenizer.vocab_size, tokenizer_kwargs.get("d_embed", None))    
+            self.tag_embedding = nn.Embedding(self.tokenizer.vocab_size, tokenizer_kwargs.get("d_embed", None))
 
-class NuplanRasterizeEncoder(EncoderBase, AugmentationMixin):
-    def forward(self, **kwargs):
-        raise NotImplemented
+    def forward(self, **kwargs):  
+        """
+        Abstract forward function for all encoder classes;
+        Encoders obtain input attributes from kwargs in need and return torch.Tensor: input_embeds and Dict: info_dict,
+        where info_dict include all the information that will be used in backbone and decoder.          
+        """
+        raise NotImplementedError
 
     def select_keypoints(self, trajectory_label):
+        """
+        Universal keypoints selection function.
+        return  `future_key_points`: torch.Tensor, the key points selected
+                `selected_indices`: List
+                `indices`: List
+        """
         device = trajectory_label.device
         # use autoregressive future interval
         if self.model_args.specified_key_points:
@@ -149,6 +115,15 @@ class NuplanRasterizeEncoder(EncoderBase, AugmentationMixin):
         self.model_args = model_args
         
     def forward(self, **kwargs):
+        """
+        Nuplan raster encoder require inputs:
+        `high_res_raster`: torch.Tensor, shape (batch_size, 224, 224, seq)
+        `low_res_raster`: torch.Tensor, shape (batch_size, 224, 224, seq)
+        `context_actions`: torch.Tensor, shape (batch_size, seq, 4)
+        `trajectory_label`: torch.Tensor, shape (batch_size, seq, 2/4), depend on whether pred yaw value
+        `pred_length`: int, the length of prediction trajectory
+        `context_length`: int, the length of context actions
+        """
         high_res_raster = kwargs.get("high_res_raster", None)
         low_res_raster = kwargs.get("low_res_raster", None)
         context_actions = kwargs.get("context_actions", None)
@@ -209,8 +184,13 @@ class NuplanRasterizeEncoder(EncoderBase, AugmentationMixin):
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
-
-
+        
+        info_dict = {
+            "future_key_points": future_key_points,
+            "selected_indices": selected_indices,
+        }
+        return input_embeds, info_dict
+    
 class PDMEncoder(EncoderBase, AugmentationMixin):
     def __init__(self, 
                  pdm_kwargs:Dict,
@@ -237,7 +217,10 @@ class PDMEncoder(EncoderBase, AugmentationMixin):
     
     def forward(self, **kwargs):
         """
-        PDM feature include ego history states, planner centerline, and scenario type
+        PDM feature includes 
+         `ego history states`: including `ego_position`, `ego_velocity`, `ego_acceleration`,
+                               each with shape of (batchsize, history_dim, 3)
+         `planner centerline`: torch.Tensor, (batchsize, centerline_num, 3) and scenario type
         """
         batch_size = kwargs.get("ego_position").shape[0]
         ego_position = kwargs.get("ego_position").float() # shape (bsz, history_dim, 3)
@@ -287,7 +270,13 @@ class PDMEncoder(EncoderBase, AugmentationMixin):
         else:
             planner_embed = torch.cat([planner_embed, 
                                        torch.zeros((batch_size, pred_length, planner_embed.shape[-1]), device=device)], dim=1)
-        return planner_embed, future_key_points, selected_indices    
+        
+        info_dict = {
+            "future_key_points": future_key_points,
+            " selected_indices" :selected_indices,
+        }
+        
+        return planner_embed, info_dict
 
 
         
