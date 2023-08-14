@@ -16,6 +16,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
         super().__init__(config, **kwargs)
         self.transformer = GPT2Model(config)
         self.model_args = kwargs["model_args"]
+        assert not self.model_args.interactive, 'Not supported.'
         self.traj_decoder = None
         self.k = int(self.model_args.k)
         self.ar_future_interval = self.model_args.ar_future_interval
@@ -55,30 +56,49 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             # The related code can be found in runner.py at around line 511.
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            from transformer4planning.models.encoders import (NuplanRasterizeEncoder, )
             # TODO: add raster/vector encoder configuration item
+            tokenizer_kwargs = dict(
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                d_embed=self.config.n_embd,
+            )
+            
             if "raster" in self.model_args.encoder_type:
+                from transformer4planning.models.encoder.encoders import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
-                    resnet_type=self.model_args.resnet_type,
+                    resnet_type=self.model_args.resnet_type, 
                     pretrain=self.model_args.pretrain_encoder
                 )
                 action_kwargs = dict(
                     d_embed=self.config.n_embd
                 )
-                tokenizer_kwargs = dict(
-                    dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
-                    d_embed=self.config.n_embd,
-                )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                raise NotImplementedError
+                from transformer4planning.models.encoder.encoders import PDMEncoder
+                pdm_kwargs = dict(
+                    hidden_dim=self.config.n_embd,
+                    centerline_dim=120,
+                    history_dim=20
+                )
+                self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
+        elif self.model_args.task == "waymo":
+            from transformer4planning.models.encoder.mtr_encoder import WaymoVectorizeEncoder
+            from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
+            cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
+            action_kwargs = dict(
+                    d_embed=self.config.n_embd
+                )
+            tokenizer_kwargs = dict(
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                d_embed=self.config.n_embd,
+                max_token_len=self.model_args.max_token_len,
+            ) if self.model_args.token_scenario_tag else None
+            self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, tokenizer_kwargs, self.model_args)
         else:
             raise NotImplementedError
-
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
 
@@ -441,6 +461,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         super().__init__(config, **kwargs)
         self.transformer = GPT2Model(config)
         self.model_args = kwargs["model_args"]
+        assert not self.model_args.interactive, 'Not supported.'
         self.traj_decoder = None
         self.k = int(self.model_args.k)
         assert self.k==1,'Currently not supported.'
@@ -466,27 +487,47 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
 
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            from transformer4planning.models.encoders import (NuplanRasterizeEncoder, )
             # TODO: add raster/vector encoder configuration item
+            tokenizer_kwargs = dict(
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                d_embed=self.config.n_embd,
+            )
+            
             if "raster" in self.model_args.encoder_type:
+                from transformer4planning.models.encoder.encoders import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
-                    resnet_type=self.model_args.resnet_type,
+                    resnet_type=self.model_args.resnet_type, 
                     pretrain=self.model_args.pretrain_encoder
                 )
                 action_kwargs = dict(
                     d_embed=self.config.n_embd
                 )
-                tokenizer_kwargs = dict(
-                    dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
-                    d_embed=self.config.n_embd,
-                )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                raise NotImplementedError
+                from transformer4planning.models.encoder.encoders import PDMEncoder
+                pdm_kwargs = dict(
+                    hidden_dim=self.config.n_embd,
+                    centerline_dim=120,
+                    history_dim=20
+                )
+                self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
+        elif self.model_args.task == "waymo":
+            from transformer4planning.models.encoder.mtr_encoder import WaymoVectorizeEncoder
+            from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
+            cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
+            action_kwargs = dict(
+                    d_embed=self.config.n_embd
+                )
+            tokenizer_kwargs = dict(
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                d_embed=self.config.n_embd,
+                max_token_len=self.model_args.max_token_len,
+            ) if self.model_args.token_scenario_tag else None
+            self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, tokenizer_kwargs, self.model_args)
         else:
             raise NotImplementedError
 
