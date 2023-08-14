@@ -454,7 +454,8 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         if not self.model_args.pred_key_points_only:
             self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
         if self.ar_future_interval > 0:
-            self.key_points_decoder = DiffusionDecoderTFBasedForKeyPoints(config.n_inner, config.n_embd, out_features=out_features * self.k, num_key_points = self.model_args.key_points_num, input_feature_seq_lenth = self.model_args.diffusion_condition_sequence_lenth)
+            self.key_points_decoder = DiffusionDecoderTFBasedForKeyPoints(config.n_inner, config.n_embd, out_features=out_features * self.k, num_key_points = self.model_args.key_points_num, input_feature_seq_lenth = self.model_args.diffusion_condition_sequence_lenth,
+                                                                          specified_key_points = self.model_args.specified_key_points, forward_specified_key_points = self.model_args.forward_specified_key_points)
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
 

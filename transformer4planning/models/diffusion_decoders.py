@@ -387,13 +387,15 @@ class DiffusionDecoderTFBasedForKeyPoints(DiffusionDecoderTFBased):
     def __init__(self, hidden_size, in_features, out_features = 2,
                  beta_schedule = 'linear', linear_start=0.01,linear_end=0.9,n_timesteps=10,
                  loss_type='l2', clip_denoised=True,predict_epsilon=True,max_action = 100,feat_dim=1024,num_key_points = 5,input_feature_seq_lenth = 16,
+                 specified_key_points = True, forward_specified_key_points = True,
                  ):
         super(DiffusionDecoderTFBasedForKeyPoints, self).__init__(hidden_size, in_features, out_features = out_features,
                  beta_schedule = beta_schedule, linear_start=linear_start,linear_end=linear_end,n_timesteps=n_timesteps,
                  loss_type=loss_type, clip_denoised=clip_denoised,predict_epsilon=predict_epsilon,max_action = max_action,feat_dim=feat_dim,)
         self.input_feature_seq_lenth = input_feature_seq_lenth
         self.num_key_points = num_key_points
-        self.model = NewDecoderTFBasedForKeyPoints(hidden_size, in_features, out_features,feat_dim=feat_dim,input_feature_seq_lenth = input_feature_seq_lenth,key_point_num=num_key_points)
+        self.model = NewDecoderTFBasedForKeyPoints(hidden_size, in_features, out_features,feat_dim=feat_dim,input_feature_seq_lenth = input_feature_seq_lenth,key_point_num=num_key_points,
+                                                   specified_key_points = specified_key_points, forward_specified_key_points = forward_specified_key_points,)
     # ------------------------- Sample -------------------------
     def sample_forward(self,state,*args, **kwargs):
         assert not self.training, 'sample_forward should not be called directly during training.'
@@ -425,10 +427,24 @@ def exp_positional_embedding(key_point_num, feat_dim):
 
     return pos_embedding
 
+def uniform_positional_embedding(key_point_num, feat_dim):
+    point_num = key_point_num
+    position = torch.tensor([6 * (point_num - i)] for i in range(point_num))
+    # Create a table of divisors to divide each position. This will create a sequence of values for the divisor.
+    div_term = torch.exp(torch.arange(0, feat_dim, 2).float() * (-math.log(100.0) / feat_dim))
+
+    # Generate the positional encodings
+    # For even positions use sin, for odd use cos
+    pos_embedding = torch.zeros((point_num, feat_dim))
+    pos_embedding[:, 0::2] = torch.sin(position * div_term)
+    pos_embedding[:, 1::2] = torch.cos(position * div_term)
+
+    return pos_embedding
 
 
 class NewDecoderTFBasedForKeyPoints(nn.Module):
-    def __init__(self,hidden_size,in_features,out_features=4,layer=7,feat_dim=1024,input_feature_seq_lenth=16,key_point_num=5):
+    def __init__(self,hidden_size,in_features,out_features=4,layer=7,feat_dim=1024,input_feature_seq_lenth=16,key_point_num=5,
+                 specified_key_points = specified_key_points, forward_specified_key_points = forward_specified_key_points,):
         super().__init__()
         self.out_features = out_features
         if feat_dim == 512:
@@ -475,10 +491,20 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
             DecoderResCat(128,64,32),
             DecoderResCat(64,32,out_features),
         )
-        key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
+
+        if specified_key_points:
+            if forward_specified_key_points:
+                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
+            else:
+                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)[...,::-1]
+        else:
+            key_points_position_embedding = uniform_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
+            
+        # trainable positional embedding, initialized by cos/sin positional embedding.
         position_embedding = torch.cat([torch.zeros([1,input_feature_seq_lenth, feat_dim]),key_points_position_embedding],dim=-2)
         self.position_embedding = torch.nn.Parameter(position_embedding, requires_grad=True)
-
+        
+        
     def forward(self,x,t,state):
         seq_lenth = x.shape[-2]
         # First encode the cond, time, x.

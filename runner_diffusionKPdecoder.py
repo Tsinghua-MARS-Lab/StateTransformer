@@ -107,7 +107,6 @@ def do_train(model, train_dataloader, test_dataloader,  saving_dir, max_epoch, p
             train_loss.backward()
             optimizer.step()
 
-
 def main():
     # Define default hyperparameters
     NAME = '200032-256FeatDim-run-LargeTFBased-keypoints_0.65TrainAllTest'
@@ -136,6 +135,8 @@ def main():
         "NUM_KEY_POINTS": 5,
         "FEATURE_SEQ_LENTH": 16,
         "PREDICT_YAW": False,
+        "SPECIFIED_KEY_POINTS": True,
+        "FORWARD_SPECIFIED_KEY_POINTS": True,
     }
 
     # Validate that TRAJ_OR_KEYPOINTS has an acceptable value
@@ -150,6 +151,10 @@ def main():
             parser.add_argument(f'--{key.lower()}', type=int, default=value)
         elif isinstance(value, float):
             parser.add_argument(f'--{key.lower()}', type=float, default=value)
+        elif isinstance(value, bool):
+            parser.add_argument(f'--{key.lower()}',type=bool, default=value)
+        else:
+            raise NotImplementedError(f"Type of {key} is not supported yet.")
 
     # Print hyperparameters
     # Parse arguments
@@ -193,9 +198,12 @@ def main():
     NUM_KEY_POINTS = HYPERPARAMS["NUM_KEY_POINTS"]
     FEATURE_SEQ_LENTH = HYPERPARAMS["FEATURE_SEQ_LENTH"]
     PREDICT_YAW = HYPERPARAMS["PREDICT_YAW"]
+    SPECIFIED_KEY_POINTS = HYPERPARAMS["SPECIFIED_KEY_POINTS"]
+    FORWARD_SPECIFIED_KEY_POINTS = HYPERPARAMS["FORWARD_SPECIFIED_KEY_POINTS"]
+    
     assert SAVING_K == 1, ''
     pl.seed_everything(SEED)
-    diffusionDecoder = DiffusionDecoderTFBased(1024,256,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS)
+    diffusionDecoder = DiffusionDecoderTFBased(1024,256,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS, specified_key_points = SPECIFIED_KEY_POINTS, forward_specified_key_points = FORWARD_SPECIFIED_KEY_POINTS)
     diffusionDecoder.to("cuda")
 
     model = diffusionDecoder
