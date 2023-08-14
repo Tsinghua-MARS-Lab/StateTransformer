@@ -206,9 +206,9 @@ class MTREncoder(nn.Module):
         return batch_dict
     
 from typing import Dict
-from transformer4planning.models.encoder.encoders import EncoderBase, AugmentationMixin
+from transformer4planning.models.encoder.base import EncoderBase
 
-class WaymoVectorizeEncoder(EncoderBase, AugmentationMixin):
+class WaymoVectorizeEncoder(EncoderBase):
     def __init__(self, 
                  mtr_config,
                  action_kwargs:Dict,
