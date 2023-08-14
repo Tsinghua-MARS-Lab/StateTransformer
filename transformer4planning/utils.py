@@ -141,9 +141,19 @@ class ModelArguments:
     diffusion_dataset_save_dir: Optional[str] = field(
         default = None, metadata = {"help": "The path of the dir to save the diffusion dataset to be generated for Diffusion KeyPoint Decoder."}
     )
+    key_points_diffusion_decoder_feat_dim: Optional[int] = field(
+        default = 256, metadata = {"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
+    )
+    key_points_num: Optional[int] = field(
+        default = 5, metadata = {"help": "Number of key points. Only used to initialize diffusion KP decoder."}
+    )
+    diffusion_condition_sequence_lenth: Optional[int] = field(
+        default = 16, metadata = {"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
+    )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default = None, metadata = {"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
+    
 
 
 def rotate_array(origin, points, angle, tuple=False):
