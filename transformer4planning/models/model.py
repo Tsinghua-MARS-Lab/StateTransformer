@@ -1,10 +1,19 @@
-from transformers import GPT2Model, GPT2PreTrainedModel
-from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.decoders import *
+from typing import Tuple, Optional, Dict
+from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+from transformer4planning.models.decoder import (DecoderResCat)
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
 import torch.nn as nn
 
+class LTMOutput(CausalLMOutputWithCrossAttentions):
+    loss: Optional[torch.FloatTensor] = None
+    logits: torch.FloatTensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    loss_items: Optional[Dict[str, torch.FloatTensor]] = None
 
 class TrajectoryGPT(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
@@ -34,15 +43,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            
-            # TODO: add raster/vector encoder configuration item
             tokenizer_kwargs = dict(
                 dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
                 d_embed=self.config.n_embd,
             )
             
             if "raster" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import NuplanRasterizeEncoder
+                from transformer4planning.models.encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
@@ -54,7 +61,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import PDMEncoder
+                from transformer4planning.models.encoder import PDMEncoder
                 pdm_kwargs = dict(
                     hidden_dim=self.config.n_embd,
                     centerline_dim=120,
@@ -64,7 +71,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
         elif self.task == "waymo":
-            from transformer4planning.models.encoder.mtr_encoder import WaymoVectorizeEncoder
+            from transformer4planning.models.encoder import WaymoVectorizeEncoder
             from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
             cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
             action_kwargs = dict(
@@ -78,6 +85,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, tokenizer_kwargs, self.model_args)
         else:
             raise NotImplementedError
+    
+    def build_decoder(self):
+        raise NotImplementedError
         
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -142,7 +152,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             traj_logits = self.traj_decoder(traj_hidden_state)
             if self.model_args.task == "waymo":
                 trajectory_label_mask = info_dict["trajectory_label_mask"]
-                loss_fct = MSELoss(reduction="none")
+                loss_fct = nn.MSELoss(reduction="none")
                 _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
                             trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
@@ -183,7 +193,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
                 # get loss of minimal loss from k results
                 k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
-                loss_fct_key_points = MSELoss(reduction="none")
+                loss_fct_key_points = nn.MSELoss(reduction="none")
                 if self.model_args.predict_yaw:
                     loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device))
                 else:
@@ -198,7 +208,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     loss += min_loss.mean()
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-                    loss_fct = CrossEntropyLoss(reduction="mean")
+                    loss_fct = nn.CrossEntropyLoss(reduction="mean")
                     loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
                     loss += loss_to_add
                     if self.training:
