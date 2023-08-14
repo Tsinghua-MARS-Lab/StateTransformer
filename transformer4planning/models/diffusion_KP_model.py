@@ -133,9 +133,11 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             pred_length=pred_length,
             context_length=context_length,
         )
-        input_embeds, future_key_points, _ = self.encoder(**feature_inputs)
+        input_embeds, info_dict = self.encoder(**feature_inputs)
+        attention_mask = info_dict["input_embeds_mask"] if self.model_args.interactive else None
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
+            attention_mask=attention_mask,
             return_dict=return_dict,
             # **kwargs
         )
@@ -172,6 +174,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
+            future_key_points = info_dict["future_key_points"]
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
             # future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             # For auto-regressive, future key point hidden state is the previous one.
@@ -198,67 +201,70 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
                     attentions=transformer_outputs.attentions,
                     cross_attentions=transformer_outputs.cross_attentions,
                 )
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-            if self.k == 1:
-                if self.model_args.predict_yaw:
-                    loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
-                else:
-                    loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
-                loss += loss_to_add
-                traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
-            else:
-                b, s, c = future_key_points.shape
-                k_results = key_points_logits.reshape(b, s, self.k, -1)
+                
+            assert False, ''
+            return None
+        #     key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+        #     if self.k == 1:
+        #         if self.model_args.predict_yaw:
+        #             loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
+        #         else:
+        #             loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
+        #         loss += loss_to_add
+        #         traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
+        #     else:
+        #         b, s, c = future_key_points.shape
+        #         k_results = key_points_logits.reshape(b, s, self.k, -1)
 
-                # get loss of minimal loss from k results
-                k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
-                loss_fct_key_points = MSELoss(reduction="none")
-                if self.model_args.predict_yaw:
-                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device))
-                else:
-                    loss_to_add = loss_fct_key_points(k_results, k_future_key_points[..., :2].to(device))
-                # add loss on x, y (the last dimension)
-                loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
-                min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                loss += min_loss.mean()
-                if self.next_token_scorer_decoder is not None:
-                    pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-                    loss_fct = CrossEntropyLoss(reduction="mean")
-                    loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
-                    loss += loss_to_add
-                    if self.training:
-                        # concatenate the key points with predicted trajectory for evaluation
-                        selected_key_points = key_points_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
-                                              min_loss_indices.reshape(-1), :].reshape(b, s, -1)
-                    else:
-                        # concatenate the key points with predicted trajectory selected from the classifier for evaluation
-                        selected_key_points = key_points_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
-                                              pred_logits.argmax(dim=-1).reshape(-1), :].reshape(b, s, -1)
-                    traj_logits = torch.cat([selected_key_points, traj_logits], dim=1)
-                else:
-                    print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
-                    traj_logits = torch.cat([key_points_logits[0].reshape(b, s, -1), traj_logits], dim=1)
+        #         # get loss of minimal loss from k results
+        #         k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
+        #         loss_fct_key_points = MSELoss(reduction="none")
+        #         if self.model_args.predict_yaw:
+        #             loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device))
+        #         else:
+        #             loss_to_add = loss_fct_key_points(k_results, k_future_key_points[..., :2].to(device))
+        #         # add loss on x, y (the last dimension)
+        #         loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
+        #         min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
+        #         loss += min_loss.mean()
+        #         if self.next_token_scorer_decoder is not None:
+        #             pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
+        #             loss_fct = CrossEntropyLoss(reduction="mean")
+        #             loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
+        #             loss += loss_to_add
+        #             if self.training:
+        #                 # concatenate the key points with predicted trajectory for evaluation
+        #                 selected_key_points = key_points_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
+        #                                       min_loss_indices.reshape(-1), :].reshape(b, s, -1)
+        #             else:
+        #                 # concatenate the key points with predicted trajectory selected from the classifier for evaluation
+        #                 selected_key_points = key_points_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
+        #                                       pred_logits.argmax(dim=-1).reshape(-1), :].reshape(b, s, -1)
+        #             traj_logits = torch.cat([selected_key_points, traj_logits], dim=1)
+        #         else:
+        #             print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
+        #             traj_logits = torch.cat([key_points_logits[0].reshape(b, s, -1), traj_logits], dim=1)
 
-        # evaluate accuracy if on eval
-        if not self.training and self.clf_metrics is not None:
-            if self.next_token_scorer_decoder is not None:
-                # classification on k predictions
-                predictions = torch.argmax(pred_logits, dim=-1)  # b, s, k
-                for _, metric in self.clf_metrics.items():
-                    metric.add_batch(references=min_loss_indices.reshape(-1), predictions=predictions.reshape(-1))
+        # # evaluate accuracy if on eval
+        # if not self.training and self.clf_metrics is not None:
+        #     if self.next_token_scorer_decoder is not None:
+        #         # classification on k predictions
+        #         predictions = torch.argmax(pred_logits, dim=-1)  # b, s, k
+        #         for _, metric in self.clf_metrics.items():
+        #             metric.add_batch(references=min_loss_indices.reshape(-1), predictions=predictions.reshape(-1))
 
-        if not return_dict:
-            output = (traj_logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+        # if not return_dict:
+        #     output = (traj_logits,) + transformer_outputs[1:]
+        #     return ((loss,) + output) if loss is not None else output
 
-        return CausalLMOutputWithCrossAttentions(
-            loss=loss,
-            logits=traj_logits,
-            past_key_values=transformer_outputs.past_key_values,
-            hidden_states=transformer_outputs.hidden_states,
-            attentions=transformer_outputs.attentions,
-            cross_attentions=transformer_outputs.cross_attentions,
-        )
+        # return CausalLMOutputWithCrossAttentions(
+        #     loss=loss,
+        #     logits=traj_logits,
+        #     past_key_values=transformer_outputs.past_key_values,
+        #     hidden_states=transformer_outputs.hidden_states,
+        #     attentions=transformer_outputs.attentions,
+        #     cross_attentions=transformer_outputs.cross_attentions,
+        # )
 
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
@@ -289,7 +295,8 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             pred_length=pred_length,
             context_length=context_length,
         )
-        input_embeds, _, selected_indices = self.encoder(**feature_inputs)
+        input_embeds, info_dict = self.encoder(**feature_inputs)
+        selected_indices = info_dict["selected_indices"]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
@@ -563,10 +570,13 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
             pred_length=pred_length,
             context_length=context_length,
         )
-        input_embeds, future_key_points, _ = self.encoder(**feature_inputs)
+        input_embeds, info_dict = self.encoder(**feature_inputs)
+        future_key_points = info_dict["future_key_points"]
+        attention_mask = info_dict["input_embeds_mask"] if self.model_args.interactive else None
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
             return_dict=return_dict,
+            attention_mask = attention_mask,
             # **kwargs
         )
 
@@ -582,9 +592,10 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         if not self.model_args.pred_key_points_only:
             traj_logits = self.traj_decoder(traj_hidden_state)
             if self.model_args.task == "waymo":
+                trajectory_label_mask = info_dict["trajectory_label_mask"]
                 loss_fct = MSELoss(reduction="none")
-                y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
-                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * y_mask).sum() / (y_mask.sum() + 1e-7)
+                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
+                            trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
             else:
                 if self.model_args.predict_yaw:
@@ -602,11 +613,12 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
+            future_key_points = info_dict["future_key_points"]
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
             # This is the original code, which is changed since it does not suit the diffusion decoder for KP.
             # future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             # key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-
+            assert self.model_args.task == 'nuplan', 'TODO: not supported.' # TODO: support Waymo.
             if self.k == 1:
                 if self.training:
                     feature_for_keypointdiffusion = transformer_outputs_hidden_state[:, :scenario_type_len + context_length * 2, :]
@@ -713,7 +725,8 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
             pred_length=pred_length,
             context_length=context_length,
         )
-        input_embeds, _, selected_indices = self.encoder(**feature_inputs)
+        input_embeds, info_dict = self.encoder(**feature_inputs)
+        selected_indices = info_dict["selected_indices"]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'

@@ -31,6 +31,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
         self.build_encoder()
+        self.task = self.model_args.task
+        self.encoder_type = self.model_args.encoder_type
 
     def build_encoder(self):
         if self.model_args.task == "nuplan":
@@ -63,7 +65,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
-        elif self.task == "waymo":
+        elif self.model_args.task == "waymo":
             from transformer4planning.models.encoder.mtr_encoder import WaymoVectorizeEncoder
             from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
             cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
@@ -171,7 +173,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
                 else:
                     loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
-                if self.task == "waymo":
+                if self.model_args.task == "waymo":
                     future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
                     loss_to_add = (loss_to_add* future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 loss += loss_to_add
@@ -190,7 +192,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 # add loss on x, y (the last dimension)
                 loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                if self.task == "waymo":
+                if self.model_args.task == "waymo":
                     future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
                     loss += (min_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
                 else:
@@ -514,6 +516,7 @@ def build_models(model_args):
                 tag = 'GPTTrajectory with Diffusion Key Point Decoder'
         else:
             from transformer4planning.models.diffusion_KP_model import TrajectoryGPTFeatureGen
+            print("Now generating features.")
             ModelCls = TrajectoryGPTFeatureGen
             tag = 'GPTTrajectory: Model For Generating and Saving Features used for training DiffusionKeyPointDecoder'
     elif 'transxl' in model_args.model_name:

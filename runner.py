@@ -244,8 +244,8 @@ def main():
             print('Testset not found, using training set as test set')
             test_dataset = train_dataset
         
-        if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
-            val_dataset = load_dataset("val", False)
+        if (training_args.do_eval or training_args.do_predict) and 'test' in root_folders:
+            val_dataset = load_dataset("test", False)
 
         all_maps_dic = {}
         all_pickles_dic = {}
@@ -369,33 +369,27 @@ def main():
         
     if model_args.generate_diffusion_dataset_for_key_points_decoder:
         # First we generate the testing set for our diffusion decoder.
-        
         try:
-            if model_args.autoregressive or True:
-                result = trainer.evaluate()
+            result = trainer.evaluate()
         except Exception as e:
-            # The code would throw an exception at the end of evaluation loop since we return None in evaluation step
-            # But this is not a big deal since we have just saved everything we need in the model's forward method.
-            # print(e)
             pass
+        # try:
+        #     if model_args.autoregressive or True:
+        #         result = trainer.evaluate()
+        # except Exception as e:
+        #     # The code would throw an exception at the end of evaluation loop since we return None in evaluation step
+        #     # But this is not a big deal since we have just saved everything we need in the model's forward method.
+        #     print(e)
+        #     pass
         
         # Then we generate the training set for our diffusion decoder.
         # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
+        trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
+        trainer.eval_dataset = train_dataset
         try:
-            trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
-            trainer.eval_dataset = train_dataset
-            # trainer = PlanningTrainer(
-            #     model=model,
-            #     args=training_args,
-            #     train_dataset=None,
-            #     eval_dataset=train_dataset,
-            #     callbacks=[CustomCallback,],
-            #     data_collator=collate_fn
-            # )
-            # trainer.pop_callback(DefaultFlowCallback)
-            results = {}
             result = trainer.evaluate()
         except Exception as e:
+            print(e)
             pass
         
         assert False, 'The generation has been done.'
