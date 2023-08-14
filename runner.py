@@ -15,7 +15,7 @@ from torch import nn
 from tqdm import tqdm
 import copy
 import json
-
+import wandb
 import datasets
 import numpy as np
 import evaluate
@@ -454,7 +454,7 @@ def main():
                          all_maps_dic=all_maps_dic,
                          all_pickles_dic=all_pickles_dic,
                          **model_args.__dict__) if data_args.online_preprocess else None
-    org_model = copy.deepcopy(model)
+    
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -464,27 +464,6 @@ def main():
         data_collator=collate_fn
     )
     trainer.pop_callback(DefaultFlowCallback)
-    
-    if model_args.key_points_diffusion_decoder_load_from is not None:
-        pretrained_model = copy.deepcopy(trainer.model)
-        print("Now loading pretrained key_points_diffusion_decoder.")
-        from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBased, DiffusionDecoderTFBasedForKeyPoints
-        state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
-        pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(1024,256,2,feat_dim=256,num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
-        pretrained_key_points_diffusion_decoder.load_state_dict(state_dict) 
-        pretrained_model.key_points_decoder = pretrained_key_points_diffusion_decoder
-
-        # load pretrained model, then substitude the key_points_decoder with ours.
-
-        trainer = PlanningTrainer(
-            model=pretrained_model,  # the instantiated 🤗 Transformers model to be trained
-            args=training_args,  # training arguments, defined above
-            train_dataset=train_dataset if training_args.do_train else None,
-            eval_dataset=eval_dataset if training_args.do_eval else None,
-            callbacks=[CustomCallback,],
-            data_collator=collate_fn
-        )
-        trainer.pop_callback(DefaultFlowCallback)
         
     if model_args.generate_diffusion_dataset_for_key_points_decoder:
         # First we generate the testing set for our diffusion decoder.
@@ -504,7 +483,7 @@ def main():
             pass
         
         # Then we generate the training set for our diffusion decoder.
-        # Since it's way more faster to run a evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
+        # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
         try:
             model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
             trainer = PlanningTrainer(
