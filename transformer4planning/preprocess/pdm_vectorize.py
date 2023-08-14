@@ -33,7 +33,7 @@ DRIVABLE_MAP_LAYERS = [
     SemanticMapLayer.CARPARK_AREA,
 ]
 
-def pdm_collate_func(batch, dic_path=None, map_api=dict()):
+def nuplan_vector_collate_func(batch, dic_path=None, map_api=dict()):
     expected_padding_keys = ["road_ids", "route_ids", "traffic_ids"]
     agent_id_lengths = list()
     for i, d in enumerate(batch):
@@ -109,7 +109,9 @@ def load_route_dicts(route_roadblock_ids: List[str], map_api) -> None:
         block = block or map_api.get_map_object(
             id_, SemanticMapLayer.ROADBLOCK_CONNECTOR
         )
-
+        if block is None:
+            continue
+        # assert block is not None, f"Roadblock {route_roadblock_ids} not found in map-api."
         route_roadblock_dict[block.id] = block
 
         for lane in block.interior_edges:
@@ -227,6 +229,7 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
     scenario_type = sample.get("scenario_type", None)
     map_api = map_api[map]
     route_ids = sample["route_ids"].tolist()
+    assert len(route_ids) > 0
     pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
     if os.path.exists(pickle_path):
         with open(pickle_path, "rb") as f:

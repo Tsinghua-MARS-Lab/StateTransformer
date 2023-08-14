@@ -34,33 +34,35 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            from transformer4planning.models.encoders import (NuplanRasterizeEncoder, PDMEncoder)
+            
             # TODO: add raster/vector encoder configuration item
             tokenizer_kwargs = dict(
                 dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
                 d_embed=self.config.n_embd,
             )
-            if self.model_args.task == "nuplan":
-                if "raster" in self.model_args.encoder_type:
-                    cnn_kwargs = dict(
-                        d_embed=self.config.n_embd // 2,
-                        in_channels=self.model_args.raster_channels,
-                        resnet_type=self.model_args.resnet_type, 
-                        pretrain=self.model_args.pretrain_encoder
-                    )
-                    action_kwargs = dict(
-                        d_embed=self.config.n_embd
-                    )
-                    self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
-                elif "vector" in self.model_args.encoder_type:
-                    pdm_kwargs = dict(
-                        hidden_dim=self.config.n_embd,
-                        centerline_dim=120,
-                        history_dim=20
-                    )
-                    self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
-                else:
-                    raise AttributeError("encoder_type should be either raster or vector")
+            
+            if "raster" in self.model_args.encoder_type:
+                from transformer4planning.models.encoders import NuplanRasterizeEncoder
+                cnn_kwargs = dict(
+                    d_embed=self.config.n_embd // 2,
+                    in_channels=self.model_args.raster_channels,
+                    resnet_type=self.model_args.resnet_type, 
+                    pretrain=self.model_args.pretrain_encoder
+                )
+                action_kwargs = dict(
+                    d_embed=self.config.n_embd
+                )
+                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
+            elif "vector" in self.model_args.encoder_type:
+                from transformer4planning.models.encoders import PDMEncoder
+                pdm_kwargs = dict(
+                    hidden_dim=self.config.n_embd,
+                    centerline_dim=120,
+                    history_dim=20
+                )
+                self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
+            else:
+                raise AttributeError("encoder_type should be either raster or vector")
 
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -81,7 +83,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
         batch_size, pred_length = trajectory_label.shape[:2]
-        context_length = kwargs.get("context_actions", torch.zeros(1, 10)).shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
+        context_actions = kwargs.get("context_actions", None)
+        context_length = context_actions.shape[1] if context_actions is not None else -1 # -1 in case of pdm encoder 
         kwargs.update(
             dict(
                 pred_length=pred_length,

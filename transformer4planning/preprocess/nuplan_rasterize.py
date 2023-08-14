@@ -9,7 +9,7 @@ from functools import partial
 from torch.utils.data._utils.collate import default_collate
 from transformer4planning.utils import generate_contour_pts, save_raster
 
-def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
+def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -319,7 +319,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
                               ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                               np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
-    rotated_poses[:, 0] *= y_inverse
+    rotated_poses[:, 1] *= y_inverse
     for i in sample_frames_in_past:
         action = rotated_poses[i//frequency_change_rate]  # hard-coded frequency change
         context_actions.append(action)
@@ -339,7 +339,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     traj_y = trajectory_label[:, 1].copy()
     trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
     trajectory_label[:, 1] = traj_x * sin_ + traj_y * cos_
-    trajectory_label[:, 0] *= y_inverse
+    trajectory_label[:, 1] *= y_inverse
 
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
     rasters_low_res = cv2.merge(rasters_low_res_channels).astype(bool)

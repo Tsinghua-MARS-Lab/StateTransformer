@@ -94,6 +94,9 @@ class DataTrainingArguments:
     datadic_path: Optional[str] = field(
         default=None, metadata={"help":"The root path of data dictionary pickle file"}
     )
+    map_path: Optional[str] = field(
+        default=None, metadata={"help":"The root path of map file"}
+    )
 
 @dataclass
 class ConfigArguments:
@@ -210,50 +213,42 @@ def main():
         assert os.path.isdir(data_args.datadic_path)
         index_root = os.path.join(data_args.datadic_path, 'index')
         root_folders = os.listdir(index_root)
-        if 'train' in root_folders:
-            # load training datasets
-            training_datasets = []
-            training_index_root_folders = os.path.join(index_root, 'train')
-            training_indices = os.listdir(training_index_root_folders)
-            for training_index in training_indices:
-                training_index_path = os.path.join(training_index_root_folders, training_index)
-                if os.path.isdir(training_index_path):
+        
+        def load_dataset(split='train', select=False):
+            datasets = []
+            index_root_folders = os.path.join(index_root, split)
+            indices = os.listdir(index_root_folders)
+            for index in indices:
+                index_path = os.path.join(index_root_folders, index)
+                if os.path.isdir(index_path):
                     # load training dataset
-                    logger.info("Loading training dataset {}".format(training_index_path))
-                    dataset = Dataset.load_from_disk(training_index_path)
+                    logger.info("Loading training dataset {}".format(index_path))
+                    dataset = Dataset.load_from_disk(index_path)
                     if dataset is not None:
-                        training_datasets.append(dataset)
-            train_dataset = _concatenate_map_style_datasets(training_datasets)
+                        datasets.append(dataset)
+            dataset = _concatenate_map_style_datasets(datasets)
             # add split column
-            train_dataset.features.update({'split': Value('string')})
-            train_dataset = train_dataset.add_column(name='split', column=['train'] * len(train_dataset))
-            train_dataset.set_format(type='torch')
-            train_samples = int(len(train_dataset) * float(data_args.dataset_scale))
-            train_dataset = train_dataset.select(range(train_samples))
+            dataset.features.update({'split': Value('string')})
+            dataset = dataset.add_column(name='split', column=[split] * len(dataset))
+            dataset.set_format(type='torch')
+            if select:
+                samples = int(len(dataset) * float(data_args.dataset_scale))
+                dataset = dataset.select(range(samples))
+            return dataset
+            
+        if 'train' in root_folders:
+            train_dataset = load_dataset("train", True)
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
         
         if training_args.do_eval and 'test' in root_folders:
-            # load test datasets
-            test_datasets = []
-            test_index_root_folders = os.path.join(index_root, 'test')
-            test_indices = os.listdir(test_index_root_folders)
-            for test_index in test_indices:
-                test_index_path = os.path.join(test_index_root_folders, test_index)
-                if os.path.isdir(test_index_path):
-                    # load test dataset
-                    logger.info("Loading test dataset {}".format(test_index_path))
-                    dataset = Dataset.load_from_disk(test_index_path)
-                    if dataset is not None:
-                        test_datasets.append(dataset)
-            test_dataset = _concatenate_map_style_datasets(test_datasets)
-            # add additional column for flagging test set
-            test_dataset.features.update({'split': Value('string')})
-            test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            test_dataset.set_format(type='torch')
+            test_dataset = load_dataset("test", False)
         else:
             print('Testset not found, using training set as test set')
             test_dataset = train_dataset
+        
+        if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
+            val_dataset = load_dataset("val", False)
 
         all_maps_dic = {}
         all_pickles_dic = {}
@@ -295,7 +290,7 @@ def main():
     nuplan_dataset = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
         validation=test_dataset.shuffle(seed=training_args.seed),
-        test=test_dataset.shuffle(seed=training_args.seed),
+        test=val_dataset.shuffle(seed=training_args.seed),
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
@@ -335,9 +330,10 @@ def main():
 
     # Initialize our Trainer
     if model_args.task == "nuplan":
-        from transformer4planning.preprocess import (nuplan_collate_func, pdm_collate_func)
+        from transformer4planning.preprocess import (nuplan_vector_collate_func, nuplan_rasterize_collate_func)
         if model_args.encoder_type == "raster":
-            collate_fn = partial(nuplan_collate_func, autoregressive=model_args.autoregressive,
+            
+            collate_fn = partial(nuplan_rasterize_collate_func,
                                 dic_path=data_args.datadic_path,
                                 all_maps_dic=all_maps_dic,
                                 all_pickles_dic=all_pickles_dic,
@@ -346,11 +342,18 @@ def main():
             from nuplan.common.maps.nuplan_map.map_factory import get_maps_api
             map_api = dict()
             for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
-                map_api[map] = get_maps_api(map_root="/public/MARS/datasets/nuPlan/nuplan-maps-v1.1",
+                map_api[map] = get_maps_api(map_root=data_args.map_path,
                                     map_version="nuplan-maps-v1.0",
                                     map_name=map
                                     )
-            collate_fn = partial(pdm_collate_func, dic_path=data_args.datadic_path, map_api=map_api)
+            collate_fn = partial(nuplan_vector_collate_func, 
+                                 dic_path=data_args.datadic_path, 
+                                 map_api=map_api)
+    elif model_args.task == "waymo":
+        raise NotImplementedError
+    else:
+        raise AttributeError("task must be nuplan or waymo")
+    
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -375,13 +378,12 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
-        if model_args.autoregressive:
-            result = trainer.evaluate()
-            logger.info("***** Final Eval results *****")
-            logger.info(f"  {result}")
-            hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
-            evaluate.save("./results/", ** result, ** hyperparams)
-            logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
+        result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
+        logger.info("***** Final Eval results *****")
+        logger.info(f"  {result}")
+        # hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
+        # evaluate.save("./results/", ** result, ** hyperparams)
+        # logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
     if training_args.do_predict:
         # Currently only supports single GPU predict outputs
