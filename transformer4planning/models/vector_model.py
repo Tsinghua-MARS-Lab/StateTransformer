@@ -40,11 +40,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         with open(intention_points_file, 'rb') as f:
             intention_points_dict = pickle.load(f)
 
-        intention_points = {}
+        self.intention_points = {}
         for cur_type in vector_model_cfg.MOTION_DECODER.OBJECT_TYPE:
             cur_intention_points = intention_points_dict[cur_type]
             cur_intention_points = torch.from_numpy(cur_intention_points).float().view(-1, 2).cuda()
-            intention_points[cur_type] = cur_intention_points
+            self.intention_points[cur_type] = cur_intention_points
         
         # decoder
         self.predict_trajectory = model_args.predict_trajectory
@@ -63,7 +63,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
             if self.ar_future_interval > 0:
                 self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
-                self.end_point_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
 
@@ -78,6 +77,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.tag_tokenizer = GPT2Tokenizer.from_pretrained(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'))
             self.tag_tokenizer.pad_token = self.tag_tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tag_tokenizer.vocab_size, config.n_embd)
+            
+            self.scenario_type_len = self.model_args.max_token_len
+        else:
+            self.scenario_type_len = 0
+            
         self.post_init()
         
         # loss
@@ -97,11 +101,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.pred_dim = 4
         else:
             self.pred_dim = 2 
-            
-        if self.model_args.token_scenario_tag:
-            self.scenario_type_len = self.model_args.max_token_len
-        else:
-            self.scenario_type_len = 0
         
         # self.generate_method = "greedy_search"
         self.generate_method = 'beam_search'
@@ -213,6 +212,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
 
+        # add future traj embedding
         if self.ar_future_interval == 0:
             # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds,
