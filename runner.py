@@ -13,7 +13,7 @@ from typing import Optional
 import torch
 from tqdm import tqdm
 import copy
-
+import json
 import datasets
 import numpy as np
 import evaluate
@@ -369,7 +369,34 @@ def main():
         data_collator=collate_fn
     )
     trainer.pop_callback(DefaultFlowCallback)
-
+        
+    if model_args.generate_diffusion_dataset_for_key_points_decoder:
+        # First we generate the testing set for our diffusion decoder.
+        try:
+            result = trainer.evaluate()
+        except Exception as e:
+            pass
+        # try:
+        #     if model_args.autoregressive or True:
+        #         result = trainer.evaluate()
+        # except Exception as e:
+        #     # The code would throw an exception at the end of evaluation loop since we return None in evaluation step
+        #     # But this is not a big deal since we have just saved everything we need in the model's forward method.
+        #     print(e)
+        #     pass
+        
+        # Then we generate the training set for our diffusion decoder.
+        # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
+        trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
+        trainer.eval_dataset = train_dataset
+        try:
+            result = trainer.evaluate()
+        except Exception as e:
+            print(e)
+            pass
+        
+        assert False, 'The generation has been done.'
+    
     # Training
     if training_args.do_train:
         checkpoint = None

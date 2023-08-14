@@ -219,6 +219,11 @@ class PlanningTrainer(Trainer):
                         future_key_points = trajectory_label_in_batch[:, selected_indices, :]
                     else:
                         future_key_points = trajectory_label_in_batch[:, self.model.ar_future_interval - 1::self.model.ar_future_interval, :]
+                    
+                    if self.model.model_args.generate_diffusion_dataset_for_key_points_decoder:
+                        return None,None,None
+                        # no need to return further info.
+                    
                     ade_x_error_key_points = prediction_key_points[:, :, 0] - future_key_points[:, :, 0]
                     ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
                     fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
@@ -400,7 +405,8 @@ class PlanningTrainer(Trainer):
             self.pred_dicts_list = []
 
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
-
+        if self.model.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            return None
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics
