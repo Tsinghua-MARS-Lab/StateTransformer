@@ -386,7 +386,7 @@ def main():
         nuplan_dataset.update(test=test_set)
 
     # Load a model's pretrained weights from a path or from hugging face's model base
-    model_args.vector_encoder_cfg = cfg.MODEL
+    model_args.vector_model_cfg = cfg.MODEL
     model = build_models(model_args)
     if 'auto' in model_args.model_name and model_args.k == -1:
         clf_metrics = dict(

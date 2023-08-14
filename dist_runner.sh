@@ -12,8 +12,7 @@ python -m torch.distributed.run --nproc_per_node=7 --master_port=29502 runner_wa
         --save_steps 5000 --dataloader_num_workers 10 \
         --save_total_limit 50  --predict_trajectory True --ar_future_interval 5 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True --do_train \
-        --d_embed 256 --d_model 256 --d_inner 1024 --n_layers 4 --n_heads 4 \
-        --activation_function silu --dataset_scale 1 \
+        --d_model 256 --dataset_scale 1 \
         --task waymo --with_traffic_light True --k 6 \
         --online_preprocess True \
         --datadic_path /data_3/madanjiao/nuplan/online_demo/mini_demo \

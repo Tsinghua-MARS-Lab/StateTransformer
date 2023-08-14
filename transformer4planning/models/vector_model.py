@@ -1,4 +1,5 @@
 import os
+import pickle
 import torch
 import torch.nn as nn
 from transformers import GPT2Tokenizer
@@ -14,13 +15,38 @@ class GPTAutoRegressiveModelVector(GPT2PreTrainedModel):
     
 class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
-        super().__init__(config)
         
-        self.transformer = GPT2Model(config)
         model_args = kwargs["model_args"]
         self.model_args = model_args
-        self.context_encoder = MTREncoder(kwargs["model_args"].vector_encoder_cfg.CONTEXT_ENCODER)
+        vector_model_cfg = model_args.vector_model_cfg
         
+        # LLM transformer
+        llm_config = GPT2Config()
+        llm_config.n_layer = vector_model_cfg.LLM_TRANSFORMER.n_layer
+        llm_config.n_embd = vector_model_cfg.LLM_TRANSFORMER.n_embd
+        llm_config.n_inner = vector_model_cfg.LLM_TRANSFORMER.n_inner
+        llm_config.n_head = vector_model_cfg.LLM_TRANSFORMER.n_head
+        llm_config.activation_function = vector_model_cfg.LLM_TRANSFORMER.activation_function
+        
+        super().__init__(llm_config)
+        
+        self.transformer = GPT2Model(llm_config)
+        
+        # encoder
+        self.context_encoder = MTREncoder(vector_model_cfg.CONTEXT_ENCODER)
+        
+        # load intention points
+        intention_points_file = vector_model_cfg.MOTION_DECODER.INTENTION_POINTS_FILE
+        with open(intention_points_file, 'rb') as f:
+            intention_points_dict = pickle.load(f)
+
+        intention_points = {}
+        for cur_type in vector_model_cfg.MOTION_DECODER.OBJECT_TYPE:
+            cur_intention_points = intention_points_dict[cur_type]
+            cur_intention_points = torch.from_numpy(cur_intention_points).float().view(-1, 2).cuda()
+            intention_points[cur_type] = cur_intention_points
+        
+        # decoder
         self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
@@ -37,6 +63,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
             if self.ar_future_interval > 0:
                 self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
+                self.end_point_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
 
