@@ -81,7 +81,7 @@ class ModelArguments:
         default=False
     )
     ar_future_interval: Optional[int] = field(
-        default=0,
+        default=20,
         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
     )
     arf_x_random_walk: Optional[float] = field(
