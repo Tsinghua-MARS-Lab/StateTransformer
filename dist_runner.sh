@@ -13,7 +13,7 @@ python -m torch.distributed.run --nproc_per_node=7 --master_port=29502 runner_wa
         --save_total_limit 50  --predict_trajectory True --ar_future_interval 5 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True --do_train \
         --d_model 256 --dataset_scale 1 \
-        --task waymo --with_traffic_light True --k 64 \
+        --task waymo --with_traffic_light True --k 6 \
         --online_preprocess True \
         --datadic_path /data_3/madanjiao/nuplan/online_demo/mini_demo \
         --remove_unused_columns False --future_sample_interval 1 \
