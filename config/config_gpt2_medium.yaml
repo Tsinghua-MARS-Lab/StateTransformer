@@ -43,7 +43,7 @@ MODEL:
         NUM_LAYER_IN_MLP_MAP: 5
         NUM_LAYER_IN_PRE_MLP_MAP: 3
 
-        D_MODEL: 256
+        D_MODEL: 768
         NUM_ATTN_LAYERS: 6
         NUM_ATTN_HEAD: 8 
         DROPOUT_OF_ATTN: 0.1 
