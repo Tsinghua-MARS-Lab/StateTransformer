@@ -149,7 +149,7 @@ class ModelArguments:
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default = None, metadata = {"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
-    interactive: Optional[bool] = field(
+    interaction: Optional[bool] = field(
         default=False
     )
     mtr_config_path: Optional[str] = field(

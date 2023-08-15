@@ -158,3 +158,6 @@ __pycache__
 
 .vscode
 .gitignore
+
+wandb
+*.sh
