@@ -40,7 +40,8 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
         
         assert self.model_args.generate_diffusion_dataset_for_key_points_decoder, 'This model should only be used for generating diffusion dataset for Diffusion Key Point Decoder.'
 
-
+        self.task = self.model_args.task
+        self.encoder_type = self.model_args.encoder_type
         if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
             assert self.ar_future_interval > 0, ''
             self.save_training_diffusion_dataset_dir = os.path.join(self.model_args.diffusion_dataset_save_dir,'train/')
@@ -480,6 +481,8 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
         out_features = 4 if self.model_args.predict_yaw else 2
+        self.task = self.model_args.task
+        self.encoder_type = self.model_args.encoder_type
         if not self.model_args.pred_key_points_only:
             self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
         if self.ar_future_interval > 0:
@@ -492,7 +495,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
         self.build_encoder()
-
+        
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             # TODO: add raster/vector encoder configuration item
@@ -759,7 +762,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
 
             if self.k > 1:
                 # TODO: use diffusion keypoint decoder to accomplish this part.
-                key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
+                key_points_logit = self.key_points_decoder.sample_forward(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
                 pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
                 selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
                                      pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
@@ -843,7 +846,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         if self.k > 1:
             assert False, 'currently not supported.'
             # TODO: finish this part for diffusion KP decoders.
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+            key_points_logits = self.key_points_decoder.sample_forward(future_key_points_hidden_state)  # b, s, 4/2*k
             pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
             selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
                                   torch.arange(batch_size * key_points_num),

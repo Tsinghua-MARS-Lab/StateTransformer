@@ -14,6 +14,7 @@ import time
 import os
 import wandb
 import argparse
+
 class Tensor_Dataset(torch.utils.data.Dataset):
     def __init__(self,pth_dir_path,split="train",start_idx = 0, finish_idx = 100, traj_or_keypoints = "traj"):
         super().__init__()
@@ -34,6 +35,7 @@ class Tensor_Dataset(torch.utils.data.Dataset):
             assert os.path.exists(traj_file), f'{traj_file} does not exist!'
             assert os.path.exists(cond_file), f'{cond_file} does not exist!'
         self.file_length = len(self.traj_filename_list)
+        self.predict_yaw = predict_yaw
 
     def __getitem__(self,idx):
         traj_filename = self.traj_filename_list[idx]
@@ -41,8 +43,8 @@ class Tensor_Dataset(torch.utils.data.Dataset):
         traj = torch.load(traj_filename)
         cond = torch.load(cond_filename)
         return dict(
-            traj = traj,
-            cond = cond,
+            traj = traj if self.predict_yaw else traj[...,:2],
+            cond = cond if self.predict_yaw else traj[...,:2],
         )
     def __len__(self):
         return self.file_length
@@ -59,7 +61,7 @@ def do_test(model, dataloader, current_min_loss, saving_dir):
     for batch in tqdm(dataloader):
         counter += 1
         model.eval()
-        traj,cond = batch['traj'][...,:2].cuda(),batch['cond'].cuda()
+        traj,cond = batch['traj'].cuda(),batch['cond'].cuda()
         # print(traj.shape)
         # print(cond.shape)
         with torch.no_grad():
@@ -67,7 +69,7 @@ def do_test(model, dataloader, current_min_loss, saving_dir):
             # calculate mean ADE and FDE between traj and traj_pred.
             error = traj - traj_pred
             # batchsize * length * 4
-            error = error[...,:2] # batchsize * length * 2
+            error = error[...,:2] # batchsize * length * 2, we only care about ade in x-y plane.
             ADE = torch.mean(torch.sqrt(torch.sum(error**2,dim=-1)),dim=-1) # batchsize
             FDE = torch.sqrt(torch.sum(error[...,-1]**2,dim=-1)) # batchsize
             # use ade as validation loss.
@@ -93,12 +95,12 @@ def do_train(model, train_dataloader, test_dataloader,  saving_dir, max_epoch, p
     for epoch_num in range(max_epoch):
         for batch in tqdm(train_dataloader):
             steps_counter += 1
-            if steps_counter % per_eval_step == 1:
+            if (steps_counter+1) % per_eval_step == 0:
                 new_val_loss = do_test(model,test_dataloader,current_min_loss,saving_dir)
                 current_min_loss = new_val_loss if new_val_loss < current_min_loss else current_min_loss
             model.train()
             optimizer.zero_grad()
-            traj,cond = batch['traj'][...,:2].cuda(),batch['cond'].cuda()
+            traj,cond = batch['traj'].cuda(),batch['cond'].cuda()
             # print(traj.shape)
             # print(cond.shape)
             train_loss = model.train_forward(cond,traj)
@@ -109,34 +111,36 @@ def do_train(model, train_dataloader, test_dataloader,  saving_dir, max_epoch, p
 
 def main():
     # Define default hyperparameters
-    NAME = '200032-256FeatDim-run-LargeTFBased-keypoints_0.65TrainAllTest'
+    NAME = '30003-1024FeatDim-run-LargeTFBased-keypoints_0.1Train0.1Test'
     HYPERPARAMS = {
         "NAME": NAME,
         "SEED": 42,
-        "FEAT_DIM": 256,
-        "BATCH_SIZE": 512,
+        "N_INNER": 6400,
+        "N_EMBED": 1600,
+        "FEAT_DIM": 1024,
+        "BATCH_SIZE": 500,
         "NUM_WORKERS": 5,
         "LR": 1e-4,
         "WEIGHT_DECAY": 1e-5,
-        "TRAIN_DIR": '/localdata_ssd/nuplan_2_diff_dataset_new/gen_164_/train/',
-        "TEST_DIR": '/localdata_ssd/nuplan_2_diff_dataset_new/gen_164_/test/',
+        "TRAIN_DIR": '/localdata_ssd/nuplan_3_diff_dataset_new/gen232_GenDiffFeat_trytry/train/',
+        "TEST_DIR": '/localdata_ssd/nuplan_3_diff_dataset_new/gen232_GenDiffFeat_trytry/test/',
         "SAVING_K": 1,
-        "SAVING_DIR": f"/localdata_ssd/nuplan_2/nuplan_diff_new_keypoints_decoderTFBased_saving_dir/{NAME}",
+        "SAVING_DIR": f"/localdata_ssd/nuplan_3/nuplan_diff_new_keypoints_decoderTFBased_saving_dir/{NAME}",
         "WANDB_PROJECT": f"diffusion_decoder_TFBased_{NAME}",
         "WANDB_ENTITY": "jingzheshi",
-        "VAL_STEP": 700,
+        "VAL_STEP": 75,
         "MAX_EPOCHS": 5,
         "PRECISION": 32,
-        "TRAIN_INIT_IDX": 200000,# min: 195872?
-        "TRAIN_FINI_IDX": 1400000, # max: 2136264
+        "TRAIN_INIT_IDX": 25000,
+        "TRAIN_FINI_IDX": 140000,
         "TEST_INIT_IDX": 0,
-        "TEST_FINI_IDX": 195000,# max: 195871
+        "TEST_FINI_IDX": 24999,
         "TRAJ_OR_KEYPOINTS": 'keypoints',
         "NUM_KEY_POINTS": 5,
         "FEATURE_SEQ_LENTH": 16,
-        "PREDICT_YAW": False,
+        "PREDICT_YAW": True,
         "SPECIFIED_KEY_POINTS": True,
-        "FORWARD_SPECIFIED_KEY_POINTS": True,
+        "FORWARD_SPECIFIED_KEY_POINTS": False,
     }
 
     # Validate that TRAJ_OR_KEYPOINTS has an acceptable value
@@ -176,6 +180,8 @@ def main():
 
     NAME = HYPERPARAMS["NAME"]
     SEED = HYPERPARAMS["SEED"]
+    N_INNER = HYPERPARAMS["N_INNER"]
+    N_EMBED = HYPERPARAMS["N_EMBED"]
     FEAT_DIM = HYPERPARAMS["FEAT_DIM"]
     BATCH_SIZE = HYPERPARAMS["BATCH_SIZE"]
     NUM_WORKERS = HYPERPARAMS["NUM_WORKERS"]
@@ -201,9 +207,13 @@ def main():
     SPECIFIED_KEY_POINTS = HYPERPARAMS["SPECIFIED_KEY_POINTS"]
     FORWARD_SPECIFIED_KEY_POINTS = HYPERPARAMS["FORWARD_SPECIFIED_KEY_POINTS"]
     
+    
     assert SAVING_K == 1, ''
     pl.seed_everything(SEED)
-    diffusionDecoder = DiffusionDecoderTFBased(1024,256,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(1024,256,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS, specified_key_points = SPECIFIED_KEY_POINTS, forward_specified_key_points = FORWARD_SPECIFIED_KEY_POINTS)
+    diffusionDecoder = DiffusionDecoderTFBased(N_INNER,N_EMBED,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM) if TRAJ_OR_KEYPOINTS == 'traj' else DiffusionDecoderTFBasedForKeyPoints(N_INNER,N_EMBED,out_features = 4 if PREDICT_YAW else 2,feat_dim=FEAT_DIM,input_feature_seq_lenth=FEATURE_SEQ_LENTH, num_key_points = NUM_KEY_POINTS, specified_key_points = SPECIFIED_KEY_POINTS, forward_specified_key_points = FORWARD_SPECIFIED_KEY_POINTS)
+    model_parameters = filter(lambda p: p.requires_grad, diffusionDecoder.parameters())
+    params = sum([np.prod(p.size()) for p in model_parameters])
+    print(f"Number of parameters == {params}")
     diffusionDecoder.to("cuda")
 
     model = diffusionDecoder
@@ -237,9 +247,6 @@ def main():
     wandb.init(project = WANDB_PROJECT, entity = WANDB_ENTITY, name = NAME)
     wandb.watch(model,log_freq = 100)
     do_train(model,train_dataloader, test_dataloader, saving_dir_path, MAX_EPOCHS, VAL_STEP, optimizer)
-
-
-
 
 if __name__ == '__main__':
     main()

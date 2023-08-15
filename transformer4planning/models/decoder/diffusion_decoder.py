@@ -385,9 +385,9 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
 
         if specified_key_points:
             if forward_specified_key_points:
-                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
+                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)[...,::-1,:]
             else:
-                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)[...,::-1]
+                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
         else:
             key_points_position_embedding = uniform_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
             
@@ -397,6 +397,10 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
         
         
     def forward(self,x,t,state):
+        # print("x.shape==",x.shape)
+        # print("t.shape==",t.shape)
+        # print("state.shape==",state.shape)
+        # assert False, "debugging"
         seq_lenth = x.shape[-2]
         # First encode the cond, time, x.
         state_embedding = self.state_encoder2(self.state_encoder1(state)) # B * 40 * feat_dim
