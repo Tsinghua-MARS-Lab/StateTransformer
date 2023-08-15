@@ -41,9 +41,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
         self.build_encoder()
-        self.task = self.model_args.task
-        self.encoder_type = self.model_args.encoder_type
-
+        
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             tokenizer_kwargs = dict(
@@ -52,7 +50,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             )
             
             if "raster" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder import NuplanRasterizeEncoder
+                from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
@@ -64,7 +62,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder import PDMEncoder
+                from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
                     hidden_dim=self.config.n_embd,
                     centerline_dim=120,
