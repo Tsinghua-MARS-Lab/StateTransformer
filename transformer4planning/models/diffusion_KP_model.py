@@ -40,7 +40,8 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
         
         assert self.model_args.generate_diffusion_dataset_for_key_points_decoder, 'This model should only be used for generating diffusion dataset for Diffusion Key Point Decoder.'
 
-
+        self.task = self.model_args.task
+        self.encoder_type = self.model_args.encoder_type
         if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
             assert self.ar_future_interval > 0, ''
             self.save_training_diffusion_dataset_dir = os.path.join(self.model_args.diffusion_dataset_save_dir,'train/')
@@ -479,6 +480,8 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
         out_features = 4 if self.model_args.predict_yaw else 2
+        self.task = self.model_args.task
+        self.encoder_type = self.model_args.encoder_type
         if not self.model_args.pred_key_points_only:
             self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
         if self.ar_future_interval > 0:
@@ -491,7 +494,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
         self.build_encoder()
-
+        
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             # TODO: add raster/vector encoder configuration item
