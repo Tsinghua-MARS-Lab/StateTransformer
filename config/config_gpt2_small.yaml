@@ -54,7 +54,7 @@ MODEL:
         n_layer: 4
         n_embd: 256
         n_inner: 1024
-        n_head: 8
+        n_head: 4
         activation_function: silu
 
     MOTION_DECODER:
