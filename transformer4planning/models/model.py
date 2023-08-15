@@ -591,7 +591,7 @@ def build_models(model_args):
     if model_args.key_points_diffusion_decoder_load_from is not None:
         assert type(model) == TrajectoryGPTDiffusionKPDecoder, ''
         print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
-        from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBasedForKeyPoints
+        from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints
         state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
         pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(1024, 256, out_features = 4 if model_args.predict_yaw else 2, feat_dim=model_args.key_points_diffusion_decoder_feat_dim, num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
         pretrained_key_points_diffusion_decoder.load_state_dict(state_dict)
