@@ -334,7 +334,7 @@ def main():
 
     # Initialize our Trainer
     if model_args.task == "nuplan":
-        from transformer4planning.preprocess import (nuplan_vector_collate_func, nuplan_rasterize_collate_func)
+        from transformer4planning.preprocess.nuplan_rasterize import nuplan_rasterize_collate_func
         if model_args.encoder_type == "raster":
             
             collate_fn = partial(nuplan_rasterize_collate_func,
@@ -344,6 +344,7 @@ def main():
                                 **model_args.__dict__) if data_args.online_preprocess else None
         elif model_args.encoder_type == "vector":
             from nuplan.common.maps.nuplan_map.map_factory import get_maps_api
+            from transformer4planning.preprocess.pdm_vectorize import nuplan_vector_collate_func
             map_api = dict()
             for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
                 map_api[map] = get_maps_api(map_root=data_args.map_path,
