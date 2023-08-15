@@ -95,7 +95,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.reg_kps_loss = self.reg_trj_loss
         
         self.cls_kps_loss = CrossEntropyLoss(reduction="mean")
-        self.cls_kps_loss_weight = 1
+        self.cls_kps_loss_weight = 10
         self.beam_search_temp = 1.0
         
         if self.model_args.predict_yaw:
@@ -214,6 +214,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         device = input_dict['obj_trajs'].device
         scenario_type = kwargs.get("scenario_type", None)
         
+        # input_embeds: (bs, context_length*2 + scenario_len, n_embd)
         input_embeds, context_length, trajectory_label, trajectory_label_mask = self._prepare_OA_inputs(input_dict, batch_sample_count, scenario_type)
         pred_length = trajectory_label.shape[1]
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -265,10 +266,18 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 future_key_points_aug[:, :, 2:] = 0
 
             future_key_embeds = self.action_m_embed(future_key_points_aug)
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
+            future_key_cls_embeds = torch.zeros((batch_size, self.ar_future_interval, self.llm_n_embd), device=device)
+            kpts_embeds = torch.zeros(
+                (batch_size, self.ar_future_interval * 2, self.llm_n_embd),
+                dtype=torch.float32,
+                device=device
+            )
+            kpts_embeds[:, ::2, :] = future_key_embeds  # index: 0, 2, 4, 6, 8
+            kpts_embeds[:, 1::2, :] = future_key_cls_embeds  # index: 1, 3, 5, 7, 9
+            
+            input_embeds = torch.cat([input_embeds, kpts_embeds,
                                       torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
-            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
+
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
@@ -302,11 +311,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 - 1:self.scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
-            pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state)  # (b, num_kps, 4/2*k)
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 - 1:self.scenario_type_len + context_length * 2 + kpts_embeds.shape[1] - 1, :]
+            pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state[:, ::2, :])  # (b, num_kps, 4/2*k)
             
             if self.k > 1:
-                pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # (b, num_kps, k)
+                pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state[:, 1::2, :])  # (b, num_kps, k)
         
         # get loss
         pred_traj_logits, loss = self.calc_loss(pred_traj_logits=pred_traj_logits, 
