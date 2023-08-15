@@ -13,8 +13,8 @@ from typing import Optional, List
 
 from torch import nn, Tensor
 import torch.nn.functional as F
-from .multi_head_attention_local import MultiheadAttentionLocal
-from .multi_head_attention import MultiheadAttention
+from transformer4planning.libs.models.mtr.transformer.multi_head_attention_local import MultiheadAttentionLocal
+from transformer4planning.libs.models.mtr.transformer.multi_head_attention import MultiheadAttention
 
 
 def _get_activation_fn(activation):

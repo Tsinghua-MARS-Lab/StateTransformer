@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from typing import Optional
 
 DEFAULT_TOKEN_CONFIG = dict(
@@ -45,3 +46,72 @@ def cat_raster_seq_for_waymo(raster, framenum=11):
         assert raster_i.shape[1] == agent_type + road_type
         result[:, i, :, :, :] = raster_i
     return result
+
+def normalize(x):
+    y = torch.zeros_like(x)
+    # mean(x[...,0]) = 9.517, mean(sqrt(x[...,0]**2))=9.517
+    y[..., 0] += (x[..., 0] / 10)
+    y[..., 0] -= 0
+    # mean(x[..., 1]) = -0.737, mean(sqrt(x[..., 1]**2))=0.783
+    y[..., 1] += (x[..., 1] / 10)
+    y[..., 1] += 0
+    if x.shape[-1]==2:
+        return y
+    # mean(x[..., 2]) = 0, mean(sqrt(x[..., 2]**2)) = 0
+    y[..., 2] = x[..., 2] * 10
+    # mean(x[..., 3]) = 0.086, mean(sqrt(x[..., 3]**2))=0.090
+    y[..., 3] += x[..., 3] / 2
+    y[..., 3] += 0
+    return y
+
+def denormalize(y):
+    x = torch.zeros_like(y)
+    x[..., 0] = (y[..., 0]) * 10
+    x[..., 1] = (y[..., 1]) * 10
+    if y.shape[-1]==2:
+        return x
+    x[..., 2] = y[..., 2] / 10
+    x[..., 3] = y[..., 3] * 2
+    return x
+
+
+def linear_beta_schedule(timesteps, beta_start=1e-4, beta_end=2e-2, dtype=torch.float32):
+    betas = np.linspace(
+        beta_start, beta_end, timesteps
+    )
+    return torch.tensor(betas, dtype=dtype)
+
+def extract(a, t, x_shape):
+    b, *_ = t.shape
+    out = a.gather(-1, t)
+    return out.reshape(b, *((1,) * (len(x_shape) - 1)))
+
+def exp_positional_embedding(key_point_num, feat_dim):
+    point_num = key_point_num
+    # Creating the position tensor where the first position is 2^point_num, the second is 2^{point_num-1}, and so on.
+    position = torch.tensor([2 ** (point_num - i - 1) for i in range(point_num)]).unsqueeze(1).float()
+
+    # Create a table of divisors to divide each position. This will create a sequence of values for the divisor.
+    div_term = torch.exp(torch.arange(0, feat_dim, 2).float() * (-math.log(100.0) / feat_dim))
+
+    # Generate the positional encodings
+    # For even positions use sin, for odd use cos
+    pos_embedding = torch.zeros((point_num, feat_dim))
+    pos_embedding[:, 0::2] = torch.sin(position * div_term)
+    pos_embedding[:, 1::2] = torch.cos(position * div_term)
+
+    return pos_embedding
+
+def uniform_positional_embedding(key_point_num, feat_dim):
+    point_num = key_point_num
+    position = torch.tensor([6 * (point_num - i)] for i in range(point_num))
+    # Create a table of divisors to divide each position. This will create a sequence of values for the divisor.
+    div_term = torch.exp(torch.arange(0, feat_dim, 2).float() * (-math.log(100.0) / feat_dim))
+
+    # Generate the positional encodings
+    # For even positions use sin, for odd use cos
+    pos_embedding = torch.zeros((point_num, feat_dim))
+    pos_embedding[:, 0::2] = torch.sin(position * div_term)
+    pos_embedding[:, 1::2] = torch.cos(position * div_term)
+
+    return pos_embedding

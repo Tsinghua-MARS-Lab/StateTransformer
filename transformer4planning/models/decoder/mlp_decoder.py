@@ -1,8 +1,9 @@
 import torch
 from typing import Dict
-from transformer4planning.models.decoder.base import (DecoderBase, DecoderResCat)
+from transformer4planning.models.decoder.base import TrajectoryDecoder
+from transformer4planning.libs.models.mlp import DecoderResCat
 
-class MultiTrajDecoder(DecoderBase):
+class MultiTrajDecoder(TrajectoryDecoder):
     """
     MultiTrajDecoder is a decoder that support predicting multiple trajectories.
     Also, it can be initialized with keypoint decoder to generate key points of trajectories,

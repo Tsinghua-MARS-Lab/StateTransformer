@@ -3,7 +3,7 @@ from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.decoders import *
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
-from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBasedForKeyPoints
+from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints
 import torch.nn as nn
 
 class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
@@ -54,6 +54,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             # Notice that although we check and create two directories (train/ and test/) here, in the forward method we only save features in eval loops.
             # This is because evaluation is way faster than training (since there are no backward propagation), and after saving features for evaluation, we just change our test set to training set and then run the evaluation loop again.
             # The related code can be found in runner.py at around line 511.
+    
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             # TODO: add raster/vector encoder configuration item
@@ -63,7 +64,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             )
             
             if "raster" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import NuplanRasterizeEncoder
+                from transformer4planning.models.encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
@@ -75,7 +76,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
                 )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import PDMEncoder
+                from transformer4planning.models.encoder import PDMEncoder
                 pdm_kwargs = dict(
                     hidden_dim=self.config.n_embd,
                     centerline_dim=120,

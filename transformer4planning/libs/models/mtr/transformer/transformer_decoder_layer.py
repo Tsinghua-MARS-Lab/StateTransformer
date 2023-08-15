@@ -13,9 +13,9 @@ from typing import Optional, List
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
-from .transformer_encoder_layer import _get_activation_fn
-from .multi_head_attention_local import MultiheadAttentionLocal
-from .multi_head_attention import MultiheadAttention
+from transformer4planning.libs.models.mtr.transformer.transformer_encoder_layer import _get_activation_fn
+from transformer4planning.libs.models.mtr.transformer.multi_head_attention_local import MultiheadAttentionLocal
+from transformer4planning.libs.models.mtr.transformer.multi_head_attention import MultiheadAttention
 
 
 class TransformerDecoderLayer(nn.Module):

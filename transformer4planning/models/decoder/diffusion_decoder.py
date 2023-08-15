@@ -1,75 +1,11 @@
 import torch
-from torch import nn, Tensor
 import torch.nn.functional as F
+import torch.nn as nn
 import numpy as np
 import math
-from tqdm import tqdm
+from transformer4planning.models.decoder import DecoderResCat
+from transformer4planning.models.utils import *
 import einops
-
-from transformer4planning.models.decoders import DecoderResCat
-def normalize(x):
-    y = torch.zeros_like(x)
-    # mean(x[...,0]) = 9.517, mean(sqrt(x[...,0]**2))=9.517
-    y[...,0] += (x[...,0] / 10)
-    y[...,0] -= 0
-    # mean(x[...,1]) = -0.737, mean(sqrt(x[...,1]**2))=0.783
-    y[...,1] += (x[...,1] / 10)
-    y[...,1] += 0
-    if x.shape[-1]==2:
-        return y
-    # mean(x[...,2]) = 0, mean(sqrt(x[...,2]**2)) = 0
-    y[...,2] = x[...,2] * 10
-    # mean(x[...,3]) = 0.086, mean(sqrt(x[...,3]**2))=0.090
-    y[...,3] += x[...,3] / 2
-    y[...,3] += 0
-    return y
-
-def denormalize(y):
-    x = torch.zeros_like(y)
-    x[...,0] = (y[...,0]) * 10
-    x[...,1] = (y[...,1]) * 10
-    if y.shape[-1]==2:
-        return x
-    x[...,2] = y[...,2] / 10
-    x[...,3] = y[...,3] * 2
-    return x
-# def normalize(x):
-#     y = torch.zeros_like(x)
-#     # mean(x[...,0]) = 9.517, mean(sqrt(x[...,0]**2))=9.517
-#     y[...,0] += x[...,0] / 9.517
-#     y[...,0] -= 1
-#     # mean(x[...,1]) = -0.737, mean(sqrt(x[...,1]**2))=0.783
-#     y[...,1] += x[...,1] / 0.783
-#     y[...,1] += 0.941
-#     if x.shape[-1]==2:
-#         return y
-#     # mean(x[...,2]) = 0, mean(sqrt(x[...,2]**2)) = 0
-#     y[...,2] = x[...,2] * 10
-#     # mean(x[...,3]) = 0.086, mean(sqrt(x[...,3]**2))=0.090
-#     y[...,3] += x[...,3] / 0.09
-#     y[...,3] += 0.958
-#     return y
-
-# def denormalize(y):
-#     x = torch.zeros_like(y)
-#     x[...,0] = (y[...,0] + 1) * 9.517
-#     x[...,1] = (y[...,1]-0.941) * 0.783
-#     if y.shape[-1]==2:
-#         return x
-#     x[...,2] = y[...,2] / 10
-#     x[...,3] = (y[...,3]-0.958) * 0.09
-#     return x
-
-def linear_beta_schedule(timesteps, beta_start=1e-4, beta_end=2e-2, dtype=torch.float32):
-    betas = np.linspace(
-        beta_start, beta_end, timesteps
-    )
-    return torch.tensor(betas, dtype=dtype)
-
-def extract(a, t, x_shape):
-    b, *_ = t.shape
-    out = a.gather(-1, t)
-    return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -97,15 +33,15 @@ class NewDecoderTFBased(nn.Module):
         # cond: B * 40 * 1600 -> B * 40 * 800 -> B * 40 * feat_dim
         self.out_features = out_features
         if feat_dim == 512:
-            self.state_encoder1 = DecoderResCat(hidden_size,in_features,800)
-            self.state_encoder2 = DecoderResCat(1600,800,feat_dim)
+            self.state_encoder1 = DecoderResCat(hidden_size, in_features, 800)
+            self.state_encoder2 = DecoderResCat(1600, 800, feat_dim)
         elif feat_dim == 1024:
             # print("This is suggested and used: feat_dim=1024.")
-            self.state_encoder1 = DecoderResCat(hidden_size,in_features,1600)
-            self.state_encoder2 = DecoderResCat(3200,1600,feat_dim)
+            self.state_encoder1 = DecoderResCat(hidden_size,in_features, 1600)
+            self.state_encoder2 = DecoderResCat(3200, 1600, feat_dim)
         else:
-            self.state_encoder1 = DecoderResCat(hidden_size,in_features,int(feat_dim * 1.5))
-            self.state_encoder2 = DecoderResCat(feat_dim*3, int(feat_dim*1.5),feat_dim)
+            self.state_encoder1 = DecoderResCat(hidden_size, in_features, int(feat_dim * 1.5))
+            self.state_encoder2 = DecoderResCat(feat_dim * 3, int(feat_dim * 1.5), feat_dim)
 
         # time: -> B * feat_dim
         t_dim = feat_dim
@@ -120,22 +56,22 @@ class NewDecoderTFBased(nn.Module):
 
         # x: B * 40 * out_features -> B * 40 * 200 -> B * 40 * feat_dim
 
-        self.x_encoder1 = DecoderResCat(400,out_features,400)
-        self.x_encoder2 = DecoderResCat(800,400,feat_dim)
+        self.x_encoder1 = DecoderResCat(400, out_features, 400)
+        self.x_encoder2 = DecoderResCat(800, 400, feat_dim)
 
         self.transformerblock_list = nn.ModuleList()
         for i in range(layer):
-            self.transformerblock_list.append(nn.TransformerEncoderLayer(d_model=feat_dim,nhead=8,dim_feedforward=4*feat_dim,batch_first=True))
+            self.transformerblock_list.append(nn.TransformerEncoderLayer(d_model=feat_dim, nhead=8,dim_feedforward=4*feat_dim,batch_first=True))
 
         self.x_decoder = nn.Sequential(
-            DecoderResCat(2*feat_dim,feat_dim,128),
-            DecoderResCat(256,128,64),
-            DecoderResCat(128,64,64),
-            DecoderResCat(128,64,32),
-            DecoderResCat(64,32,out_features),
+            DecoderResCat(2 * feat_dim,feat_dim, 128),
+            DecoderResCat(256, 128, 64),
+            DecoderResCat(128, 64, 64),
+            DecoderResCat(128, 64, 32),
+            DecoderResCat(64, 32, out_features),
         )
 
-    def forward(self,x,t,state):
+    def forward(self, x, t, state):
 
         # First encode the cond, time, x.
         state_embedding = self.state_encoder2(self.state_encoder1(state)) # B * 40 * feat_dim
@@ -150,19 +86,9 @@ class NewDecoderTFBased(nn.Module):
         for block in self.transformerblock_list:
             seq = block(seq)
 
-
         # Then decode the trajectory.
         x = self.x_decoder(seq)
         return x
-
-class L2Loss(nn.Module):
-    def __init__(self):
-        super().__init__()
-    def forward(self, pred, targ):
-        loss = self._loss(pred, targ)
-        return loss.mean()
-    def _loss(self, pred, targ):
-        return F.mse_loss(pred,targ,reduction='none')
 
 class Silent:
 
@@ -176,7 +102,7 @@ class Silent:
 class DiffusionDecoderTFBased(nn.Module):
     def __init__(self, hidden_size, in_features, out_features = 60,
                  beta_schedule = 'linear', linear_start=0.01,linear_end=0.9,n_timesteps=10,
-                 loss_type='l2', clip_denoised=True,predict_epsilon=True,max_action = 100, feat_dim=1024,
+                 clip_denoised=True,predict_epsilon=True,max_action = 100, feat_dim=1024,
                  ):
         # if during sampling mc_num > 1, then we return traj and cls of shape batch_size * mc_num * traj_lenth * traj_point_dim.
         # else the returned shape of traj is batch_size * traj_lenth * traj_point_dim.
@@ -226,7 +152,8 @@ class DiffusionDecoderTFBased(nn.Module):
         print("We are now using diffusion model for decoder.")
         print("When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.")
 
-        self.loss_fn = L2Loss()
+        self.loss_fn = nn.MSELoss(reduction='none')
+
     def fowrard(self, *args):
         if self.training:
             return self.train_forward(self,*args)
@@ -235,7 +162,7 @@ class DiffusionDecoderTFBased(nn.Module):
 
 
     # ------------------------- Train -------------------------
-    def train_forward(self,hidden_states,trajectory_label):
+    def train_forward(self, hidden_states, trajectory_label):
         trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
         # print(trajectory_label.shape)
@@ -331,7 +258,7 @@ class DiffusionDecoderTFBased(nn.Module):
             total_cls = total_cls.reshape(batch_size, mc_num)
             return x, total_cls
 
-    def p_sample(self,x,t,s,determin=True):
+    def p_sample(self, x, t, s, determin=True):
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, s=s)
         if determin == False:
@@ -378,11 +305,6 @@ class DiffusionDecoderTFBased(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-
-
-
-
-
 class DiffusionDecoderTFBasedForKeyPoints(DiffusionDecoderTFBased):
     def __init__(self, hidden_size, in_features, out_features = 2,
                  beta_schedule = 'linear', linear_start=0.01,linear_end=0.9,n_timesteps=10,
@@ -397,7 +319,7 @@ class DiffusionDecoderTFBasedForKeyPoints(DiffusionDecoderTFBased):
         self.model = NewDecoderTFBasedForKeyPoints(hidden_size, in_features, out_features,feat_dim=feat_dim,input_feature_seq_lenth = input_feature_seq_lenth,key_point_num=num_key_points,
                                                    specified_key_points = specified_key_points, forward_specified_key_points = forward_specified_key_points,)
     # ------------------------- Sample -------------------------
-    def sample_forward(self,state,*args, **kwargs):
+    def sample_forward(self, state, *args, **kwargs):
         assert not self.training, 'sample_forward should not be called directly during training.'
         # returns predicted trajectory
         batch_size = state.shape[0]
@@ -409,37 +331,6 @@ class DiffusionDecoderTFBasedForKeyPoints(DiffusionDecoderTFBased):
         action, cls = self.p_sample_loop(state, shape, *args, **kwargs)
         action = denormalize(action)
         return action, cls
-
-
-def exp_positional_embedding(key_point_num, feat_dim):
-    point_num = key_point_num
-    # Creating the position tensor where the first position is 2^point_num, the second is 2^{point_num-1}, and so on.
-    position = torch.tensor([2 ** (point_num - i - 1) for i in range(point_num)]).unsqueeze(1).float()
-
-    # Create a table of divisors to divide each position. This will create a sequence of values for the divisor.
-    div_term = torch.exp(torch.arange(0, feat_dim, 2).float() * (-math.log(100.0) / feat_dim))
-
-    # Generate the positional encodings
-    # For even positions use sin, for odd use cos
-    pos_embedding = torch.zeros((point_num, feat_dim))
-    pos_embedding[:, 0::2] = torch.sin(position * div_term)
-    pos_embedding[:, 1::2] = torch.cos(position * div_term)
-
-    return pos_embedding
-
-def uniform_positional_embedding(key_point_num, feat_dim):
-    point_num = key_point_num
-    position = torch.tensor([6 * (point_num - i)] for i in range(point_num))
-    # Create a table of divisors to divide each position. This will create a sequence of values for the divisor.
-    div_term = torch.exp(torch.arange(0, feat_dim, 2).float() * (-math.log(100.0) / feat_dim))
-
-    # Generate the positional encodings
-    # For even positions use sin, for odd use cos
-    pos_embedding = torch.zeros((point_num, feat_dim))
-    pos_embedding[:, 0::2] = torch.sin(position * div_term)
-    pos_embedding[:, 1::2] = torch.cos(position * div_term)
-
-    return pos_embedding
 
 
 class NewDecoderTFBasedForKeyPoints(nn.Module):

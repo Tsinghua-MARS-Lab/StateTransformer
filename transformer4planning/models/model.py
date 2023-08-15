@@ -1,10 +1,12 @@
+import os
+import torch
+import torch.nn as nn
 from typing import Tuple, Optional, Dict
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
-from transformer4planning.models.decoder import (DecoderResCat)
-from transformer4planning.models.utils import *
-from transformer4planning.utils import *
-import torch.nn as nn
+from transformer4planning.libs.models.mlp import DecoderResCat
+from transformer4planning.utils import nuplan_utils 
+
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 class LTMOutput(CausalLMOutputWithCrossAttentions):
@@ -45,7 +47,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             tokenizer_kwargs = dict(
-                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tokenizer', 'gpt2-tokenizer'),
                 d_embed=self.config.n_embd,
             )
             
@@ -318,7 +320,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
                 # Check key points with map_api
                 # WARNING: WIP, do not use
-                pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
+                pred_key_point_global = nuplan_utils.change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
                                                             ego_pose,
                                                             ego_to_global=True)
                 closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
@@ -327,7 +329,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 dist = closest_lane_road_dic['distance_to_road_block']
                 if nearest not in route_ids or dist > 0.5:
                     # off-road, move to nearest lane according to PDMPath
-                    dist = euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
+                    dist = nuplan_utils.euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
                     interpolate_point = center_path.interpolate(np.array([dist]))[0]
                     print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
                     pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
@@ -335,7 +337,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
                 # replace last key point with IDM reference
                 ego_state_global = idm_reference_global[selected_indices[-1]]
-                idm_reference_lastpt_relative = change_coordination(np.array([ego_state_global.rear_axle.x,
+                idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
                                                                               ego_state_global.rear_axle.y]),
                                                                     ego_pose,
                                                                     ego_to_global=False)
