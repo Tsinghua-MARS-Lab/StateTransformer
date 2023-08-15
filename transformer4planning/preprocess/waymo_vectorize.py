@@ -4,7 +4,7 @@ import os
 import torch
 from functools import partial
 
-def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=False):
+def waymo_collate_func(batch, data_path=None, interaction=False):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -13,17 +13,9 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=Fa
     The batch is the raw indexes data for one nuplan data item, each data in batch includes:
     road_ids, route_ids, traffic_ids, agent_ids, file_name, frame_id, map and timestamp.
     """
-    split = batch[0]["split"]
-    if split == "train":
-        assert dic_path is not None
-        data_path = dic_path
-    elif split ==  "test":
-        assert dic_valid_path is not None
-        data_path = dic_valid_path
-    else:
-        raise NotImplementedError
+    data_path = os.path.join(data_path, batch[0]["split"])
     
-    map_func = partial(waymo_preprocess, interactive=interactive, data_path=data_path)
+    map_func = partial(waymo_preprocess, interaction=interaction, data_path=data_path)
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
     #     batch = list(executor.map(map_func, batch))
     new_batch = list()
@@ -57,11 +49,11 @@ def waymo_collate_func(batch, dic_path=None, dic_valid_path=None, interactive=Fa
         else:
             input_dict[key] = torch.cat(input_list, dim=0)
 
-    if interactive: input_dict["agents_num_per_scenario"] = [len(d["track_index_to_predict"]) for d in new_batch]
+    if interaction: input_dict["agents_num_per_scenario"] = [len(d["track_index_to_predict"]) for d in new_batch]
 
-    return {"input_dict": input_dict}
+    return input_dict
 
-def waymo_preprocess(sample, interactive=False, data_path=None):
+def waymo_preprocess(sample, interaction=False, data_path=None):
     filename = sample["file_name"]
     with open(os.path.join(data_path, filename), "rb") as f:
         info = pickle.load(f)
@@ -71,7 +63,7 @@ def waymo_preprocess(sample, interactive=False, data_path=None):
     
     agent_trajs = data['agent_trajs']  # (num_objects, num_timestamp, 10)
     current_time_index = data["current_time_index"]
-    if interactive: track_index_to_predict = sample["interactive_index"].to(torch.long)
+    if interaction: track_index_to_predict = sample["interaction_index"].to(torch.long)
     else: track_index_to_predict = data['track_index_to_predict'].to(torch.long)
     map_polyline = torch.from_numpy(data["map_polyline"])
 
@@ -82,7 +74,7 @@ def waymo_preprocess(sample, interactive=False, data_path=None):
     agent_trajs_res = transform_to_center(agent_trajs, center, heading, heading_index=6)
     map_polylines_data = transform_to_center(map_polyline, center, heading, no_time_dim=True)
     map_polylines_mask = torch.from_numpy(data["map_polylines_mask"]).unsqueeze(0).repeat(len(track_index_to_predict), 1, 1, )
-    
+
     ret_dict = {
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),

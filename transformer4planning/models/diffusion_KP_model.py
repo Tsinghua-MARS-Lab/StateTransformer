@@ -3,7 +3,7 @@ from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.decoders import *
 from transformer4planning.models.utils import *
 from transformer4planning.utils import *
-from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBasedForKeyPoints
+from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints
 import torch.nn as nn
 
 class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
@@ -55,6 +55,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             # Notice that although we check and create two directories (train/ and test/) here, in the forward method we only save features in eval loops.
             # This is because evaluation is way faster than training (since there are no backward propagation), and after saving features for evaluation, we just change our test set to training set and then run the evaluation loop again.
             # The related code can be found in runner.py at around line 511.
+    
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             # TODO: add raster/vector encoder configuration item
@@ -64,7 +65,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
             )
             
             if "raster" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import NuplanRasterizeEncoder
+                from transformer4planning.models.encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
@@ -76,7 +77,7 @@ class TrajectoryGPTFeatureGen(GPT2PreTrainedModel):
                 )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                from transformer4planning.models.encoder.encoders import PDMEncoder
+                from transformer4planning.models.encoder import PDMEncoder
                 pdm_kwargs = dict(
                     hidden_dim=self.config.n_embd,
                     centerline_dim=120,
@@ -761,7 +762,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
 
             if self.k > 1:
                 # TODO: use diffusion keypoint decoder to accomplish this part.
-                key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
+                key_points_logit = self.key_points_decoder.sample_forward(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
                 pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
                 selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
                                      pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
@@ -845,7 +846,7 @@ class TrajectoryGPTDiffusionKPDecoder(GPT2PreTrainedModel):
         if self.k > 1:
             assert False, 'currently not supported.'
             # TODO: finish this part for diffusion KP decoders.
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+            key_points_logits = self.key_points_decoder.sample_forward(future_key_points_hidden_state)  # b, s, 4/2*k
             pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
             selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
                                   torch.arange(batch_size * key_points_num),

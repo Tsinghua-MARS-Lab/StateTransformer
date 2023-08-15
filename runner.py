@@ -9,7 +9,6 @@ import os
 import sys
 import pickle
 import copy
-from typing import Optional
 import torch
 from tqdm import tqdm
 import copy
@@ -20,7 +19,6 @@ import evaluate
 import transformers
 from datasets import Dataset
 from datasets.arrow_dataset import _concatenate_map_style_datasets
-from dataclasses import dataclass, field
 from functools import partial
 
 from transformers import (
@@ -28,9 +26,14 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
-from transformer4planning.utils import ModelArguments
+from transformer4planning.utils import (
+    ModelArguments, 
+    DataTrainingArguments, 
+    ConfigArguments, 
+    PlanningTrainingArguments
+)
 from transformers.trainer_utils import get_last_checkpoint
-from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
+from transformer4planning.trainer import (PlanningTrainer, CustomCallback)
 from torch.utils.data import DataLoader
 from transformers.trainer_callback import DefaultFlowCallback
 
@@ -39,80 +42,35 @@ from datasets import Dataset, Value
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-@dataclass
-class DataTrainingArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    saved_dataset_folder: Optional[str] = field(
-        default=None, metadata={"help": "The path of a pre-saved dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
-    )
-    saved_valid_dataset_folder: Optional[str] = field(
-        default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
-    )
-
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_eval_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_predict_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of prediction examples to this "
-                "value if set."
-            )
-        },
-    )    
-
-    dataset_scale: Optional[float] = field(
-        default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
-    )
-    dagger: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to save dagger results"}
-    )
-    online_preprocess: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to generate raster dataset online"}
-    )
-    datadic_path: Optional[str] = field(
-        default=None, metadata={"help":"The root path of data dictionary pickle file"}
-    )
-    map_path: Optional[str] = field(
-        default=None, metadata={"help":"The root path of map file"}
-    )
-
-@dataclass
-class ConfigArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    save_model_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current model config to a json file if not None"}
-    )
-    save_data_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current data config to a json file if not None"}
-    )
-    load_model_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load model config from a json file if not None"}
-    )
-    load_data_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load data config to a json file if not None"}
-    )
-
+def load_dataset(root, split='train', dataset_scale=1, select=False):
+    datasets = []
+    index_root_folders = os.path.join(root, split)
+    indices = os.listdir(index_root_folders)
+ 
+    for index in indices:
+        index_path = os.path.join(index_root_folders, index)
+        if os.path.isdir(index_path):
+            # load training dataset
+            logger.info("Loading training dataset {}".format(index_path))
+            dataset = Dataset.load_from_disk(index_path)
+            if dataset is not None:
+                datasets.append(dataset)
+        else:
+            continue
+    # For nuplan dataset directory structure, each split obtains multi cities directories, so concat is required;
+    # But for waymo dataset, index directory is just the datset, so load directory directly to build dataset. 
+    if len(datasets) > 0: 
+        dataset = _concatenate_map_style_datasets(datasets)
+    else: 
+        dataset = Dataset.load_from_disk(index_root_folders)
+    # add split column
+    dataset.features.update({'split': Value('string')})
+    dataset = dataset.add_column(name='split', column=[split] * len(dataset))
+    dataset.set_format(type='torch')
+    if select:
+        samples = int(len(dataset) * float(dataset_scale))
+        dataset = dataset.select(range(samples))
+    return dataset
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
@@ -201,55 +159,35 @@ def main():
     1. Pass None to load from data_args.saved_dataset_folder as the root folder path to load all sub-datasets of each city
     2. Pass the folder of an index files to load one sub-dataset of one city
     """
-    if data_args.datadic_path is None:
-        from datasets import disable_caching
-        disable_caching()
-        data_args.datadic_path = data_args.saved_dataset_folder
-        # loop all datasets
-        logger.info("Loading full set of datasets from {}".format(data_args.datadic_path))
-        assert os.path.isdir(data_args.datadic_path)
-        index_root = os.path.join(data_args.datadic_path, 'index')
-        root_folders = os.listdir(index_root)
-        
-        def load_dataset(split='train', select=False):
-            datasets = []
-            index_root_folders = os.path.join(index_root, split)
-            indices = os.listdir(index_root_folders)
-            for index in indices:
-                index_path = os.path.join(index_root_folders, index)
-                if os.path.isdir(index_path):
-                    # load training dataset
-                    logger.info("Loading training dataset {}".format(index_path))
-                    dataset = Dataset.load_from_disk(index_path)
-                    if dataset is not None:
-                        datasets.append(dataset)
-            dataset = _concatenate_map_style_datasets(datasets)
-            # add split column
-            dataset.features.update({'split': Value('string')})
-            dataset = dataset.add_column(name='split', column=[split] * len(dataset))
-            dataset.set_format(type='torch')
-            if select:
-                samples = int(len(dataset) * float(data_args.dataset_scale))
-                dataset = dataset.select(range(samples))
-            return dataset
-            
-        if 'train' in root_folders:
-            train_dataset = load_dataset("train", True)
-        else:
-            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-        
-        if training_args.do_eval and 'test' in root_folders:
-            test_dataset = load_dataset("test", False)
-        else:
-            print('Testset not found, using training set as test set')
-            test_dataset = train_dataset
-        
-        if (training_args.do_eval or training_args.do_predict) and 'test' in root_folders:
-            val_dataset = load_dataset("test", False)
 
+    from datasets import disable_caching
+    disable_caching()
+    # loop all datasets
+    logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
+    assert os.path.isdir(data_args.saved_dataset_folder)
+    index_root = os.path.join(data_args.saved_dataset_folder, 'index')
+    root_folders = os.listdir(index_root)
+        
+    if 'train' in root_folders:
+        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, True)
+    else:
+        raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+    
+    if training_args.do_eval and 'test' in root_folders:
+        test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, False)
+    else:
+        print('Testset not found, using training set as test set')
+        test_dataset = train_dataset
+    
+    if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
+        val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, False)
+    else:
+        print('Validation set not found, using training set as val set')
+        val_dataset = train_dataset
+
+    if model_args.task == "nuplan":
         all_maps_dic = {}
-        all_pickles_dic = {}
-        map_folder = os.path.join(data_args.datadic_path, 'map')
+        map_folder = os.path.join(data_args.saved_dataset_folder, 'map')
         for each_map in os.listdir(map_folder):
             if each_map.endswith('.pkl'):
                 map_path = os.path.join(map_folder, each_map)
@@ -257,37 +195,14 @@ def main():
                     map_dic = pickle.load(f)
                 map_name = each_map.split('.')[0]
                 all_maps_dic[map_name] = map_dic
-    else:
-        all_maps_dic = None
-        all_pickles_dic = None
-        if os.path.isdir(data_args.saved_dataset_folder):
-            logger.info("loading dataset...")
-            dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
-            dataset.features.update({'split': Value('string')})
-            dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
-            dataset.set_format(type='torch')
-            dataset.shuffle(seed=training_args.seed)
-            train_samples = int(len(dataset) * float(data_args.dataset_scale))
-            train_dataset = dataset.select(range(train_samples))
-
-            if training_args.do_eval:
-                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                # add additional column for flagging test set
-                test_dataset.features.update({'split': Value('string')})
-                test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            else:
-                test_dataset = dataset.select(range(train_samples))
-            test_dataset.set_format(type='torch')
-        else:
-            raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # loop split info and update for test set
-    print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
+    print('TrainingSet: ', train_dataset, '\nValidationSet', val_dataset, '\nTestingSet', test_dataset)
 
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
-        validation=test_dataset.shuffle(seed=training_args.seed),
-        test=val_dataset.shuffle(seed=training_args.seed),
+        validation=val_dataset.shuffle(seed=training_args.seed),
+        test=test_dataset.shuffle(seed=training_args.seed),
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
@@ -327,31 +242,30 @@ def main():
 
     # Initialize our Trainer
     if model_args.task == "nuplan":
-        from transformer4planning.preprocess import (nuplan_vector_collate_func, nuplan_rasterize_collate_func)
         if model_args.encoder_type == "raster":
-            
+            from transformer4planning.preprocess.nuplan_rasterize import nuplan_rasterize_collate_func
             collate_fn = partial(nuplan_rasterize_collate_func,
-                                dic_path=data_args.datadic_path,
+                                dic_path=data_args.saved_dataset_folder,
                                 all_maps_dic=all_maps_dic,
-                                all_pickles_dic=all_pickles_dic,
-                                **model_args.__dict__) if data_args.online_preprocess else None
+                                **model_args.__dict__)
         elif model_args.encoder_type == "vector":
             from nuplan.common.maps.nuplan_map.map_factory import get_maps_api
+            from transformer4planning.preprocess.pdm_vectorize import nuplan_vector_collate_func
             map_api = dict()
             for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
-                map_api[map] = get_maps_api(map_root=data_args.map_path,
+                map_api[map] = get_maps_api(map_root=data_args.nuplan_map_path,
                                     map_version="nuplan-maps-v1.0",
                                     map_name=map
                                     )
             collate_fn = partial(nuplan_vector_collate_func, 
-                                 dic_path=data_args.datadic_path, 
+                                 dic_path=data_args.saved_dataset_folder, 
                                  map_api=map_api)
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":
-            collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
-                                dic_valid_path=data_args.datadic_valid_path, 
-                                interactive=model_args.interactive)
+            collate_fn = partial(waymo_collate_func, 
+                                 data_path=data_args.saved_dataset_folder, 
+                                 interaction=model_args.interaction)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
     else:

@@ -9,9 +9,8 @@ from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
-from transformer4planning.common_utils import common_utils
+from transformer4planning.utils import mtr_utils
 from typing import List, Optional, Dict, Any, Tuple, Union
-from dataclasses import dataclass, field
 from datasets import Dataset
 import torch
 import torch.nn as nn
@@ -41,17 +40,6 @@ class CustomCallback(DefaultFlowCallback):
             control.should_save = True
 
         return control
-
-@dataclass
-class PlanningTrainingArguments(TrainingArguments):
-    eval_interval: Optional[int] = field(
-        default=1,
-        metadata={
-            "help": (
-                "how many epoch the model perform an evaluation."
-            )
-        },
-    )
 
 class PlanningTrainer(Trainer):
 
@@ -190,14 +178,13 @@ class PlanningTrainer(Trainer):
                 fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
                 fde_y_error = prediction_trajectory_in_batch[:, -1, 1] - trajectory_label_in_batch[:, -1, 1]
             else:
-                if self.model.task == "waymo" and self.model.encoder_type == "vector":
-                    input_dict = inputs["input_dict"]
-                    agent_trajs = input_dict['agent_trajs']
-                    ego_trajs = [traj[input_dict["track_index_to_predict"][i], :, :] for i, traj in enumerate(agent_trajs)]
+                if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
+                    agent_trajs = inputs['agent_trajs']
+                    ego_trajs = [traj[inputs["track_index_to_predict"][i], :, :] for i, traj in enumerate(agent_trajs)]
                     ego_trajs = torch.stack(ego_trajs, dim=0).to(self.model.device).squeeze(1)
 
                     trajectory_label_in_batch = ego_trajs[:, 11:, [0, 1, 2, 6]].clone()
-                elif self.model.task == "nuplan" and self.model.encoder_type == "raster":
+                elif self.model.model_args.task == "nuplan" and self.model.model_args.encoder_type == "raster":
                     trajectory_label_in_batch = inputs["trajectory_label"].clone()
                 else:
                     raise NotImplementedError
@@ -354,16 +341,15 @@ class PlanningTrainer(Trainer):
         if len(logits) == 1:
             logits = logits[0]
 
-        if self.model.task == "waymo" and self.model.encoder_type == "vector":
-            input_dict = inputs['input_dict']
-            pred_length = input_dict['center_gt_trajs_src'].shape[1] - input_dict['current_time_index'][0] - 1
+        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
+            pred_length = inputs['center_gt_trajs_src'].shape[1] - inputs['current_time_index'][0] - 1
             pred_trajs = logits[:, None, -pred_length:, :]
             pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
-            center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
+            center_objects_world = inputs['center_objects_world'].type_as(pred_trajs)
             num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
             # assert num_feat == 7
 
-            pred_trajs_world = common_utils.rotate_points_along_z(
+            pred_trajs_world = mtr_utils.rotate_points_along_z(
                 points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
                 angle=center_objects_world[:, 6].view(num_center_objects)
             ).view(num_center_objects, num_modes, num_timestamps, num_feat)
@@ -372,13 +358,13 @@ class PlanningTrainer(Trainer):
             pred_dict = []
             for obj_idx in range(num_center_objects):
                 single_pred_dict = {
-                    'scenario_id': str(input_dict['scenario_id'][obj_idx]),
+                    'scenario_id': str(inputs['scenario_id'][obj_idx]),
                     'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
                     'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
-                    'object_id': input_dict['center_objects_id'][obj_idx],
-                    'object_type': str(input_dict['center_objects_type'][obj_idx]),
-                    'gt_trajs': input_dict['center_gt_trajs_src'][obj_idx].cpu().numpy(),
-                    'track_index_to_predict': input_dict['track_index_to_predict'][obj_idx].cpu().numpy()
+                    'object_id': inputs['center_objects_id'][obj_idx],
+                    'object_type': str(inputs['center_objects_type'][obj_idx]),
+                    'gt_trajs': inputs['center_gt_trajs_src'][obj_idx].cpu().numpy(),
+                    'track_index_to_predict': inputs['track_index_to_predict'][obj_idx].cpu().numpy()
                 }
                 pred_dict.append(single_pred_dict)
 
@@ -400,7 +386,7 @@ class PlanningTrainer(Trainer):
                 'fde': [],
             }
         self.eval_itr = 0
-        if self.model.task == "waymo" and self.model.encoder_type == "vector": 
+        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector": 
             prediction_loss_only = False
             self.pred_dicts_list = []
 
@@ -422,7 +408,7 @@ class PlanningTrainer(Trainer):
         self.log(result)
 
         
-        if self.model.task == "waymo" and self.model.encoder_type == "vector":
+        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
             from dataset_gen.waymo.waymo_eval import waymo_evaluation
             logging.info('*************** Performance of WOMD *****************' )
             try:
@@ -589,7 +575,7 @@ class PlanningTrainer(Trainer):
         
         cur_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
         log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, cur_time))
-        logger = common_utils.create_logger(log_file, rank=0)
+        logger = mtr_utils.create_logger(log_file, rank=0)
 
         start_time = time.time()
         logger_iter_interval = 1000
