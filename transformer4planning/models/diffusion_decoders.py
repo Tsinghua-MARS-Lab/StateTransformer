@@ -18,9 +18,9 @@ def normalize(x):
     if x.shape[-1]==2:
         return y
     # mean(x[...,2]) = 0, mean(sqrt(x[...,2]**2)) = 0
-    y[...,2] = x[...,2] * 10
+    y[...,2] = x[...,2] / 10
     # mean(x[...,3]) = 0.086, mean(sqrt(x[...,3]**2))=0.090
-    y[...,3] += x[...,3] / 2
+    y[...,3] += x[...,3] / 10
     y[...,3] += 0
     return y
 
@@ -30,8 +30,8 @@ def denormalize(y):
     x[...,1] = (y[...,1]) * 10
     if y.shape[-1]==2:
         return x
-    x[...,2] = y[...,2] / 10
-    x[...,3] = y[...,3] * 2
+    x[...,2] = y[...,2] * 10
+    x[...,3] = y[...,3] * 10
     return x
 # def normalize(x):
 #     y = torch.zeros_like(x)
@@ -236,6 +236,9 @@ class DiffusionDecoderTFBased(nn.Module):
 
     # ------------------------- Train -------------------------
     def train_forward(self,hidden_states,trajectory_label):
+        # print(hidden_states.shape)
+        # print(trajectory_label.shape)
+
         trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
         # print(trajectory_label.shape)
@@ -506,6 +509,10 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
         
         
     def forward(self,x,t,state):
+        # print("x.shape==",x.shape)
+        # print("t.shape==",t.shape)
+        # print("state.shape==",state.shape)
+        # assert False, "debugging"
         seq_lenth = x.shape[-2]
         # First encode the cond, time, x.
         state_embedding = self.state_encoder2(self.state_encoder1(state)) # B * 40 * feat_dim
