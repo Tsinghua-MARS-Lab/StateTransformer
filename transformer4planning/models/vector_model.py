@@ -95,7 +95,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.reg_kps_loss = self.reg_trj_loss
         
         self.cls_kps_loss = CrossEntropyLoss(reduction="mean")
-        self.cls_kps_loss_weight = 10
+        self.cls_kps_loss_weight = 1
         self.beam_search_temp = 1.0
         
         if self.model_args.predict_yaw:
@@ -265,15 +265,16 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
 
+            key_points_num = future_key_points.shape[1]
             future_key_embeds = self.action_m_embed(future_key_points_aug)
-            future_key_cls_embeds = torch.zeros((batch_size, self.ar_future_interval, self.llm_n_embd), device=device)
+            future_key_cls_embeds = torch.zeros((batch_size, key_points_num, self.llm_n_embd), device=device)
             kpts_embeds = torch.zeros(
-                (batch_size, self.ar_future_interval * 2, self.llm_n_embd),
+                (batch_size, key_points_num * 2, self.llm_n_embd),
                 dtype=torch.float32,
                 device=device
             )
-            kpts_embeds[:, ::2, :] = future_key_embeds  # index: 0, 2, 4, 6, 8
-            kpts_embeds[:, 1::2, :] = future_key_cls_embeds  # index: 1, 3, 5, 7, 9
+            kpts_embeds[:, ::2, :] = future_key_cls_embeds  # index: 0, 2, 4, 6, 8
+            kpts_embeds[:, 1::2, :] = future_key_embeds  # index: 1, 3, 5, 7, 9
             
             input_embeds = torch.cat([input_embeds, kpts_embeds,
                                       torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
@@ -312,10 +313,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
             future_key_points_hidden_state = transformer_outputs_hidden_state[:, self.scenario_type_len + context_length * 2 - 1:self.scenario_type_len + context_length * 2 + kpts_embeds.shape[1] - 1, :]
-            pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state[:, ::2, :])  # (b, num_kps, 4/2*k)
+            pred_kps_logits = self.key_points_decoder(future_key_points_hidden_state[:, 1::2, :])  # (b, num_kps, 4/2*k)
             
             if self.k > 1:
-                pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state[:, 1::2, :])  # (b, num_kps, k)
+                pred_kps_cls = self.next_token_scorer_decoder(future_key_points_hidden_state[:, 0::2, :])  # (b, num_kps, k)
         
         # get loss
         pred_traj_logits, loss = self.calc_loss(pred_traj_logits=pred_traj_logits, 
