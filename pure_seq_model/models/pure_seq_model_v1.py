@@ -3,13 +3,15 @@ from torch import nn
 from omegaconf import DictConfig
 import copy
 from typing import Dict, List, Tuple, cast
+import os
 
 import models.base_model as base_model
 from models.mtr_models.polyline_encoder import PointNetPolylineEncoder
 
 class PureSeqModelV1(nn.Module):
-    def __init__(self, model_config: DictConfig) -> None:
+    def __init__(self, model_config: Dict) -> None:
         super().__init__()
+        model_config = DictConfig(model_config)
         self.model_parameter = model_config.model_parameter
         self.data_dim = model_config.data_dim
 
@@ -49,68 +51,216 @@ class PureSeqModelV1(nn.Module):
         self.ego_head = base_model.MLP(self.model_parameter.seq_embedding_dim, self.data_dim.agent_target)
         self.agent_head = base_model.MLP(self.model_parameter.seq_embedding_dim, self.data_dim.agent_target)
 
+        # loss
+        self._fn_mse = torch.nn.MSELoss(reduction='none')
+
 
     def forward(self, input_dict: Dict):
-        device = input_dict['ego_feature_list'][0][0].device
+        ego_output, agent_output = self.model_forward(input_dict)
 
-        lane_encoded_feature = self.encode_map_feature(input_dict['lane_feature_list'], input_dict['lane_mask_list'],
+        if self.training:
+            loss, tb_dict, disp_dict = self.get_loss(ego_output, input_dict['ego_label'].squeeze(2),
+                                                     agent_output, input_dict['ego_label'].view(agent_output.size(0), agent_output.size(1), agent_output.size(2)))
+            return loss, tb_dict, disp_dict
+
+        return ego_output, agent_output
+
+
+    def model_forward(self, input_dict: Dict):
+        device = input_dict['ego_feature'].device
+        batch_size = input_dict['ego_feature'].size(0)
+        time_set_num = self.data_dim.time_set_num
+
+        # map encoder
+        lane_encoded_feature = self.encode_map_feature(input_dict['lane_feature'], input_dict['lane_mask'],
                                                        self.lane_in_polyline_encoder, self.lane_between_polyline_encoder, device)
-        road_line_encoded_feature = self.encode_map_feature(input_dict['road_line_feature_list'], input_dict['road_line_mask_list'],
+        road_line_encoded_feature = self.encode_map_feature(input_dict['road_line_feature'], input_dict['road_line_mask'],
                                                        self.road_line_in_polyline_encoder, self.road_line_between_polyline_encoder, device)
-        road_edge_encoded_feature = self.encode_map_feature(input_dict['road_edge_feature_list'], input_dict['road_edge_mask_list'],
+        road_edge_encoded_feature = self.encode_map_feature(input_dict['road_edge_feature'], input_dict['road_edge_mask'],
                                                        self.road_edge_in_polyline_encoder, self.road_edge_between_polyline_encoder, device)
-        map_others_encoded_feature = self.encode_map_feature(input_dict['map_others_feature_list'], input_dict['map_others_mask_list'],
+        map_others_encoded_feature = self.encode_map_feature(input_dict['map_others_feature'], input_dict['map_others_mask'],
                                                        self.map_others_in_polyline_encoder, self.map_others_between_polyline_encoder, device)
 
-        ego_feature_input = input_dict['ego_feature_list']
-        ego_label_input = input_dict['ego_label_list']
-        agent_feature_input = input_dict['agent_feature_list']
-        agent_label_input = input_dict['agent_label_list']
-        agent_to_predict_num_input = input_dict['agent_to_predict_num']
+        # ego, agent embedding
+        ego_data_embeded = self.ego_seq_embedding(input_dict['ego_feature'])
+        agent_data_embeded = self.agent_seq_embedding(input_dict['agent_feature'])
 
+        # construct input seq and input mask
+        seq_tensor, seq_mask = self.construct_input_seq(lane_encoded_feature, road_line_encoded_feature, road_edge_encoded_feature, map_others_encoded_feature,
+                                                                    ego_data_embeded, agent_data_embeded, input_dict['agent_valid'])
+
+        # pos encoder. each time set use same pos encoder
+        len_per_time_set = 4+1+agent_data_embeded.size(2)
+        for i in range(time_set_num):
+            seq_tensor[:, i*len_per_time_set:(i+1)*len_per_time_set, :] = seq_tensor[:, i*len_per_time_set:(i+1)*len_per_time_set, :] + self.pos_encoder[i, :]
+            
+        # transformer
+        for layer in self.seq_layerlist:
+            seq_tensor = layer(seq_tensor, attn_mask=seq_mask)
+
+        # ego heads
+        ego_index = [i*len_per_time_set+4 for i in range(time_set_num)]
+        ego_output = self.ego_head(seq_tensor[:, ego_index, :])
+
+        # agent heads
+        agent_index = []
+        for i in range(time_set_num):
+            agent_index += list(range(i*len_per_time_set+5, (i+1)*len_per_time_set))
+        agent_output = self.agent_head(seq_tensor[:, agent_index, :])
+        # agent_valid_reshape = input_dict['agent_valid'].view(batch_size, agent_output.size(1))
+
+        return ego_output, agent_output
 
     def generate(self, x):
         pass
 
-    def encode_map_feature(self, map_data_list: List, map_mask_list: List, in_polyline_encoder, between_polyline_encoder, device):
-        batch_size = len(map_data_list)
-        time_set_num = self.data_dim.time_set_num
-        points_in_polyline = self.data_dim.points_in_polyline
-        data_dim = map_data_list[0][0].size(2)
-
-        # find max polyline num
-        max_polyline_num = 0
-        for i in range(batch_size):
-            for j in range(time_set_num):
-                if max_polyline_num < map_data_list[i][j].size(0):
-                    max_polyline_num = map_data_list[i][j].size(0)
-
-        # build feature tensor
-        batch_map_data = torch.zeros((batch_size, time_set_num, max_polyline_num, points_in_polyline, data_dim), device=device)
-        batch_map_point_mask = torch.zeros((batch_size, time_set_num, max_polyline_num, points_in_polyline), device=device, dtype=torch.bool)
-        batch_map_polyline_mask = torch.zeros((batch_size, time_set_num, max_polyline_num), device=device, dtype=torch.bool)
-        for i in range(batch_size):
-            for j in range(time_set_num):
-                batch_map_data[i, j, :map_data_list[i][j].size(0), :, :] = map_data_list[i][j]
-                batch_map_point_mask[i, j, :map_data_list[i][j].size(0), :] = map_mask_list[i][j]
-                batch_map_polyline_mask[i, j, :map_data_list[i][j].size(0)] = 1
-
-        # encode
-        in_polyline_encoded_data = in_polyline_encoder(batch_map_data.view((batch_size*time_set_num, max_polyline_num, points_in_polyline, data_dim)),
-                                                       batch_map_point_mask.view((batch_size*time_set_num, max_polyline_num, points_in_polyline))) 
-        between_polyline_encoded_data = between_polyline_encoder(in_polyline_encoded_data.view(batch_size, time_set_num, max_polyline_num, data_dim),
-                                                                 batch_map_polyline_mask) # (batch, 8, feature_dim)
+    def encode_map_feature(self, map_data: torch.Tensor, map_mask: torch.Tensor, in_polyline_encoder, between_polyline_encoder, device):
+        in_polyline_encoded_data = in_polyline_encoder(map_data.view((map_data.size(0)*map_data.size(1), map_data.size(2), map_data.size(3), map_data.size(4))),
+                                                       map_mask.view((map_data.size(0)*map_data.size(1), map_data.size(2), map_data.size(3)))) 
+        polyline_valid = (map_mask.sum(dim=-1) > 0)
+        between_polyline_encoded_data = between_polyline_encoder(in_polyline_encoded_data.view(map_data.size(0), map_data.size(1), map_data.size(2), map_data.size(4)),
+                                                                 polyline_valid) # (batch, 8, feature_dim)
         return between_polyline_encoded_data
 
-    def encode_agent_feature(self, agent_data_list: List, agent_embedding, device):
-        batch_size = len(agent_data_list)
-        time_set_num = self.data_dim.time_set_num
-        data_dim = agent_data_list[0][0].size(2)
-        
-        max_agent_num = 0
-        for i in range(batch_size):
-            for j in time_set_num:
-                if max_agent_num < agent_data_list[i][j].size(0):
-                    max_agent_num = agent_data_list[i][j].size(0)
+    def construct_input_seq(self, lane: torch.Tensor, road_line: torch.Tensor, road_edge: torch.Tensor, map_others: torch.Tensor,
+                            ego: torch.Tensor, agent: torch.Tensor, agent_valid: torch.Tensor):
+        len_per_time_set = 4+1+agent.size(2)
+        seq_len = agent.size(1)*len_per_time_set
+        input_seq_tensor = torch.zeros(agent.size(0), seq_len, agent.size(3), device=agent.device)
+        input_seq_mask_base = torch.ones(agent.size(0), seq_len, seq_len, dtype=torch.bool, device=agent.device)
 
-        batch_agent_data = torch.zeros((batch_size, time_set_num, max_agent_num, data_dim), device=device)
+        for i in range(agent.size(1)):
+            # input seq
+            input_seq_tensor[:, i*len_per_time_set, :] = lane[:, i, :]
+            input_seq_tensor[:, i*len_per_time_set+1, :] = road_line[:, i, :]
+            input_seq_tensor[:, i*len_per_time_set+2, :] = road_edge[:, i, :]
+            input_seq_tensor[:, i*len_per_time_set+3, :] = map_others[:, i, :]
+            input_seq_tensor[:, i*len_per_time_set+4, :] = ego[:, i, 0, :]
+            input_seq_tensor[:, i*len_per_time_set+5:i*len_per_time_set+len_per_time_set, :] = agent[:, i, :, :]
+
+            # input mask
+            input_seq_mask_base[:, i*len_per_time_set:, i*len_per_time_set:i*len_per_time_set+5] = False
+            agent_valid_one_time_matrix = (agent_valid[:, i, :].unsqueeze(1).repeat(1, seq_len, 1) == 0)
+            input_seq_mask_base[:, i*len_per_time_set:, i*len_per_time_set+5:i*len_per_time_set+len_per_time_set] = agent_valid_one_time_matrix[:, i*len_per_time_set, :]
+
+        input_seq_mask = input_seq_mask_base.repeat_interleave(self.model_parameter.seq_head, dim=0)
+
+        return input_seq_tensor, input_seq_mask
+            
+
+    def load_params_with_optimizer(self, filename, to_cpu=False, optimizer=None, logger=None):
+        if not os.path.isfile(filename):
+            raise FileNotFoundError
+
+        logger.info('==> Loading parameters from checkpoint %s to %s' % (filename, 'CPU' if to_cpu else 'GPU'))
+        loc_type = torch.device('cpu') if to_cpu else None
+        checkpoint = torch.load(filename, map_location=loc_type)
+        epoch = checkpoint.get('epoch', -1)
+        it = checkpoint.get('it', 0.0)
+
+        self.load_state_dict(checkpoint['model_state'], strict=True)
+
+        if optimizer is not None:
+            logger.info('==> Loading optimizer parameters from checkpoint %s to %s'
+                        % (filename, 'CPU' if to_cpu else 'GPU'))
+            optimizer.load_state_dict(checkpoint['optimizer_state'])
+
+        if 'version' in checkpoint:
+            print('==> Checkpoint trained from version: %s' % checkpoint['version'])
+        # logger.info('==> Done')
+        logger.info('==> Done (loaded %d/%d)' % (len(checkpoint['model_state']), len(checkpoint['model_state'])))
+
+        return it, epoch
+
+    def load_params_from_file(self, filename, logger, to_cpu=False):
+        if not os.path.isfile(filename):
+            raise FileNotFoundError
+
+        logger.info('==> Loading parameters from checkpoint %s to %s' % (filename, 'CPU' if to_cpu else 'GPU'))
+        loc_type = torch.device('cpu') if to_cpu else None
+        checkpoint = torch.load(filename, map_location=loc_type)
+        model_state_disk = checkpoint['model_state']
+
+        version = checkpoint.get("version", None)
+        if version is not None:
+            logger.info('==> Checkpoint trained from version: %s' % version)
+
+        logger.info(f'The number of disk ckpt keys: {len(model_state_disk)}')
+        model_state = self.state_dict()
+        model_state_disk_filter = {}
+        for key, val in model_state_disk.items():
+            if key in model_state and model_state_disk[key].shape == model_state[key].shape:
+                model_state_disk_filter[key] = val
+            else:
+                if key not in model_state:
+                    print(f'Ignore key in disk (not found in model): {key}, shape={val.shape}')
+                else:
+                    print(f'Ignore key in disk (shape does not match): {key}, load_shape={val.shape}, model_shape={model_state[key].shape}')
+
+        model_state_disk = model_state_disk_filter
+
+        missing_keys, unexpected_keys = self.load_state_dict(model_state_disk, strict=False)
+
+        logger.info(f'Missing keys: {missing_keys}')
+        logger.info(f'The number of missing keys: {len(missing_keys)}')
+        logger.info(f'The number of unexpected keys: {len(unexpected_keys)}')
+        logger.info('==> Done (total keys %d)' % (len(model_state)))
+
+        epoch = checkpoint.get('epoch', -1)
+        it = checkpoint.get('it', 0.0)
+
+        return it, epoch
+
+    def get_loss(self, ego_output, ego_label, agent_output, agent_label, agent_valid):
+        # ego_output, ego_label: [batch, 8, 5*time_sample_num]
+        # agent_output, agent_label: [batch, 8*max_agent_num, 5*time_sample_num]
+        # agent_valid: [batch, 8*max_agent_num]
+
+        # get index and weight
+        xy_index = list(range(0, ego_output.size(-1), 5)) + list(range(1, ego_output.size(-1), 5))
+        heading_index = list(range(2, ego_output.size(-1), 5))
+        vel_index = list(range(3, ego_output.size(-1), 5)) + list(range(4, ego_output.size(-1), 5))
+
+        xy_weight = self.model_parameter.loss_weight['xy']
+        heading_weight = self.model_parameter.loss_weight['heading']
+        vel_weight = self.model_parameter.loss_weight['vel']
+
+        # ego loss
+        ego_diff = self._fn_mse(ego_output, ego_label)
+        ego_xy_loss = xy_weight * torch.mean(ego_diff[:, :, xy_index])
+        ego_heading_loss = heading_weight * torch.mean(ego_diff[:, :, heading_index])
+        ego_vel_loss = vel_weight * torch.mean(ego_diff[:, :, vel_index])
+
+        ego_loss = ego_xy_loss + ego_heading_loss + ego_vel_loss
+
+        # agent loss
+        agent_diff = torch.mean(self._fn_mse(agent_output, agent_label), dim=-1)
+        agent_xy_loss = xy_weight * torch.mean(torch.mean(agent_diff[:, :, xy_index], dim=-1) * agent_valid)
+        agent_heading_loss = heading_weight * torch.mean(torch.mean(agent_diff[:, :, heading_index], dim=-1) * agent_valid)
+        agent_vel_loss = vel_weight * torch.mean(torch.mean(agent_diff[:, :, vel_index], dim=-1) * agent_valid)
+
+        agent_loss = agent_xy_loss + agent_heading_loss + agent_vel_loss
+
+        num_valid_agent = torch.sum(agent_valid)/(agent_valid.size(0)*ego_output.size(1))
+        
+        # total loss
+        loss = ego_loss + num_valid_agent * agent_loss
+
+        # update info
+        tb_dict = {}
+        disp_dict = {}
+        tb_dict['loss'] = loss.item()
+        disp_dict['loss'] = loss.item()
+
+        tb_dict['ego_xy_loss'] = ego_xy_loss.item()
+        tb_dict['ego_heading_loss'] = ego_heading_loss.item()
+        tb_dict['ego_vel_loss'] = ego_vel_loss.item()
+        tb_dict['ego_loss'] = ego_loss.item()
+        tb_dict['agent_xy_loss'] = agent_xy_loss.item()
+        tb_dict['agent_heading_loss'] = agent_heading_loss.item()
+        tb_dict['agent_vel_loss'] = agent_vel_loss.item()
+        tb_dict['agent_loss'] = agent_loss.item()
+        tb_dict['num_valid_agent'] = num_valid_agent.item()
+
+        return loss, tb_dict, disp_dict
+

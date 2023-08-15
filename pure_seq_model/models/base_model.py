@@ -39,8 +39,8 @@ class SelfAttention(nn.Module):
         super(SelfAttention, self).__init__()
         self.multi_head_attention = nn.MultiheadAttention(embed_dim, num_heads, dropout, batch_first=True)
 
-    def forward(self, embed_states):
-        embed_states, atten_weights = self.multi_head_attention(embed_states, embed_states, embed_states)
+    def forward(self, embed_states, attn_mask=None):
+        embed_states, atten_weights = self.multi_head_attention(embed_states, embed_states, embed_states, attn_mask=attn_mask)
         return embed_states
 
 class CrossAttention(nn.Module):
@@ -96,8 +96,8 @@ class TransformerEncoderLayer(nn.Module):
         self.dropout_self_attn = nn.Dropout(dropout)
         self.dropout_pff = nn.Dropout(dropout)
 
-    def forward(self, x):
-        x = self.norm_self_attn(x + self.dropout_self_attn(self.self_attn(x)))
+    def forward(self, x, attn_mask=None):
+        x = self.norm_self_attn(x + self.dropout_self_attn(self.self_attn(x, attn_mask=attn_mask)))
         x = self.norm_pff(x + self.dropout_pff(self.feed_forward(x)))
         return x
     
