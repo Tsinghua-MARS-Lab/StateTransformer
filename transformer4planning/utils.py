@@ -131,7 +131,7 @@ class ModelArguments:
     debug_raster_path: Optional[str] = field(
         default=None
     )
-    interactive: Optional[bool] = field(
+    interaction: Optional[bool] = field(
         default=False
     )
     mtr_config_path: Optional[str] = field(

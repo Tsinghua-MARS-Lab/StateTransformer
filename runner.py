@@ -210,7 +210,7 @@ def main():
         assert os.path.isdir(data_args.datadic_path)
         index_root = os.path.join(data_args.datadic_path, 'index')
         root_folders = os.listdir(index_root)
-        
+
         def load_dataset(split='train', select=False):
             datasets = []
             index_root_folders = os.path.join(index_root, split)
@@ -223,7 +223,10 @@ def main():
                     dataset = Dataset.load_from_disk(index_path)
                     if dataset is not None:
                         datasets.append(dataset)
-            dataset = _concatenate_map_style_datasets(datasets)
+                else:
+                    break
+            if len(datasets) > 0: dataset = _concatenate_map_style_datasets(datasets)
+            else: dataset = Dataset.load_from_disk(index_root_folders)
             # add split column
             dataset.features.update({'split': Value('string')})
             dataset = dataset.add_column(name='split', column=[split] * len(dataset))
@@ -250,16 +253,17 @@ def main():
             print('Validation set not found, using training set as test set')
             val_dataset = train_dataset
 
-        all_maps_dic = {}
-        all_pickles_dic = {}
-        map_folder = os.path.join(data_args.datadic_path, 'map')
-        for each_map in os.listdir(map_folder):
-            if each_map.endswith('.pkl'):
-                map_path = os.path.join(map_folder, each_map)
-                with open(map_path, 'rb') as f:
-                    map_dic = pickle.load(f)
-                map_name = each_map.split('.')[0]
-                all_maps_dic[map_name] = map_dic
+        if model_args.task == "nuplan":
+            all_maps_dic = {}
+            all_pickles_dic = {}
+            map_folder = os.path.join(data_args.datadic_path, 'map')
+            for each_map in os.listdir(map_folder):
+                if each_map.endswith('.pkl'):
+                    map_path = os.path.join(map_folder, each_map)
+                    with open(map_path, 'rb') as f:
+                        map_dic = pickle.load(f)
+                    map_name = each_map.split('.')[0]
+                    all_maps_dic[map_name] = map_dic
     else:
         all_maps_dic = None
         all_pickles_dic = None
@@ -285,7 +289,7 @@ def main():
             raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # loop split info and update for test set
-    print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
+    print('TrainingSet: ', train_dataset, '\nValidationSet', val_dataset, '\nTestingSet', test_dataset)
 
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
@@ -352,9 +356,7 @@ def main():
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":
-            collate_fn = partial(waymo_collate_func, dic_path=data_args.datadic_path, 
-                                dic_valid_path=data_args.datadic_valid_path, 
-                                interactive=model_args.interactive)
+            collate_fn = partial(waymo_collate_func, data_path=data_args.datadic_path, interaction=model_args.interaction)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
     else:
