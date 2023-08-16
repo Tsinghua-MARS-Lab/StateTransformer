@@ -403,7 +403,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         # kpts_score: accumulated score
         all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
         # all_traj_scores = all_traj_scores / all_traj_scores.sum()
-        all_traj_scores = (all_traj_scores*100).softmax(-1)
+        all_traj_scores = (all_traj_scores*200).softmax(-1)
 
         return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
     

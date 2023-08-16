@@ -16,7 +16,7 @@ import shapely
 from dataset_gen.waymo.dataset_template import DatasetTemplate
 import dataset_gen.waymo.common_util as common_utils
 from dataset_gen.waymo.config import cfg
-from dataset_gen.waymo.waymo_eval import waymo_evaluation
+from dataset_gen.waymo.waymo_eval import waymo_evaluation, waymo_evaluation_seperate
 from transformer4planning.utils import generate_contour_pts
 
 
@@ -747,6 +747,7 @@ class WaymoDataset(DatasetTemplate):
             except:
                 num_modes_for_eval = 6
             metric_results, result_format_str = waymo_evaluation(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval, eval_second=8)
+            # metric_results, result_format_str = waymo_evaluation_seperate(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval, eval_second=8)
 
             metric_result_str = '\n'
             for key in metric_results:
