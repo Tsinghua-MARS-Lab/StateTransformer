@@ -17,10 +17,10 @@ from tensorboardX import SummaryWriter
 
 from mtr_trainer.mtr_datasets import build_dataloader
 from mtr_trainer.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
-from mtr_trainer.utils import common_utils
+from mtr_trainer.mtr_utils import common_utils
 from models.pure_seq_model_v1 import PureSeqModelV1
 
-from mtr_trainer.utils.train_utils import train_model
+from mtr_trainer.mtr_utils.train_utils import train_model
 
 
 def parse_config():
@@ -119,6 +119,8 @@ def main():
         total_gpus, cfg.LOCAL_RANK = getattr(common_utils, 'init_dist_%s' % args.launcher)(
             args.tcp_port, args.local_rank, backend='nccl'
         )
+        # total_gpus = 1
+
         dist_train = True
 
     if args.batch_size is None:

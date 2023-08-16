@@ -3,7 +3,6 @@ import pickle
 import os
 
 from typing import Dict, List, Tuple, cast
-from omegaconf import DictConfig
 import numpy as np
 import numpy.typing as npt
 from utils.torch_geometry import global_state_se2_tensor_to_local, coordinates_to_local_frame
@@ -46,9 +45,13 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
     # for the whole scenario, the output data is:
     # Dict[lane: torch.Tensor(batch_size, 8, n, 20, 18), road_line: ..., ..., agent: torch.Tensor(batch_size, 8, n, 5*time_sample_num+5), ...]
 
-    def __init__(self, dataset_config: Dict, mode: str, logger=None):
-        self.mode = mode
-        self.dataset_config = DictConfig(dataset_config)
+    def __init__(self, dataset_cfg: Dict, training: bool, logger=None):
+        if training:
+            self.mode = 'train'
+        else:
+            self.mode = 'val'
+
+        self.dataset_config = dataset_cfg
         self.logger = logger
 
         self.data_root = self.dataset_config.dataset_info.data_root
@@ -194,10 +197,10 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         # build ego label
         ego_label = torch.zeros([1, 5*time_sample_num])
         for i in range(time_sample_num):
-            ego_label[0, 0+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 0]-trajs[ego_index, time_index - i*time_sample_interval, 0]  # x
-            ego_label[0, 1+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 1]-trajs[ego_index, time_index - i*time_sample_interval, 1] # y
+            ego_label[0, 0+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 0]-trajs[ego_index, time_index, 0]  # x
+            ego_label[0, 1+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 1]-trajs[ego_index, time_index, 1] # y
             ego_label[0, 2+i*5] = angle_to_range(
-                trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 6]-trajs[ego_index, time_index - i*time_sample_interval, 6]) # heading
+                trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 6]-trajs[ego_index, time_index, 6]) # heading
             ego_label[0, 3+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 7] # v_x
             ego_label[0, 4+i*5] = trajs[ego_index, time_index + time_set_interval - i*time_sample_interval, 8] # v_y
 
@@ -209,7 +212,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
             ego_feature[:, 0+i*5:3+i*5] = global_state_se2_tensor_to_local(ego_feature[:, 0+i*5:3+i*5], ego_frame)
             ego_feature[:, 3+i*5:5+i*5] = coordinates_to_local_frame(ego_feature[:, 3+i*5:5+i*5], rotation_frame)
 
-            ego_label[:, 0+i*5:3+i*5] = global_state_se2_tensor_to_local(ego_label[:, 0+i*5:3+i*5], ego_frame)
+            ego_label[:, 0+i*5:2+i*5] = coordinates_to_local_frame(ego_label[:, 0+i*5:2+i*5], rotation_frame)
             ego_label[:, 3+i*5:5+i*5] = coordinates_to_local_frame(ego_label[:, 3+i*5:5+i*5], rotation_frame)
             
         return ego_feature, ego_label
@@ -260,10 +263,10 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         # build agent label tensor
         agent_label = torch.zeros([agent_tensor.size(0), 5*time_sample_num])
         for i in range(time_sample_num):
-            agent_label[:, 0+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 0]-trajs[:, time_index - i*time_sample_interval, 0] # x
-            agent_label[:, 1+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 1]-trajs[:, time_index - i*time_sample_interval, 1] # y
+            agent_label[:, 0+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 0]-agent_tensor[:, time_index, 0] # x
+            agent_label[:, 1+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 1]-agent_tensor[:, time_index, 1] # y
             agent_label[:, 2+i*5] = angle_to_range(
-                agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 6]-trajs[:, time_index - i*time_sample_interval, 6]) # heading
+                agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 6]-agent_tensor[:, time_index, 6]) # heading
             agent_label[:, 3+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 7] # v_x
             agent_label[:, 4+i*5] = agent_tensor[:, time_index + time_set_interval - i*time_sample_interval, 8] # v_y
 
@@ -275,7 +278,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
             agent_feature[:, 0+i*5:3+i*5] = global_state_se2_tensor_to_local(agent_feature[:, 0+i*5:3+i*5], ego_frame)
             agent_feature[:, 3+i*5:5+i*5] = coordinates_to_local_frame(agent_feature[:, 3+i*5:5+i*5], rotation_frame)
 
-            agent_label[:, 0+i*5:3+i*5] = global_state_se2_tensor_to_local(agent_label[:, 0+i*5:3+i*5], ego_frame)
+            agent_label[:, 0+i*5:2+i*5] = coordinates_to_local_frame(agent_label[:, 0+i*5:2+i*5], rotation_frame)
             agent_label[:, 3+i*5:5+i*5] = coordinates_to_local_frame(agent_label[:, 3+i*5:5+i*5], rotation_frame)
             
         # reshape to max_agent_num
@@ -300,6 +303,10 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
             other_agent_num = max_agent_num - len(valid_agent_to_predict)
             agent_feature_padded[len(valid_agent_to_predict):, :] = agent_feature[sorted_index[:other_agent_num], :]
             agent_label_padded[len(valid_agent_to_predict):, :] = agent_label[sorted_index[:other_agent_num], :]
+
+        # filter out agent which have to large data
+        label_max_diff, _ = torch.max(torch.abs(agent_label_padded), dim=-1)
+        agent_valid[label_max_diff>150] = 0
 
         return agent_feature_padded, agent_label_padded, agent_valid
 
@@ -326,7 +333,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
 
         if max_polyline_num >= len(map_feature_list):
             # pad zeros
-            for i in len(map_feature_list):
+            for i in range(len(map_feature_list)):
                 map_feature_padded[i, :, :] = map_feature_list[i]
                 map_feature_mask_padded[i, :] = map_feature_mask_list[i]
         else:
@@ -335,13 +342,13 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
             map_feature_mask = torch.stack(map_feature_mask_list)
 
             point_dis = torch.hypot(map_feature_feature[:, :, 0], map_feature_feature[:, :, 1])
-            min_dis_in_polyline = torch.min(point_dis, dim=1)
+            min_dis_in_polyline, _ = torch.min(point_dis, dim=1)
             _, sorted_index = torch.sort(min_dis_in_polyline)
 
             map_feature_padded = map_feature_feature[sorted_index[:max_polyline_num], :, :]
             map_feature_mask_padded = map_feature_mask[sorted_index[:max_polyline_num], :]
 
-        return map_feature_padded, map_feature_mask_padded
+        return map_feature_padded, (map_feature_mask_padded>0)
 
     def build_one_map_feature_tensor_except_lane(self, polylines: torch.Tensor, feature_type: str):
         polyline_point_num = self.dataset_config.map_feature.polyline_point_num
@@ -425,7 +432,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
 
         if max_polyline_num >= len(lane_feature_list):
             # pad zeros
-            for i in len(lane_feature_list):
+            for i in range(len(lane_feature_list)):
                 map_feature_padded[i, :, :] = lane_feature_list[i]
                 map_feature_mask_padded[i, :] = lane_feature_mask_list[i]
         else:
@@ -434,13 +441,13 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
             map_feature_mask = torch.stack(lane_feature_mask_list)
 
             point_dis = torch.hypot(map_feature_feature[:, :, 0], map_feature_feature[:, :, 1])
-            min_dis_in_polyline = torch.min(point_dis, dim=1)
+            min_dis_in_polyline, _ = torch.min(point_dis, dim=1)
             _, sorted_index = torch.sort(min_dis_in_polyline)
 
             map_feature_padded = map_feature_feature[sorted_index[:max_polyline_num], :, :]
             map_feature_mask_padded = map_feature_mask[sorted_index[:max_polyline_num], :]
 
-        return map_feature_padded, map_feature_mask_padded
+        return map_feature_padded, (map_feature_mask_padded>0)
 
     def build_one_lane_feature_tensor(self, polylines: torch.Tensor, lane_traffic_light_state: str, speed_limit: float):
         polyline_point_num = self.dataset_config.map_feature.polyline_point_num
@@ -493,7 +500,7 @@ class WaymoDatasetV1(torch.utils.data.Dataset):
         feature_dict = {}
         for key in batch_list[0].keys():
             temp_list = []
-            for i in len(batch_list):
+            for i in range(len(batch_list)):
                 temp_list.append(batch_list[i][key])
             feature_dict[key] = torch.cat(temp_list, dim=0)
 

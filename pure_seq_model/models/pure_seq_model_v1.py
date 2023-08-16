@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from omegaconf import DictConfig
 import copy
 from typing import Dict, List, Tuple, cast
 import os
@@ -9,11 +8,10 @@ import models.base_model as base_model
 from models.mtr_models.polyline_encoder import PointNetPolylineEncoder
 
 class PureSeqModelV1(nn.Module):
-    def __init__(self, model_config: Dict) -> None:
+    def __init__(self, config: Dict) -> None:
         super().__init__()
-        model_config = DictConfig(model_config)
-        self.model_parameter = model_config.model_parameter
-        self.data_dim = model_config.data_dim
+        self.model_parameter = config.model_parameter
+        self.data_dim = config.data_dim
 
         # map in polyline encoder
         self.lane_in_polyline_encoder = PointNetPolylineEncoder(self.data_dim.lane, self.model_parameter.in_polyline_dim, 
@@ -60,7 +58,8 @@ class PureSeqModelV1(nn.Module):
 
         if self.training:
             loss, tb_dict, disp_dict = self.get_loss(ego_output, input_dict['ego_label'].squeeze(2),
-                                                     agent_output, input_dict['ego_label'].view(agent_output.size(0), agent_output.size(1), agent_output.size(2)))
+                                                     agent_output, input_dict['agent_label'].view(agent_output.size(0), agent_output.size(1), agent_output.size(2)),
+                                                     input_dict['agent_valid'].view(agent_output.size(0), agent_output.size(1)))
             return loss, tb_dict, disp_dict
 
         return ego_output, agent_output
@@ -111,14 +110,12 @@ class PureSeqModelV1(nn.Module):
 
         return ego_output, agent_output
 
-    def generate(self, x):
-        pass
 
     def encode_map_feature(self, map_data: torch.Tensor, map_mask: torch.Tensor, in_polyline_encoder, between_polyline_encoder, device):
         in_polyline_encoded_data = in_polyline_encoder(map_data.view((map_data.size(0)*map_data.size(1), map_data.size(2), map_data.size(3), map_data.size(4))),
                                                        map_mask.view((map_data.size(0)*map_data.size(1), map_data.size(2), map_data.size(3)))) 
         polyline_valid = (map_mask.sum(dim=-1) > 0)
-        between_polyline_encoded_data = between_polyline_encoder(in_polyline_encoded_data.view(map_data.size(0), map_data.size(1), map_data.size(2), map_data.size(4)),
+        between_polyline_encoded_data = between_polyline_encoder(in_polyline_encoded_data.view(map_data.size(0), map_data.size(1), map_data.size(2), self.model_parameter.in_polyline_dim),
                                                                  polyline_valid) # (batch, 8, feature_dim)
         return between_polyline_encoded_data
 
@@ -140,8 +137,8 @@ class PureSeqModelV1(nn.Module):
 
             # input mask
             input_seq_mask_base[:, i*len_per_time_set:, i*len_per_time_set:i*len_per_time_set+5] = False
-            agent_valid_one_time_matrix = (agent_valid[:, i, :].unsqueeze(1).repeat(1, seq_len, 1) == 0)
-            input_seq_mask_base[:, i*len_per_time_set:, i*len_per_time_set+5:i*len_per_time_set+len_per_time_set] = agent_valid_one_time_matrix[:, i*len_per_time_set, :]
+            agent_valid_one_time_matrix = (agent_valid[:, i, :].unsqueeze(1).repeat(1, seq_len-i*len_per_time_set, 1) == 0)
+            input_seq_mask_base[:, i*len_per_time_set:, i*len_per_time_set+5:i*len_per_time_set+len_per_time_set] = agent_valid_one_time_matrix
 
         input_seq_mask = input_seq_mask_base.repeat_interleave(self.model_parameter.seq_head, dim=0)
 
@@ -234,7 +231,7 @@ class PureSeqModelV1(nn.Module):
         ego_loss = ego_xy_loss + ego_heading_loss + ego_vel_loss
 
         # agent loss
-        agent_diff = torch.mean(self._fn_mse(agent_output, agent_label), dim=-1)
+        agent_diff = self._fn_mse(agent_output, agent_label)
         agent_xy_loss = xy_weight * torch.mean(torch.mean(agent_diff[:, :, xy_index], dim=-1) * agent_valid)
         agent_heading_loss = heading_weight * torch.mean(torch.mean(agent_diff[:, :, heading_index], dim=-1) * agent_valid)
         agent_vel_loss = vel_weight * torch.mean(torch.mean(agent_diff[:, :, vel_index], dim=-1) * agent_valid)
@@ -264,3 +261,6 @@ class PureSeqModelV1(nn.Module):
 
         return loss, tb_dict, disp_dict
 
+
+    def generate(self, x):
+        pass

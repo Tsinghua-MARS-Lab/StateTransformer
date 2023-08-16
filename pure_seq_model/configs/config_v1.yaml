@@ -58,7 +58,7 @@ MODEL:
       seq_embedding_dim: 256
       seq_inter_dim: 512
       seq_head: 16
-      seq_layer: 4
+      seq_layer: 6
 
       loss_weight: {
         xy: 1.0,

@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import tqdm
 
-from mtr_trainer.utils import common_utils
+from mtr_trainer.mtr_utils import common_utils
 
 
 def eval_one_epoch(cfg, model, dataloader, epoch_id, logger, dist_test=False, save_to_file=False, result_dir=None, logger_iter_interval=50):

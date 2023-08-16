@@ -7,7 +7,7 @@
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from mtr_trainer.utils import common_utils
+from mtr_trainer.mtr_utils import common_utils
 
 from dataset.waymo_dataset_v1 import WaymoDatasetV1
 
