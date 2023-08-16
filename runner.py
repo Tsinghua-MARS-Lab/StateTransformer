@@ -9,20 +9,16 @@ import os
 import sys
 import pickle
 import copy
-from typing import List, Optional, Dict, Any, Tuple, Union
 import torch
-from torch import nn
 from tqdm import tqdm
 import copy
 import json
-
 import datasets
 import numpy as np
 import evaluate
 import transformers
 from datasets import Dataset
 from datasets.arrow_dataset import _concatenate_map_style_datasets
-from dataclasses import dataclass, field
 from functools import partial
 
 from transformers import (
@@ -30,207 +26,55 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
-from transformer4planning.preprocess.nuplan_rasterize import nuplan_collate_func
-from transformer4planning.utils import ModelArguments
+from transformer4planning.utils import (
+    ModelArguments, 
+    DataTrainingArguments, 
+    ConfigArguments, 
+    PlanningTrainingArguments
+)
 from transformers.trainer_utils import get_last_checkpoint
-from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
+from transformer4planning.trainer import (PlanningTrainer, CustomCallback)
 from torch.utils.data import DataLoader
-from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
 
-from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
+from datasets import Dataset, Value
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-# @dataclass
-# class ModelArguments:
-#     """
-#     Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-#     """
-#     model_name: str = field(
-#         default="scratch-gpt",
-#         metadata={"help": "Name of a planning model backbone"}
-#     )
-#     model_pretrain_name_or_path: str = field(
-#         default=None,
-#         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-#     )
-#     predict_result_saving_dir: Optional[str] = field(
-#         default=False,
-#         metadata={"help": "The target folder to save prediction results."},
-#     )
-#     predict_trajectory: Optional[bool] = field(
-#         default=True,
-#     )
-#     d_embed: Optional[int] = field(
-#         default=256,
-#     )
-#     d_model: Optional[int] = field(
-#         default=256,
-#     )
-#     d_inner: Optional[int] = field(
-#         default=1024,
-#     )
-#     n_layers: Optional[int] = field(
-#         default=4,
-#     )
-#     n_heads: Optional[int] = field(
-#         default=8,
-#     )
-#     # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
-#     activation_function: Optional[str] = field(
-#         default="silu"
-#     )
-#     loss_fn: Optional[str] = field(
-#         default="mse",
-#     )
-#     task: Optional[str] = field(
-#         default="nuplan" # only for mmtransformer
-#     )
-#     with_traffic_light: Optional[bool] = field(
-#         default=True
-#     )
-#     autoregressive: Optional[bool] = field(
-#         default=False
-#     )
-#     k: Optional[int] = field(
-#         default=1,
-#         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
-#     )
-#     next_token_scorer: Optional[bool] = field(
-#         default=False,
-#         metadata={"help": "Whether to use next token scorer for prediction."},
-#     )
-#     past_seq: Optional[int] = field(
-#         # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
-#         # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
-#         default=10,
-#         metadata={"help": "past frames to include for prediction/planning."},
-#     )
-#     x_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     y_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     tokenize_label: Optional[bool] = field(
-#         default=True
-#     )
-#     raster_channels: Optional[int] = field(
-#         default=33,
-#         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
-#     )
-#     predict_yaw: Optional[bool] = field(
-#         default=False
-#     )
-#     ar_future_interval: Optional[int] = field(
-#         default=0,
-#         metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
-#     )
-#     arf_x_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     arf_y_random_walk: Optional[float] = field(
-#         default=0.0
-#     )
-#     trajectory_loss_rescale: Optional[float] = field(
-#         default=1.0
-#     )
-#     visualize_prediction_to_path: Optional[str] = field(
-#         default=None
-#     )
-#     pred_key_points_only: Optional[bool] = field(
-#         default=False
-#     )
-#     specified_key_points: Optional[bool] = field(
-#         default=False
-#     )
-#     forward_specified_key_points: Optional[bool] = field(
-#         default=False
-#     )
-#     token_scenario_tag: Optional[bool] = field(
-#         default=False
-#     )
-#     max_token_len: Optional[int] = field(
-#         default=20
-#     )
-
-@dataclass
-class DataTrainingArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    saved_dataset_folder: Optional[str] = field(
-        default=None, metadata={"help": "The path of a pre-saved dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
-    )
-    saved_valid_dataset_folder: Optional[str] = field(
-        default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
-    )
-
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_eval_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_predict_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of prediction examples to this "
-                "value if set."
-            )
-        },
-    )    
-
-    dataset_scale: Optional[float] = field(
-        default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
-    )
-    dagger: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to save dagger results"}
-    )
-    online_preprocess: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to generate raster dataset online"}
-    )
-    datadic_path: Optional[str] = field(
-        default=None, metadata={"help":"The root path of data dictionary pickle file"}
-    )
-
-@dataclass
-class ConfigArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    save_model_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current model config to a json file if not None"}
-    )
-    save_data_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current data config to a json file if not None"}
-    )
-    load_model_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load model config from a json file if not None"}
-    )
-    load_data_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load data config to a json file if not None"}
-    )
-
+def load_dataset(root, split='train', dataset_scale=1, select=False):
+    datasets = []
+    index_root_folders = os.path.join(root, split)
+    indices = os.listdir(index_root_folders)
+ 
+    for index in indices:
+        index_path = os.path.join(index_root_folders, index)
+        if os.path.isdir(index_path):
+            # load training dataset
+            logger.info("Loading training dataset {}".format(index_path))
+            dataset = Dataset.load_from_disk(index_path)
+            if dataset is not None:
+                datasets.append(dataset)
+        else:
+            continue
+    # For nuplan dataset directory structure, each split obtains multi cities directories, so concat is required;
+    # But for waymo dataset, index directory is just the datset, so load directory directly to build dataset. 
+    if len(datasets) > 0: 
+        dataset = _concatenate_map_style_datasets(datasets)
+    else: 
+        dataset = Dataset.load_from_disk(index_root_folders)
+    # add split column
+    dataset.features.update({'split': Value('string')})
+    dataset = dataset.add_column(name='split', column=[split] * len(dataset))
+    dataset.set_format(type='torch')
+    if select:
+        samples = int(len(dataset) * float(dataset_scale))
+        dataset = dataset.select(range(samples))
+    return dataset
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
-    model_args, data_args, config_args, training_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
 
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
@@ -315,63 +159,35 @@ def main():
     1. Pass None to load from data_args.saved_dataset_folder as the root folder path to load all sub-datasets of each city
     2. Pass the folder of an index files to load one sub-dataset of one city
     """
-    if data_args.datadic_path is None:
-        from datasets import disable_caching
-        disable_caching()
-        data_args.datadic_path = data_args.saved_dataset_folder
-        # loop all datasets
-        logger.info("Loading full set of datasets from {}".format(data_args.datadic_path))
-        assert os.path.isdir(data_args.datadic_path)
-        index_root = os.path.join(data_args.datadic_path, 'index')
-        root_folders = os.listdir(index_root)
-        if 'train' in root_folders:
-            # load training datasets
-            training_datasets = []
-            training_index_root_folders = os.path.join(index_root, 'train')
-            training_indices = os.listdir(training_index_root_folders)
-            for training_index in training_indices:
-                training_index_path = os.path.join(training_index_root_folders, training_index)
-                if os.path.isdir(training_index_path):
-                    # load training dataset
-                    logger.info("Loading training dataset {}".format(training_index_path))
-                    dataset = Dataset.load_from_disk(training_index_path)
-                    if dataset is not None:
-                        training_datasets.append(dataset)
-            train_dataset = _concatenate_map_style_datasets(training_datasets)
-            # add split column
-            train_dataset.features.update({'split': Value('string')})
-            train_dataset = train_dataset.add_column(name='split', column=['train'] * len(train_dataset))
-            train_dataset.set_format(type='torch')
-            train_samples = int(len(train_dataset) * float(data_args.dataset_scale))
-            train_dataset = train_dataset.select(range(train_samples))
-        else:
-            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-        
-        if training_args.do_eval and 'test' in root_folders:
-            # load test datasets
-            test_datasets = []
-            test_index_root_folders = os.path.join(index_root, 'test')
-            test_indices = os.listdir(test_index_root_folders)
-            for test_index in test_indices:
-                test_index_path = os.path.join(test_index_root_folders, test_index)
-                if os.path.isdir(test_index_path):
-                    # load test dataset
-                    logger.info("Loading test dataset {}".format(test_index_path))
-                    dataset = Dataset.load_from_disk(test_index_path)
-                    if dataset is not None:
-                        test_datasets.append(dataset)
-            test_dataset = _concatenate_map_style_datasets(test_datasets)
-            # add additional column for flagging test set
-            test_dataset.features.update({'split': Value('string')})
-            test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            test_dataset.set_format(type='torch')
-        else:
-            print('Testset not found, using training set as test set')
-            test_dataset = train_dataset
 
+    from datasets import disable_caching
+    disable_caching()
+    # loop all datasets
+    logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
+    assert os.path.isdir(data_args.saved_dataset_folder)
+    index_root = os.path.join(data_args.saved_dataset_folder, 'index')
+    root_folders = os.listdir(index_root)
+        
+    if 'train' in root_folders:
+        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, True)
+    else:
+        raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+    
+    if training_args.do_eval and 'test' in root_folders:
+        test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, False)
+    else:
+        print('Testset not found, using training set as test set')
+        test_dataset = train_dataset
+    
+    if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
+        val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, False)
+    else:
+        print('Validation set not found, using training set as val set')
+        val_dataset = train_dataset
+
+    if model_args.task == "nuplan":
         all_maps_dic = {}
-        all_pickles_dic = {}
-        map_folder = os.path.join(data_args.datadic_path, 'map')
+        map_folder = os.path.join(data_args.saved_dataset_folder, 'map')
         for each_map in os.listdir(map_folder):
             if each_map.endswith('.pkl'):
                 map_path = os.path.join(map_folder, each_map)
@@ -379,36 +195,13 @@ def main():
                     map_dic = pickle.load(f)
                 map_name = each_map.split('.')[0]
                 all_maps_dic[map_name] = map_dic
-    else:
-        all_maps_dic = None
-        all_pickles_dic = None
-        if os.path.isdir(data_args.saved_dataset_folder):
-            logger.info("loading dataset...")
-            dataset = Dataset.load_from_disk(data_args.saved_dataset_folder)
-            dataset.features.update({'split': Value('string')})
-            dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
-            dataset.set_format(type='torch')
-            dataset.shuffle(seed=training_args.seed)
-            train_samples = int(len(dataset) * float(data_args.dataset_scale))
-            train_dataset = dataset.select(range(train_samples))
-
-            if training_args.do_eval:
-                test_dataset = Dataset.load_from_disk(data_args.saved_valid_dataset_folder)
-                # add additional column for flagging test set
-                test_dataset.features.update({'split': Value('string')})
-                test_dataset = test_dataset.add_column('split', column=['test'] * len(test_dataset))
-            else:
-                test_dataset = dataset.select(range(train_samples))
-            test_dataset.set_format(type='torch')
-        else:
-            raise ValueError(f'Dataset directory ({data_args.saved_dataset_folder}) does not exist. Use save_to_disk() to save a dataset first.')
 
     # loop split info and update for test set
-    print('TrainingSet: ', train_dataset, '\nTestSet', test_dataset)
+    print('TrainingSet: ', train_dataset, '\nValidationSet', val_dataset, '\nTestingSet', test_dataset)
 
-    nuplan_dataset = dict(
+    dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
-        validation=test_dataset.shuffle(seed=training_args.seed),
+        validation=val_dataset.shuffle(seed=training_args.seed),
         test=test_dataset.shuffle(seed=training_args.seed),
     )
 
@@ -430,29 +223,54 @@ def main():
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
             os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / 8))
-        train_dataset = nuplan_dataset["train"]
+        train_dataset = dataset_dict["train"]
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
 
     if training_args.do_eval:
-        eval_dataset = nuplan_dataset["validation"]
+        eval_dataset = dataset_dict["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
     if training_args.do_predict:
-        predict_dataset = nuplan_dataset["test"]
+        predict_dataset = dataset_dict["test"]
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
             predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Initialize our Trainer
-    collate_fn = partial(nuplan_collate_func,
-                         dic_path=data_args.datadic_path,
-                         all_maps_dic=all_maps_dic,
-                         all_pickles_dic=all_pickles_dic,
-                         **model_args.__dict__) if data_args.online_preprocess else None
+    if model_args.task == "nuplan":
+        if model_args.encoder_type == "raster":
+            from transformer4planning.preprocess.nuplan_rasterize import nuplan_rasterize_collate_func
+            collate_fn = partial(nuplan_rasterize_collate_func,
+                                dic_path=data_args.saved_dataset_folder,
+                                all_maps_dic=all_maps_dic,
+                                **model_args.__dict__)
+        elif model_args.encoder_type == "vector":
+            from nuplan.common.maps.nuplan_map.map_factory import get_maps_api
+            from transformer4planning.preprocess.pdm_vectorize import nuplan_vector_collate_func
+            map_api = dict()
+            for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
+                map_api[map] = get_maps_api(map_root=data_args.nuplan_map_path,
+                                    map_version="nuplan-maps-v1.0",
+                                    map_name=map
+                                    )
+            collate_fn = partial(nuplan_vector_collate_func, 
+                                 dic_path=data_args.saved_dataset_folder, 
+                                 map_api=map_api)
+    elif model_args.task == "waymo":
+        from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
+        if model_args.encoder_type == "vector":
+            collate_fn = partial(waymo_collate_func, 
+                                 data_path=data_args.saved_dataset_folder, 
+                                 interaction=model_args.interaction)
+        elif model_args.encoder_type == "raster":
+            raise NotImplementedError
+    else:
+        raise AttributeError("task must be nuplan or waymo")
+
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -462,7 +280,34 @@ def main():
         data_collator=collate_fn
     )
     trainer.pop_callback(DefaultFlowCallback)
-
+        
+    if model_args.generate_diffusion_dataset_for_key_points_decoder:
+        # First we generate the testing set for our diffusion decoder.
+        try:
+            result = trainer.evaluate()
+        except Exception as e:
+            pass
+        # try:
+        #     if model_args.autoregressive or True:
+        #         result = trainer.evaluate()
+        # except Exception as e:
+        #     # The code would throw an exception at the end of evaluation loop since we return None in evaluation step
+        #     # But this is not a big deal since we have just saved everything we need in the model's forward method.
+        #     print(e)
+        #     pass
+        
+        # Then we generate the training set for our diffusion decoder.
+        # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
+        trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
+        trainer.eval_dataset = train_dataset
+        try:
+            result = trainer.evaluate()
+        except Exception as e:
+            print(e)
+            pass
+        
+        assert False, 'The generation has been done.'
+    
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -477,13 +322,12 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
-        if model_args.autoregressive:
-            result = trainer.evaluate()
-            logger.info("***** Final Eval results *****")
-            logger.info(f"  {result}")
-            hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
-            evaluate.save("./results/", ** result, ** hyperparams)
-            logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
+        result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
+        logger.info("***** Final Eval results *****")
+        logger.info(f"  {result}")
+        # hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
+        # evaluate.save("./results/", ** result, ** hyperparams)
+        # logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
     if training_args.do_predict:
         # Currently only supports single GPU predict outputs
@@ -524,19 +368,6 @@ def main():
                 all_bias_y = []
                 losses = []
                 loss_fn = torch.nn.MSELoss(reduction="mean")
-            
-            # def waymo_collate_fn(batch):
-            #     import collections
-            #     expect_keys = expect_keys = ["high_res_raster", "low_res_raster", "context_actions", "trajectory_label"]
-            #
-            #     elem = batch[0]
-            #     if isinstance(elem, collections.abc.Mapping):
-            #         return {key: default_collate([d[key] for d in batch]) for key in expect_keys}
-            #
-            # if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
-            #     # Todo: test waymo collate fn
-            #     collate_fn = waymo_collate_fn
-
 
             for itr, input in enumerate(tqdm(test_dataloader)):
                 # move batch to device
