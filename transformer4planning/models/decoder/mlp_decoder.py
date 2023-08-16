@@ -1,7 +1,7 @@
 import torch
 from typing import Dict
 from transformer4planning.models.decoder.base import TrajectoryDecoder
-from transformer4planning.libs.models.mlp import DecoderResCat
+from transformer4planning.libs.mlp import DecoderResCat
 
 class MultiTrajDecoder(TrajectoryDecoder):
     """
@@ -10,14 +10,9 @@ class MultiTrajDecoder(TrajectoryDecoder):
     and a scorer decoder to judge different trajectories.
     """
     def __init__(self, model_args, config):
-        super().__init__(model_args)
-        self.traj_decoder, self.key_points_decoder, self.next_token_scorer_decoder = None, None, None 
-        if not self.model_args.pred_key_points_only:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features)
+        super().__init__(model_args, config)
         if self.ar_future_interval > 0:
-            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features * self.k)
-        if self.k > 1:
-            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
+            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features * self.k) 
     
     def forward(self, 
                 hidden_output,
@@ -38,11 +33,11 @@ class MultiTrajDecoder(TrajectoryDecoder):
             if self.model_args.task == "waymo":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
-                traj_loss = (self.loss_fn(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
+                traj_loss = (self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
                     trajectory_label_mask.sum() + 1e-7)
             elif self.model_args.task == "nuplan":
-                traj_loss = self.loss_fn(traj_logits, label.to(device)) if self.model_args.predict_yaw else \
-                            self.loss_fn(traj_logits[..., :2], label[..., :2].to(device))   
+                traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.model_args.predict_yaw else \
+                            self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))   
             # Modification here: both waymo&nuplan use the same loss scale and loss fn
             traj_loss *= self.model_args.trajectory_loss_rescale
             loss += traj_loss
@@ -50,6 +45,7 @@ class MultiTrajDecoder(TrajectoryDecoder):
             traj_logits = torch.zeros_like(label[..., :2])
             traj_loss = None
         
+        kp_loss, cls_loss = None, None
         if self.ar_future_interval > 0:
             future_key_points = info_dict["future_key_points"]
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
@@ -81,7 +77,7 @@ class MultiTrajDecoder(TrajectoryDecoder):
                     kp_loss = kp_loss.mean()
                 loss += kp_loss
 
-                cls_loss = None
+
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))
                     cls_loss_fn = torch.nn.CrossEntropyLoss()
