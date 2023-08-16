@@ -363,9 +363,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 selected_indices = [79, 39, 19, 9, 4]
             future_key_points = trajectory_label_dummy[:, selected_indices, :]
             future_key_points_gt = trajectory_label[:, selected_indices, :]
+            future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
         else:
             future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
             future_key_points_gt = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+            future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
         future_key_embeds_dummy = self.action_m_embed(future_key_points)
         
@@ -388,7 +390,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num)
         elif self.generate_method == 'beam_search':
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, tot_scenario_contenxt_len, key_points_num,
-                                                                                               num_beam=self.k, out_num_mode=self.k)
+                                                                                               num_beam=self.k, out_num_mode=self.k,
+                                                                                               gt_kpts=future_key_points_gt,
+                                                                                               gt_kpts_mask=future_key_points_gt_mask)
         else:
             raise ValueError("generate_method has not yet been implemented ", self.generate_method)
         
@@ -566,7 +570,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
         return pred_key_points_during_generate, input_embeds_kpts, kpts_scores
     
-    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, num_beam=None, out_num_mode=None):
+    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, num_beam=None, out_num_mode=None,
+                    gt_kpts=None, gt_kpts_mask=None):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
         
@@ -642,6 +647,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_kps_logit_topk = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, num_beam, 2), device=device)), dim=-1) # (bs, num_beam, 4)
 
             # get kps topk embeds
+            # if k_i < 2:
+            #     pred_kps_logit_topk = gt_kpts[:, [k_i], :].repeat(1, num_beam, 1)
+                
             pred_kps_logit_topk_embed = self.action_m_embed(pred_kps_logit_topk)  # b, num_beam, n_embed
             
             k_input_embeds[:, :, tot_scenario_contenxt_len + 2*k_i+1, :] = pred_kps_logit_topk_embed
