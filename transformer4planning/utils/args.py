@@ -145,6 +145,9 @@ class ModelArguments:
     mtr_config_path: Optional[str] = field(
         default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
     )
+    generation_method: Optional[str] = field(
+        default="beam"
+    )
 
 @dataclass
 class DataTrainingArguments:
