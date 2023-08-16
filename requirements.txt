@@ -52,6 +52,6 @@ torch-scatter==2.0.9
 torchmetrics==0.7.2
 torchvision==0.10.0+cu111
 tqdm==4.64.1
-
-
+einops==0.6.1
+wandb==0.15.5
 

@@ -2,7 +2,7 @@ from typing import Dict
 import torch
 from torch import nn
 from transformer4planning.models.utils import *
-from transformer4planning.models.encoder.base import EncoderBase
+from transformer4planning.models.encoder.base import TrajectoryEncoder
 
 class CNNDownSamplingResNet(nn.Module):
     def __init__(self, d_embed, in_channels, resnet_type='resnet18', pretrain=False):
@@ -39,7 +39,7 @@ class CNNDownSamplingResNet(nn.Module):
     
 
 
-class NuplanRasterizeEncoder(EncoderBase):
+class NuplanRasterizeEncoder(TrajectoryEncoder):
     def __init__(self, 
                  cnn_kwargs:Dict, 
                  action_kwargs:Dict,

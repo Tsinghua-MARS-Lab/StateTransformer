@@ -9,9 +9,8 @@ from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
-from transformer4planning.common_utils import common_utils
+from transformer4planning.utils import mtr_utils
 from typing import List, Optional, Dict, Any, Tuple, Union
-from dataclasses import dataclass, field
 from datasets import Dataset
 import torch
 import torch.nn as nn
@@ -42,17 +41,6 @@ class CustomCallback(DefaultFlowCallback):
             control.should_save = True
 
         return control
-
-@dataclass
-class PlanningTrainingArguments(TrainingArguments):
-    eval_interval: Optional[int] = field(
-        default=1,
-        metadata={
-            "help": (
-                "how many epoch the model perform an evaluation."
-            )
-        },
-    )
 
 class PlanningTrainer(Trainer):
 
@@ -264,6 +252,11 @@ class PlanningTrainer(Trainer):
                         future_key_points = trajectory_label_in_batch[:, selected_indices, :]
                     else:
                         future_key_points = trajectory_label_in_batch[:, self.model.ar_future_interval - 1::self.model.ar_future_interval, :]
+                    
+                    if self.model.model_args.generate_diffusion_dataset_for_key_points_decoder:
+                        return None,None,None
+                        # no need to return further info.
+                    
                     ade_x_error_key_points = prediction_key_points[:, :, 0] - future_key_points[:, :, 0]
                     ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
                     fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
@@ -644,7 +637,7 @@ class PlanningTrainer(Trainer):
         
         cur_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
         log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, cur_time))
-        logger = common_utils.create_logger(log_file, rank=0)
+        logger = mtr_utils.create_logger(log_file, rank=0)
 
         start_time = time.time()
         logger_iter_interval = 1000

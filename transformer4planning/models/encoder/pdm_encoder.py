@@ -2,9 +2,9 @@ from typing import Dict
 import torch
 from torch import nn
 from transformer4planning.models.utils import *
-from transformer4planning.models.encoder.base import EncoderBase
+from transformer4planning.models.encoder.base import TrajectoryEncoder
 
-class PDMEncoder(EncoderBase):
+class PDMEncoder(TrajectoryEncoder):
     def __init__(self, 
                  pdm_kwargs:Dict,
                  tokenizer_kwargs:Dict = None,

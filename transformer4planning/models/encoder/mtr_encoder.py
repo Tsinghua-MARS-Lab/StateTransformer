@@ -6,10 +6,10 @@ import torch
 import torch.nn as nn
 
 
-from transformer4planning.models.encoder.utils.transformer import transformer_encoder_layer, position_encoding_utils
-from transformer4planning.models.encoder.utils import polyline_encoder
-from transformer4planning.models.encoder.utils import common_utils
-from transformer4planning.ops.knn import knn_utils
+from transformer4planning.libs.models.mtr.transformer import (transformer_encoder_layer, position_encoding_utils)
+from transformer4planning.libs.models.mtr import polyline_encoder
+from transformer4planning.utils import mtr_utils
+from transformer4planning.libs.ops.knn import knn_utils
 
 
 class MTREncoder(nn.Module):
@@ -115,7 +115,7 @@ class MTREncoder(nn.Module):
         batch_idxs = batch_idxs_full[x_mask_stack]
 
         # knn
-        batch_offsets = common_utils.get_batch_offsets(batch_idxs=batch_idxs, bs=batch_size).int()  # (batch_size + 1)
+        batch_offsets = mtr_utils.get_batch_offsets(batch_idxs=batch_idxs, bs=batch_size).int()  # (batch_size + 1)
         batch_cnt = batch_offsets[1:] - batch_offsets[:-1]
 
         index_pair = knn_utils.knn_batch_mlogk(
@@ -206,9 +206,9 @@ class MTREncoder(nn.Module):
         return batch_dict
     
 from typing import Dict
-from transformer4planning.models.encoder.base import EncoderBase
+from transformer4planning.models.encoder.base import TrajectoryEncoder
 
-class WaymoVectorizeEncoder(EncoderBase):
+class WaymoVectorizeEncoder(TrajectoryEncoder):
     def __init__(self, 
                  mtr_config,
                  action_kwargs:Dict,

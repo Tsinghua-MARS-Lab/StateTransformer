@@ -6,7 +6,7 @@
 
 import torch
 import torch.nn as nn
-from ..utils import common_layers
+from transformer4planning.libs.models.mtr import common_layers
 
 
 class PointNetPolylineEncoder(nn.Module):
