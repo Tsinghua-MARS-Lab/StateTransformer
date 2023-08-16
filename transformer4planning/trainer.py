@@ -3,7 +3,7 @@ import tqdm
 import datetime
 import pickle
 from torch.utils.data import DataLoader
-from transformers.trainer_utils import EvalLoopOutput
+from transformers.trainer_utils import EvalLoopOutput, speed_metrics
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
@@ -18,6 +18,7 @@ import torch.nn as nn
 import logging
 import os
 import numpy as np
+import math
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -98,6 +99,7 @@ class PlanningTrainer(Trainer):
         loss_without_labels = True
 
         inputs = self._prepare_inputs(inputs)
+
         if ignore_keys is None:
             if hasattr(self.model, "config"):
                 ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
@@ -153,7 +155,49 @@ class PlanningTrainer(Trainer):
                     # # TODO: this needs to be fixed and made cleaner later.
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
-        batch_generate_eval = True
+
+        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
+            batch_pred_dicts = self.model.generate(**inputs)
+            pred_length = inputs['center_gt_trajs_src'].shape[1] - inputs['current_time_index'][0] - 1
+            pred_trajs = batch_pred_dicts['logits'][:, :, -pred_length:, :]
+            pred_scores = batch_pred_dicts['scores']
+            pred_kps = batch_pred_dicts['key_points_logits']
+            center_objects_world = inputs['center_objects_world'].type_as(pred_trajs)
+
+            num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
+            # assert num_feat == 7
+
+            pred_trajs_world = common_utils.rotate_points_along_z(
+                points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
+                angle=center_objects_world[:, 6].view(num_center_objects)
+            ).view(num_center_objects, num_modes, num_timestamps, num_feat)
+            pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+            
+            num_center_objects, num_modes, num_kps, num_kps_feat = pred_kps.shape
+            pred_kps_world = common_utils.rotate_points_along_z(
+                points=pred_kps.view(num_center_objects, num_modes * num_kps, num_kps_feat),
+                angle=center_objects_world[:, 6].view(num_center_objects)
+            ).view(num_center_objects, num_modes, num_kps, num_kps_feat)
+            pred_kps_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+
+            pred_dict = []
+            for obj_idx in range(num_center_objects):
+                single_pred_dict = {
+                    'scenario_id': str(inputs['scenario_id'][obj_idx]),
+                    'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
+                    'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
+                    'pred_kps': pred_kps_world[obj_idx, :].cpu().numpy(),
+                    'object_id': inputs['center_objects_id'][obj_idx],
+                    'object_type': str(inputs['center_objects_type'][obj_idx]),
+                    'gt_trajs': inputs['center_gt_trajs_src'][obj_idx].cpu().numpy(),
+                    'track_index_to_predict': inputs['track_index_to_predict'][obj_idx].cpu().numpy()
+                }
+                pred_dict.append(single_pred_dict)
+            self.pred_dicts_list += pred_dict
+
+            return (loss, None, None)
+        else:
+            batch_generate_eval = True
         # if model.mode == 'OA-OA':
         #     batch_generate_eval = False
         #     print('batch generate for OA-OA is not implemented yet')
@@ -167,6 +211,8 @@ class PlanningTrainer(Trainer):
         if batch_generate_eval:
             # run generate for sequence of actions
             if self.model.model_args.autoregressive:
+                if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
+                    raise NotImplementedError
                 # TODO: support different frame interval, change sequence length from 40
                 actions_label_in_batch = inputs["trajectory"].clone()
                 trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
@@ -340,64 +386,71 @@ class PlanningTrainer(Trainer):
                         heading_error_by_gen = torch.abs(heading_error_by_gen).mean()
                         self.eval_result['heading_error_by_gen'].append(float(heading_error_by_gen))
 
-        self.eval_itr += 1
         if prediction_loss_only:
             return (loss, None, None)
-
+        
         logits = nested_detach(logits)
         if len(logits) == 1:
             logits = logits[0]
 
-        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
-            pred_length = inputs['center_gt_trajs_src'].shape[1] - inputs['current_time_index'][0] - 1
-            pred_trajs = logits[:, None, -pred_length:, :]
-            pred_scores = torch.ones_like(pred_trajs[:, :, 0, 0])
-            center_objects_world = inputs['center_objects_world'].type_as(pred_trajs)
-            num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
-            # assert num_feat == 7
-
-            pred_trajs_world = common_utils.rotate_points_along_z(
-                points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
-                angle=center_objects_world[:, 6].view(num_center_objects)
-            ).view(num_center_objects, num_modes, num_timestamps, num_feat)
-            pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
-
-            pred_dict = []
-            for obj_idx in range(num_center_objects):
-                single_pred_dict = {
-                    'scenario_id': str(inputs['scenario_id'][obj_idx]),
-                    'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
-                    'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
-                    'object_id': inputs['center_objects_id'][obj_idx],
-                    'object_type': str(inputs['center_objects_type'][obj_idx]),
-                    'gt_trajs': inputs['center_gt_trajs_src'][obj_idx].cpu().numpy(),
-                    'track_index_to_predict': inputs['track_index_to_predict'][obj_idx].cpu().numpy()
-                }
-                pred_dict.append(single_pred_dict)
-
-            self.pred_dicts_list += pred_dict
         return (loss, logits, None)
-
-    def evaluation_loop(
+    
+    def evaluate(
         self,
-        dataloader: DataLoader,
-        description: str,
-        prediction_loss_only: Optional[bool] = None,
+        eval_dataset: Optional[Dataset] = None,
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
-    ) -> EvalLoopOutput:
+    ) -> Dict[str, float]:
+        """
+        Run evaluation and returns metrics.
+
+        The calling script will be responsible for providing a method to compute metrics, as they are task-dependent
+        (pass it to the init `compute_metrics` argument).
+
+        You can also subclass and override this method to inject custom behavior.
+
+        Args:
+            eval_dataset (`Dataset`, *optional*):
+                Pass a dataset if you wish to override `self.eval_dataset`. If it is a [`~datasets.Dataset`], columns
+                not accepted by the `model.forward()` method are automatically removed. It must implement the `__len__`
+                method.
+            ignore_keys (`Lst[str]`, *optional*):
+                A list of keys in the output of your model (if it is a dictionary) that should be ignored when
+                gathering predictions.
+            metric_key_prefix (`str`, *optional*, defaults to `"eval"`):
+                An optional prefix to be used as the metrics key prefix. For example the metrics "bleu" will be named
+                "eval_bleu" if the prefix is "eval" (default)
+
+        Returns:
+            A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
+            dictionary also contains the epoch number which comes from the training state.
+        """
         print('Starting evaluation loop with reset eval result')
         if self.is_world_process_zero:
             self.eval_result = {
                 'ade': [],
                 'fde': [],
             }
-        self.eval_itr = 0
-        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector": 
-            prediction_loss_only = False
-            self.pred_dicts_list = []
 
-        eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+            if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
+                self.pred_dicts_list = []
+
+        # memory metrics - must set up as early as possible
+        self._memory_tracker.start()
+
+        eval_dataloader = self.get_eval_dataloader(eval_dataset)
+        start_time = time.time()
+
+        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+        output = eval_loop(
+            eval_dataloader,
+            description="Evaluation",
+            # No point gathering the predictions if there are no metrics, otherwise we defer to
+            # self.args.prediction_loss_only
+            prediction_loss_only=True if self.compute_metrics is None else None,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
 
         result = dict()
         if self.model.clf_metrics is not None:
@@ -406,34 +459,44 @@ class PlanningTrainer(Trainer):
             result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
             result[f"{metric_key_prefix}_recall"] = self.model.clf_metrics["recall"].compute(average="macro")
-        for each_key in self.eval_result:
-            # result[f"{metric_key_prefix}_{each_key}"] = float(self.eval_result[each_key])
-            result[f"{metric_key_prefix}_{each_key}"] = sum(self.eval_result[each_key]) / len(self.eval_result[each_key])
-        logging.info("***** Eval results *****")
-        logging.info(f"{result}")
-        self.log(result)
 
-        
         if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
             from dataset_gen.waymo.waymo_eval import waymo_evaluation
-            logging.info('*************** Performance of WOMD *****************' )
             try:
                 num_modes_for_eval = self.pred_dicts_list[0]['pred_trajs'].shape[0]
             except:
                 num_modes_for_eval = 6
-            metric_results, result_format_str = waymo_evaluation(pred_dicts=self.pred_dicts_list, num_modes_for_eval=num_modes_for_eval)
+            
+            print(len(self.pred_dicts_list))
+            _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=self.pred_dicts_list, num_modes_for_eval=num_modes_for_eval)
+            print(final_avg_results)
+            exit()
+        else:
+            for each_key in self.eval_result:
+                # result[f"{metric_key_prefix}_{each_key}"] = float(self.eval_result[each_key])
+                result[f"{metric_key_prefix}_{each_key}"] = sum(self.eval_result[each_key]) / len(self.eval_result[each_key])
 
-            metric_result_str = '\n'
-            for key in metric_results:
-                metric_results[key] = metric_results[key]
-                metric_result_str += '%s: %.4f \n' % (key, metric_results[key])
-            metric_result_str += '\n'
-            metric_result_str += result_format_str
+        self.log(result)
 
-            print(metric_result_str)
-            logging.info('****************Evaluation done.*****************')
+        total_batch_size = self.args.eval_batch_size * self.args.world_size
+        if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
+            start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
+        output.metrics.update(
+            speed_metrics(
+                metric_key_prefix,
+                start_time,
+                num_samples=output.num_samples,
+                num_steps=math.ceil(output.num_samples / total_batch_size),
+            )
+        )
 
-        return eval_output
+        self.log(output.metrics)
+
+        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
+
+        self._memory_tracker.stop_and_update_metrics(output.metrics)
+
+        return output.metrics
 
     def save_raster(self, path_to_save,
                     inputs, sample_index,

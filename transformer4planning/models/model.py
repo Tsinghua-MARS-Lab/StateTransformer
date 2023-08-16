@@ -19,11 +19,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
-        out_features = 4 if self.model_args.predict_yaw else 2
+        self.out_features = 4 if self.model_args.predict_yaw else 2
         if not self.model_args.pred_key_points_only:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features)
         if self.ar_future_interval > 0:
-            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
+            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features * self.k)
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
 
@@ -273,112 +273,287 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
         input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
-        # Loop for generation
+
+
+        if self.model_args.task == "waymo":
+            length_before_keypoints = scenario_type_len + context_length * 2
+            if self.model_args.generation_method == 'greedy':
+                pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, length_before_keypoints, key_points_num)
+            elif self.model_args.generation_method == 'beam':
+                pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, length_before_keypoints, key_points_num)
+            else:
+                raise NotImplementedError
+            
+            all_traj_logits = []
+            all_kps_logits = []
+            n_mode = input_embeds_kpts.shape[1]
+            
+            for m_i in range(n_mode):
+                input_embeds[:, length_before_keypoints:length_before_keypoints+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
+                transformer_output = self.transformer(
+                    inputs_embeds=input_embeds,
+                    attention_mask=None,
+                    position_ids=None,
+                )
+                transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+                
+                # get traj_logits
+                traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
+                traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
+                all_traj_logits.append(traj_logits[:, None, :, :])
+                
+            all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
+            all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
+            
+            kpts_scores = kpts_scores.softmax(dim=1) # (bs, k, num_kps)
+            
+            # use accumulated score
+            all_traj_scores = torch.ones((batch_size, n_mode), device=device)
+            
+            for k_i in range(key_points_num):
+                all_traj_scores *= kpts_scores[:, :, k_i]
+            all_traj_scores = all_traj_scores / all_traj_scores.sum()
+            
+            # use last score
+            # all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
+
+            return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
+        else:
+            # Loop for generation
+            for i in range(key_points_num):
+                input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
+                attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+                position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+                transformer_output = self.transformer(
+                    inputs_embeds=input_embeds_current,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                )
+                transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+                future_key_point_hidden_state = transformer_outputs_hidden_state[:,
+                                                scenario_type_len + context_length * 2 + i - 1,
+                                                :].reshape(batch_size, 1, -1)
+
+                if self.k > 1:
+                    key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
+                    pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
+                    selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
+                                        pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
+                    key_points_logit = selected_key_point
+                else:
+                    key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
+                pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
+                if self.model_args.predict_yaw:
+                    pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
+                else:
+                    pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+
+                off_road_checking = False
+                if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
+                    # Check key points with map_api
+                    # WARNING: WIP, do not use
+                    pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
+                                                                ego_pose,
+                                                                ego_to_global=True)
+                    closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
+                    nearest = closest_lane_road_dic['road_id']
+                    nearest_lane = closest_lane_road_dic['lane_id']
+                    dist = closest_lane_road_dic['distance_to_road_block']
+                    if nearest not in route_ids or dist > 0.5:
+                        # off-road, move to nearest lane according to PDMPath
+                        dist = euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
+                        interpolate_point = center_path.interpolate(np.array([dist]))[0]
+                        print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
+                        pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
+
+                if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
+                    # replace last key point with IDM reference
+                    ego_state_global = idm_reference_global[selected_indices[-1]]
+                    idm_reference_lastpt_relative = change_coordination(np.array([ego_state_global.rear_axle.x,
+                                                                                ego_state_global.rear_axle.y]),
+                                                                        ego_pose,
+                                                                        ego_to_global=False)
+                    print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
+                    pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
+                key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                # replace embed at the next position
+                input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+                if self.model_args.predict_yaw:
+                    pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
+                else:
+                    pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+
+            # generate remaining trajectory
+            transformer_output = self.transformer(
+                inputs_embeds=input_embeds,
+                attention_mask=None,
+                position_ids=None,
+            )
+            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+
+            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+            # expected shape for pred trajectory is (b, pred_length, 4)
+            if self.traj_decoder is not None:
+                traj_logits = self.traj_decoder(traj_hidden_state)
+            else:
+                traj_logits = trajectory_label_dummy[..., :2]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+
+            if self.k > 1:
+                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+                pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
+                selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
+                                    torch.arange(batch_size * key_points_num),
+                                    pred_logits.argmax(dim=-1).reshape(-1),
+                                    :].reshape(batch_size, key_points_num, -1)
+                key_points_logits = selected_key_points
+            elif self.k == 1:
+                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
+                # use previous prediction during generation
+                # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
+                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
+            else:
+                raise ValueError("illegal k while generating trajectory", self.k)
+            # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
+            return torch.cat([key_points_logits, traj_logits], dim=1)
+    
+    def greedy_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num):
+        '''
+        input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
+        
+        return:
+            input_embeds_kpts: (bs, 1, num_kps, n_embed)
+            kpts_scores: (bs, 1, num_kps)
+            pred_key_points_during_generate: (bs, self.k, num_kps, 4)
+        '''
+        
+        device = input_embeds.device
+        batch_size, cur_len, n_embed = input_embeds.shape
+        pred_key_points_during_generate = torch.zeros((batch_size, 1, key_points_num, self.out_features), device=device)
+        
+        input_embeds_kpts = torch.zeros((batch_size, 1, key_points_num, n_embed), device=device)
+        kpts_scores = torch.zeros((batch_size, 1, key_points_num), device=device)
+        
         for i in range(key_points_num):
-            input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
-            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+            # prepare attention mask
+            input_embeds_current = input_embeds[:, :tot_scenario_contenxt_len + i, :]
+            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=device)
             position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
                 inputs_embeds=input_embeds_current,
                 attention_mask=attention_mask,
-                position_ids=position_ids,
+                position_ids=position_ids
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                            scenario_type_len + context_length * 2 + i - 1,
-                                            :].reshape(batch_size, 1, -1)
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len + i - 1, :].reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
-                pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
-                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
-                                     pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
+                pred_kps_score = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
+                
+                # delta = (key_points_logit.reshape(batch_size, self.k, -1) - future_key_points_gt[:, [i], :2])
+                # dist = -delta[..., 0]*delta[..., 0] - delta[..., 1]*delta[..., 1]
+                # pred_kps_score = dist[:, None, :]
+                
+                # pred_kps_score_index = pred_kps_score.argsort(dim=-1)
+                # selected_key_point = torch.zeros((batch_size, 1, 2), device=pred_kps_score.device, dtype=pred_kps_score.dtype)
+                
+                # for s_ind in range(3):
+                #     selected_key_point += key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_kps_score_index[:, 0, s_ind].reshape(-1), :].reshape(batch_size, 1, -1)
+                
+                # selected_key_point /= 3.0
+                
+                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_kps_score.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)    
                 key_points_logit = selected_key_point
             else:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
             pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
-            if self.model_args.predict_yaw:
-                pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
-            else:
-                pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+            pred_key_point[:, 0, :self.out_features] = key_points_logit[:, 0, :]
 
-            off_road_checking = False
-            if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
-                # Check key points with map_api
-                # WARNING: WIP, do not use
-                pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
-                                                            ego_pose,
-                                                            ego_to_global=True)
-                closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
-                nearest = closest_lane_road_dic['road_id']
-                nearest_lane = closest_lane_road_dic['lane_id']
-                dist = closest_lane_road_dic['distance_to_road_block']
-                if nearest not in route_ids or dist > 0.5:
-                    # off-road, move to nearest lane according to PDMPath
-                    dist = euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
-                    interpolate_point = center_path.interpolate(np.array([dist]))[0]
-                    print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
-                    pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
-
-            if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
-                # replace last key point with IDM reference
-                ego_state_global = idm_reference_global[selected_indices[-1]]
-                idm_reference_lastpt_relative = change_coordination(np.array([ego_state_global.rear_axle.x,
-                                                                              ego_state_global.rear_axle.y]),
-                                                                    ego_pose,
-                                                                    ego_to_global=False)
-                print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
-                pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
             key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
-            input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
-            if self.model_args.predict_yaw:
-                pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
+            input_embeds[:, tot_scenario_contenxt_len + i, :] = key_point_embed[:, 0, :]
+            input_embeds_kpts[:, 0, i, :] = key_point_embed[:, 0, :]
+            kpts_scores[:, :, i] = pred_kps_score.max(-1)[0]
+            pred_key_points_during_generate[:, 0, i, :] = pred_key_point[:, 0, :self.out_features]
+            
+        return pred_key_points_during_generate, input_embeds_kpts, kpts_scores
+    
+    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num):
+        '''
+        input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
+        
+        return:
+            k_input_embeds_kpts: (bs, k, num_kps, n_embed)
+            k_kpts_scores: (bs, k, num_kps)
+            pred_key_points_during_generate: (bs, self.k, num_kps, 4)
+        '''
+
+        assert self.k > 1
+        
+        device = input_embeds.device
+        batch_size, tot_len, n_embed = input_embeds.shape
+        pred_key_points_during_generate = torch.zeros((batch_size, self.k, key_points_num, self.out_features), device=device)
+        
+        k_kpts_scores = torch.zeros((batch_size, self.k, key_points_num), device=device)
+        k_input_embeds = input_embeds[:, None, :, :].repeat(1, self.k, 1, 1)
+        
+        for i in range(key_points_num):
+            # prepare attention mask
+            k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_contenxt_len + i, :].view(batch_size*self.k, -1, n_embed)
+            attention_mask = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
+            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+            transformer_output = self.transformer(
+                inputs_embeds=k_input_embeds_current,
+                attention_mask=attention_mask,
+                position_ids=position_ids
+            )
+            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, [tot_scenario_contenxt_len + i - 1], :] # (bs*k, 1, n_embed)
+
+            # get topk kps
+            pred_kps_logit = self.key_points_decoder(future_key_point_hidden_state) # (bs*k, 1, 4/2 *k)
+            pred_kps_logit = pred_kps_logit.view(batch_size, self.k*self.k, self.out_features) # (bs, k*k, 2)
+            
+            pred_kps_score = self.next_token_scorer_decoder(future_key_point_hidden_state)  # (bs*k, 1, k)
+            pred_kps_score = pred_kps_score.view(batch_size, self.k*self.k) # (bs, k*k)
+            
+            if i == 0:
+                topk_indx = torch.arange(self.k)[None, :].repeat(batch_size, 1) # (bs, k)
+                topk_score = pred_kps_score[:, :self.k]
             else:
-                pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+                topk_score, topk_indx = torch.topk(pred_kps_score, dim=-1, k =self.k) # (bs, k)
+                
+            topk_group = torch.div(topk_indx, self.k, rounding_mode='floor')
+            
+            pred_kps_logit_topk = []
+            for k_ in range(self.k):
+                pred_kps_logit_topk.append(pred_kps_logit[torch.arange(batch_size), topk_indx[:, k_], :][:, None, :]) 
+            pred_kps_logit_topk = torch.cat(pred_kps_logit_topk, dim=1) # (bs, self.k, 2)
 
+            pred_kps_logit_topk = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, self.k, 2), device=device)), dim=-1) # (bs, self.k, 4)
 
-        if self.model_args.interaction:
-            input_embeds = self.encoder.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=False)
-            attention_mask = info_dict["input_embeds_mask"]
-        else:
-            attention_mask = None
-        # generate remaining trajectory
-        transformer_output = self.transformer(
-            inputs_embeds=input_embeds,
-            attention_mask=attention_mask,
-            position_ids=None,
-        )
-        transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            # get kps topk embeds
+            pred_kps_logit_topk_embed = self.encoder.action_m_embed(pred_kps_logit_topk)  # b, self.k, n_embed
 
-        if self.model_args.interaction: 
-            transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
-
-        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-        # expected shape for pred trajectory is (b, pred_length, 4)
-        if self.traj_decoder is not None:
-            traj_logits = self.traj_decoder(traj_hidden_state)
-        else:
-            traj_logits = trajectory_label_dummy[..., :2]
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
-
-        if self.k > 1:
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-            pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-            selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
-                                  torch.arange(batch_size * key_points_num),
-                                  pred_logits.argmax(dim=-1).reshape(-1),
-                                  :].reshape(batch_size, key_points_num, -1)
-            key_points_logits = selected_key_points
-        elif self.k == 1:
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
-            # use previous prediction during generation
-            # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
-            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
-        else:
-            raise ValueError("illegal k while generating trajectory", self.k)
-        # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
-        return torch.cat([key_points_logits, traj_logits], dim=1)
+            k_input_embeds[:, :, tot_scenario_contenxt_len + i, :] = pred_kps_logit_topk_embed
+            k_kpts_scores[:, :, i] = topk_score
+            
+            if i > 0:
+                k_input_embeds_kpts_prev = torch.zeros((batch_size, self.k, i, n_embed), device=device)
+                k_kpts_scores_prev = torch.zeros((batch_size, self.k, i), device=device)
+                
+                for p_i in range(self.k):
+                    k_input_embeds_kpts_prev[:, p_i, :, :] = k_input_embeds[torch.arange(batch_size), topk_group[:, p_i], tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :]
+                    k_kpts_scores_prev[:, p_i, :] = k_kpts_scores[torch.arange(batch_size), topk_group[:, p_i], :i]
+                
+                k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :] = k_input_embeds_kpts_prev
+                k_kpts_scores[:, :, :i] = k_kpts_scores_prev
+            
+            pred_key_points_during_generate[:, :, i, :] = pred_kps_logit_topk[:, :, :self.out_features]
+            k_input_embeds_kpts = k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + key_points_num, :]
+            
+        return pred_key_points_during_generate, k_input_embeds_kpts, k_kpts_scores
 
 def query_current_lane(map_api, target_point):
     """

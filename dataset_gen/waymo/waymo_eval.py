@@ -247,7 +247,7 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
     result_dict.update(object_type_cnt_dict)
     result_dict['-----Note that this evaluation may have marginal differences with the official Waymo evaluation server-----'] = 0
 
-    return result_dict, result_format_str
+    return result_dict, result_format_str, final_avg_results
 
 
 def main():
@@ -268,7 +268,7 @@ def main():
     result_format_str = ''
     print('Start to evaluate the waymo format results...')
 
-    metric_results, result_format_str = waymo_evaluation(
+    metric_results, result_format_str, _ = waymo_evaluation(
         pred_dicts=pred_infos, top_k=args.top_k, eval_second=args.eval_second,
         num_modes_for_eval=args.num_modes_for_eval,
     )

@@ -307,8 +307,7 @@ def main():
     )
     if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
         model.clf_metrics = clf_metrics
-    elif model_args.next_token_scorer:
-        assert model_args.k > 1 and model_args.ar_future_interval > 0, "ar_future_interval must be greater than 0 and k must be greater than 1"
+    elif model_args.k > 1 and model_args.ar_future_interval > 0:
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:

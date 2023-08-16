@@ -3,6 +3,7 @@ import pickle
 import os
 import torch
 from functools import partial
+from torch.utils.data._utils.collate import default_collate
 
 def waymo_collate_func(batch, data_path=None, interaction=False):
     """
@@ -45,7 +46,7 @@ def waymo_collate_func(batch, data_path=None, interaction=False):
             input_list = [d[key] for d in new_batch]
 
         if key in ["scenario_id", "center_objects_type"]:
-            input_dict[key] = np.concatenate(input_list, axis=0).reshape(-1)
+            input_dict[key] = default_collate(np.concatenate(input_list, axis=0))
         else:
             input_dict[key] = torch.cat(input_list, dim=0)
 
@@ -74,7 +75,6 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
     agent_trajs_res = transform_to_center(agent_trajs, center, heading, heading_index=6)
     map_polylines_data = transform_to_center(map_polyline, center, heading, no_time_dim=True)
     map_polylines_mask = torch.from_numpy(data["map_polylines_mask"]).unsqueeze(0).repeat(len(track_index_to_predict), 1, 1, )
-
     ret_dict = {
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),
@@ -82,11 +82,11 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
         "map_polylines_mask": map_polylines_mask,
         "current_time_index": torch.tensor(current_time_index, dtype=torch.int32).repeat(num_ego).view(-1, 1),
         # for evaluation
-        "scenario_id": np.array([scenario_id] * num_ego).reshape(-1, 1),
+        "scenario_id": [scenario_id] * num_ego,
         "center_objects_world": center_objects_world,
         "center_gt_trajs_src": agent_trajs[track_index_to_predict],
         "center_objects_id": torch.tensor(data['center_objects_id'], dtype=torch.int32).view(-1, 1),
-        "center_objects_type": np.array(data['center_objects_type']).reshape(-1, 1),
+        "center_objects_type": [data['center_objects_type']] if isinstance(data['center_objects_type'], (str, bytes)) else data['center_objects_type'],
         }
     
     return ret_dict
