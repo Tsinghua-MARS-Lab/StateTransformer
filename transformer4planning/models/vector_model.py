@@ -110,7 +110,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.generate_method = 'beam_search'
         
         self.tot_iter_num = 0
-        self.debug = False
+        self.debug = True
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -491,13 +491,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 for _, metric in self.clf_metrics.items():
                     metric.add_batch(references=min_loss_kp_indices.reshape(-1), predictions=predictions.reshape(-1))
         
-        if self.debug and loss_kp_cls.device.index == 4:
+        if self.debug and loss.device.index == 4:
             self.tot_iter_num += 1
-            if self.tot_iter_num % 100 ==0:
+            if self.tot_iter_num % 100 ==0 and self.k > 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
+            elif self.tot_iter_num % 100 ==0 and self.k == 1:
+                print("loss traj ", loss_traj, " loss kpts logits ", loss_keypoints,  ' tot loss ', loss)
                 
-                if self.tot_iter_num >= 1e6:
-                    self.tot_iter_num = 0
+            if self.tot_iter_num >= 1e6:
+                self.tot_iter_num = 0
                     
         return pred_traj_logits, loss
     
