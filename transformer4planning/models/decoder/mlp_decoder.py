@@ -102,3 +102,9 @@ class MultiTrajDecoder(TrajectoryDecoder):
             scorer_loss=cls_loss,
         )
         return traj_logits, loss, loss_items
+
+    def generate_keypoints(self, hidden_state, info_dict:Dict=None):
+        batch_size = hidden_state.shape[0]
+        key_points_logit = self.key_points_decoder(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
+        pred_logits = self.next_token_scorer_decoder(hidden_state).reshape(batch_size, 1, -1) if self.k > 1 else None # b, 1, k
+        return key_points_logit, pred_logits

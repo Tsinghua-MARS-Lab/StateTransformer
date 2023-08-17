@@ -112,9 +112,7 @@ class TrajectoryDecoder(nn.Module):
             scorer_loss=cls_loss,
         )
         return traj_logits, loss, loss_items
-    
-    def predict_keypoints(self, hidden_state, context_length):
-        raise NotImplementedError
 
-    def generate_keypoints(self, x):
+    def generate_keypoints(self, hidden_state, info_dict:Dict=None):
         raise NotImplementedError
+    

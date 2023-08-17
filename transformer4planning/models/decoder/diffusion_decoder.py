@@ -427,7 +427,6 @@ class DiffusionKPTrajDecoder(TrajectoryDecoder):
         '''
         assert self.ar_future_interval > 0, ''
         assert not self.training, ''
-        future_key_points = info_dict["future_key_points"]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
         context_length = info_dict.get("context_length", None)
@@ -449,47 +448,6 @@ class DiffusionKPTrajDecoder(TrajectoryDecoder):
             scores = reg_sigma_cls_dict["cls"]
         return key_points_logits, scores
     
-    def gen_traj(self,
-                 hidden_output,
-                 label,
-                 info_dict:Dict=None):
-        '''
-            Input:
-                hidden_output: batch_size * (scenario_type_len + context_length * 2 + pred_length) * n_embd
-                label: batch_size * num_key_points * 2/4
-                info_dict: Dict
-            Output:
-                tuple of traj_logits, loss, loss_items
-        '''
-        device = hidden_output.device
-        pred_length = info_dict.get("pred_length", label.shape[1])
-        context_length = info_dict.get("context_length", None)
-        assert context_length is not None, "context length can not be None"
-        
-        traj_hidden_state = hidden_output[:, -pred_length -1:-1, :]
-        loss = torch.tensor(0, dtype=torch.float32, device=device)
-        if not self.model_args.pred_key_points_only:
-            traj_logits = self.traj_decoder(traj_hidden_state)
-            if self.model_args.task == "waymo":
-                trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
-                assert trajectory_label_mask is not None, "trajectory_label_mask is None"
-                traj_loss = (self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
-                    trajectory_label_mask.sum() + 1e-7)
-            elif self.model_args.task == "nuplan":
-                traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.model_args.predict_yaw else \
-                            self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))   
-            # Modification here: both waymo&nuplan use the same loss scale and loss fn
-            traj_loss *= self.model_args.trajectory_loss_rescale
-            loss += traj_loss
-        else:
-            traj_logits = torch.zeros_like(label[..., :2])
-            traj_loss = None
-            
-        loss_items = dict(
-            trajectory_loss=traj_loss,
-            key_points_loss=None,
-            scorer_loss=None,
-        )
-        return traj_logits, loss, loss_items
+
     
 
