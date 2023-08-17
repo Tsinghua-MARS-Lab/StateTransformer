@@ -429,6 +429,8 @@ class DiffusionKPTrajDecoder(TrajectoryDecoder):
         future_key_points = info_dict["future_key_points"]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
+        context_length = info_dict.get("context_length", None)
+        assert context_length is not None, "context length can not be None"
         future_key_points_hidden_state = hidden_output[:, :scenario_type_len + context_length * 2, :]
         if self.k == 1:
             key_points_logits, scores = self.key_points_decoder(future_key_points_hidden_state, determin = True)
