@@ -2,8 +2,8 @@
 For example, train with 8 GPUs: 
 ```
 
-bash dist_train.sh 1 --cfg_file configs/config_v1.yaml --batch_size 8 --epochs 5 --extra_tag my_first_exp
-bash dist_train.sh 8 --cfg_file configs/config_v1.yaml --batch_size 512 --epochs 5 --extra_tag my_first_exp
+bash dist_train.sh 1 --cfg_file configs/config_v1.yaml --batch_size 8 --epochs 20 --extra_tag my_first_exp
+bash dist_train.sh 8 --cfg_file configs/config_v1.yaml --batch_size 512 --epochs 20 --extra_tag my_first_exp
 ```
 Actually, during the training process, the evaluation results will be logged to the log file under `output/waymo/mtr+100_percent_data/my_first_exp/log_train_xxxx.txt`
 

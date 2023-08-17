@@ -66,6 +66,12 @@ MODEL:
         vel: 0.5
       }
 
+      normalization_para: {
+        xy: 50.0,
+        heading: 1.0,
+        vel: 10.0
+      }
+
     data_dim:
       # Dim should match dataset, so following parameters are not free parameter. They are used only for convenience.
       lane: 19
@@ -85,12 +91,12 @@ OPTIMIZATION:
     NUM_EPOCHS: 30
 
     OPTIMIZER: AdamW
-    LR: 0.0001
+    LR: 0.0003
     WEIGHT_DECAY: 0.01
 
     SCHEDULER: lambdaLR
-    DECAY_STEP_LIST: [22, 24, 26, 28]
-    LR_DECAY: 0.5
+    DECAY_STEP_LIST: [4, 8, 12, 16]
+    LR_DECAY: 0.7
     LR_CLIP: 0.000001
 
     GRAD_NORM_CLIP: 1000.0

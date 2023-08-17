@@ -54,15 +54,19 @@ class PureSeqModelV1(nn.Module):
 
 
     def forward(self, input_dict: Dict):
-        ego_output, agent_output = self.model_forward(input_dict)
-
         if self.training:
+            input_dict = self.normalize_input(input_dict)
+            ego_output, agent_output = self.model_forward(input_dict)
+            ego_output, agent_output = self.denormalize_output(ego_output, agent_output)
+
             loss, tb_dict, disp_dict = self.get_loss(ego_output, input_dict['ego_label'].squeeze(2),
                                                      agent_output, input_dict['agent_label'].view(agent_output.size(0), agent_output.size(1), agent_output.size(2)),
                                                      input_dict['agent_valid'].view(agent_output.size(0), agent_output.size(1)))
             return loss, tb_dict, disp_dict
+        else:
+            ego_output, agent_output = self.traj_generation(input_dict)
 
-        return ego_output, agent_output
+            return ego_output, agent_output
 
 
     def model_forward(self, input_dict: Dict):
@@ -239,7 +243,7 @@ class PureSeqModelV1(nn.Module):
         agent_loss = agent_xy_loss + agent_heading_loss + agent_vel_loss
 
         num_valid_agent = torch.sum(agent_valid)/(agent_valid.size(0)*ego_output.size(1))
-        
+
         # total loss
         loss = ego_loss + num_valid_agent * agent_loss
 
@@ -261,6 +265,80 @@ class PureSeqModelV1(nn.Module):
 
         return loss, tb_dict, disp_dict
 
+    def normalize_input(self, input_dict):
+        # warning: this function will modify input_dict!
+        xy_norm_para = self.model_parameter.normalization_para['xy']
+        heading_norm_para = self.model_parameter.normalization_para['heading']
+        vel_norm_para = self.model_parameter.normalization_para['vel']
 
-    def generate(self, x):
+        # map feature
+        map_keys = ['lane_feature', 'road_line_feature', 'road_edge_feature', 'map_others_feature']
+        for key in map_keys:
+            map_feature_tensor = input_dict[key]
+            map_feature_tensor[..., [0, 1, 4, 5]] = map_feature_tensor[..., [0, 1, 4, 5]] / xy_norm_para
+            input_dict[key] = map_feature_tensor
+
+        # ego, agent feature
+        ego_agent_keys = ['ego_feature', 'agent_feature']
+        xy_index = list(range(0, input_dict['ego_label'].size(-1), 5)) + list(range(1, input_dict['ego_label'].size(-1), 5))
+        heading_index = list(range(2, input_dict['ego_label'].size(-1), 5))
+        vel_index = list(range(3, input_dict['ego_label'].size(-1), 5)) + list(range(4, input_dict['ego_label'].size(-1), 5))
+        for key in ego_agent_keys:
+            feature_tensor = input_dict[key]
+            feature_tensor[..., xy_index] = feature_tensor[..., xy_index] / xy_norm_para
+            feature_tensor[..., heading_index] = feature_tensor[..., heading_index] / heading_norm_para
+            feature_tensor[..., vel_index] = feature_tensor[..., vel_index] / vel_norm_para
+            input_dict[key] = feature_tensor
+
+        return input_dict
+
+    def denormalize_output(self, ego_output, agent_output):
+        xy_norm_para = self.model_parameter.normalization_para['xy']
+        heading_norm_para = self.model_parameter.normalization_para['heading']
+        vel_norm_para = self.model_parameter.normalization_para['vel']
+
+        xy_index = list(range(0, ego_output.size(-1), 5)) + list(range(1, ego_output.size(-1), 5))
+        heading_index = list(range(2, ego_output.size(-1), 5))
+        vel_index = list(range(3, ego_output.size(-1), 5)) + list(range(4, ego_output.size(-1), 5))
+
+        denormed_ego_output = torch.zeros(ego_output.shape, device=ego_output.device)
+        denormed_ego_output[..., xy_index] = ego_output[..., xy_index] * xy_norm_para
+        denormed_ego_output[..., heading_index] = ego_output[..., heading_index] * heading_norm_para
+        denormed_ego_output[..., vel_index] = ego_output[..., vel_index] * vel_norm_para
+
+        denormed_agent_output = torch.zeros(agent_output.shape, device=agent_output.device)
+        denormed_agent_output[..., xy_index] = agent_output[..., xy_index] * xy_norm_para
+        denormed_agent_output[..., heading_index] = agent_output[..., heading_index] * heading_norm_para
+        denormed_agent_output[..., vel_index] = agent_output[..., vel_index] * vel_norm_para
+        
+        return denormed_ego_output, denormed_agent_output
+
+
+    # auto-regessive generating future traj
+    def traj_generation(self, input_dict):
+        # get first step input and output
+        for key in input_dict.keys():
+            input_dict[key] = input_dict[key][:, 0:1, ...]
+
+        normed_input_dict = self.normalize_input(copy.deepcopy(input_dict))
+        normed_ego_output, normed_agent_output = self.model_forward(normed_input_dict)
+        ego_output, agent_output = self.denormalize_output(normed_ego_output, normed_agent_output)
+
+        # generate next input based on output
+        
+        
+        
+
+    def extend_input_based_on_last_output(self, input_dict, ego_output, agent_output):
+        # get current ego pose relative to last ego pose
+        ego_pose = ego_output[:, -1, 0:2]
+        ego_frame = ego_pose
+        rotation_frame = torch.tensor([0, 0, ego_pose[2]])
+
+        # transform map features
+        map_keys = ['lane', 'road_line', 'road_edge', 'map_others']
+        for key in map_keys:
+            last_map_feature = input_dict[key][:, -1, ...].unsqueeze(1)
+            last_map_feature[:, :, :, ]
+
         pass
