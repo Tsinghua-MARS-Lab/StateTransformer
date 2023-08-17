@@ -506,6 +506,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 predictions = torch.argmax(pred_kps_cls, dim=-1)  # b, num_kps, k
                 for _, metric in self.clf_metrics.items():
                     metric.add_batch(references=min_loss_kp_indices.reshape(-1), predictions=predictions.reshape(-1))
+        
+        # print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
                     
         return pred_traj_logits, loss
     
