@@ -22,8 +22,8 @@ python -m torch.distributed.run --nproc_per_node=7 --master_port=29502 runner_wa
         --overwrite_output_dir --loss_fn mse
 
 # export CUDA_VISIBLE_DEVICES=0; \
-# python -m torch.distributed.run --nproc_per_node=1 --master_port=29510 runner_waymo.py \
-#         --model_name pretrain-vector-gpt --model_pretrain_name_or_path /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_correctA_ep100_cls10/training_results/checkpoint-180000  \
+# python runner_waymo.py \
+#         --model_name scratch-vector-gpt --model_pretrain_name_or_path None  \
 #         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
 #         --output_dir /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_correctA_ep100_cls10/training_results  \
 #         --logging_dir /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_correctA_ep100_cls10/training_logs \
