@@ -59,11 +59,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
+        out_features = 4 if model_args.predict_yaw else 2
+        
         if self.predict_trajectory:
-            out_features = 4 if model_args.predict_yaw else 2
             self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
-            if self.ar_future_interval > 0:
-                self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
+            
+        if self.ar_future_interval > 0:
+            self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
+            
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
 
@@ -105,6 +108,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # self.generate_method = "greedy_search"
         self.generate_method = 'beam_search'
+        
+        self.tot_iter_num = 0
+        self.debug = False
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -290,7 +296,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-        pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
+        pred_traj_logits = None
+        if self.predict_trajectory:
+            pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
         pred_kps_logits = None
         pred_kps_cls = None
         
@@ -483,7 +491,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 for _, metric in self.clf_metrics.items():
                     metric.add_batch(references=min_loss_kp_indices.reshape(-1), predictions=predictions.reshape(-1))
         
-        # print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
+        if self.debug and loss_kp_cls.device.index == 4:
+            self.tot_iter_num += 1
+            if self.tot_iter_num % 100 ==0:
+                print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
+                
+                if self.tot_iter_num >= 1e6:
+                    self.tot_iter_num = 0
                     
         return pred_traj_logits, loss
     
