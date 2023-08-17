@@ -184,17 +184,20 @@ class DiffusionWrapper(nn.Module):
 
         self.loss_fn = nn.MSELoss(reduction='none')
 
-    def fowrard(self, *args):
+    def forward(self, **kwargs):
         if self.training:
-            return self.train_forward(self,*args)
+            hidden_state = kwargs.get("hidden_state", None)
+            label = kwargs.get("label", None)
+            return self.train_forward(hidden_state, label)
         else:
-            return self.sample_forward(self,*args)
+            state = kwargs.get("hidden_state", None)
+            return self.sample_forward(state, **kwargs)
 
     # ------------------------- Train -------------------------
-    def train_forward(self, hidden_states, trajectory_label):
+    def train_forward(self, hidden_state, trajectory_label):
         trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
-        return self.train_loss(trajectory_label, hidden_states)
+        return self.train_loss(trajectory_label, hidden_state)
 
     def train_loss(self, x, state):
         batch_size=len(x)
@@ -398,3 +401,6 @@ class DiffusionKPTrajDecoder(TrajectoryDecoder):
             scorer_loss=None,
         )
         return traj_logits, loss, loss_items
+    
+    def generate_keypoints(self, x):
+        return self.key_points_decoder.sample_forward(x, self.model_args.)

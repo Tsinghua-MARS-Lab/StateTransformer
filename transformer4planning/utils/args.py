@@ -124,9 +124,6 @@ class ModelArguments:
     generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
         default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
     )
-    diffusion_dataset_save_dir: Optional[str] = field(
-        default = None, metadata = {"help": "The path of the dir to save the diffusion dataset to be generated for Diffusion KeyPoint Decoder."}
-    )
     key_points_diffusion_decoder_feat_dim: Optional[int] = field(
         default = 256, metadata = {"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
     )
