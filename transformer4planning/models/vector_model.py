@@ -59,11 +59,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
+        out_features = 4 if model_args.predict_yaw else 2
+        
         if self.predict_trajectory:
-            out_features = 4 if model_args.predict_yaw else 2
             self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
-            if self.ar_future_interval > 0:
-                self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
+            
+        if self.ar_future_interval > 0:
+            self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
+            
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
         
@@ -115,6 +118,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # self.generate_method = "greedy_search"
         self.generate_method = 'beam_search'
+        
+        self.tot_iter_num = 0
+        self.debug = True
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -312,7 +318,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-        pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
+        pred_traj_logits = None
+        if self.predict_trajectory:
+            pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
         pred_kps_logits = None
         pred_kps_cls = None
         
@@ -448,7 +456,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # kpts_score: accumulated score
         all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
-        all_traj_scores = all_traj_scores / all_traj_scores.sum()
+        # all_traj_scores = all_traj_scores / all_traj_scores.sum()
+        all_traj_scores = (all_traj_scores*200).softmax(-1)
 
         return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
     
@@ -511,8 +520,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 if self.next_token_scorer_decoder is not None:
                     pred_kps_cls_masked = pred_kps_cls[gt_kps_mask[...,0].to(torch.bool)] 
                     min_loss_kp_indices_masked = min_loss_kp_indices[gt_kps_mask[...,0].to(torch.bool)]
-                    loss_kp_cls = self.cls_kps_loss(pred_kps_cls_masked.reshape(-1, self.k).to(torch.float64), min_loss_kp_indices_masked.reshape(-1).long())
-                    loss += (loss_kp_cls * self.cls_kps_loss_weight)
+                    loss_kp_cls = self.cls_kps_loss(pred_kps_cls_masked.reshape(-1, self.k).to(torch.float64), min_loss_kp_indices_masked.reshape(-1).long()) * self.cls_kps_loss_weight
+                    loss += loss_kp_cls
                     
                     if self.training:
                         # concatenate the key points with predicted trajectory for evaluation
@@ -539,6 +548,16 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 predictions = torch.argmax(pred_kps_cls, dim=-1)  # b, num_kps, k
                 for _, metric in self.clf_metrics.items():
                     metric.add_batch(references=min_loss_kp_indices.reshape(-1), predictions=predictions.reshape(-1))
+        
+        if self.debug and loss.device.index == 4:
+            self.tot_iter_num += 1
+            if self.tot_iter_num % 100 ==0 and self.k > 1:
+                print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
+            elif self.tot_iter_num % 100 ==0 and self.k == 1:
+                print("loss traj ", loss_traj, " loss kpts logits ", loss_keypoints,  ' tot loss ', loss)
+                
+            if self.tot_iter_num >= 1e6:
+                self.tot_iter_num = 0
                     
         return pred_traj_logits, loss
     
