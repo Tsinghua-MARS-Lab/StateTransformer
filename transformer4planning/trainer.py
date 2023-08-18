@@ -551,8 +551,8 @@ class PlanningTrainer(Trainer):
                             f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
                             f'{disp_str}')
             
-            # if i > 100:    
-            #     break
+            if i > 100:    
+                break
 
         if self.is_world_process_zero:
             progress_bar.close()
