@@ -13,7 +13,7 @@ import datetime
 import time
 import os
 import wandb
-wandb.login(key='3cb4a5ee4aefb4f4e25dae6a16db1f59568ac603')
+# wandb.login(key='3cb4a5ee4aefb4f4e25dae6a16db1f59568ac603')
 import argparse
 import torch.nn as nn
 import copy

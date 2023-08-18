@@ -580,10 +580,17 @@ def build_models(model_args):
     if model_args.key_points_diffusion_decoder_load_from is not None:
         assert type(model) == TrajectoryGPTDiffusionKPDecoder, ''
         print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
-        from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBasedForKeyPoints
+        import copy
+        from transformer4planning.models.diffusion_decoders import DiffusionDecoderTFBasedForKeyPoints #, PL_MODEL_WRAPPER
+        pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(config_p.n_inner, config_p.n_embd, out_features = 4 if model_args.predict_yaw else 2, feat_dim=model_args.key_points_diffusion_decoder_feat_dim, num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
         state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
-        pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(1024, 256, out_features = 4 if model_args.predict_yaw else 2, feat_dim=model_args.key_points_diffusion_decoder_feat_dim, num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
         pretrained_key_points_diffusion_decoder.load_state_dict(state_dict)
+        # plmodel = PL_MODEL_WRAPPER.load_from_checkpoint(model_args.key_points_diffusion_decoder_load_from, model = pretrained_key_points_diffusion_decoder, lr = 0.0, weight_decay = 0.0)
+        # pretrained_key_points_diffusion_decoder = copy.deepcopy(plmodel.model)
+        # torch.save(pretrained_key_points_diffusion_decoder.state_dict(),'/localdata_ssd/nuplan_3/DiffusionDecoderTFBasedForKeyPoints_statedict_for_GPTL_SKPY_loss1_K1_data1_SgFix.pth')
+        
+        
+        
         model.key_points_decoder = pretrained_key_points_diffusion_decoder
         
     return model

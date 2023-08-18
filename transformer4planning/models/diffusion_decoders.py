@@ -5,6 +5,41 @@ import numpy as np
 import math
 from tqdm import tqdm
 import einops
+import pytorch_lightning as pl
+class PL_MODEL_WRAPPER(pl.LightningModule):
+    def __init__(self,
+                 model,
+                 lr,
+                 weight_decay):
+        super().__init__()
+        self.model = model
+        self.lr = lr
+        self.weight_decay = weight_decay
+    def forward(self,x):
+        return self.model(x)
+    def training_step(self,batch,batch_idx):
+        self.model.train()
+        traj,cond = batch['traj'],batch['cond']
+        train_loss = self.model.train_forward(cond,traj)
+        self.log_dict({"train_loss":train_loss})
+        return {"loss":train_loss}
+    def validation_step(self,batch,batch_idx):
+        self.model.eval()
+        with torch.no_grad():
+            traj,cond = batch['traj'],batch['cond']
+            traj_pred, cls_pred = self.model.sample_forward(cond,verbose=False, cal_elbo=False,return_diffusion=False,mc_num=1,determin=True)
+            # calculate mean ADE and FDE between traj and traj_pred.
+            error = traj - traj_pred
+            # batchsize * length * 4
+            error = error[...,:2] # batchsize * length * 2
+            ADE = torch.mean(torch.sqrt(torch.sum(error**2,dim=-1)),dim=-1) # batchsize
+            FDE = torch.sqrt(torch.sum(error[...,-1]**2,dim=-1)) # batchsize
+            # use ade as validation loss.
+            val_loss = ADE.mean()
+        self.log_dict({"val_loss":val_loss})
+        return {"val_loss":val_loss}
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.model.parameters(),lr=self.lr,weight_decay=self.weight_decay)
 
 from transformer4planning.models.decoders import DecoderResCat
 def normalize(x):
@@ -18,9 +53,9 @@ def normalize(x):
     if x.shape[-1]==2:
         return y
     # mean(x[...,2]) = 0, mean(sqrt(x[...,2]**2)) = 0
-    y[...,2] = x[...,2] * 10
+    y[...,2] = x[...,2] / 10
     # mean(x[...,3]) = 0.086, mean(sqrt(x[...,3]**2))=0.090
-    y[...,3] += x[...,3] / 2
+    y[...,3] += x[...,3] / 10
     y[...,3] += 0
     return y
 
@@ -30,8 +65,8 @@ def denormalize(y):
     x[...,1] = (y[...,1]) * 10
     if y.shape[-1]==2:
         return x
-    x[...,2] = y[...,2] / 10
-    x[...,3] = y[...,3] * 2
+    x[...,2] = y[...,2] * 10
+    x[...,3] = y[...,3] * 10
     return x
 # def normalize(x):
 #     y = torch.zeros_like(x)
@@ -227,7 +262,7 @@ class DiffusionDecoderTFBased(nn.Module):
         print("When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.")
 
         self.loss_fn = L2Loss()
-    def fowrard(self, *args):
+    def forward(self, *args):
         if self.training:
             return self.train_forward(self,*args)
         else:
@@ -236,6 +271,9 @@ class DiffusionDecoderTFBased(nn.Module):
 
     # ------------------------- Train -------------------------
     def train_forward(self,hidden_states,trajectory_label):
+        # print(hidden_states.shape)
+        # print(trajectory_label.shape)
+
         trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
         # print(trajectory_label.shape)
@@ -387,7 +425,7 @@ class DiffusionDecoderTFBasedForKeyPoints(DiffusionDecoderTFBased):
     def __init__(self, hidden_size, in_features, out_features = 2,
                  beta_schedule = 'linear', linear_start=0.01,linear_end=0.9,n_timesteps=10,
                  loss_type='l2', clip_denoised=True,predict_epsilon=True,max_action = 100,feat_dim=1024,num_key_points = 5,input_feature_seq_lenth = 16,
-                 specified_key_points = True, forward_specified_key_points = True,
+                 specified_key_points = True, forward_specified_key_points = False,
                  ):
         super(DiffusionDecoderTFBasedForKeyPoints, self).__init__(hidden_size, in_features, out_features = out_features,
                  beta_schedule = beta_schedule, linear_start=linear_start,linear_end=linear_end,n_timesteps=n_timesteps,
@@ -494,9 +532,9 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
 
         if specified_key_points:
             if forward_specified_key_points:
-                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
+                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)[...,::-1,:]
             else:
-                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)[...,::-1]
+                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
         else:
             key_points_position_embedding = uniform_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
             
@@ -506,6 +544,10 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
         
         
     def forward(self,x,t,state):
+        # print("x.shape==",x.shape)
+        # print("t.shape==",t.shape)
+        # print("state.shape==",state.shape)
+        # assert False, "debugging"
         seq_lenth = x.shape[-2]
         # First encode the cond, time, x.
         state_embedding = self.state_encoder2(self.state_encoder1(state)) # B * 40 * feat_dim
