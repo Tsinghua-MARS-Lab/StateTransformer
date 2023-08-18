@@ -551,7 +551,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         if self.debug and loss.device.index == 4:
             self.tot_iter_num += 1
-            if self.tot_iter_num % 100 ==0 and self.k > 1:
+            if self.use_anchor:
+                print("loss traj ", loss_traj, " loss anchor ", loss_anchor, ' tot loss ', loss)
+            elif self.tot_iter_num % 100 ==0 and self.k > 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k == 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", loss_keypoints,  ' tot loss ', loss)
