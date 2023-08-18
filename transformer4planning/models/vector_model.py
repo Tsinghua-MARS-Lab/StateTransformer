@@ -467,8 +467,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 if self.next_token_scorer_decoder is not None:
                     pred_kps_cls_masked = pred_kps_cls[gt_kps_mask[...,0].to(torch.bool)] 
                     min_loss_kp_indices_masked = min_loss_kp_indices[gt_kps_mask[...,0].to(torch.bool)]
-                    loss_kp_cls = self.cls_kps_loss(pred_kps_cls_masked.reshape(-1, self.k).to(torch.float64), min_loss_kp_indices_masked.reshape(-1).long())
-                    loss += (loss_kp_cls * self.cls_kps_loss_weight)
+                    loss_kp_cls = self.cls_kps_loss(pred_kps_cls_masked.reshape(-1, self.k).to(torch.float64), min_loss_kp_indices_masked.reshape(-1).long()) * self.cls_kps_loss_weight
+                    loss += loss_kp_cls
                     
                     if self.training:
                         # concatenate the key points with predicted trajectory for evaluation
