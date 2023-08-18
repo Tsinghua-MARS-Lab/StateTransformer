@@ -193,7 +193,7 @@ class PlanningTrainer(Trainer):
                     prediction_trajectory_in_batch = logits[0]
                 else:
                     print('unknown logits type', type(logits), logits)
-                if self.model.ar_future_interval > 0:
+                if self.model.ar_future_interval > 0 and "diffusion" not in self.model.model_args.task:
                     length_of_trajectory = trajectory_label_in_batch.shape[1]
                     prediction_key_points = prediction_trajectory_in_batch[:, :-length_of_trajectory, :]
                     prediction_trajectory_in_batch = prediction_trajectory_in_batch[:, -length_of_trajectory:, :]
@@ -291,7 +291,7 @@ class PlanningTrainer(Trainer):
                     self.eval_result['heading_error'] = []
                 self.eval_result['heading_error'].append(float(heading_error))
 
-            if self.model.ar_future_interval > 0:
+            if self.model.ar_future_interval > 0 and "diffusion" not in self.model.model_args.task:
                 if 'ade_keypoints' not in self.eval_result:
                     self.eval_result['ade_keypoints'] = []
                     self.eval_result['fde_keypoints'] = []
@@ -391,8 +391,6 @@ class PlanningTrainer(Trainer):
             self.pred_dicts_list = []
 
         eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
-        if self.model.model_args.generate_diffusion_dataset_for_key_points_decoder:
-            return None
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics

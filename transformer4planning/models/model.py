@@ -99,7 +99,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             from transformer4planning.models.decoder.diffusion_decoder import DiffusionKPTrajDecoder
             state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
             self.decoder = DiffusionKPTrajDecoder(self.model_args, self.config)
-            self.decoder.key_points_decoder.load_state_dict(state_dict) 
+            self.decoder.load_state_dict(state_dict) 
             print("Pretrained keypoint decoder has been loaded!")
             self.decoder_type = "diffusion"
         else: # normal mlp decoder
@@ -277,13 +277,14 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
         
         elif self.decoder_type == "diffusion":
+            # TODO:confirm the attention mask here
             transformer_output = self.transformer(
                     inputs_embeds=input_embeds,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
+                    attention_mask=None,
+                    position_ids=None,
                 )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            key_points_logit, pred_logits = self.decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
+            key_points_logits, pred_logits = self.decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
 
         # predict the whole trajectory
         if self.model_args.interaction:

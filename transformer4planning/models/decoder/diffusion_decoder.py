@@ -59,8 +59,10 @@ class BaseDiffusionModel(nn.Module):
         )
 
         self.x_encoder = nn.Sequential(
-            DecoderResCat(400, out_features, 400), 
-            DecoderResCat(800, 400, feat_dim)
+            DecoderResCat(64, out_features, 128),
+            DecoderResCat(256, 128, 512),
+            DecoderResCat(1024, 512, 768),
+            DecoderResCat(2048, 768, feat_dim),
         )
         self.backbone = nn.ModuleList()
         for i in range(layer_num):
@@ -70,9 +72,10 @@ class BaseDiffusionModel(nn.Module):
                                                             batch_first=True))
         self.backbone = nn.Sequential(*self.backbone)
         self.x_decoder = nn.Sequential(
-            DecoderResCat(2 * feat_dim, feat_dim, 128),
+            DecoderResCat(2 * feat_dim, feat_dim, 512),
+            DecoderResCat(1024, 512, 256),
+            DecoderResCat(512, 256, 128),
             DecoderResCat(256, 128, 64),
-            DecoderResCat(128, 64, 64),
             DecoderResCat(128, 64, 32),
             DecoderResCat(64, 32, out_features),
         )
@@ -186,14 +189,11 @@ class DiffusionWrapper(nn.Module):
 
         self.loss_fn = nn.MSELoss(reduction='mean')
 
-    def forward(self, **kwargs):
+    def forward(self, hidden_state, label=None, **kwargs):
         if self.training:
-            hidden_state = kwargs.get("hidden_state", None)
-            label = kwargs.get("label", None)
             return self.train_forward(hidden_state, label)
         else:
-            state = kwargs.get("hidden_state", None)
-            return self.sample_forward(state, **kwargs)
+            return self.sample_forward(hidden_state, **kwargs)
 
     # ------------------------- Train -------------------------
     def train_forward(self, hidden_state, trajectory_label):
@@ -228,12 +228,12 @@ class DiffusionWrapper(nn.Module):
         return sample
 
     # ------------------------- Sample -------------------------
-    def sample_forward(self, state, *args, **kwargs):
+    def sample_forward(self, state, **kwargs):
         assert not self.training, 'sample_forward should not be called directly during training.'
         batch_size = state.shape[0]
         seq_len = self.num_key_points if self.num_key_points is not None else state.shape[-2]
         shape = (batch_size, seq_len,self.action_dim)
-        action, cls = self.p_sample_loop(state, shape, *args, **kwargs)
+        action, cls = self.p_sample_loop(state, shape, **kwargs)
         action = denormalize(action)
         return action, cls
 
