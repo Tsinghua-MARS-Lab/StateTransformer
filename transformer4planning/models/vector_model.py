@@ -436,7 +436,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         n_mode = input_embeds_kpts.shape[1]
         
         for m_i in range(n_mode):
-            input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_anchor_len+key_points_num+self.anchor_len, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
+            input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_anchor_len+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
             transformer_output = self.transformer(
                 inputs_embeds=input_embeds,
                 attention_mask=None,
