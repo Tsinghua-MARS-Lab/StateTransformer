@@ -22,6 +22,8 @@ from datasets import Dataset
 from datasets.arrow_dataset import _concatenate_map_style_datasets
 from dataclasses import dataclass, field
 from functools import partial
+import wandb
+wandb.login(key='3cb4a5ee4aefb4f4e25dae6a16db1f59568ac603')
 
 from transformers import (
     HfArgumentParser,
