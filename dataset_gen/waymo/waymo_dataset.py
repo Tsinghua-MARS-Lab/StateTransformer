@@ -92,8 +92,11 @@ class WaymoDataset(DatasetTemplate):
         """
         info = self.infos[index]
         scene_id = info['scenario_id']
+        filtered_tracks_to_predict = info['tracks_to_predict']
         with open(self.data_path / f'sample_{scene_id}.pkl', 'rb') as f:
             info = pickle.load(f)
+            
+        info['tracks_to_predict'] = filtered_tracks_to_predict
 
         sdc_track_index = info['sdc_track_index']
         current_time_index = info['current_time_index']

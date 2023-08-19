@@ -3,14 +3,14 @@
 export CUDA_VISIBLE_DEVICES=0;
 python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_waymo.py \
         --model_name pretrain-vector-gpt \
-        --model_pretrain_name_or_path /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_correctA_anchored_ep100/training_results/checkpoint-110000 \
-        --output_dir /data_3/madanjiao/model_res/vector_gpt_small_k6_reverseKP5_correctA_anchored_ep100/training_results  \
+        --model_pretrain_name_or_path /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle/training_results/checkpoint-20000 \
+        --output_dir /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle/training_results  \
         --run_name gpt_mse_FI1_PI1_k1_test \
-        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --predict_trajectory True --ar_future_interval 5 --specified_key_points True --forward_specified_key_points False \
+        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --predict_trajectory True --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True \
         --d_model 256 --dataset_scale 1 \
         --dataset_name waymo --task waymo \
-        --with_traffic_light True --k 6 \
+        --with_traffic_light True --k 1 \
         --online_preprocess True \
         --remove_unused_columns False --future_sample_interval 1 \
         --past_sample_interval 1 --do_eval\
