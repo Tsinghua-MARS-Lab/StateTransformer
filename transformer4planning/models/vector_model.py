@@ -553,6 +553,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 key_points_logit = selected_key_point
             else:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
+                pred_kps_score = torch.ones((batch_size, 1, 1), device=device)
             pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
             pred_key_point[:, 0, :self.pred_dim] = key_points_logit[:, 0, :]
 
