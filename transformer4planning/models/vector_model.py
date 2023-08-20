@@ -399,6 +399,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
             dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_anchor_pts, dim=2)
             anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+            
+            gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
         else:
             center_obj_anchor_pts = None
 
@@ -456,13 +458,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         all_traj_scores = (all_traj_scores*200).softmax(-1)
         
         if self.use_anchor:
-            hard_miss_num = batch_size - (kpts_idx[:, 0] == anchor_GT_cls).sum()
-            soft_miss_vec = (kpts_idx[:, 0] == anchor_GT_cls)
+            hard_match_num = ((kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
+            soft_match_vec = (kpts_idx[:, 0] == anchor_GT_cls)
             for m_i in range(1, 6):
-                soft_miss_vec |= (kpts_idx[:, m_i] == anchor_GT_cls)
-            soft_miss_num = batch_size - soft_miss_vec.sum()
+                soft_match_vec |= (kpts_idx[:, m_i] == anchor_GT_cls)
+            soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
             
-        out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_miss_num': hard_miss_num, 'anchor_soft_miss_num': soft_miss_num, 'tot_num': batch_size}
+        out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': batch_size}
         
         if not self.predict_trajectory:
             return out_res
