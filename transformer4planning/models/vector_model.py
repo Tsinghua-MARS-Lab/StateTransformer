@@ -75,8 +75,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.use_anchor:
             self.anchor_num = 64
             self.anchor_cls_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= self.anchor_num)
+            self.anchor_logits_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= out_features * self.anchor_num)
             self.anchor_len = 1
             self.cls_anchor_loss = CrossEntropyLoss(reduction="none")
+            self.logits_anchor_loss = MSELoss(reduction="none")
         else:
             self.anchor_len = 0
 
@@ -328,6 +330,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.use_anchor:
             pred_anchor_embed = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len-1 : tot_scenario_contenxt_len-1+self.anchor_len, :] # (bs, anchor_len, n_embed)
             pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed) # (bs, anchor_len, 64)
+            pred_anchor_logits = self.anchor_logits_decoder(pred_anchor_embed) # (bs, anchor_len, 64 * 2)
 
         if self.ar_future_interval > 0:
             """
@@ -354,7 +357,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                               pred_kps_cls=pred_kps_cls,
                               pred_anchor_cls=pred_anchor_cls,
                               gt_anchor_cls=anchor_GT_cls,
-                              gt_anchor_mask=gt_anchor_mask
+                              gt_anchor_mask=gt_anchor_mask,
+                              pred_anchor_logits=pred_anchor_logits, # (bs, anchor_len, 64 * 2)
+                              gt_anchor_logits = anchor_GT_logits, #(bs, 2)
                               )
 
         if not return_dict:
@@ -491,6 +496,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                   pred_anchor_cls=None,
                   gt_anchor_cls=None,
                   gt_anchor_mask=None,
+                  pred_anchor_logits=None,
+                  gt_anchor_logits=None
                   ):
         """_summary_
 
@@ -567,6 +574,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             loss_anchor = self.cls_anchor_loss(pred_anchor_cls.reshape(-1, self.anchor_num).to(torch.float64), gt_anchor_cls.reshape(-1).long())
             loss_anchor = (loss_anchor * gt_anchor_mask.view(-1)).sum()/ (gt_anchor_mask.sum()+1e-7)
             loss += loss_anchor
+            
+            bs = gt_anchor_cls.shape[0]
+            pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
+            pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)
+            loss_anchor_logits = self.logits_anchor_loss(pred_pos_anchor_logits, gt_anchor_logits)
+            loss_anchor_logits = (loss_anchor_logits * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
+            loss += loss_anchor_logits
         
         # evaluate accuracy if on eval
         if not self.training and self.clf_metrics is not None:
@@ -579,7 +593,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.debug and loss.device.index == 4:
             self.tot_iter_num += 1
             if self.tot_iter_num % 100 ==0 and self.use_anchor:
-                print("loss traj ", loss_traj, " loss anchor ", loss_anchor, ' tot loss ', loss)
+                print("loss traj ", loss_traj, " loss anchor ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k > 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k == 1:
