@@ -424,7 +424,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         key_points_num = future_key_points.shape[1]
         
         if self.use_anchor:
-            pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
                                                                                                center_obj_anchor_pts=center_obj_anchor_pts)
             key_points_num = 0
         elif self.generate_method == 'greedy_search':
@@ -441,6 +441,32 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         all_kps_logits = []
         n_mode = input_embeds_kpts.shape[1]
         
+        all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
+        
+        # use accumulated score
+        all_traj_scores = torch.ones((batch_size, n_mode), device=device) # (bs, n_mode)
+        
+        # for k_i in range(key_points_num):
+        #     all_traj_scores *= kpts_scores[:, :, k_i]
+        # all_traj_scores = all_traj_scores / all_traj_scores.sum()
+        
+        # kpts_score: accumulated score
+        all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
+        # all_traj_scores = all_traj_scores / all_traj_scores.sum()
+        all_traj_scores = (all_traj_scores*200).softmax(-1)
+        
+        if self.use_anchor:
+            hard_miss_num = batch_size - (kpts_idx[:, 0] == anchor_GT_cls).sum()
+            soft_miss_vec = (kpts_idx[:, 0] == anchor_GT_cls)
+            for m_i in range(1, 6):
+                soft_miss_vec |= (kpts_idx[:, m_i] == anchor_GT_cls)
+            soft_miss_num = batch_size - soft_miss_vec.sum()
+            
+        out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_miss_num': hard_miss_num, 'anchor_soft_miss_num': soft_miss_num, 'tot_num': batch_size}
+        
+        if not self.predict_trajectory:
+            return out_res
+        
         for m_i in range(n_mode):
             input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_anchor_len+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
             transformer_output = self.transformer(
@@ -456,21 +482,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             all_traj_logits.append(traj_logits[:, None, :, :])
             
         all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
-        all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
         
-        # use accumulated score
-        all_traj_scores = torch.ones((batch_size, n_mode), device=device) # (bs, n_mode)
-        
-        # for k_i in range(key_points_num):
-        #     all_traj_scores *= kpts_scores[:, :, k_i]
-        # all_traj_scores = all_traj_scores / all_traj_scores.sum()
-        
-        # kpts_score: accumulated score
-        all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
-        # all_traj_scores = all_traj_scores / all_traj_scores.sum()
-        all_traj_scores = (all_traj_scores*200).softmax(-1)
+        out_res.update(logits=all_traj_logits)
 
-        return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
+        return out_res
     
     def calc_loss(self, device, pred_traj_logits, gt_traj, gt_traj_mask=None, 
                   pred_kps_logits=None, gt_kps=None, gt_kps_mask=None,
@@ -797,5 +812,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         k_kpts_scores = torch.zeros((batch_size, out_num_mode, 1), device=device)
         k_kpts_scores[:, :, 0] = topk_score
         
-        return pred_kps_logit_topk[:, :, None, :self.pred_dim], pred_kps_logit_topk_embed, k_kpts_scores
+        k_kpts_index = torch.zeros((batch_size, out_num_mode, 1), device=device)
+        k_kpts_index[:, :, 0] = topk_indx
+        
+        return pred_kps_logit_topk[:, :, None, :self.pred_dim], pred_kps_logit_topk_embed, k_kpts_scores, topk_indx
     
