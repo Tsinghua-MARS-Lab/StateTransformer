@@ -527,8 +527,8 @@ class PlanningTrainer(Trainer):
 
         pred_dicts = []
         
-        anchor_hard_miss_num = 0
-        anchor_soft_miss_num =0
+        anchor_hard_match_num = 0
+        anchor_soft_match_num =0
         tot_num = 0
         for i, batch_dict in enumerate(dataloader):
             with torch.no_grad():
@@ -536,8 +536,8 @@ class PlanningTrainer(Trainer):
                 batch_pred_dicts = self.model.generate(**batch_dict)
                 # batch_pred_dicts = self.model(**batch_dict)
                 
-                anchor_hard_miss_num += batch_pred_dicts['anchor_hard_miss_num'].cpu().numpy()
-                anchor_soft_miss_num += batch_pred_dicts['anchor_soft_miss_num'].cpu().numpy()
+                anchor_hard_match_num += batch_pred_dicts['anchor_hard_match_num'].cpu().numpy()
+                anchor_soft_match_num += batch_pred_dicts['anchor_soft_match_num'].cpu().numpy()
                 tot_num += batch_pred_dicts['tot_num']
                 
                 if 'logits' not in batch_pred_dicts:
@@ -565,7 +565,7 @@ class PlanningTrainer(Trainer):
             if i > 100:    
                 break
         
-        print('anchor hard miss ', anchor_hard_miss_num, " anchor soft miss ", anchor_soft_miss_num, ' tot num ', tot_num)
+        print('*'*20, ' anchor hard match ', anchor_hard_match_num, " anchor soft match ", anchor_soft_match_num, ' tot num ', tot_num, '*'*20)
         if not self.model.predict_trajectory:
             return
 
