@@ -255,8 +255,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                                       torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
             future_key_points = None
             future_key_points_gt_mask = None
-            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            # attention_mask[:, context_length * 2:] = 0
         elif self.ar_future_interval > 0:
             # use autoregressive future interval
             if self.model_args.specified_key_points:
@@ -297,8 +295,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
-            # attention_mask = torch.ones((input_embeds.shape[0], input_embeds.shape[1]), device=device)
-            # attention_mask[:, context_length * 2 + future_key_embeds.shape[1]:] = 0
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
