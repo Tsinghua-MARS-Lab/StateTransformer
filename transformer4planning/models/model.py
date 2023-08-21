@@ -134,11 +134,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         pred_length = info_dict["pred_length"]
         trajectory_label = info_dict["trajectory_label"]
         context_length = info_dict["context_length"]
-
-        pred_length = info_dict["pred_length"]
-        trajectory_label = info_dict["trajectory_label"]
-        context_length = info_dict["context_length"]
-
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         loss = torch.tensor(0, dtype=torch.float32, device=device)
