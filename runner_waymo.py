@@ -6,6 +6,8 @@ Train a Transformer ML Model for Planning
 
 import logging
 import os
+os.environ["WANDB_DISABLED"] = "true"
+
 import sys
 import pickle
 import copy

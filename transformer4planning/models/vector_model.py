@@ -426,7 +426,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                                   torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
         key_points_num = future_key_points.shape[1]
         
-        if self.use_anchor:
+        if self.use_anchor and self.ar_future_interval == 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
                                                                                                center_obj_anchor_pts=center_obj_anchor_pts)
             key_points_num = 0
@@ -434,7 +434,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num,
                                                                                                  center_obj_anchor_pts=center_obj_anchor_pts)
         elif self.generate_method == 'beam_search':
-            pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, tot_scenario_contenxt_len, key_points_num,
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search(input_embeds, tot_scenario_contenxt_len, key_points_num,
                                                                                                num_beam=self.k, out_num_mode=self.k,
                                                                                                center_obj_anchor_pts=center_obj_anchor_pts)
         else:
@@ -459,10 +459,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         all_traj_scores = (all_traj_scores*200).softmax(-1)
         
         if self.use_anchor:
-            hard_match_num = ((kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
-            soft_match_vec = (kpts_idx[:, 0] == anchor_GT_cls)
+            anchor_kpts_idx = kpts_idx[:, :, 0]
+            hard_match_num = ((anchor_kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
+            soft_match_vec = (anchor_kpts_idx[:, 0] == anchor_GT_cls)
             for m_i in range(1, 6):
-                soft_match_vec |= (kpts_idx[:, m_i] == anchor_GT_cls)
+                soft_match_vec |= (anchor_kpts_idx[:, m_i] == anchor_GT_cls)
             soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
             
         out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': batch_size}
@@ -577,7 +578,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
             bs = gt_anchor_cls.shape[0]
             pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
-            pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)
+            
+            # pred_anchor_cls_argmax = pred_anchor_cls.argmax(-1).view(-1)
+            # pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), pred_anchor_cls_argmax, :] # (bs, 2)
+            
+            pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)            
             loss_anchor_logits = self.logits_anchor_loss(pred_pos_anchor_logits, gt_anchor_logits)
             loss_anchor_logits = (loss_anchor_logits * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
             loss += loss_anchor_logits
@@ -715,6 +720,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         k_kpts_scores = torch.zeros((batch_size, num_beam, key_points_num), device=device)
         k_input_embeds = input_embeds[:, None, :, :].repeat(1, num_beam, 1, 1)
         
+        k_kpts_index = torch.zeros((batch_size, num_beam, key_points_num), device=device)
+        
         for i in range(key_points_num):
             # prepare attention mask
             k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_contenxt_len + i, :].view(batch_size*num_beam, -1, n_embed)
@@ -780,8 +787,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
             pred_key_points_during_generate[:, :, i, :] = pred_kps_logit_topk[:, :, :self.pred_dim]
             k_input_embeds_kpts = k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + key_points_num, :]
+            
+            k_kpts_index[:, :, i] = topk_indx
         
-        return pred_key_points_during_generate[:, 0:out_num_mode, ...], k_input_embeds_kpts[:, 0:out_num_mode, ...], k_kpts_scores[:, 0:out_num_mode, ...]
+        return pred_key_points_during_generate[:, 0:out_num_mode, ...], k_input_embeds_kpts[:, 0:out_num_mode, ...], k_kpts_scores[:, 0:out_num_mode, ...], k_kpts_index
     
     def beam_search_anchor_only(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None):
         '''
@@ -827,5 +836,5 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         k_kpts_index = torch.zeros((batch_size, out_num_mode, 1), device=device)
         k_kpts_index[:, :, 0] = topk_indx
         
-        return pred_kps_logit_topk[:, :, None, :self.pred_dim], pred_kps_logit_topk_embed, k_kpts_scores, topk_indx
+        return pred_kps_logit_topk[:, :, None, :self.pred_dim], pred_kps_logit_topk_embed, k_kpts_scores, k_kpts_index
     
