@@ -106,9 +106,6 @@ class ModelArguments:
         default=True
     )
     forward_specified_key_points: Optional[bool] = field(
-        default=True
-    )
-    token_scenario_tag: Optional[bool] = field(
         default=False
     )
     token_scenario_tag: Optional[bool] = field(
@@ -135,6 +132,12 @@ class ModelArguments:
     debug_raster_path: Optional[str] = field(
         default=None
     )
+    generate_with_offroad_correction: Optional[bool] = field(
+        default=False
+    )
+    score_with_separate_token: Optional[bool] = field(
+        default=False
+    )
 
 
 def rotate_array(origin, points, angle, tuple=False):
@@ -158,7 +161,9 @@ def rotate_array(origin, points, angle, tuple=False):
         return rst_array
 
 
-def change_coordination(target_point, ego_center, ego_to_global=False):
+def change_coordination(target_point, ego_center, ego_to_global=False, y_inverse=1):
+    if y_inverse != 1:
+        assert NotImplementedError, "y_inverse != 1 is not implemented"
     target_point_new = target_point.copy()
     if ego_to_global:
         cos_, sin_ = math.cos(ego_center[-1]), math.sin(ego_center[-1])
@@ -175,6 +180,7 @@ def change_coordination(target_point, ego_center, ego_to_global=False):
                        target_point_new[0] * sin_ + target_point_new[1] * cos_
         target_point_new[0], target_point_new[1] = new_x, new_y
     return target_point_new
+
 
 
 def normalize_angle(angle):

@@ -113,6 +113,8 @@ class NuplanRasterizeEncoder(AugmentationMixin):
         
         # scenario tag encoding
         if self.token_scenario_tag:
+            assert scenario_type is not None, "scenario_type is None for token_scenario_tag"
+            assert scenario_type[0] != 'Unknown', f"scenario_type is Unknown for token_scenario_tag"
             scenario_tag_ids = torch.tensor(self.tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
@@ -146,8 +148,14 @@ class NuplanRasterizeEncoder(AugmentationMixin):
                 future_key_points_aug[:, :, 2:] = 0
 
             future_key_embeds = self.action_m_embed(future_key_points_aug)
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            if self.model_args.score_with_separate_token:
+                future_key_embeds = future_key_embeds.repeat(1, 2, 1)
+                future_key_embeds[:, ::2, :] = 0
+                input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                          torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            else:
+                input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                          torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
