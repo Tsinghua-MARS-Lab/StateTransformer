@@ -112,6 +112,10 @@ class ModelArguments:
         default='raster',
         metadata={"help": "choose from [raster, vector]"}
     )
+    decoder_type: Optional[str] = field(
+        default='mlp',
+        metadata={"help": "choose from [mlp, diffusion]"}
+    )
     past_sample_interval: Optional[int] = field(
         default=5
     )
@@ -144,6 +148,9 @@ class ModelArguments:
     )
     mtr_config_path: Optional[str] = field(
         default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+    )
+    use_centerline: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
 
 @dataclass

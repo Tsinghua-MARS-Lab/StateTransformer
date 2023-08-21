@@ -94,18 +94,21 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     def build_decoder(self):
         # load pretrained diffusion keypoint decoder
         #TODO: add diffusion decoder trained from scratch
-        if self.model_args.key_points_diffusion_decoder_load_from is not None:
-            print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
+        self.decoder_type = self.model_args.decoder_type
+        if self.decoder_type == "diffusion":
             from transformer4planning.models.decoder.diffusion_decoder import DiffusionKPTrajDecoder
-            state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
             self.decoder = DiffusionKPTrajDecoder(self.model_args, self.config)
-            self.decoder.load_state_dict(state_dict) 
-            print("Pretrained keypoint decoder has been loaded!")
-            self.decoder_type = "diffusion"
-        else: # normal mlp decoder
+            if self.model_args.key_points_diffusion_decoder_load_from is not None:
+                print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
+                state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
+                self.decoder.load_state_dict(state_dict) 
+                print("Pretrained keypoint decoder has been loaded!")
+            else:
+                print("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
+        elif self.decoder_type == "mlp":
             from transformer4planning.models.decoder.mlp_decoder import MultiTrajDecoder
             self.decoder = MultiTrajDecoder(self.model_args, self.config)
-            self.decoder_type = "mlp"
+
         
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -190,7 +193,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         selected_indices = info_dict["selected_indices"]
         pred_length = info_dict["pred_length"]
         trajectory_label = info_dict["trajectory_label"]
-        context_length = info_dict["context_length"]
+        context_length = info_dict.get("context_length", None)
+        if context_length is None: # pdm encoder
+            input_length = info_dict.get("input_length", None)
 
         device = input_embeds.device
         batch_size = trajectory_label.shape[0]
@@ -198,8 +203,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
-        if self.decoder_type == "mlp":
-            assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
+        if self.decoder_type == "mlp" and self.ar_future_interval > 0:
             trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
             if self.model_args.specified_key_points:
                 future_key_points = trajectory_label_dummy[:, selected_indices, :]
@@ -211,10 +215,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
             if self.model_args.interaction:
                 input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
-            input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
+            kp_start_index = scenario_type_len + context_length * 2 if context_length is not None else scenario_type_len + input_length * 2
+            input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
             pred_key_points_during_generate = []
             for i in range(key_points_num):
-                input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
+                input_embeds_current = input_embeds[:, :kp_start_index + i, :]
                 attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
                 position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
                 transformer_output = self.transformer(
@@ -224,7 +229,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 )
                 transformer_outputs_hidden_state = transformer_output['last_hidden_state']
                 future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                                scenario_type_len + context_length * 2 + i - 1,
+                                                kp_start_index + i - 1,
                                                 :].reshape(batch_size, 1, -1)
 
                 if self.k > 1:
@@ -269,7 +274,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                 key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                 # replace embed at the next position
-                input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+                input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
                 if self.model_args.predict_yaw:
                     pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
                 else:
@@ -285,7 +290,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             key_points_logits, pred_logits = self.decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
-
+        else:
+            key_points_logits = None
         # predict the whole trajectory
         if self.model_args.interaction:
             input_embeds = self.encoder.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=False)
@@ -310,8 +316,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         else:
             traj_logits = trajectory_label_dummy[..., :2]
 
-        # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
-        return torch.cat([key_points_logits, traj_logits], dim=1)
+        if key_points_logits is not None:
+            return torch.cat([key_points_logits, traj_logits], dim=1)
+        else: # predict trajectory directly
+            return traj_logits
 
 def query_current_lane(map_api, target_point):
     """

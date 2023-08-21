@@ -165,9 +165,9 @@ def main():
     # loop all datasets
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
-    if "diffusion_decoder" not in model_args.model_name: # nuplan and waymo datasets are stored in index format
+    if model_args.task == "nuplan" or model_args.task == "waymo": # nuplan and waymo datasets are stored in index format
         index_root = os.path.join(data_args.saved_dataset_folder, 'index')
-    else:
+    elif "diffusion" in model_args.task:
         index_root = data_args.saved_dataset_folder
     root_folders = os.listdir(index_root)
         

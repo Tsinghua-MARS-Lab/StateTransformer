@@ -221,7 +221,7 @@ def get_discrete_centerline(current_lane, route_block_dict, route_lane_dict, sea
 
 def pdm_vectorize(sample, data_path, map_api=None, map_radius=50, 
                   centerline_samples=120, centerline_interval=1.0, 
-                  frame_rate=20, past_seconds=2):
+                  frame_rate=20, past_seconds=2, use_centerline=True):
     filename = sample["file_name"]
     map = sample["map"]
     split = sample["split"]
@@ -251,7 +251,25 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
     ego_position = convert_absolute_to_relative_poses(anchor_ego_pose, nuplan_ego_poses)
     ego_velocities = compute_derivative(ego_position, interval=0.1, drop_z_axis=True) # (bsz, 4) -> (bsz, 3)
     ego_accelerations = compute_derivative(ego_velocities, interval=0.1, drop_z_axis=False) # (bsz, 3) -> (bsz, 3)
-
+    
+    cos_, sin_ = math.cos(-ego_poses[-1][-1]), math.sin(-ego_poses[-1][-1])
+    trajectory_label = agent_dic["ego"]["pose"][frame_id//2:frame_id//2 + 80, :].copy()
+    trajectory_label -= ego_poses[-1]
+    traj_x = trajectory_label[:, 0].copy()
+    traj_y = trajectory_label[:, 1].copy()
+    trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
+    trajectory_label[:, 1] = traj_x * sin_ + traj_y * cos_
+    if not use_centerline:
+        return dict(
+            ego_position=ego_position,
+            ego_velocity=ego_velocities,
+            ego_acceleration=ego_accelerations,
+            scenario_type=scenario_type,
+            trajectory_label=trajectory_label,
+            map=map,
+            file_name=filename,
+            frame_id=frame_id
+        )
     # build drivable area map and extract centerline
     divable_area_map = get_drivable_area_map(map_api, ego_poses[-1], map_radius=map_radius)
     
@@ -272,21 +290,16 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
         centerline.interpolate(centerline_progress_values, as_array=True),
     )
 
-    cos_, sin_ = math.cos(-ego_poses[-1][-1]), math.sin(-ego_poses[-1][-1])
-    trajectory_label = agent_dic["ego"]["pose"][frame_id//2:frame_id//2 + 80, :].copy()
-    trajectory_label -= ego_poses[-1]
-    traj_x = trajectory_label[:, 0].copy()
-    traj_y = trajectory_label[:, 1].copy()
-    trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
-    trajectory_label[:, 1] = traj_x * sin_ + traj_y * cos_
-
     return dict(
         ego_position=ego_position,
         ego_velocity=ego_velocities,
         ego_acceleration=ego_accelerations,
         planner_centerline=planner_centerline,
         scenario_type=scenario_type,
-        trajectory_label=trajectory_label
+        trajectory_label=trajectory_label,
+        map=map,
+        file_name=filename,
+        frame_id=frame_id
     )
 
 if __name__ == "__main__":

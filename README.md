@@ -90,7 +90,7 @@ model_name consist of ['scratch','pretrain']-['xl','gpt']
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run \
 --nproc_per_node=8 runner.py \
---model_name scratch-gpt --model_pretrain_name_or_path None \
+--model_name scratch-gpt-mini --model_pretrain_name_or_path None \
 --saved_dataset_folder  /localdata_ssd/nuplan/train-index_boston/boston_index_full \
 --output_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_results  \
 --logging_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_logs \
@@ -100,15 +100,11 @@ python -m torch.distributed.run \
 --save_steps 1000 --dataloader_num_workers 10 \
 --save_total_limit 2  --predict_trajectory True \
 --dataloader_drop_last True --do_train \
---d_embed 1600 --d_model 1600 --d_inner 6400 --n_layers 48 --n_heads 25 \
 --activation_function silu --dataset_scale 1 \
 --task nuplan --with_traffic_light True --k 1 \
---online_preprocess True \
---datadic_path /localdata_ssd/nuplan/online \
 --remove_unused_columns False --future_sample_interval 2 \
 --past_sample_interval 5 --do_eval \
 --evaluation_strategy steps --eval_steps 100 \
---saved_valid_dataset_folder /localdata_ssd/nuplan/test-index_boston_full \
 --overwrite_output_dir --loss_fn mse --max_eval_samples 10000\
 --next_token_scorer True \
 --ar_future_interval 20 \
@@ -120,6 +116,7 @@ python -m torch.distributed.run \
 --forward_specified_key_points False \
 `
 
+if you want to train diffusion decoder only, please set `--task diffusion_decoder` and change the `--saved_dataset_folder` to the folder storing correspond transformerbackbone features dataset. Additionally, to initilize backbone weights, remember to set `--model_pretrain_name_or_path`
 
 
 ## To predict:

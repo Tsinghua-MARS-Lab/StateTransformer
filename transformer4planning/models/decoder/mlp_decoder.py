@@ -24,7 +24,8 @@ class MultiTrajDecoder(TrajectoryDecoder):
         device = hidden_output.device
         pred_length = info_dict.get("pred_length", label.shape[1])
         context_length = info_dict.get("context_length", None)
-        assert context_length is not None, "context length can not be None"
+        if context_length is None: # pdm encoder
+           input_length = info_dict.get("input_length", None) 
         
         traj_hidden_state = hidden_output[:, -pred_length -1:-1, :]
         loss = torch.tensor(0, dtype=torch.float32, device=device)
@@ -49,7 +50,8 @@ class MultiTrajDecoder(TrajectoryDecoder):
         if self.ar_future_interval > 0:
             future_key_points = info_dict["future_key_points"]
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            future_key_points_hidden_state = hidden_output[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+            kp_start_index = scenario_type_len + context_length * 2 - 1 if context_length is not None else scenario_type_len + input_length
+            future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
