@@ -1,5 +1,5 @@
 DATA_CONFIG:
-    DATASET: WaymoDatasetV1
+    DATASET: WaymoDatasetV1Aug
     
     dataset_info:
       data_root: '/data/waymo_open_dataset/mtr_processed_data/v1'
@@ -10,6 +10,10 @@ DATA_CONFIG:
       info_file: {
           'train': 'processed_scenarios_training_infos.pkl', 
           'val': 'processed_scenarios_val_infos.pkl'
+      }
+      cache_dir: {
+          'train': 'v1_aug_train_cache',
+          'val': 'v1_aug_val_cache'
       }
 
       object_type: ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
@@ -45,7 +49,7 @@ DATA_CONFIG:
     max_agent_num: 64
 
 MODEL:
-    model_name: 'PureSeqModelV1'
+    model_name: PureSeqModelV1Aug
 
     model_parameter:
       # map encoder
@@ -81,7 +85,10 @@ MODEL:
       road_edge: 8
       map_others: 9
 
-      agent: 30
+      ego: 40
+      agent: 75
+
+      ego_target: 25
       agent_target: 25
 
       points_in_polyline: 20
@@ -97,7 +104,7 @@ OPTIMIZATION:
     WEIGHT_DECAY: 0.01
 
     SCHEDULER: lambdaLR
-    DECAY_STEP_LIST: [4, 8, 12, 16]
+    DECAY_STEP_LIST: [3, 6, 9, 12, 15, 18]
     LR_DECAY: 0.7
     LR_CLIP: 0.000001
 

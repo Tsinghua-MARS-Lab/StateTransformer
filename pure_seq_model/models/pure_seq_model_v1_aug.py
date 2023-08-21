@@ -7,7 +7,7 @@ import os
 import models.base_model as base_model
 from models.mtr_models.polyline_encoder import PointNetPolylineEncoder
 
-class PureSeqModelV1(nn.Module):
+class PureSeqModelV1Aug(nn.Module):
     def __init__(self, config: Dict) -> None:
         super().__init__()
         self.model_parameter = config.model_parameter
@@ -33,11 +33,12 @@ class PureSeqModelV1(nn.Module):
         self.map_others_between_polyline_encoder = copy.deepcopy(between_polyline_encoder)
 
         # ego/agent seq input embedding
-        self.ego_seq_embedding = base_model.MLP(self.data_dim.agent, self.model_parameter.seq_embedding_dim)
+        self.ego_seq_embedding = base_model.MLP(self.data_dim.ego, self.model_parameter.seq_embedding_dim)
         self.agent_seq_embedding = base_model.MLP(self.data_dim.agent, self.model_parameter.seq_embedding_dim)
 
         # pos encoder
-        self.pos_encoder = nn.Parameter(torch.zeros(20, self.model_parameter.seq_embedding_dim))
+        # self.pos_encoder = nn.Parameter(torch.zeros(20, self.model_parameter.seq_embedding_dim))
+        self.pos_encoder = base_model.PositionalEncoding(self.model_parameter.seq_embedding_dim)
 
         # seq transformer
         seq_self_attn = base_model.SelfAttention(self.model_parameter.seq_embedding_dim, self.model_parameter.seq_head)
@@ -46,7 +47,7 @@ class PureSeqModelV1(nn.Module):
         self.seq_layerlist = nn.ModuleList([copy.deepcopy(seq_layer) for _ in range(self.model_parameter.seq_layer)])
 
         # head
-        self.ego_head = base_model.MLP(self.model_parameter.seq_embedding_dim, self.data_dim.agent_target)
+        self.ego_head = base_model.MLP(self.model_parameter.seq_embedding_dim, self.data_dim.ego_target)
         self.agent_head = base_model.MLP(self.model_parameter.seq_embedding_dim, self.data_dim.agent_target)
 
         # loss
@@ -55,9 +56,12 @@ class PureSeqModelV1(nn.Module):
 
     def forward(self, input_dict: Dict):
         if self.training:
-            input_dict = self.normalize_input(input_dict)
-            ego_output, agent_output = self.model_forward(input_dict)
+            # normed_input_dict = self.normalize_input(copy.deepcopy(input_dict))
+            normed_input_dict = self.normalize_input(input_dict)
+            ego_output, agent_output = self.model_forward(normed_input_dict)
             ego_output, agent_output = self.denormalize_output(ego_output, agent_output)
+
+            # ego_output, agent_output = self.vel_constant_test(input_dict)
 
             loss, tb_dict, disp_dict = self.get_loss(ego_output, input_dict['ego_label'].squeeze(2),
                                                      agent_output, input_dict['agent_label'].view(agent_output.size(0), agent_output.size(1), agent_output.size(2)),
@@ -93,12 +97,14 @@ class PureSeqModelV1(nn.Module):
                                                                     ego_data_embeded, agent_data_embeded, input_dict['agent_valid'])
 
         # pos encoder. each time set use same pos encoder
-        len_per_time_set = 4+1+agent_data_embeded.size(2)
-        for i in range(time_set_num):
-            seq_tensor[:, i*len_per_time_set:(i+1)*len_per_time_set, :] = seq_tensor[:, i*len_per_time_set:(i+1)*len_per_time_set, :] + self.pos_encoder[i, :]
-            
+        len_per_time_set = 4+1+agent_data_embeded.size(2) # map:4, ego:1, agent:64
+        # for i in range(time_set_num):
+        #     seq_tensor[:, i*len_per_time_set:(i+1)*len_per_time_set, :] = seq_tensor[:, i*len_per_time_set:(i+1)*len_per_time_set, :] + self.pos_encoder[i, :]
+        seq_tensor = self.pos_encoder(seq_tensor)
+
         # transformer
         for layer in self.seq_layerlist:
+            # seq_tensor = layer(seq_tensor, attn_mask=seq_mask)
             seq_tensor = layer(seq_tensor, attn_mask=seq_mask)
 
         # ego heads
@@ -263,17 +269,11 @@ class PureSeqModelV1(nn.Module):
         tb_dict['agent_loss'] = agent_loss.item()
         tb_dict['num_valid_agent'] = num_valid_agent.item()
 
-        # print(ego_output)
-        # print(ego_label)
-        # print(tb_dict)
-        # assert(0)
-
         return loss, tb_dict, disp_dict
 
     def normalize_input(self, input_dict):
         # warning: this function will modify input_dict!
         xy_norm_para = self.model_parameter.normalization_para['xy']
-        heading_norm_para = self.model_parameter.normalization_para['heading']
         vel_norm_para = self.model_parameter.normalization_para['vel']
 
         # map feature
@@ -283,17 +283,25 @@ class PureSeqModelV1(nn.Module):
             map_feature_tensor[..., [0, 1, 4, 5]] = map_feature_tensor[..., [0, 1, 4, 5]] / xy_norm_para
             input_dict[key] = map_feature_tensor
 
-        # ego, agent feature
-        ego_agent_keys = ['ego_feature', 'agent_feature']
-        xy_index = list(range(0, input_dict['ego_label'].size(-1), 5)) + list(range(1, input_dict['ego_label'].size(-1), 5))
-        heading_index = list(range(2, input_dict['ego_label'].size(-1), 5))
-        vel_index = list(range(3, input_dict['ego_label'].size(-1), 5)) + list(range(4, input_dict['ego_label'].size(-1), 5))
-        for key in ego_agent_keys:
-            feature_tensor = input_dict[key]
-            feature_tensor[..., xy_index] = feature_tensor[..., xy_index] / xy_norm_para
-            feature_tensor[..., heading_index] = feature_tensor[..., heading_index] / heading_norm_para
-            feature_tensor[..., vel_index] = feature_tensor[..., vel_index] / vel_norm_para
-            input_dict[key] = feature_tensor
+        # ego feature
+        xy_index = list(range(0, input_dict['ego_feature'].size(-1)-5, 7)) + list(range(1, input_dict['ego_feature'].size(-1)-5, 7)) + [-5, -4]
+        vel_index = list(range(5, input_dict['ego_feature'].size(-1)-5, 7)) + list(range(6, input_dict['ego_feature'].size(-1)-5, 7))
+
+        feature_tensor = input_dict['ego_feature']
+        feature_tensor[..., xy_index] = feature_tensor[..., xy_index] / xy_norm_para
+        feature_tensor[..., vel_index] = feature_tensor[..., vel_index] / vel_norm_para
+        input_dict['ego_feature'] = feature_tensor
+
+        # agent feature
+        xy_index = list(range(0, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(1, input_dict['agent_feature'].size(-1)-5, 14)) + \
+                   list(range(7, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(8, input_dict['agent_feature'].size(-1)-5, 14)) + [-5, -4]
+        vel_index = list(range(5, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(6, input_dict['agent_feature'].size(-1)-5, 14)) + \
+                    list(range(12, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(13, input_dict['agent_feature'].size(-1)-5, 14))
+
+        feature_tensor = input_dict['agent_feature']
+        feature_tensor[..., xy_index] = feature_tensor[..., xy_index] / xy_norm_para
+        feature_tensor[..., vel_index] = feature_tensor[..., vel_index] / vel_norm_para
+        input_dict['agent_feature'] = feature_tensor
 
         return input_dict
 
@@ -318,7 +326,6 @@ class PureSeqModelV1(nn.Module):
         
         return denormed_ego_output, denormed_agent_output
 
-
     # auto-regessive generating future traj
     def traj_generation(self, input_dict):
         # get first step input and output
@@ -330,8 +337,6 @@ class PureSeqModelV1(nn.Module):
         ego_output, agent_output = self.denormalize_output(normed_ego_output, normed_agent_output)
 
         # generate next input based on output
-        
-        
         
 
     def extend_input_based_on_last_output(self, input_dict, ego_output, agent_output):
@@ -346,3 +351,38 @@ class PureSeqModelV1(nn.Module):
             last_map_feature = input_dict[key][:, -1, ...].unsqueeze(1)
 
         pass
+
+    def vel_constant_test(self, input_dict):
+        # ego_output, ego_label: [batch, 8, 5*time_sample_num]
+        # agent_output, agent_label: [batch, 8*max_agent_num, 5*time_sample_num]
+        ego_feature = input_dict['ego_feature']
+        agent_feature = input_dict['agent_feature']
+
+        ego_result = torch.zeros(ego_feature.size(0), ego_feature.size(1), ego_feature.size(2), 5*5, device=ego_feature.device)
+        agent_result = torch.zeros(agent_feature.size(0), agent_feature.size(1), agent_feature.size(2), 5*5, device=ego_feature.device)
+
+        time_intervel = torch.tensor([[1.0, 0.8, 0.6, 0.4, 0.2]], device=ego_feature.device)
+        current_ego_vel_x = ego_feature[..., 5]
+        current_agent_vel_x = agent_feature[..., 12]
+        ego_rel_x = current_ego_vel_x.unsqueeze(-1).matmul(time_intervel)
+        agent_rel_x = current_agent_vel_x.unsqueeze(-1).matmul(time_intervel)
+
+        # vel_x is current vel_x, x is x, others are zeros
+        x_index = list(range(0, 25, 5))
+        vel_x_index = list(range(3, 25, 5))
+        ego_result[..., x_index] = ego_rel_x
+        ego_result[..., vel_x_index] = current_ego_vel_x.unsqueeze(-1).repeat(1, 1, 1, 5)
+        agent_result[..., x_index] = agent_rel_x
+        agent_result[..., vel_x_index] = current_agent_vel_x.unsqueeze(-1).repeat(1, 1, 1, 5)
+
+        return ego_result.view(ego_feature.size(0), ego_feature.size(1)*ego_feature.size(2), 5*5), agent_result.view(agent_feature.size(0), agent_feature.size(1)*agent_feature.size(2), 5*5)
+    
+    def simple_forward_test(self, input_dict):
+        ego_feature = input_dict['ego_feature']
+        agent_feature = input_dict['output_feature']
+
+        ego_output = self.ego_head(self.ego_seq_embedding(ego_feature))
+        agent_output = self.agent_head(self.agent_seq_embedding(agent_feature))
+
+        return ego_output.view(ego_feature.size(0), ego_feature.size(1)*ego_feature.size(2), 5*5), agent_output.view(agent_feature.size(0), agent_feature.size(1)*agent_feature.size(2), 5*5)
+    

@@ -18,7 +18,7 @@ from tensorboardX import SummaryWriter
 from mtr_trainer.mtr_datasets import build_dataloader
 from mtr_trainer.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
 from mtr_trainer.mtr_utils import common_utils
-from models.pure_seq_model_v1 import PureSeqModelV1
+from models.model_builder import build_model
 
 from mtr_trainer.mtr_utils.train_utils import train_model
 
@@ -167,7 +167,7 @@ def main():
         add_worker_init_fn=args.add_worker_init_fn,
     )
 
-    model = PureSeqModelV1(config=cfg.MODEL)
+    model = build_model(config=cfg.MODEL)
     if not args.without_sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()
