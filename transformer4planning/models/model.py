@@ -1,9 +1,23 @@
-from transformers import GPT2Model, GPT2PreTrainedModel
-from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.decoders import *
-from transformer4planning.models.utils import *
-from transformer4planning.utils import *
+import os
+import torch
 import torch.nn as nn
+from typing import Tuple, Optional, Dict
+from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+from transformer4planning.libs.models.mlp import DecoderResCat
+from transformer4planning.utils import nuplan_utils
+
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+
+
+class LTMOutput(CausalLMOutputWithCrossAttentions):
+    loss: Optional[torch.FloatTensor] = None
+    logits: torch.FloatTensor = None
+    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
+    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
+    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    loss_items: Optional[Dict[str, torch.FloatTensor]] = None
 
 
 class TrajectoryGPT(GPT2PreTrainedModel):
@@ -34,9 +48,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            from transformer4planning.models.encoders import (NuplanRasterizeEncoder, )
-            # TODO: add raster/vector encoder configuration item
+            tokenizer_kwargs = dict(
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tokenizer', 'gpt2-tokenizer'),
+                d_embed=self.config.n_embd,
+            )
+
             if "raster" in self.model_args.encoder_type:
+                from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.model_args.raster_channels,
@@ -46,17 +64,35 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 action_kwargs = dict(
                     d_embed=self.config.n_embd
                 )
-                tokenizer_kwargs = dict(
-                    dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
-                    d_embed=self.config.n_embd,
-                )
                 self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
-                raise NotImplementedError
+                from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
+                pdm_kwargs = dict(
+                    hidden_dim=self.config.n_embd,
+                    centerline_dim=120,
+                    history_dim=20
+                )
+                self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
+        elif self.model_args.task == "waymo":
+            from transformer4planning.models.encoder.mtr_encoder import WaymoVectorizeEncoder
+            from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
+            cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
+            action_kwargs = dict(
+                d_embed=self.config.n_embd
+            )
+            tokenizer_kwargs = dict(
+                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
+                d_embed=self.config.n_embd,
+                max_token_len=self.model_args.max_token_len,
+            ) if self.model_args.token_scenario_tag else None
+            self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, tokenizer_kwargs, self.model_args)
         else:
             raise NotImplementedError
+
+    def build_decoder(self):
+        raise NotImplementedError
 
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -65,39 +101,43 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         position_ids = attention_mask.long().cumsum(-1) - 1
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
-    
+
+    def from_joint_to_marginal(self, hidden_state, info_dict):
+        agents_num_per_scenario = info_dict["agents_num_per_scenario"]
+        scenario_num, _, _ = hidden_state.shape
+        assert len(agents_num_per_scenario) == scenario_num
+        hidden_state_marginal = []
+        for i in range(scenario_num):
+            agents_num = agents_num_per_scenario[i]
+            for j in range(agents_num):
+                hidden_state_marginal.append(hidden_state[i, j::agents_num, :])
+        hidden_state_marginal = torch.stack(hidden_state_marginal)
+        return hidden_state_marginal
+
     def forward(
             self,
-            trajectory_label: Optional[torch.FloatTensor] = None,
-            context_actions: Optional[torch.FloatTensor] = None,
-            high_res_raster: Optional[torch.LongTensor] = None,
-            low_res_raster: Optional[torch.LongTensor] = None,
-            scenario_type: Optional[str] = None,
             return_dict: Optional[bool] = None,
             **kwargs
     ):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        device = high_res_raster.device
-        batch_size, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
-        feature_inputs = dict(
-            high_res_raster=high_res_raster,
-            low_res_raster=low_res_raster,
-            context_actions=context_actions,
-            trajectory_label=trajectory_label,
-            scenario_type=scenario_type,
-            pred_length=pred_length,
-            context_length=context_length,
-        )
-        input_embeds, future_key_points, _ = self.encoder(**feature_inputs)
+        input_embeds, info_dict = self.encoder(**kwargs)
+
+        attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
+        device = input_embeds.device
+
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
+            attention_mask=attention_mask,
             return_dict=return_dict,
             # **kwargs
         )
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+
+        pred_length = info_dict["pred_length"]
+        trajectory_label = info_dict["trajectory_label"]
+        context_length = info_dict["context_length"]
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
@@ -109,15 +149,18 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if not self.model_args.pred_key_points_only:
             traj_logits = self.traj_decoder(traj_hidden_state)
             if self.model_args.task == "waymo":
-                loss_fct = MSELoss(reduction="none")
-                y_mask = ((trajectory_label != -1).sum(-1) > 0).view(batch_size, pred_length, 1)
-                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * y_mask).sum() / (y_mask.sum() + 1e-7)
+                trajectory_label_mask = info_dict["trajectory_label_mask"]
+                loss_fct = nn.MSELoss(reduction="none")
+                _loss = (loss_fct(traj_logits[..., :2], trajectory_label[...,
+                                                        :2].to(device)) * trajectory_label_mask).sum() / (
+                                trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
             else:
                 if self.model_args.predict_yaw:
                     loss += loss_fct(traj_logits, trajectory_label.to(device)) * self.model_args.trajectory_loss_rescale
                 else:
-                    loss += loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * self.model_args.trajectory_loss_rescale
+                    loss += loss_fct(traj_logits[..., :2], trajectory_label[...,
+                                                           :2].to(device)) * self.model_args.trajectory_loss_rescale
         else:
             traj_logits = torch.zeros_like(trajectory_label[..., :2])
 
@@ -129,8 +172,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             input_embed: [O, A, O, A, FutureKey1, FutureKey2, Traj1(Given0), Traj2(Given0)..]
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
+            future_key_points = info_dict["future_key_points"]
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:,
+                                             scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 +
+                                                                                        future_key_points.shape[1] - 1,
+                                             :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -138,6 +185,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     loss_to_add = loss_fct(key_points_logits, future_key_points.to(device))
                 else:
                     loss_to_add = loss_fct(key_points_logits, future_key_points[..., :2].to(device))
+                if self.model_args.task == "waymo":
+                    future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
+                    loss_to_add = (loss_to_add * future_key_points_gt_mask).sum() / (
+                                future_key_points_gt_mask.sum() + 1e-7)
                 loss += loss_to_add
                 traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
             else:
@@ -146,7 +197,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
                 # get loss of minimal loss from k results
                 k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
-                loss_fct_key_points = MSELoss(reduction="none")
+                loss_fct_key_points = nn.MSELoss(reduction="none")
                 if self.model_args.predict_yaw:
                     loss_to_add = loss_fct_key_points(k_results, k_future_key_points.to(device))
                 else:
@@ -154,14 +205,19 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 # add loss on x, y (the last dimension)
                 loss_to_add = loss_to_add.sum(dim=-1)  # b, s, k
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
-                loss += min_loss.mean()
+                if self.model_args.task == "waymo":
+                    future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
+                    loss += (min_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (
+                                future_key_points_gt_mask.sum() + 1e-7)
+                else:
+                    loss += min_loss.mean()
                 if self.next_token_scorer_decoder is not None:
                     pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-                    loss_fct = CrossEntropyLoss(reduction="mean")
+                    loss_fct = nn.CrossEntropyLoss(reduction="mean")
                     loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
                     loss += loss_to_add
                     if self.training:
-                        # concatenate the key points with best predicted trajectory for evaluation
+                        # concatenate the key points with predicted trajectory for evaluation
                         selected_key_points = key_points_logits.reshape(b * s, self.k, -1)[torch.arange(b * s),
                                               min_loss_indices.reshape(-1), :].reshape(b, s, -1)
                     else:
@@ -196,34 +252,34 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
-        high_res_raster = kwargs.get("high_res_raster", None)
-        low_res_raster = kwargs.get("low_res_raster", None)
-        pred_length = kwargs.get("pred_length", None)
-        trajectory_label = kwargs.get("trajectory_label", None)
-        context_actions = kwargs.get("context_actions", None)
+        """
+        For nuplan generation, the input include those nuplan encoder requires; 
+        additionally, it also requires: `map_api`, `route_ids`, `ego_pose`, `road_dic`, `idm_reference_global`
+        to post process the generated trajectory which are out of route or out of road
+
+        For waymo generation, the input include a `input_dict` and waymo encoder processes it in its 
+        forward function.
+        """
         # pass the following infos during generate for one sample (non-batch) generate with KP checking
-        map_name = kwargs.get("map", None)
+        map_api = kwargs.get("map_api", None)
         route_ids = kwargs.get("route_ids", None)
         ego_pose = kwargs.get("ego_pose", None)
         road_dic = kwargs.get("road_dic", None)
-        scenario_type = kwargs.get("scenario_type", None)
-        # idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
+        idm_reference_global = kwargs.get("idm_reference_global", None)
         """
         Used for generate with key points
         """
-        device = high_res_raster.device
-        batch_size, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1]
-        feature_inputs = dict(
-            high_res_raster=high_res_raster,
-            low_res_raster=low_res_raster,
-            context_actions=context_actions,
-            trajectory_label=trajectory_label,
-            scenario_type=scenario_type,
-            pred_length=pred_length,
-            context_length=context_length,
-        )
-        input_embeds, _, selected_indices = self.encoder(**feature_inputs)
+
+        input_embeds, info_dict = self.encoder(**kwargs)
+
+        selected_indices = info_dict["selected_indices"]
+        pred_length = info_dict["pred_length"]
+        trajectory_label = info_dict["trajectory_label"]
+        context_length = info_dict["context_length"]
+
+        device = input_embeds.device
+        batch_size = trajectory_label.shape[0]
+
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
 
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
@@ -235,7 +291,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
         future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
         key_points_num = future_key_points.shape[1]
-        input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
+
+        if self.model_args.interaction:
+            input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
+        input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num,
+        :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
         # Loop for generation
         for i in range(key_points_num):
@@ -266,25 +326,34 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
-            self.model_args.generate_with_offroad_correction = True
-            if self.model_args.generate_with_offroad_correction and batch_size == 1 and map_name is not None and route_ids is not None and road_dic is not None and map_name != 'sg-one-north':
-                # currently only support batch size 1, i.e. single sample generation
-                pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
-                                                            ego_pose,
-                                                            ego_to_global=True)
-                # find closest point on the route
-                closest_point = project_point_to_nearest_lane_on_route(road_dic, route_ids, pred_key_point_global)
-                closest_point_relative = change_coordination(closest_point, ego_pose, ego_to_global=False)
-                pred_key_point[0, 0, :2] = torch.tensor(closest_point_relative[:2], device=pred_key_point.device)
-            # if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
-            #     # replace last key point with IDM reference
-            #     ego_state_global = idm_reference_global[selected_indices[-1]]
-            #     idm_reference_lastpt_relative = change_coordination(np.array([ego_state_global.rear_axle.x,
-            #                                                                   ego_state_global.rear_axle.y]),
-            #                                                         ego_pose,
-            #                                                         ego_to_global=False)
-            #     print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
-            #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
+            off_road_checking = False
+            if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
+                # Check key points with map_api
+                # WARNING: WIP, do not use
+                pred_key_point_global = nuplan_utils.change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
+                                                                         ego_pose,
+                                                                         ego_to_global=True)
+                closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
+                nearest = closest_lane_road_dic['road_id']
+                nearest_lane = closest_lane_road_dic['lane_id']
+                dist = closest_lane_road_dic['distance_to_road_block']
+                if nearest not in route_ids or dist > 0.5:
+                    # off-road, move to nearest lane according to PDMPath
+                    dist = nuplan_utils.euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
+                    interpolate_point = center_path.interpolate(np.array([dist]))[0]
+                    print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
+                    pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
+
+            if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
+                # replace last key point with IDM reference
+                ego_state_global = idm_reference_global[selected_indices[-1]]
+                idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
+                                                                                           ego_state_global.rear_axle.y]),
+                                                                                 ego_pose,
+                                                                                 ego_to_global=False)
+                print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0,
+                                                                                                  :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
+                pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
             key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
             input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
@@ -292,27 +361,45 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
             else:
                 pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+
+        if self.model_args.interaction:
+            input_embeds = self.encoder.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=False)
+            attention_mask = info_dict["input_embeds_mask"]
+        else:
+            attention_mask = None
         # generate remaining trajectory
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
-            attention_mask=None,
+            attention_mask=attention_mask,
             position_ids=None,
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+
+        if self.model_args.interaction:
+            transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
+
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         if self.traj_decoder is not None:
             traj_logits = self.traj_decoder(traj_hidden_state)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:,
+                                         scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 +
+                                                                                    future_key_points.shape[1] - 1, :]
 
         if self.k > 1:
-            b, _, c = pred_key_points_during_generate[0].shape
-            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(b, -1, c)
+            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+            pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
+            selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
+                                  torch.arange(batch_size * key_points_num),
+                                  pred_logits.argmax(dim=-1).reshape(-1),
+                                  :].reshape(batch_size, key_points_num, -1)
+            key_points_logits = selected_key_points
         elif self.k == 1:
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
             # use previous prediction during generation
+            # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
             key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
         else:
             raise ValueError("illegal k while generating trajectory", self.k)
@@ -374,33 +461,6 @@ def query_current_lane(map_api, target_point):
         'distance_to_lane': dist_to_nearest_lane
     }
 
-def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
-    import numpy as np
-    points_of_lane = []
-    for each_road_id in route_ids:
-        each_road_id = int(each_road_id)
-        if each_road_id not in road_dic:
-            continue
-        road_block = road_dic[each_road_id]
-        lanes_in_block = road_block['lower_level']
-        for each_lane in lanes_in_block:
-            each_lane = int(each_lane)
-            if each_lane not in road_dic:
-                continue
-            points_of_lane.append(road_dic[each_lane]['xyz'])
-    if len(points_of_lane) <= 1:
-        print('Warning: No lane found in route, return original point.')
-        return org_point
-    points_np = np.vstack(points_of_lane)
-    total_points = points_np.shape[0]
-    dist_xy = abs(points_np[:, :2] - np.repeat(org_point[np.newaxis, :], total_points, axis=0))
-    dist = dist_xy[:, 0] + dist_xy[:, 1]
-    minimal_index = np.argmin(dist)
-    minimal_point = points_np[minimal_index, :2]
-    min_dist = min(dist)
-    return minimal_point
-    # return minimal_point if min_dist < 10 else org_point
-
 
 def build_models(model_args):
     if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
@@ -457,8 +517,20 @@ def build_models(model_args):
             config_p.n_inner = model_args.d_inner
             config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
-        ModelCls = TrajectoryGPT
-        tag = 'GPTTrajectory'
+
+        if not model_args.generate_diffusion_dataset_for_key_points_decoder:
+            if 'diffusion_KP_decoder' not in model_args.model_name:
+                ModelCls = TrajectoryGPT
+                tag = 'GPTTrajectory'
+            else:
+                from transformer4planning.models.diffusion_KP_model import TrajectoryGPTDiffusionKPDecoder
+                ModelCls = TrajectoryGPTDiffusionKPDecoder
+                tag = 'GPTTrajectory with Diffusion Key Point Decoder'
+        else:
+            from transformer4planning.models.diffusion_KP_model import TrajectoryGPTFeatureGen
+            print("Now generating features.")
+            ModelCls = TrajectoryGPTFeatureGen
+            tag = 'GPTTrajectory: Model For Generating and Saving Features used for training DiffusionKeyPointDecoder'
     elif 'transxl' in model_args.model_name:
         config_p = TransfoXLConfig()
         config_p.pad_token_id = 0
@@ -505,26 +577,6 @@ def build_models(model_args):
         from transformer4planning.models.mmtransformer.model import MMTransformer
         ModelCls = MMTransformer
         tag = 'mmtransformer'
-    elif 'waymomodel' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        from .waymo_model import GPTModelWaymo
-        ModelCls = GPTModelWaymo
-        tag = 'waymomodel'
-    elif 'demo' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
-        from .waymo_model import GPTModelDemo
-        ModelCls = GPTModelDemo
-        tag = 'demo'
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:
@@ -536,4 +588,14 @@ def build_models(model_args):
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p, model_args=model_args)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
+
+    if model_args.key_points_diffusion_decoder_load_from is not None:
+        assert type(model) == TrajectoryGPTDiffusionKPDecoder, ''
+        print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
+        from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints
+        state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
+        pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(1024, 256, out_features=4 if model_args.predict_yaw else 2, feat_dim=model_args.key_points_diffusion_decoder_feat_dim, num_key_points=model_args.key_points_num, input_feature_seq_lenth=model_args.diffusion_condition_sequence_lenth)
+        pretrained_key_points_diffusion_decoder.load_state_dict(state_dict)
+        model.key_points_decoder = pretrained_key_points_diffusion_decoder
+
     return model
