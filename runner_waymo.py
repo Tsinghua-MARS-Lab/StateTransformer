@@ -36,7 +36,6 @@ from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArgume
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
-from dataset_gen.preprocess import preprocess, nuplan_collate_func
 
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 

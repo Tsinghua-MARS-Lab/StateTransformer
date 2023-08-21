@@ -2,8 +2,8 @@ from transformers import GPT2Model, GPT2PreTrainedModel, GPT2Tokenizer
 import torch
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.encoders import *
-from transformer4planning.models.decoders import *
+from transformer4planning.models.encoder.nuplan_raster_encoder import *
+from transformer4planning.libs.models.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
 class GPTAutoRegressiveModelVector(GPT2PreTrainedModel):

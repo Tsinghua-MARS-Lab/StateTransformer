@@ -99,7 +99,7 @@ def transform_preds_to_waymo_format(pred_dicts, top_k_for_eval=-1, eval_second=8
     num_max_objs_per_scene = 0
     for k in range(len(pred_dicts)):
         cur_scenario_id = pred_dicts[k]['scenario_id']
-        if  cur_scenario_id not in scene2preds:
+        if cur_scenario_id not in scene2preds:
             scene2preds[cur_scenario_id] = []
         scene2preds[cur_scenario_id].append(pred_dicts[k])
         num_max_objs_per_scene = max(num_max_objs_per_scene, len(scene2preds[cur_scenario_id]))
