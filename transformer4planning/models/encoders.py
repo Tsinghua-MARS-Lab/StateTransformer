@@ -148,14 +148,8 @@ class NuplanRasterizeEncoder(AugmentationMixin):
                 future_key_points_aug[:, :, 2:] = 0
 
             future_key_embeds = self.action_m_embed(future_key_points_aug)
-            if self.model_args.score_with_separate_token:
-                future_key_embeds = future_key_embeds.repeat(1, 2, 1)
-                future_key_embeds[:, ::2, :] = 0
-                input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                          torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-            else:
-                input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                          torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 

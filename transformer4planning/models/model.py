@@ -130,10 +130,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            if self.model_args.score_with_separate_token:
-                future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] * 2 - 1:2, :]
-            else:
-                future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -159,11 +156,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 min_loss, min_loss_indices = torch.min(loss_to_add, dim=2)  # b, s
                 loss += min_loss.mean()
                 if self.next_token_scorer_decoder is not None:
-                    if self.model_args.score_with_separate_token:
-                        future_key_points_scorer_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + future_key_points.shape[1] * 2:2, :]
-                        pred_logits = self.next_token_scorer_decoder(future_key_points_scorer_hidden_state.to(device))  # b, s, k
-                    else:
-                        pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
+                    pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
                     loss_fct = CrossEntropyLoss(reduction="mean")
                     loss_to_add = loss_fct(pred_logits.reshape(b * s, self.k).to(torch.float64), min_loss_indices.reshape(-1).long())
                     loss += loss_to_add
@@ -242,18 +235,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         assert future_key_points.shape[1] > 0, 'future points not enough to sample'
         future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
         key_points_num = future_key_points.shape[1]
-        if self.model_args.score_with_separate_token:
-            input_embeds[:, scenario_type_len + context_length * 2 + 1:scenario_type_len + context_length * 2 + key_points_num * 2 + 1:2, :] = future_key_embeds_dummy
-            input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num * 2:2, :] = 0
-        else:
-            input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
+        input_embeds[:, scenario_type_len + context_length * 2:scenario_type_len + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
         # Loop for generation
         for i in range(key_points_num):
-            if self.model_args.score_with_separate_token:
-                input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + (i + 1) * 2 - 1, :]
-            else:
-                input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
+            input_embeds_current = input_embeds[:, :scenario_type_len + context_length * 2 + i, :]
             attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
             position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
@@ -262,28 +248,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 position_ids=position_ids,
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            if self.model_args.score_with_separate_token:
-                # [O, A, O, A, KP, KP-Scorer, KP, KP-Scorer, KP, KP-Scorer, Tau, ...]
-                # [0, 1, 2, 3, 4,  5, ...]
-                #  ->
-                # [A, O, A, KP, KP-Scorer, KP, KP-Scorer, Tau, ...]
-                # [0, 1, 2, 3,  4,  ...]
-                future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                                scenario_type_len + context_length * 2 + i * 2 - 1,
-                                                :].reshape(batch_size, 1, -1)
-            else:
-                future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                                scenario_type_len + context_length * 2 + i - 1,
-                                                :].reshape(batch_size, 1, -1)
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:,
+                                            scenario_type_len + context_length * 2 + i - 1,
+                                            :].reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
-                if self.model_args.score_with_separate_token:
-                    future_key_points_scorer_hidden_state = transformer_outputs_hidden_state[:,
-                                                            scenario_type_len + context_length * 2 + i * 2, :]
-                    pred_logits = self.next_token_scorer_decoder(future_key_points_scorer_hidden_state.to(device))  # b, s, k
-                else:
-                    pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
+                pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
                 selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
                                      pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
                 key_points_logit = selected_key_point
@@ -316,10 +287,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
             key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
-            if self.model_args.score_with_separate_token:
-                input_embeds[:, scenario_type_len + context_length * 2 + i * 2, :] = key_point_embed[:, 0, :]
-            else:
-                input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+            input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
             if self.model_args.predict_yaw:
                 pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
             else:
@@ -337,10 +305,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             traj_logits = self.traj_decoder(traj_hidden_state)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
-        if self.model_args.score_with_separate_token:
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] * 2 - 1:2, :]
-        else:
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
 
         if self.k > 1:
             b, _, c = pred_key_points_during_generate[0].shape

@@ -135,9 +135,6 @@ class ModelArguments:
     generate_with_offroad_correction: Optional[bool] = field(
         default=False
     )
-    score_with_separate_token: Optional[bool] = field(
-        default=False
-    )
 
 
 def rotate_array(origin, points, angle, tuple=False):
