@@ -407,24 +407,28 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         if not self.use_anchor:
             assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
-        # use autoregressive future interval
-        trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
-        if self.model_args.specified_key_points:
-            # 80, 40, 20, 10, 5
-            if self.model_args.forward_specified_key_points:
-                selected_indices = [4, 9, 19, 39, 79]
+        if self.ar_future_interval > 0:
+            # use autoregressive future interval
+            trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
+            if self.model_args.specified_key_points:
+                # 80, 40, 20, 10, 5
+                if self.model_args.forward_specified_key_points:
+                    selected_indices = [4, 9, 19, 39, 79]
+                else:
+                    selected_indices = [79, 39, 19, 9, 4]
+                future_key_points = trajectory_label_dummy[:, selected_indices, :]
+                future_key_points_gt = trajectory_label[:, selected_indices, :]
             else:
-                selected_indices = [79, 39, 19, 9, 4]
-            future_key_points = trajectory_label_dummy[:, selected_indices, :]
-            future_key_points_gt = trajectory_label[:, selected_indices, :]
+                future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                future_key_points_gt = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+            assert future_key_points.shape[1] > 0, 'future points not enough to sample'
+            future_key_embeds_dummy = self.action_m_embed(future_key_points)
+            input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
+                                    torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
+            key_points_num = future_key_points.shape[1]
         else:
-            future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-            future_key_points_gt = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-        assert future_key_points.shape[1] > 0, 'future points not enough to sample'
-        future_key_embeds_dummy = self.action_m_embed(future_key_points)
-        input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
-                                  torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
-        key_points_num = future_key_points.shape[1]
+            input_embeds = torch.cat([input_embeds,
+                                    torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
         
         if self.use_anchor and self.ar_future_interval == 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
