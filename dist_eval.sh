@@ -3,8 +3,8 @@
 export CUDA_VISIBLE_DEVICES=0;
 python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_waymo.py \
         --model_name pretrain-vector-gpt \
-        --model_pretrain_name_or_path /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle/training_results/checkpoint-20000 \
-        --output_dir /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle/training_results  \
+        --model_pretrain_name_or_path /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results/checkpoint-350000 \
+        --output_dir /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results  \
         --run_name gpt_mse_FI1_PI1_k1_test \
         --per_device_eval_batch_size 16 --dataloader_num_workers 10 --predict_trajectory True --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True \
