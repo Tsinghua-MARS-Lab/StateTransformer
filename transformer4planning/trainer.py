@@ -621,8 +621,6 @@ class PlanningTrainer(Trainer):
                 break
         
         print('*'*20, ' anchor hard match ', anchor_hard_match_num, " anchor soft match ", anchor_soft_match_num, ' tot num ', tot_num, '*'*20)
-        if not self.model.predict_trajectory:
-            return
 
         if self.is_world_process_zero:
             progress_bar.close()

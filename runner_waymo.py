@@ -64,24 +64,20 @@ def main():
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
-    model_args, data_args, config_args, data_process, training_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
 
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
         road_types = 20
         agent_types = 8
         traffic_types = 4
-        past_sample_number = int(2 * 20 / data_process.past_sample_interval)  # past_seconds-2, frame_rate-20
+        past_sample_number = int(2 * 20 / model_args.past_sample_interval)  # past_seconds-2, frame_rate-20
         if 'auto' not in model_args.model_name:
             # will cast into each frame
             if model_args.with_traffic_light:
                 model_args.raster_channels = 1 + road_types + traffic_types + agent_types
             else:
                 model_args.raster_channels = 1 + road_types + agent_types
-
-    # Set up pytorch backend
-    # if training_args.deepspeed is None:
-    #     torch.distributed.init_process_group(backend='nccl')
 
     # Setup logging
     logging.basicConfig(
@@ -109,23 +105,23 @@ def main():
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Handle config loading and saving
-    if config_args.load_model_config_from_path is not None:
-        # Load the data class object from the JSON file
-        model_parser = HfArgumentParser(ModelArguments)
-        model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
-        print(model_args)
-        logger.warning("Loading model args, this will overwrite model args from command lines!!!")
-    if config_args.load_data_config_from_path is not None:
-        # Load the data class object from the JSON file
-        data_parser = HfArgumentParser(DataTrainingArguments)
-        data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
-        logger.warning("Loading data args, this will overwrite data args from command lines!!!")
-    if config_args.save_model_config_to_path is not None:
-        with open(config_args.save_model_config_to_path, 'w') as f:
-            json.dump(model_args.__dict__, f, indent=4)
-    if config_args.save_data_config_to_path is not None:
-        with open(config_args.save_data_config_to_path, 'w') as f:
-            json.dump(data_args.__dict__, f, indent=4)
+    # if config_args.load_model_config_from_path is not None:
+    #     # Load the data class object from the JSON file
+    #     model_parser = HfArgumentParser(ModelArguments)
+    #     model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
+    #     print(model_args)
+    #     logger.warning("Loading model args, this will overwrite model args from command lines!!!")
+    # if config_args.load_data_config_from_path is not None:
+    #     # Load the data class object from the JSON file
+    #     data_parser = HfArgumentParser(DataTrainingArguments)
+    #     data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
+    #     logger.warning("Loading data args, this will overwrite data args from command lines!!!")
+    # if config_args.save_model_config_to_path is not None:
+    #     with open(config_args.save_model_config_to_path, 'w') as f:
+    #         json.dump(model_args.__dict__, f, indent=4)
+    # if config_args.save_data_config_to_path is not None:
+    #     with open(config_args.save_data_config_to_path, 'w') as f:
+    #         json.dump(data_args.__dict__, f, indent=4)
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -255,7 +251,7 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
-        if data_args.dataset_name == 'waymo':
+        if model_args.task == "waymo":
             trainer.evaluate_waymo()
             return
             
@@ -443,13 +439,13 @@ def main():
     kwargs = {"finetuned_from": model_args.model_pretrain_name_or_path, "tasks": "NuPlanPlanning"}
     
     # push to hub?
-    if data_args.dataset_name is not None:
-        kwargs["dataset_tags"] = data_args.dataset_name
+    if model_args.task is not None:
+        kwargs["dataset_tags"] = model_args.task
         if data_args.dataset_config_name is not None:
             kwargs["dataset_args"] = data_args.dataset_config_name
-            kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
+            kwargs["dataset"] = f"{model_args.task} {data_args.dataset_config_name}"
         else:
-            kwargs["dataset"] = data_args.dataset_name
+            kwargs["dataset"] = model_args.task
 
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
