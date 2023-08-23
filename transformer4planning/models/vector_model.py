@@ -1,11 +1,10 @@
 import os
 import pickle
 import torch
-import torch.nn as nn
-from transformers import GPT2Tokenizer
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.decoders import DecoderResCat
+from transformer4planning.models.encoder.nuplan_raster_encoder import *
+from transformer4planning.libs.models.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
 class GPTAutoRegressiveModelVector(GPT2PreTrainedModel):
@@ -363,12 +362,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                               )
 
         if not return_dict:
-            output = (pred_traj_logits,) + transformer_outputs[1:]
+            output = (traj_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
-            logits=pred_traj_logits,
+            logits=traj_logits,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
@@ -657,33 +656,24 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             transformer_output = self.transformer(
                 inputs_embeds=input_embeds_current,
                 attention_mask=attention_mask,
-                position_ids=position_ids
+                position_ids=position_ids,
+                # **input_kwargs
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             future_key_point_hidden_state = transformer_outputs_hidden_state[:, tot_scenario_contenxt_anchor_len + i - 1, :].reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
-                pred_kps_score = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
-                
-                # delta = (key_points_logit.reshape(batch_size, self.k, -1) - future_key_points_gt[:, [i], :2])
-                # dist = -delta[..., 0]*delta[..., 0] - delta[..., 1]*delta[..., 1]
-                # pred_kps_score = dist[:, None, :]
-                
-                # pred_kps_score_index = pred_kps_score.argsort(dim=-1)
-                # selected_key_point = torch.zeros((batch_size, 1, 2), device=pred_kps_score.device, dtype=pred_kps_score.dtype)
-                
-                # for s_ind in range(3):
-                #     selected_key_point += key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_kps_score_index[:, 0, s_ind].reshape(-1), :].reshape(batch_size, 1, -1)
-                
-                # selected_key_point /= 3.0
-                
-                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_kps_score.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)    
+                pred_logits = self.next_token_scorer_decoder(future_key_point_hidden_state.to(device)).reshape(batch_size, 1, -1)  # b, 1, k
+                selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size), pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
                 key_points_logit = selected_key_point
             else:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
             pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
-            pred_key_point[:, 0, :self.pred_dim] = key_points_logit[:, 0, :]
+            if self.model_args.predict_yaw:
+                pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
+            else:
+                pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
             key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
