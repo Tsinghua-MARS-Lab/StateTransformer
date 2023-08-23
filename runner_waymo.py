@@ -34,7 +34,13 @@ from transformers import (
 )
 from transformer4planning.models.model import build_models
 from transformers.trainer_utils import get_last_checkpoint
-from transformer4planning.trainer import PlanningTrainer, PlanningTrainingArguments, CustomCallback
+from transformer4planning.trainer import PlanningTrainer, CustomCallback
+from transformer4planning.utils import (
+    ModelArguments, 
+    DataTrainingArguments, 
+    ConfigArguments, 
+    PlanningTrainingArguments
+)
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
 from transformers.trainer_callback import DefaultFlowCallback
@@ -51,222 +57,13 @@ __all__ = {
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-@dataclass
-class ModelArguments:
-    """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-    """
-    model_name: str = field(
-        default="scratch-gpt",
-        metadata={"help": "Name of a planning model backbone"}
-    )
-    model_pretrain_name_or_path: str = field(
-        default=None,
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    predict_result_saving_dir: Optional[str] = field(
-        default=False,
-        metadata={"help": "The target folder to save prediction results."},
-    )
-    predict_trajectory: Optional[bool] = field(
-        default=True,
-    )
-    recover_obs: Optional[bool] = field(
-        default=False,
-    )
-    teacher_forcing_obs: Optional[bool] = field(
-        default=False,
-    )
-    d_embed: Optional[int] = field(
-        default=256,
-    )
-    d_model: Optional[int] = field(
-        default=256,
-    )
-    d_inner: Optional[int] = field(
-        default=1024,
-    )
-    n_layers: Optional[int] = field(
-        default=4,
-    )
-    n_heads: Optional[int] = field(
-        default=8,
-    )
-    # Activation function, to be selected in the list `["relu", "silu", "gelu", "tanh", "gelu_new"]`.
-    activation_function: Optional[str] = field(
-        default = "gelu_new"
-    )
-    loss_fn: Optional[str] = field(
-        default="mse",
-    )
-    task: Optional[str] = field(
-        default="nuplan" # only for mmtransformer
-    )
-    with_traffic_light: Optional[bool] = field(
-        default=True
-    )
-    autoregressive: Optional[bool] = field(
-        default=False
-    )
-    k: Optional[int] = field(
-        default=1,
-        metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
-    )
-    next_token_scorer: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to use next token scorer for prediction."},
-    )
-    past_seq: Optional[int] = field(
-        # 20 frames / 4 = 5 frames per second, 5 * 2 seconds = 10 frames
-        # 20 frames / 10 = 2 frames per second, 2 * 2 seconds = 4 frames
-        default=10,
-        metadata={"help": "past frames to include for prediction/planning."},
-    )
-    x_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    y_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    tokenize_label: Optional[bool] = field(
-        default=True
-    )
-    raster_channels: Optional[int] = field(
-        default=33,
-        metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
-    )
-    predict_yaw: Optional[bool] = field(
-        default=False
-    )
-    ar_future_interval: Optional[int] = field(
-        default=0,
-        metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
-    )
-    arf_x_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    arf_y_random_walk: Optional[float] = field(
-        default=0.0
-    )
-    trajectory_loss_rescale: Optional[float] = field(
-        default=1.0
-    )
-    visualize_prediction_to_path: Optional[str] = field(
-        default=None
-    )
-    pred_key_points_only: Optional[bool] = field(
-        default=False
-    )
-    specified_key_points: Optional[bool] = field(
-        default=False
-    )
-    forward_specified_key_points: Optional[bool] = field(
-        default=False
-    )
-    token_scenario_tag: Optional[bool] = field(
-        default=False
-    )
-    max_token_len: Optional[int] = field(
-        default=20
-    )
-
-@dataclass
-class DataTrainingArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    saved_dataset_folder: Optional[str] = field(
-        default=None, metadata={"help": "The path of a pre-saved dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
-    )
-    saved_valid_dataset_folder: Optional[str] = field(
-        default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
-    )
-    dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_eval_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
-        },
-    )
-    max_predict_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of prediction examples to this "
-                "value if set."
-            )
-        },
-    )    
-    dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The dataset name from hugging face used to push the model."}
-    )
-    dataset_scale: Optional[float] = field(
-        default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
-    )
-    dagger: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to save dagger results"}
-    )
-    online_preprocess: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to generate raster dataset online"}
-    )
-    datadic_path: Optional[str] = field(
-        default=None, metadata={"help":"The root path of data dictionary pickle file"}
-    )
-
-@dataclass
-class ConfigArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    save_model_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current model config to a json file if not None"}
-    )
-    save_data_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current data config to a json file if not None"}
-    )
-    load_model_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load model config from a json file if not None"}
-    )
-    load_data_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load data config to a json file if not None"}
-    )
-
-@dataclass
-class DataProcessArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    past_sample_interval: Optional[int] = field(
-        default=4
-    )
-    future_sample_interval: Optional[int] = field(
-        default=4
-    )
-    debug_raster_path: Optional[str] = field(
-        default=None
-    )
-
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, DataProcessArguments, PlanningTrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
     model_args, data_args, config_args, data_process, training_args = parser.parse_args_into_dataclasses()
 
     # pre-compute raster channels number
