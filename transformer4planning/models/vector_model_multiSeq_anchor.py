@@ -1,11 +1,13 @@
 import os
 import pickle
+from typing import List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 from transformers import GPT2Tokenizer
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
-from transformer4planning.models.GPT2.models import *
-from transformer4planning.models.decoders import DecoderResCat
+from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
+from transformer4planning.libs.models.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
 
@@ -109,7 +111,6 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
             self.intention_points[cur_type][79] = cur_intention_points
         
         # decoder
-        self.predict_trajectory = model_args.predict_trajectory
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
@@ -123,8 +124,7 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
         self.key_points_decoder = None
         out_features = 4 if model_args.predict_yaw else 2
         
-        if self.predict_trajectory:
-            self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
+        self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
             
         if self.ar_future_interval > 0:
             self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
@@ -192,37 +192,6 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
         
         self.tot_iter_num = 0
         self.debug = True
-
-    @add_start_docstrings(PARALLELIZE_DOCSTRING)
-    def parallelize(self, device_map=None):
-        warnings.warn(
-            "`GPT2LMHeadModel.parallelize` is deprecated and will be removed in v5 of Transformers, you should load"
-            " your model with `device_map='balanced'` in the call to `from_pretrained`. You can also provide your own"
-            " `device_map` but it needs to be a dictionary module_name to device, so for instance {'transformer.h.0':"
-            " 0, 'transformer.h.1': 1, ...}",
-            FutureWarning,
-        )
-        self.device_map = (
-            get_device_map(len(self.transformer.h), range(torch.cuda.device_count()))
-            if device_map is None
-            else device_map
-        )
-        assert_device_map(self.device_map, len(self.transformer.h))
-        self.transformer.parallelize(self.device_map)
-        self.traj_decoder = self.traj_decoder.to(self.transformer.first_device)
-        self.model_parallel = True
-
-    @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
-    def deparallelize(self):
-        warnings.warn(
-            "Like `parallelize`, `deparallelize` is deprecated and will be removed in v5 of Transformers.",
-            FutureWarning,
-        )
-        self.transformer.deparallelize()
-        self.transformer = self.transformer.to("cpu")
-        self.traj_decoder = self.traj_decoder.to("cpu")
-        self.model_parallel = False
-        torch.cuda.empty_cache()
 
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -413,9 +382,7 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-        pred_traj_logits = None
-        if self.predict_trajectory:
-            pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
+        pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
         pred_kps_logits = None
         pred_kps_cls = None
         
@@ -583,9 +550,6 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
             
         out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': batch_size}
         
-        if not self.predict_trajectory:
-            return out_res
-        
         for m_i in range(n_mode):
             input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_anchor_len+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
             transformer_output = self.transformer(
@@ -637,10 +601,9 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
         loss_traj = torch.tensor(0, dtype=torch.float32, device=device)
 
         # loss traj
-        if self.predict_trajectory:
-            loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
-            loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
-            loss += loss_traj
+        loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
+        loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
+        loss += loss_traj
 
         # loss kps
         if self.ar_future_interval > 0:
