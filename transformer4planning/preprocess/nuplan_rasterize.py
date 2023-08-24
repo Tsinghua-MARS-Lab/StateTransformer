@@ -7,9 +7,10 @@ import os
 import torch
 from functools import partial
 from torch.utils.data._utils.collate import default_collate
-from transformer4planning.utils import generate_contour_pts, save_raster
+from transformer4planning.utils.nuplan_utils import generate_contour_pts
+from transformer4planning.utils.common_utils import save_raster
 
-def nuplan_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
+def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -73,7 +74,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           high_res_scale=4, low_res_scale=0.77,
                           road_types=20, agent_types=8, traffic_types=4,
                           past_sample_interval=5, future_sample_interval=2,
-                          debug_raster_path=None, all_maps_dic=None, all_pickles_dic=None, agent_dic=None,
+                          debug_raster_path=None, all_maps_dic=None, agent_dic=None,
                           frequency_change_rate=2, **kwargs):
     """
     WARNING: frame_rate has been change to 10 as default to generate new dataset pickles, this is automatically processed by hard-coded logits
