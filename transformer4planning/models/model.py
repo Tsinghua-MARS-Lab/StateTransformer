@@ -253,15 +253,15 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         forward function.
         """
         # pass the following infos during generate for one sample (non-batch) generate with KP checking
-        map_api = kwargs.get("map_api", None)
+        map_name = kwargs.get("map", None)
         route_ids = kwargs.get("route_ids", None)
         ego_pose = kwargs.get("ego_pose", None)
         road_dic = kwargs.get("road_dic", None)
-        idm_reference_global = kwargs.get("idm_reference_global", None)
+        # idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
         """
         Used for generate with key points
         """
-        input_embeds, info_dict  = self.encoder(**kwargs)
+        input_embeds, info_dict = self.encoder(**kwargs)
 
         selected_indices = info_dict["selected_indices"]
         pred_length = info_dict["pred_length"]
@@ -316,33 +316,25 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
-            off_road_checking = False
-            if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
-                # Check key points with map_api
-                # WARNING: WIP, do not use
-                pred_key_point_global = nuplan_utils.change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
-                                                                         ego_pose,
-                                                                         ego_to_global=True)
-                closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
-                nearest = closest_lane_road_dic['road_id']
-                nearest_lane = closest_lane_road_dic['lane_id']
-                dist = closest_lane_road_dic['distance_to_road_block']
-                if nearest not in route_ids or dist > 0.5:
-                    # off-road, move to nearest lane according to PDMPath
-                    dist = nuplan_utils.euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
-                    interpolate_point = center_path.interpolate(np.array([dist]))[0]
-                    print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
-                    pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
-
-            if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
-                # replace last key point with IDM reference
-                ego_state_global = idm_reference_global[selected_indices[-1]]
-                idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
-                                                                                           ego_state_global.rear_axle.y]),
-                                                                                 ego_pose,
-                                                                                 ego_to_global=False)
-                print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
-                pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
+            # self.model_args.generate_with_offroad_correction = True
+            if self.model_args.generate_with_offroad_correction and batch_size == 1 and map_name is not None and route_ids is not None and road_dic is not None and map_name != 'sg-one-north':
+                # currently only support batch size 1, i.e. single sample generation
+                pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
+                                                            ego_pose,
+                                                            ego_to_global=True)
+                # find closest point on the route
+                closest_point = project_point_to_nearest_lane_on_route(road_dic, route_ids, pred_key_point_global)
+                closest_point_relative = change_coordination(closest_point, ego_pose, ego_to_global=False)
+                pred_key_point[0, 0, :2] = torch.tensor(closest_point_relative[:2], device=pred_key_point.device)
+            # if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
+            #     # replace last key point with IDM reference
+            #     ego_state_global = idm_reference_global[selected_indices[-1]]
+            #     idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
+            #                                                                                ego_state_global.rear_axle.y]),
+            #                                                                      ego_pose,
+            #                                                                      ego_to_global=False)
+            #     print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
+            #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
             key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
             # replace embed at the next position
             input_embeds[:, scenario_type_len + context_length * 2 + i, :] = key_point_embed[:, 0, :]
@@ -378,13 +370,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                                     future_key_points.shape[1] - 1, :]
 
         if self.k > 1:
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
-            pred_logits = self.next_token_scorer_decoder(future_key_points_hidden_state.to(device))  # b, s, k
-            selected_key_points = key_points_logits.reshape(batch_size * key_points_num, self.k, -1)[
-                                  torch.arange(batch_size * key_points_num),
-                                  pred_logits.argmax(dim=-1).reshape(-1),
-                                  :].reshape(batch_size, key_points_num, -1)
-            key_points_logits = selected_key_points
+            b, _, c = pred_key_points_during_generate[0].shape
+            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(b, -1, c)
         elif self.k == 1:
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
             # use previous prediction during generation
@@ -448,6 +435,34 @@ def query_current_lane(map_api, target_point):
         'distance_to_road_block': dist_to_road_block,
         'distance_to_lane': dist_to_nearest_lane
     }
+
+
+def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
+    import numpy as np
+    points_of_lane = []
+    for each_road_id in route_ids:
+        each_road_id = int(each_road_id)
+        if each_road_id not in road_dic:
+            continue
+        road_block = road_dic[each_road_id]
+        lanes_in_block = road_block['lower_level']
+        for each_lane in lanes_in_block:
+            each_lane = int(each_lane)
+            if each_lane not in road_dic:
+                continue
+            points_of_lane.append(road_dic[each_lane]['xyz'])
+    if len(points_of_lane) <= 1:
+        print('Warning: No lane found in route, return original point.')
+        return org_point
+    points_np = np.vstack(points_of_lane)
+    total_points = points_np.shape[0]
+    dist_xy = abs(points_np[:, :2] - np.repeat(org_point[np.newaxis, :], total_points, axis=0))
+    dist = dist_xy[:, 0] + dist_xy[:, 1]
+    minimal_index = np.argmin(dist)
+    minimal_point = points_np[minimal_index, :2]
+    min_dist = min(dist)
+    return minimal_point
+    # return minimal_point if min_dist < 10 else org_point
 
 
 def build_models(model_args):
