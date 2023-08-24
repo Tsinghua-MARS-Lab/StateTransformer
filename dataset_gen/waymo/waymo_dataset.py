@@ -150,7 +150,7 @@ class WaymoDataset(DatasetTemplate):
             'obj_ids': obj_ids,
 
             'center_objects_world': center_objects,
-            "center_objects_past": center_gt_past_trajs, # (x, y, z, rot)
+            "center_objects_past": center_gt_past_trajs[..., :4], # (x, y, z, rot, vx, vy)
             # "center_objects_past": center_objects_past[..., [0,1,2,6]], # (x, y, z, l, w, h, heading, vx, vy, valid)
             'trajectory_label': center_gt_trajs_labels, # ( x, y, z, heading)
             'center_objects_id': np.array(track_infos['object_id'])[track_index_to_predict],
@@ -355,7 +355,7 @@ class WaymoDataset(DatasetTemplate):
         # ret_obj_valid_mask[np.arange(len(center_indices)), center_indices, :] = 0
         ret_obj_trajs[ret_obj_valid_mask == 0] = 0
         
-        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6]]
+        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6, 7, 8]]
         ret_center_past_trajs_mask = obj_trajs[np.arange(len(center_indices)), center_indices, :, -1]
         ret_center_past_trajs[ret_center_past_trajs_mask == 0] = 0
 

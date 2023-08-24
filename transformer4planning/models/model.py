@@ -395,6 +395,7 @@ def build_models(model_args):
         config_p = None
         if not model_args.autoregressive:
             from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
+            from transformer4planning.models.vector_model_multiSeq_anchor import GPTNonAutoRegressiveModelVector_MutliSeqAnchor
             ModelCls = GPTNonAutoRegressiveModelVector
             tag = 'Vector GPT nonauto'
         else:

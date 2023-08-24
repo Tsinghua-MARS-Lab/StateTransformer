@@ -140,6 +140,12 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
             self.anchor_logits_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= out_features * self.anchor_num)
             self.anchor_index = [79, 39]
             self.anchor_len = len(self.anchor_index)
+            
+            # self.anchor_cls_decoder = []
+            # self.anchor_logits_decoder = []
+            # for a_i in range(self.anchor_len):
+                # self.anchor_cls_decoder.append(DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= self.anchor_num))
+                # self.anchor_logits_decoder.append(DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= out_features * self.anchor_num))
             self.cls_anchor_loss = CrossEntropyLoss(reduction="none")
             self.logits_anchor_loss = MSELoss(reduction="none")
         else:
@@ -274,6 +280,22 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
         
         return input_embeds, context_length, trajectory_label, trajectory_label_mask
         
+    def _decode_anchor_cls_logits(self, pred_anchor_embed):
+        '''
+        pred_anchor_embed: # (bs, anchor_len, n_embed)
+        '''
+        
+        bs = pred_anchor_embed.shape[0]
+        device = pred_anchor_embed.device
+        pred_anchor_cls = torch.zeros((bs, self.anchor_len, self.anchor_num), device=device) # (bs, anchor_len, 64)
+        pred_anchor_logits = torch.zeros((bs, self.anchor_len, self.anchor_num * self.pred_dim), device=device) # (bs, anchor_len, 64 * 2)
+        
+        for i in range(self.anchor_len):
+            pred_anchor_cls[:, i, :] = self.anchor_cls_decoder[i].to(device)(pred_anchor_embed[:, i, :]) 
+            pred_anchor_logits[:, i, :] = self.anchor_logits_decoder.to(device)(pred_anchor_embed[:, i, :]) 
+            
+        return pred_anchor_cls, pred_anchor_logits
+    
     def forward(
             self,
             batch_size, input_dict, batch_sample_count,
@@ -402,6 +424,8 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
         
         if self.use_anchor:
             pred_anchor_embed = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len-1 : tot_scenario_contenxt_len-1+self.anchor_len, :] # (bs, anchor_len, n_embed)
+            
+            # pred_anchor_cls, pred_anchor_logits = self._decode_anchor_cls_logits(pred_anchor_embed)
             pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed) # (bs, anchor_len, 64)
             pred_anchor_logits = self.anchor_logits_decoder(pred_anchor_embed) # (bs, anchor_len, 64 * 2)
 
