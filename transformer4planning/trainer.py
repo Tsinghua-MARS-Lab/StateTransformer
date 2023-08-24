@@ -3,7 +3,7 @@ import tqdm
 import datetime
 import pickle
 from torch.utils.data import DataLoader
-from transformers.trainer_utils import EvalLoopOutput, speed_metrics
+from transformers.trainer_utils import EvalLoopOutput
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
@@ -17,7 +17,6 @@ import torch.nn as nn
 import logging
 import os
 import numpy as np
-import math
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -87,7 +86,6 @@ class PlanningTrainer(Trainer):
         loss_without_labels = True
 
         inputs = self._prepare_inputs(inputs)
-
         if ignore_keys is None:
             if hasattr(self.model, "config"):
                 ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
@@ -95,12 +93,13 @@ class PlanningTrainer(Trainer):
                 ignore_keys = []
 
         # labels may be popped when computing the loss (label smoothing for instance) so we grab them first.
-        # if has_labels or loss_without_labels:
-        #     labels = nested_detach(tuple(inputs.get(name) is not None for name in self.label_names))
-        #     if len(labels) == 1:
-        #         labels = labels[0]
-        # else:
-        #     labels = None
+        if has_labels or loss_without_labels:
+            labels = nested_detach(tuple(inputs.get(name) for name in self.label_names))
+            if len(labels) == 1:
+                labels = labels[0]
+            
+        else:
+            labels = None
 
         with torch.no_grad():
             if is_sagemaker_mp_enabled():
@@ -145,9 +144,12 @@ class PlanningTrainer(Trainer):
                     #     self._past = outputs[self.args.past_index - 1]
 
         if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
+            from transformer4planning.utils.mtr_utils import rotate_points_along_z, str_to_tensor
+
             batch_pred_dicts = self.model.generate(**inputs)
             pred_length = inputs['center_gt_trajs_src'].shape[1] - inputs['current_time_index'][0] - 1
             pred_trajs = batch_pred_dicts['logits'][:, :, -pred_length:, :]
+
             pred_scores = batch_pred_dicts['scores']
             pred_kps = batch_pred_dicts['key_points_logits']
             center_objects_world = inputs['center_objects_world'].type_as(pred_trajs)
@@ -155,52 +157,41 @@ class PlanningTrainer(Trainer):
             num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
             # assert num_feat == 7
 
-            pred_trajs_world = common_utils.rotate_points_along_z(
+            pred_trajs_world = rotate_points_along_z(
                 points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
                 angle=center_objects_world[:, 6].view(num_center_objects)
             ).view(num_center_objects, num_modes, num_timestamps, num_feat)
             pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
-            
+
             num_center_objects, num_modes, num_kps, num_kps_feat = pred_kps.shape
-            pred_kps_world = common_utils.rotate_points_along_z(
+            pred_kps_world = rotate_points_along_z(
                 points=pred_kps.view(num_center_objects, num_modes * num_kps, num_kps_feat),
                 angle=center_objects_world[:, 6].view(num_center_objects)
             ).view(num_center_objects, num_modes, num_kps, num_kps_feat)
             pred_kps_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
 
-            pred_dict = []
-            for obj_idx in range(num_center_objects):
-                single_pred_dict = {
-                    'scenario_id': str(inputs['scenario_id'][obj_idx]),
-                    'pred_trajs': pred_trajs_world[obj_idx, :, :, 0:2].cpu().numpy(),
-                    'pred_scores': pred_scores[obj_idx, :].cpu().numpy(),
-                    'pred_kps': pred_kps_world[obj_idx, :].cpu().numpy(),
-                    'object_id': inputs['center_objects_id'][obj_idx],
-                    'object_type': str(inputs['center_objects_type'][obj_idx]),
-                    'gt_trajs': inputs['center_gt_trajs_src'][obj_idx].cpu().numpy(),
-                    'track_index_to_predict': inputs['track_index_to_predict'][obj_idx].cpu().numpy()
-                }
-                pred_dict.append(single_pred_dict)
-            self.pred_dicts_list += pred_dict
+            pred_dict = {
+                'scenario_id': str_to_tensor(inputs['scenario_id']).to(pred_trajs.device),
+                'pred_trajs': pred_trajs_world[..., 0:2],
+                'pred_scores': pred_scores,
+                'pred_kps': pred_kps_world,
+                'object_id': inputs['center_objects_id'],
+                'object_type': str_to_tensor(inputs['center_objects_type']).to(pred_trajs.device),
+                'gt_trajs': inputs['center_gt_trajs_src'],
+                'track_index_to_predict': inputs['track_index_to_predict']
+            }
 
-            return (loss, None, None)
-        else:
+            if prediction_loss_only:
+                return (loss, None, None)
+            
+            pred_dict = nested_detach(pred_dict)
+            return (loss, pred_dict, labels)
+        else:      
             batch_generate_eval = True
-        # if model.mode == 'OA-OA':
-        #     batch_generate_eval = False
-        #     print('batch generate for OA-OA is not implemented yet')
-        # if self.model.model_args.k not in [-1]:
-        #     batch_generate_eval = False
-        #     print('batch generate for TopK is not implemented yet')
-        # if self.model.model_args.k not in [1, -1]:
-        #     batch_generate_eval = False
-        #     print('batch generate for TopK is not implemented yet')
 
         if batch_generate_eval:
             # run generate for sequence of actions
             if self.model.model_args.autoregressive:
-                if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
-                    raise NotImplementedError
                 # TODO: support different frame interval, change sequence length from 40
                 actions_label_in_batch = inputs["trajectory"].clone()
                 trajectory_label_in_batch = self.model.compute_normalized_points(actions_label_in_batch)
@@ -379,72 +370,39 @@ class PlanningTrainer(Trainer):
                         heading_error_by_gen = torch.abs(heading_error_by_gen).mean()
                         self.eval_result['heading_error_by_gen'].append(float(heading_error_by_gen))
 
+        self.eval_itr += 1
         if prediction_loss_only:
             return (loss, None, None)
-        
+
         logits = nested_detach(logits)
         if len(logits) == 1:
             logits = logits[0]
 
         return (loss, logits, None)
     
-    def evaluate(
+    def evaluation_loop(
         self,
-        eval_dataset: Optional[Dataset] = None,
+        dataloader: DataLoader,
+        description: str,
+        prediction_loss_only: Optional[bool] = None,
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
-    ) -> Dict[str, float]:
-        """
-        Run evaluation and returns metrics.
-
-        The calling script will be responsible for providing a method to compute metrics, as they are task-dependent
-        (pass it to the init `compute_metrics` argument).
-
-        You can also subclass and override this method to inject custom behavior.
-
-        Args:
-            eval_dataset (`Dataset`, *optional*):
-                Pass a dataset if you wish to override `self.eval_dataset`. If it is a [`~datasets.Dataset`], columns
-                not accepted by the `model.forward()` method are automatically removed. It must implement the `__len__`
-                method.
-            ignore_keys (`Lst[str]`, *optional*):
-                A list of keys in the output of your model (if it is a dictionary) that should be ignored when
-                gathering predictions.
-            metric_key_prefix (`str`, *optional*, defaults to `"eval"`):
-                An optional prefix to be used as the metrics key prefix. For example the metrics "bleu" will be named
-                "eval_bleu" if the prefix is "eval" (default)
-
-        Returns:
-            A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
-            dictionary also contains the epoch number which comes from the training state.
-        """
-        print('Starting evaluation loop with reset eval result')
+    ) -> EvalLoopOutput:
+        
         if self.is_world_process_zero:
             self.eval_result = {
                 'ade': [],
                 'fde': [],
             }
+        self.eval_itr = 0
 
-            if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
-                self.pred_dicts_list = []
-
-        # memory metrics - must set up as early as possible
-        self._memory_tracker.start()
-
-        eval_dataloader = self.get_eval_dataloader(eval_dataset)
-        start_time = time.time()
-
-        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
-        output = eval_loop(
-            eval_dataloader,
-            description="Evaluation",
-            # No point gathering the predictions if there are no metrics, otherwise we defer to
-            # self.args.prediction_loss_only
-            prediction_loss_only=True if self.compute_metrics is None else None,
-            ignore_keys=ignore_keys,
-            metric_key_prefix=metric_key_prefix,
-        )
-
+        eval_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+        
+        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector": 
+            return eval_output
+        
+        if self.model.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            return None
         result = dict()
         if self.model.clf_metrics is not None:
             # run classsification metrics
@@ -452,44 +410,13 @@ class PlanningTrainer(Trainer):
             result[f"{metric_key_prefix}_f1"] = self.model.clf_metrics["f1"].compute(average="macro")
             result[f"{metric_key_prefix}_precision"] = self.model.clf_metrics["precision"].compute(average="macro")
             result[f"{metric_key_prefix}_recall"] = self.model.clf_metrics["recall"].compute(average="macro")
-
-        if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
-            from dataset_gen.waymo.waymo_eval import waymo_evaluation
-            try:
-                num_modes_for_eval = self.pred_dicts_list[0]['pred_trajs'].shape[0]
-            except:
-                num_modes_for_eval = 6
-            
-            print(len(self.pred_dicts_list))
-            _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=self.pred_dicts_list, num_modes_for_eval=num_modes_for_eval)
-            print(final_avg_results)
-            exit()
-        else:
-            for each_key in self.eval_result:
-                # result[f"{metric_key_prefix}_{each_key}"] = float(self.eval_result[each_key])
-                result[f"{metric_key_prefix}_{each_key}"] = sum(self.eval_result[each_key]) / len(self.eval_result[each_key])
-
+        for each_key in self.eval_result:
+            # result[f"{metric_key_prefix}_{each_key}"] = float(self.eval_result[each_key])
+            result[f"{metric_key_prefix}_{each_key}"] = sum(self.eval_result[each_key]) / len(self.eval_result[each_key])
+        logging.info("***** Eval results *****")
+        logging.info(f"{result}")
         self.log(result)
-
-        total_batch_size = self.args.eval_batch_size * self.args.world_size
-        if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
-            start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
-        output.metrics.update(
-            speed_metrics(
-                metric_key_prefix,
-                start_time,
-                num_samples=output.num_samples,
-                num_steps=math.ceil(output.num_samples / total_batch_size),
-            )
-        )
-
-        self.log(output.metrics)
-
-        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
-
-        self._memory_tracker.stop_and_update_metrics(output.metrics)
-
-        return output.metrics
+        return eval_output
 
     def save_raster(self, path_to_save,
                     inputs, sample_index,
@@ -643,11 +570,22 @@ class PlanningTrainer(Trainer):
         logger_iter_interval = 1000
 
         pred_dicts = []
+        
+        anchor_hard_match_num = 0
+        anchor_soft_match_num =0
+        tot_num = 0
         for i, batch_dict in enumerate(dataloader):
             with torch.no_grad():
                 batch_dict = self._prepare_inputs(batch_dict)
                 batch_pred_dicts = self.model.generate(**batch_dict)
                 # batch_pred_dicts = self.model(**batch_dict)
+                
+                anchor_hard_match_num += batch_pred_dicts['anchor_hard_match_num'].cpu().numpy()
+                anchor_soft_match_num += batch_pred_dicts['anchor_soft_match_num'].cpu().numpy()
+                tot_num += batch_pred_dicts['tot_num']
+                
+                if 'logits' not in batch_pred_dicts:
+                    continue
 
                 if 'vector' in self.model.model_args.model_name:
                     final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
@@ -668,8 +606,10 @@ class PlanningTrainer(Trainer):
                             f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
                             f'{disp_str}')
             
-            # if i > 100:    
-            #     break
+            if i > 100:    
+                break
+        
+        print('*'*20, ' anchor hard match ', anchor_hard_match_num, " anchor soft match ", anchor_soft_match_num, ' tot num ', tot_num, '*'*20)
 
         if self.is_world_process_zero:
             progress_bar.close()
@@ -691,4 +631,153 @@ class PlanningTrainer(Trainer):
         ret_dict.update(result_dict)
 
         logger.info('Result is save to %s' % eval_output_dir)
-        logger.info('****************Evaluation done.*****************')        
+        logger.info('****************Evaluation done.*****************')   
+
+def compute_metric_nuplan(eval_input, model_args):
+    eval_result_list = {
+        "ade": [],
+        "fde": [],
+    }
+
+    # run generate for sequence of actions
+    prediction_forward = eval_input.predictions["prediction_forward"]
+    trajectory_label = eval_input.label_ids
+
+    if model_args.ar_future_interval > 0:
+        length_of_trajectory = trajectory_label.shape[1]
+        prediction_key_points = prediction_forward[:, :-length_of_trajectory, :]
+        prediction_forward = prediction_forward[:, -length_of_trajectory:, :]
+        if model_args.specified_key_points:
+            # 80, 40, 20, 10, 5
+            if model_args.forward_specified_key_points:
+                selected_indices = [4, 9, 19, 39, 79]
+            else:
+                selected_indices = [79, 39, 19, 9, 4]
+            future_key_points = trajectory_label[:, selected_indices, :]
+        else:
+            future_key_points = trajectory_label[:, model_args.ar_future_interval - 1::model_args.ar_future_interval, :]
+        
+        if model_args.generate_diffusion_dataset_for_key_points_decoder:
+            return None,None,None
+            # no need to return further info.
+        
+        ade_x_error_key_points = prediction_key_points[:, :, 0] - future_key_points[:, :, 0]
+        ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
+        fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
+        fde_y_error_key_points = prediction_key_points[:, -1, 1] - future_key_points[:, -1, 1]
+        ade_x_error = prediction_forward[:, :, 0] - trajectory_label[:, :, 0]
+        ade_y_error = prediction_forward[:, :, 1] - trajectory_label[:, :, 1]
+        fde_x_error = prediction_forward[:, -1, 0] - trajectory_label[:, -1, 0]
+        fde_y_error = prediction_forward[:, -1, 1] - trajectory_label[:, -1, 1]
+        if model_args.predict_yaw:
+            heading_error = prediction_forward[:, :, -1] - trajectory_label[:, :, -1]
+        if model_args.k >= 1:
+            prediction_generation = eval_input.predictions["prediction_generation"]
+            length_of_trajectory = trajectory_label.shape[1]
+            prediction_key_points_by_gen = prediction_generation[:, :-length_of_trajectory, :]
+            prediction_generation = prediction_generation[:, -length_of_trajectory:, :]
+            ade_x_error_key_points_by_gen = prediction_key_points_by_gen[:, :, 0] - future_key_points[:, :, 0]
+            ade_y_error_key_points_by_gen = prediction_key_points_by_gen[:, :, 1] - future_key_points[:, :, 1]
+            fde_x_error_key_points_by_gen = prediction_key_points_by_gen[:, -1, 0] - future_key_points[:, -1, 0]
+            fde_y_error_key_points_by_gen = prediction_key_points_by_gen[:, -1, 1] - future_key_points[:, -1, 1]
+            ade_x_error_by_gen = prediction_generation[:, :, 0] - trajectory_label[:, :, 0]
+            ade_y_error_by_gen = prediction_generation[:, :, 1] - trajectory_label[:, :, 1]
+            fde_x_error_by_gen = prediction_generation[:, -1, 0] - trajectory_label[:, -1, 0]
+            fde_y_error_by_gen = prediction_generation[:, -1, 1] - trajectory_label[:, -1, 1]
+            if model_args.predict_yaw:
+                heading_error_by_gen = prediction_generation[:, :, -1] - trajectory_label[:, :, -1]
+        else:
+            raise ValueError(f'unknown k for auto-regression future keypoints: {model_args.k}')
+    else:
+        ade_x_error = prediction_forward[:, :, 0] - trajectory_label[:, :, 0]
+        ade_y_error = prediction_forward[:, :, 1] - trajectory_label[:, :, 1]
+        fde_x_error = prediction_forward[:, -1, 0] - trajectory_label[:, -1, 0]
+        fde_y_error = prediction_forward[:, -1, 1] - trajectory_label[:, -1, 1]
+        if model_args.predict_yaw:
+            heading_error = prediction_forward[:, :, -1] - trajectory_label[:, :, -1]
+
+    # compute ade
+    ade = np.sqrt(ade_x_error.flatten() ** 2 + ade_y_error.flatten() ** 2)
+    ade = ade.mean()
+    eval_result_list['ade'].append(float(ade))
+    # compute fde
+    fde = np.sqrt(fde_x_error.flatten() ** 2 + fde_y_error.flatten() ** 2)
+    fde = fde.mean()
+    eval_result_list['fde'].append(float(fde))
+    if model_args.predict_yaw:
+        heading_error = np.abs(heading_error).mean()
+        if 'heading_error' not in eval_result_list:
+            eval_result_list['heading_error'] = []
+        eval_result_list['heading_error'].append(float(heading_error))
+
+    if model_args.ar_future_interval > 0:
+        if 'ade_keypoints' not in eval_result_list:
+            eval_result_list['ade_keypoints'] = []
+            eval_result_list['fde_keypoints'] = []
+        # compute key points ade
+        ade_key_points = np.sqrt(ade_x_error_key_points.flatten() ** 2 + ade_y_error_key_points.flatten() ** 2)
+        ade_key_points = ade_key_points.mean()
+        eval_result_list['ade_keypoints'].append(float(ade_key_points))
+        # compute fde
+        fde_key_points = np.sqrt(fde_x_error_key_points.flatten() ** 2 + fde_y_error_key_points.flatten() ** 2)
+        fde_key_points = fde_key_points.mean()
+        eval_result_list['fde_keypoints'].append(float(fde_key_points))
+
+        if model_args.k >= 1:
+            # evaluate through generate function
+            if 'ade_keypoints_gen' not in eval_result_list:
+                eval_result_list['ade_keypoints_gen'] = []
+                eval_result_list['fde_keypoints_gen'] = []
+                eval_result_list['ade_gen'] = []
+                eval_result_list['fde_gen'] = []
+            # compute ade by gen
+            ade_by_gen = np.sqrt(ade_x_error_by_gen.flatten() ** 2 + ade_y_error_by_gen.flatten() ** 2)
+            ade_by_gen = ade_by_gen.mean()
+            eval_result_list['ade_gen'].append(float(ade_by_gen))
+            # compute fde
+            fde_by_gen = np.sqrt(fde_x_error_by_gen.flatten() ** 2 + fde_y_error_by_gen.flatten() ** 2)
+            fde_by_gen = fde_by_gen.mean()
+            eval_result_list['fde_gen'].append(float(fde_by_gen))
+            # compute key points ade
+            ade_key_points_by_gen = np.sqrt(ade_x_error_key_points_by_gen.flatten() ** 2 + ade_y_error_key_points_by_gen.flatten() ** 2)
+            ade_key_points_by_gen = ade_key_points_by_gen.mean()
+            eval_result_list['ade_keypoints_gen'].append(float(ade_key_points_by_gen))
+            # compute key points fde
+            fde_key_points_by_gen = np.sqrt(fde_x_error_key_points_by_gen.flatten() ** 2 + fde_y_error_key_points_by_gen.flatten() ** 2)
+            fde_key_points_by_gen = fde_key_points_by_gen.mean()
+            eval_result_list['fde_keypoints_gen'].append(float(fde_key_points_by_gen))
+            if model_args.predict_yaw:
+                if 'heading_error_by_gen' not in eval_result_list:
+                    eval_result_list['heading_error_by_gen'] = []
+                heading_error_by_gen = np.abs(heading_error_by_gen).mean()
+                eval_result_list['heading_error_by_gen'].append(float(heading_error_by_gen))
+
+    eval_result = {}
+    for each_key in eval_result_list:
+        eval_result[each_key] = sum(eval_result_list[each_key]) / len(eval_result_list[each_key])
+
+    return eval_result
+
+def compute_metric_waymo(eval_input, model_args):
+    total_eval_num = eval_input.label_ids.shape[0]
+    predictions = eval_input.predictions
+    pred_keys = predictions.keys()
+
+    from transformer4planning.utils.mtr_utils import _num_to_str
+    predictions["scenario_id"] = _num_to_str(predictions["scenario_id"])
+    predictions["object_type"] = _num_to_str(predictions["object_type"])
+
+    pred_list = []
+    for i in range(total_eval_num):
+        pred = {}
+        for key in pred_keys:
+            pred[key] = predictions[key][i]
+
+        pred_list.append(pred)
+
+    from dataset_gen.waymo.waymo_eval import waymo_evaluation
+    _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=pred_list, num_modes_for_eval=6)
+
+    print(result_format_str)
+
+    return final_avg_results

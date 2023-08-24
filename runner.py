@@ -259,12 +259,18 @@ def main():
             collate_fn = partial(nuplan_vector_collate_func, 
                                  dic_path=data_args.saved_dataset_folder, 
                                  map_api=map_api)
+        
+        from transformer4planning.trainer import compute_metric_nuplan
+        compute_metrics_fn = partial(compute_metric_nuplan, model_args=model_args)
+        
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
+        from transformer4planning.trainer import compute_metric_waymo
         if model_args.encoder_type == "vector":
             collate_fn = partial(waymo_collate_func, 
                                  data_path=data_args.saved_dataset_folder, 
                                  interaction=model_args.interaction)
+            compute_metrics_fn = partial(compute_metric_waymo, model_args=model_args)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
     else:
@@ -276,7 +282,8 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
-        data_collator=collate_fn
+        data_collator=collate_fn,
+        compute_metrics=compute_metrics_fn,
     )
     trainer.pop_callback(DefaultFlowCallback)
         

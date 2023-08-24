@@ -214,3 +214,40 @@ def merge_results_dist(result_part, size, tmpdir):
     ordered_results = ordered_results[:size]
     shutil.rmtree(tmpdir)
     return ordered_results
+
+def _num_to_str(nums):
+    string_list = []
+    
+    for str in nums:
+        s = ""
+        for char in str:
+            if char == -1: continue
+            s += chr(char)
+        string_list.append(s)
+
+    return string_list
+
+def _str_to_num(string):
+    "Encodes `string` to a decodeable number and breaks it up by `batch_size`"
+    nums = [[ord(char) for char in str] for str in string]
+    length = [len(n) for n in nums]
+    max_length = max(length)
+    for i in range(len(nums)):
+        nums[i] += [-1] * (max_length - length[i])
+
+    return nums
+
+def str_to_tensor(string) -> torch.tensor:
+    """
+    Encodes `string` to a tensor of shape [1,N,batch_size] where 
+    `batch_size` is the number of characters and `n` is
+    (len(string)//batch_size) + 1
+    """
+    return torch.tensor(_str_to_num(string), dtype=torch.long)
+
+def tensor_to_str(x:torch.Tensor) -> str:
+    """
+    Decodes `x` to a string. `x` must have been encoded from
+    `str_to_tensor`
+    """
+    return _num_to_str(x.tolist())
