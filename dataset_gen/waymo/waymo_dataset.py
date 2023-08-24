@@ -16,8 +16,8 @@ import shapely
 from dataset_gen.waymo.dataset_template import DatasetTemplate
 import dataset_gen.waymo.common_util as common_utils
 from dataset_gen.waymo.config import cfg
-from dataset_gen.waymo.waymo_eval import waymo_evaluation
-from transformer4planning.utils import generate_contour_pts
+from dataset_gen.waymo.waymo_eval import waymo_evaluation, waymo_evaluation_seperate
+from transformer4planning.utils.nuplan_utils import generate_contour_pts
 
 
 
@@ -30,6 +30,9 @@ class WaymoDataset(DatasetTemplate):
 
         self.infos = self.get_all_infos(self.data_root / self.dataset_cfg.INFO_FILE[self.mode])
         self.logger.info(f'Total scenes after filters: {len(self.infos)}')
+        
+        self.obj_dist_thres = 1000
+        self.do_filter = False
 
     def get_all_infos(self, info_path):
         self.logger.info(f'Start to load infos from {info_path}')
@@ -89,8 +92,11 @@ class WaymoDataset(DatasetTemplate):
         """
         info = self.infos[index]
         scene_id = info['scenario_id']
+        filtered_tracks_to_predict = info['tracks_to_predict']
         with open(self.data_path / f'sample_{scene_id}.pkl', 'rb') as f:
             info = pickle.load(f)
+            
+        info['tracks_to_predict'] = filtered_tracks_to_predict
 
         sdc_track_index = info['sdc_track_index']
         current_time_index = info['current_time_index']
@@ -102,15 +108,28 @@ class WaymoDataset(DatasetTemplate):
         obj_types = np.array(track_infos['object_type'])
         obj_ids = np.array(track_infos['object_id'])
         obj_trajs_full = track_infos['trajs']  # (num_objects, num_timestamp, 10)
-        obj_trajs_past = obj_trajs_full[:, :current_time_index + 1]
-        obj_trajs_future = obj_trajs_full[:, current_time_index + 1:]
-
+        
         center_objects, center_objects_past, track_index_to_predict = self.get_interested_agents(
             track_index_to_predict=track_index_to_predict,
             obj_trajs_full=obj_trajs_full,
             current_time_index=current_time_index,
             obj_types=obj_types, scene_id=scene_id
         )
+
+        # filter objects
+        if self.do_filter:
+            dist_start = np.linalg.norm(obj_trajs_full[:, 0, :2][None, ...] - center_objects[:, None, :2], ord=2, axis=-1)
+            dist_end = np.linalg.norm(obj_trajs_full[:, -1, :2][None, ...] - center_objects[:, None, :2], ord=2, axis=-1)
+            obj_mask = np.logical_or((dist_start.min(0) < self.obj_dist_thres),(dist_end.min(0) < self.obj_dist_thres))
+            obj_trajs_full = obj_trajs_full[obj_mask]
+            obj_types = obj_types[obj_mask]
+            obj_ids = obj_ids[obj_mask]
+            
+            obj_full_valid_index_cnt = obj_mask.cumsum(axis=0)
+            track_index_to_predict = obj_full_valid_index_cnt[track_index_to_predict] - 1
+        
+        obj_trajs_past = obj_trajs_full[:, :current_time_index + 1]
+        obj_trajs_future = obj_trajs_full[:, current_time_index + 1:]
 
         (obj_trajs_data, obj_trajs_mask, obj_trajs_pos, obj_trajs_last_pos, obj_trajs_future_state, obj_trajs_future_mask, center_gt_past_trajs, center_gt_trajs, center_gt_trajs_labels,
             center_gt_trajs_mask, center_gt_final_valid_idx,
@@ -333,6 +352,7 @@ class WaymoDataset(DatasetTemplate):
         ), dim=-1)
 
         ret_obj_valid_mask = obj_trajs[:, :, :, -1]  # (num_center_obejcts, num_objects, num_timestamps)  # TODO: CHECK THIS, 20220322
+        # ret_obj_valid_mask[np.arange(len(center_indices)), center_indices, :] = 0
         ret_obj_trajs[ret_obj_valid_mask == 0] = 0
         
         ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6]]
@@ -729,7 +749,8 @@ class WaymoDataset(DatasetTemplate):
                 num_modes_for_eval = pred_dicts[0]['pred_trajs'].shape[0]
             except:
                 num_modes_for_eval = 6
-            metric_results, result_format_str = waymo_evaluation(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval)
+            metric_results, result_format_str = waymo_evaluation(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval, eval_second=8)
+            # metric_results, result_format_str = waymo_evaluation_seperate(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval, eval_second=8)
 
             metric_result_str = '\n'
             for key in metric_results:

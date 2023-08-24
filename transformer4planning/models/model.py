@@ -467,12 +467,7 @@ def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
 
 def build_models(model_args):
     if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
+        config_p = None
         if not model_args.autoregressive:
             from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
             ModelCls = GPTNonAutoRegressiveModelVector

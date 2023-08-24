@@ -581,11 +581,22 @@ class PlanningTrainer(Trainer):
         logger_iter_interval = 1000
 
         pred_dicts = []
+        
+        anchor_hard_match_num = 0
+        anchor_soft_match_num =0
+        tot_num = 0
         for i, batch_dict in enumerate(dataloader):
             with torch.no_grad():
                 batch_dict = self._prepare_inputs(batch_dict)
                 batch_pred_dicts = self.model.generate(**batch_dict)
                 # batch_pred_dicts = self.model(**batch_dict)
+                
+                anchor_hard_match_num += batch_pred_dicts['anchor_hard_match_num'].cpu().numpy()
+                anchor_soft_match_num += batch_pred_dicts['anchor_soft_match_num'].cpu().numpy()
+                tot_num += batch_pred_dicts['tot_num']
+                
+                if 'logits' not in batch_pred_dicts:
+                    continue
 
                 if 'vector' in self.model.model_args.model_name:
                     final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
@@ -606,8 +617,10 @@ class PlanningTrainer(Trainer):
                             f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
                             f'{disp_str}')
             
-            # if i > 100:    
-            #     break
+            if i > 100:    
+                break
+        
+        print('*'*20, ' anchor hard match ', anchor_hard_match_num, " anchor soft match ", anchor_soft_match_num, ' tot num ', tot_num, '*'*20)
 
         if self.is_world_process_zero:
             progress_bar.close()
