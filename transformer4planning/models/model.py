@@ -468,14 +468,10 @@ def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
 def build_models(model_args):
     if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
         config_p = None
-        if not model_args.autoregressive:
-            from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
-            from transformer4planning.models.vector_model_multiSeq_anchor import GPTNonAutoRegressiveModelVector_MutliSeqAnchor
-            ModelCls = GPTNonAutoRegressiveModelVector
-            tag = 'Vector GPT nonauto'
-        else:
-            ModelCls = GPTAutoRegressiveModelVector
-            tag = 'Vector GPT auto'
+        from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector
+        from transformer4planning.models.vector_model_multiSeq_anchor import GPTNonAutoRegressiveModelVector_MutliSeqAnchor
+        ModelCls = GPTNonAutoRegressiveModelVector
+        tag = 'Vector GPT nonauto'
     elif 'gpt' in model_args.model_name:
         config_p = GPT2Config()
         if 'gpt-mini' in model_args.model_name:
