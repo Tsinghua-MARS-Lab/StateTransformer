@@ -9,12 +9,10 @@ import torch
 from torch.utils.data import DataLoader
 from mtr_trainer.mtr_utils import common_utils
 
-from dataset.waymo_dataset_v1 import WaymoDatasetV1
 from dataset.waymo_dataset_v1_aug import WaymoDatasetV1Aug
 
 
 __all__ = {
-    'WaymoDatasetV1': WaymoDatasetV1,
     'WaymoDatasetV1Aug': WaymoDatasetV1Aug,
 }
 

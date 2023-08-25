@@ -24,10 +24,13 @@ DATA_CONFIG:
       }
 
     time_info:
+      time_set_num: 8
       time_set_interval: 10
 
       time_sample_num: 5
       time_sample_interval: 2
+
+      total_time_step: 80
 
     map_feature:
       polyline_point_num: 20
@@ -67,9 +70,11 @@ MODEL:
       seq_layer: 6
 
       loss_weight: {
-        xy: 1.0,
+        x: 1.0,
+        y: 1.0,
         heading: 10.0,
-        vel: 0.5
+        vel_x: 1.0,
+        vel_y: 1.0
       }
 
       normalization_para: {
@@ -77,6 +82,8 @@ MODEL:
         heading: 1.0,
         vel: 10.0
       }
+
+      loss_type: 'L2'
 
     data_dim:
       # Dim should match dataset, so following parameters are not free parameter. They are used only for convenience.
@@ -92,8 +99,6 @@ MODEL:
       agent_target: 25
 
       points_in_polyline: 20
-
-      time_set_num: 8
 
 OPTIMIZATION:
     BATCH_SIZE_PER_GPU: 10

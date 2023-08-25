@@ -5,7 +5,6 @@ import pathlib
 
 from typing import Dict, List, Tuple, cast
 import numpy as np
-import numpy.typing as npt
 from utils.torch_geometry import global_state_se2_tensor_to_local, coordinates_to_local_frame
 from utils.base_math import angle_to_range
 
@@ -49,7 +48,7 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
     # agent_to_predict_num: int
 
     # for the whole scenario, the output data is:
-    # Dict[lane: torch.Tensor(batch_size, 8, n, 20, 18), road_line: ..., ..., agent: torch.Tensor(batch_size, 8, n, 5*time_sample_num+5), ...]
+    # Dict[lane: torch.Tensor(batch_size, 8, n, 20, 18), road_line: ..., ..., agent: torch.Tensor(batch_size, 8, n, 14*time_sample_num+5), ...]
 
     def __init__(self, dataset_cfg: Dict, training: bool, logger=None):
         if training:
@@ -96,6 +95,9 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
             with open(cache_file_name, 'wb') as f:
                 pickle.dump(feature_dict, f)
         return feature_dict
+    
+        # feature_dict = self.generate_from_raw_data(index)
+        # return feature_dict
 
     def generate_from_raw_data(self, index):
         info = self.infos[index]
@@ -104,14 +106,19 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
             info = pickle.load(f)
 
         # get current time index, time set num, first time index. 
-        # For standard waymo data, current_time_index=10, time_set_num=8, first_time_index=10
-        current_time_index = info['current_time_index']
-        total_time_steps = len(info['timestamps_seconds'])
+
+        # # For standard waymo data, current_time_index=10, time_set_num=8, first_time_index=10
+        # current_time_index = info['current_time_index']
+        # total_time_steps = len(info['timestamps_seconds'])
+        # time_set_interval = self.dataset_config.time_info.time_set_interval
+        # past_time_set = current_time_index // time_set_interval
+        # future_time_set = (total_time_steps - current_time_index - 1) // time_set_interval
+        # time_set_num = past_time_set + future_time_set - 1
+        # first_time_index = current_time_index - (past_time_set-1) * time_set_interval
+
         time_set_interval = self.dataset_config.time_info.time_set_interval
-        past_time_set = current_time_index // time_set_interval
-        future_time_set = (total_time_steps - current_time_index - 1) // time_set_interval
-        time_set_num = past_time_set + future_time_set - 1
-        first_time_index = current_time_index - (past_time_set-1) * time_set_interval
+        time_set_num = self.dataset_config.time_info.time_set_num
+        first_time_index = time_set_interval
         
         # generate time_set_num sets samples
         lane_feature_list, lane_mask_list = [], []
@@ -128,6 +135,8 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
         trajs = torch.from_numpy(info['track_infos']['trajs']).float()
         polyline_tensor = torch.from_numpy(info['map_infos']['all_polylines']).float()
 
+        agent_index = self.get_proper_agent_index(trajs, sdc_track_index, valid_agent_to_predict)
+
         for i in range(time_set_num):
             # get ego, agent feature
             ego_feature, ego_label = self.get_ego_feature_and_label_in_one_time_set(trajs, sdc_track_index, first_time_index+i*time_set_interval)
@@ -135,7 +144,8 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
                                                                                           object_type=info['track_infos']['object_type'], 
                                                                                           ego_index=sdc_track_index, 
                                                                                           valid_agent_to_predict=valid_agent_to_predict, 
-                                                                                          time_index=first_time_index+i*time_set_interval)
+                                                                                          time_index=first_time_index+i*time_set_interval,
+                                                                                          agent_index=agent_index)
             ego_feature_list.append(ego_feature)
             ego_label_list.append(ego_label)
             agent_feature_list.append(agent_feature)
@@ -188,9 +198,11 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
             'agent_valid': torch.stack(agent_valid_list).unsqueeze(0),
             'agent_to_predict_num': torch.zeros(1, 1) + len(valid_agent_to_predict)
         }
+        feature_dict = self.generate_input_dict_for_eval(info, feature_dict, valid_agent_to_predict, trajs, sdc_track_index)
+
         return feature_dict
 
-    def check_valid_agent_to_predict(self, trajs: npt.NDArray, ego_index: int, agent_to_predict_index: List):
+    def check_valid_agent_to_predict(self, trajs, ego_index: int, agent_to_predict_index: List):
         assert trajs[ego_index, :, -1].all()
 
         valid_agent_to_predict = []
@@ -243,13 +255,17 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
             
         return ego_feature, ego_label
 
-    def get_agent_feature_and_label_in_one_time_set(self, trajs: torch.Tensor, object_type: List, ego_index: int, valid_agent_to_predict: List, time_index: int):
-        # ego state is not include in agent part
-        # valid_agent_to_predict are at the beginning of all agents
-        # only contains valid agents. if agent num is large than max, agents are filtered by distance to ego
+    def get_proper_agent_index(self, trajs: torch.Tensor, ego_index: int, valid_agent_to_predict: List):
+        # we perpare agent index by:
+        # 1. ignore ego
+        # 2. put valid_agent_to_predict at front
+        # 3. filter out agent invalid for all times
+        # 3. if agent num is less than max_agent_num, return
+        # 4. if agent num is larger than max_agent_num, 
+        # 4. sort agent based on the distance to ego at time 1.0(index 10)
 
-        time_sample_num = self.dataset_config.time_info.time_sample_num
-        time_sample_interval = self.dataset_config.time_info.time_sample_interval
+        max_agent_num = self.dataset_config.max_agent_num
+        time_set_num = self.dataset_config.time_info.time_set_num
         time_set_interval = self.dataset_config.time_info.time_set_interval
 
         # get agents except ego and predict agent
@@ -257,15 +273,49 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
         other_agent_index = [i for i in other_agent_index if i != ego_index]
         for predict_index in valid_agent_to_predict:
             other_agent_index = [i for i in other_agent_index if i != predict_index]
-        other_agent_tensor = trajs[other_agent_index, time_index-time_set_interval+1:time_index+time_set_interval, :]
 
-        # filter valid agent trajs in other_agent_tensor
-        valid_other_agent_valid = other_agent_tensor[:, :, -1].all(dim=1)
-        valid_other_agent_index = [i for i in range(other_agent_tensor.size(0)) if valid_other_agent_valid[i] == True]
+        # filter out agents invalid for all times
+        valid_tensor = torch.zeros(trajs.size(0), time_set_num).bool()
+        for i in range(time_set_num):
+            valid_tensor[:, i] = trajs[:, i*time_set_interval+1:(i+2)*time_set_interval+1, -1].all(dim=1)
+        invalid_index_tensor = (valid_tensor==False).all(dim=1)
+        valid_other_agent_index = [i for i in other_agent_index if invalid_index_tensor[i]==False]
 
-        agent_list = valid_agent_to_predict + valid_other_agent_index
-        agent_tensor = trajs[agent_list, :, :]
-        agent_type = [object_type[i] for i in agent_list]
+        # return if agent num <= max_agent_num
+        if len(valid_other_agent_index) + len(valid_agent_to_predict) <= max_agent_num:
+            return valid_agent_to_predict + valid_other_agent_index
+
+        # sort agent based on distance to ego
+        dis_to_ego = torch.hypot(trajs[:, time_set_interval, 0]-trajs[ego_index, time_set_interval, 0],
+                                 trajs[:, time_set_interval, 1]-trajs[ego_index, time_set_interval, 1])
+        _, sorted_index = torch.sort(dis_to_ego)
+        sorted_valid_other_index = []
+        for i in sorted_index:
+            for j in valid_other_agent_index:
+                if i == j:
+                    sorted_valid_other_index.append(i)
+                    break
+
+        other_agent_num = max_agent_num - len(valid_agent_to_predict)
+        assert(len(sorted_valid_other_index) > other_agent_num)
+        filter_other_index = sorted_valid_other_index[:other_agent_num]
+        filter_other_index.sort()
+
+        return valid_agent_to_predict + filter_other_index
+
+    def get_agent_feature_and_label_in_one_time_set(self, trajs: torch.Tensor, object_type: List, ego_index: int, valid_agent_to_predict: List, time_index: int, agent_index: List):
+        # ego state is not include in agent part
+        # valid_agent_to_predict are at the beginning of all agents
+        # only contains valid agents. if agent num is large than max, agents are filtered by distance to ego
+
+        time_sample_num = self.dataset_config.time_info.time_sample_num
+        time_sample_interval = self.dataset_config.time_info.time_sample_interval
+        time_set_interval = self.dataset_config.time_info.time_set_interval
+        max_agent_num = self.dataset_config.max_agent_num
+
+        # move valid_agent_to_predict to the front of agnets
+        agent_tensor = trajs[agent_index, :, :]
+        agent_type = [object_type[i] for i in agent_index]
         
         # build agent feature tensor
         agent_feature = torch.zeros([agent_tensor.size(0), 14*time_sample_num + 5])
@@ -285,6 +335,9 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
                 agent_feature[i, 14*time_sample_num+3] = 1
             elif agent_type[i] == 'TYPE_CYCLIST':
                 agent_feature[i, 14*time_sample_num+4] = 1
+
+        # build agent valid tensor
+        agent_valid = agent_tensor[:, time_index-time_set_interval+1:time_index+time_set_interval+1, -1].all(dim=1).float()
 
         # build agent label tensor
         agent_label = torch.zeros([agent_tensor.size(0), 5*time_sample_num])
@@ -326,34 +379,16 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
                 agent_label[j, 0+i*5:2+i*5] = coordinates_to_local_frame(agent_label[j, 0+i*5:2+i*5].unsqueeze(0), agent_rotation_frame).squeeze(0) # x,y in agent frame
                 agent_label[j, 3+i*5:5+i*5] = coordinates_to_local_frame(agent_label[j, 3+i*5:5+i*5].unsqueeze(0), agent_rotation_frame).squeeze(0) # vel_x, vel_y in agent frame
                 
-        # reshape to max_agent_num
-        max_agent_num = self.dataset_config.max_agent_num
+        # pad to max_agent_num
         agent_feature_padded = torch.zeros((max_agent_num, agent_feature.size(1)))
         agent_label_padded = torch.zeros((max_agent_num, agent_label.size(1)))
-        agent_valid = torch.zeros(max_agent_num)
+        agent_valid_padded = torch.zeros(max_agent_num)
 
-        if max_agent_num >= agent_feature.size(0):
-            # pad zeros
-            agent_feature_padded[:agent_feature.size(0), :] = agent_feature
-            agent_label_padded[:agent_feature.size(0), :] = agent_label
-            agent_valid[:agent_feature.size(0)] = 1
-        else:
-            # filtered by distance
-            agent_feature_padded[:len(valid_agent_to_predict), :] = agent_feature[:len(valid_agent_to_predict), :]
-            agent_label_padded[:len(valid_agent_to_predict), :] = agent_label[:len(valid_agent_to_predict), :]
-            agent_valid[:] = 1
+        agent_feature_padded[:agent_feature.size(0), :] = agent_feature
+        agent_label_padded[:agent_feature.size(0), :] = agent_label
+        agent_valid_padded[:agent_feature.size(0)] = agent_valid
 
-            dis_to_ego = torch.hypot(agent_feature[len(valid_agent_to_predict):, 0], agent_feature[len(valid_agent_to_predict):, 1])
-            _, sorted_index = torch.sort(dis_to_ego)
-            other_agent_num = max_agent_num - len(valid_agent_to_predict)
-            agent_feature_padded[len(valid_agent_to_predict):, :] = agent_feature[sorted_index[:other_agent_num], :]
-            agent_label_padded[len(valid_agent_to_predict):, :] = agent_label[sorted_index[:other_agent_num], :]
-
-        # filter out agent which have to large data
-        label_max_diff, _ = torch.max(torch.abs(agent_label_padded), dim=-1)
-        agent_valid[label_max_diff>150] = 0 # 150 is a random choosed large diff
-
-        return agent_feature_padded, agent_label_padded, agent_valid
+        return agent_feature_padded, agent_label_padded, agent_valid_padded
 
     def get_map_feature_except_lane(self, polylines_tensor: torch.Tensor, map_feature_info: List, feature_type: str):
         polyline_point_num = self.dataset_config.map_feature.polyline_point_num
@@ -446,7 +481,7 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
 
         return map_feature_tensor, map_feature_mask
 
-    def get_lane_feature(self, polylines_tensor: torch.Tensor, lane_info: List, traffic_light_index: npt.NDArray, traffic_light_state: npt.NDArray):
+    def get_lane_feature(self, polylines_tensor: torch.Tensor, lane_info: List, traffic_light_index, traffic_light_state):
         
         polyline_point_num = self.dataset_config.map_feature.polyline_point_num
         polyline_subsample_interval = self.dataset_config.map_feature.polyline_subsample_interval
@@ -545,9 +580,102 @@ class WaymoDatasetV1Aug(torch.utils.data.Dataset):
     def collate_batch(self, batch_list):
         feature_dict = {}
         for key in batch_list[0].keys():
-            temp_list = []
-            for i in range(len(batch_list)):
-                temp_list.append(batch_list[i][key])
-            feature_dict[key] = torch.cat(temp_list, dim=0)
+            if key in ['scenario_id', 'center_objects_id', 'center_objects_type']:
+                temp_list = []
+                for i in range(len(batch_list)):
+                    temp_list.append(batch_list[i][key][0])
+                feature_dict[key] = temp_list
+            else:
+                temp_list = []
+                for i in range(len(batch_list)):
+                    temp_list.append(batch_list[i][key])
+                feature_dict[key] = torch.cat(temp_list, dim=0)
 
         return feature_dict
+    
+    def generate_input_dict_for_eval(self, info, ret_dict, valid_agent_to_predict, trajs, ego_index):
+        # scenario_id: list[str]
+        # center_objects_id: list[list[str]]
+        # center_objects_type: list[list[]]
+        # center_gt_trajs_src: [batch, 1, max_agent_num, 91, 10]
+        # track_index_to_predict: [batch, 1, max_agent_num]
+        # ego_current_pose: [batch, 1, 3]
+        max_agent_num = self.dataset_config.max_agent_num
+
+        # scenario_id
+        scene_id = info['scenario_id']
+        ret_dict['scenario_id'] = [scene_id]
+
+        # track_index_to_predict, center_objects_id, center_objects_type, center_gt_trajs_src
+        object_id = info['track_infos']['object_id']
+        object_type = info['track_infos']['object_type']
+
+        track_index_to_predict = torch.zeros(1, 1, max_agent_num)
+        center_objects_id_single = []
+        center_objects_type_single = []
+        center_gt_trajs_src = torch.zeros(1, 1, max_agent_num, 91, 10)
+
+        for i in range(len(valid_agent_to_predict)):
+            track_index_to_predict[0, 0, i] = valid_agent_to_predict[i]
+            center_objects_id_single.append(object_id[valid_agent_to_predict[i]])
+            center_objects_type_single.append(object_type[valid_agent_to_predict[i]])
+            center_gt_trajs_src[0, 0, i, :, :] = trajs[valid_agent_to_predict[i], :, :]
+
+        ret_dict['track_index_to_predict'] = track_index_to_predict
+        ret_dict['center_objects_id'] = [center_objects_id_single]
+        ret_dict['center_objects_type'] = [center_objects_type_single]
+        ret_dict['center_gt_trajs_src'] = center_gt_trajs_src
+
+        # ego pose at 1s
+        ego_current_pose = torch.zeros(1, 1, 3)
+        ego_current_pose[0, 0, 0:2] = trajs[ego_index, 10, 0:2]
+        ego_current_pose[0, 0, 2] = trajs[ego_index, 10, 6]
+        ret_dict['ego_current_pose'] = ego_current_pose
+
+        return ret_dict
+    
+
+    def generate_prediction_dicts(self, input_dict, output_path=None):
+        agent_to_predict_num = input_dict['agent_to_predict_num']
+
+        batch = agent_to_predict_num.size(0)
+        mode_num = 6
+        agent_global_traj = input_dict['agent_global_traj']
+        agent_global_traj = agent_global_traj.unsqueeze(2).repeat(1, 1, mode_num, 1, 1)
+
+        pred_dict_list = []
+        for i in range(batch):
+            for j in range(int(agent_to_predict_num[i, 0].item())):
+                single_pred_dict = {
+                    'scenario_id': input_dict['scenario_id'][i],
+                    'pred_trajs': agent_global_traj[i, j, :, :, 0:2].cpu().numpy(),
+                    'pred_scores': torch.ones(mode_num).cpu().numpy(),
+                    'object_id': input_dict['center_objects_id'][i][j],
+                    'object_type': input_dict['center_objects_type'][i][j],
+                    'gt_trajs': input_dict['center_gt_trajs_src'][i, 0, j, ...].cpu().numpy(),
+                    'track_index_to_predict': input_dict['track_index_to_predict'][i, 0, j].item(),
+                }
+                pred_dict_list.append(single_pred_dict)
+
+        return pred_dict_list
+    
+
+    def evaluation(self, pred_dicts, output_path=None, eval_method='waymo', **kwargs):
+        if eval_method == 'waymo':
+            from mtr_trainer.mtr_datasets.waymo_eval import waymo_evaluation
+            try:
+                num_modes_for_eval = pred_dicts[0][0]['pred_trajs'].shape[0]
+            except:
+                num_modes_for_eval = 6
+            metric_results, result_format_str = waymo_evaluation(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval)
+
+            metric_result_str = '\n'
+            for key in metric_results:
+                metric_results[key] = metric_results[key]
+                metric_result_str += '%s: %.4f \n' % (key, metric_results[key])
+            metric_result_str += '\n'
+            metric_result_str += result_format_str
+        else:
+            raise NotImplementedError
+
+        return metric_result_str, metric_results

@@ -167,7 +167,7 @@ def main():
         add_worker_init_fn=args.add_worker_init_fn,
     )
 
-    model = build_model(config=cfg.MODEL)
+    model = build_model(config=cfg)
     if not args.without_sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()

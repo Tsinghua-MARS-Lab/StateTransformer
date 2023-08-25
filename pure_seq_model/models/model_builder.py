@@ -7,7 +7,7 @@ __all__ = {
 }
 
 def build_model(config):
-    model = __all__[config.model_name](
+    model = __all__[config.MODEL.model_name](
         config=config
     )
     return model
