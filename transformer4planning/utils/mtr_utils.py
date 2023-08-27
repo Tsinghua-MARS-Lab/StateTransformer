@@ -221,7 +221,7 @@ def _num_to_str(nums):
     for str in nums:
         s = ""
         for char in str:
-            if char == -1: continue
+            if char == -1 or char == -100: continue
             s += chr(char)
         string_list.append(s)
 
