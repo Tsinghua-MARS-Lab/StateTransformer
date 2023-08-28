@@ -12,11 +12,13 @@ from transformers.trainer import Trainer
 from transformer4planning.utils import mtr_utils
 from typing import List, Optional, Dict, Any, Tuple, Union
 from datasets import Dataset
+import copy
 import torch
 import torch.nn as nn
 import logging
 import os
 import numpy as np
+import pandas as pd
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -184,7 +186,7 @@ class PlanningTrainer(Trainer):
                     ego_trajs = torch.stack(ego_trajs, dim=0).to(self.model.device).squeeze(1)
 
                     trajectory_label_in_batch = ego_trajs[:, 11:, [0, 1, 2, 6]].clone()
-                elif self.model.model_args.task == "nuplan" and self.model.model_args.encoder_type == "raster":
+                elif self.model.model_args.task == "nuplan":
                     trajectory_label_in_batch = inputs["trajectory_label"].clone()
                 else:
                     raise NotImplementedError
@@ -208,7 +210,7 @@ class PlanningTrainer(Trainer):
                         future_key_points = trajectory_label_in_batch[:, self.model.ar_future_interval - 1::self.model.ar_future_interval, :]
                     
                     if self.model.model_args.generate_diffusion_dataset_for_key_points_decoder:
-                        return None,None,None
+                        return None, None, None
                         # no need to return further info.
                     
                     ade_x_error_key_points = prediction_key_points[:, :, 0] - future_key_points[:, :, 0]
@@ -277,12 +279,21 @@ class PlanningTrainer(Trainer):
                     else:
                         break
 
+            # for log, TODO: add args
+            batch_to_csv = dict(
+                log_name=np.array(inputs['file_name']),
+                scenario_name=np.array(inputs['scenario_id']),
+                scenario_type=np.array(inputs['scenario_type'])
+            )
             # compute ade
+            batch_size = trajectory_label_in_batch.shape[0]
             ade = torch.sqrt(ade_x_error.flatten() ** 2 + ade_y_error.flatten() ** 2)
+            batch_to_csv["ade_with_kp"] = copy.deepcopy(torch.mean(ade.reshape(batch_size, -1), dim=-1).detach().cpu().numpy())
             ade = ade.mean()
             self.eval_result['ade'].append(float(ade))
             # compute fde
             fde = torch.sqrt(fde_x_error.flatten() ** 2 + fde_y_error.flatten() ** 2)
+            batch_to_csv["fde_with_kp"] = copy.deepcopy(fde.detach().cpu().numpy())
             fde = fde.mean()
             self.eval_result['fde'].append(float(fde))
             if self.model.model_args.predict_yaw:
@@ -313,10 +324,12 @@ class PlanningTrainer(Trainer):
                         self.eval_result['fde_gen'] = []
                     # compute ade by gen
                     ade_by_gen = torch.sqrt(ade_x_error_by_gen.flatten() ** 2 + ade_y_error_by_gen.flatten() ** 2)
+                    batch_to_csv["ade"] = copy.deepcopy(torch.mean(ade_by_gen.reshape(batch_size, -1), dim=-1).detach().cpu().numpy())
                     ade_by_gen = ade_by_gen.mean()
                     self.eval_result['ade_gen'].append(float(ade_by_gen))
                     # compute fde
                     fde_by_gen = torch.sqrt(fde_x_error_by_gen.flatten() ** 2 + fde_y_error_by_gen.flatten() ** 2)
+                    batch_to_csv["fde"] = copy.deepcopy(fde_by_gen.detach().cpu().numpy())
                     fde_by_gen = fde_by_gen.mean()
                     self.eval_result['fde_gen'].append(float(fde_by_gen))
                     # compute key points ade
@@ -333,6 +346,16 @@ class PlanningTrainer(Trainer):
                         heading_error_by_gen = torch.abs(heading_error_by_gen).mean()
                         self.eval_result['heading_error_by_gen'].append(float(heading_error_by_gen))
 
+        
+        write_header = True if self.eval_itr == 0 else False
+        # for key, value in batch_to_csv.items():
+            # print(key, value.shape)
+        batch_to_write = pd.DataFrame(batch_to_csv)
+        if self.args.do_eval and not self.args.do_train:
+            batch_to_write.to_csv("val14k.csv", 
+                                mode='a', 
+                                header=write_header, 
+                                index=False)
         self.eval_itr += 1
         if prediction_loss_only:
             return (loss, None, None)
@@ -628,3 +651,7 @@ class PlanningTrainer(Trainer):
 
         logger.info('Result is save to %s' % eval_output_dir)
         logger.info('****************Evaluation done.*****************')        
+
+    # This function is just to 
+    def log_batch_into_csv(self, batch):
+        pass
