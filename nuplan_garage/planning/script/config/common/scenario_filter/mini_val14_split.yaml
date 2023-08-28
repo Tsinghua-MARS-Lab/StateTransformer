@@ -1,0 +1,86 @@
+_target_: nuplan.planning.scenario_builder.scenario_filter.ScenarioFilter
+_convert_: 'all'
+
+scenario_types: # List of scenario types to include
+  - starting_left_turn
+  - starting_right_turn
+  - starting_straight_traffic_light_intersection_traversal
+  - stopping_with_lead
+  - high_lateral_acceleration
+  - high_magnitude_speed
+  - low_magnitude_speed
+  - traversing_pickup_dropoff
+  - waiting_for_pedestrian_to_cross
+  - behind_long_vehicle
+  - stationary_in_traffic
+  - near_multiple_vehicles
+  - changing_lane
+  - following_lane_with_lead
+
+scenario_tokens:
+  - '026c317cfdcf519a'
+  - '028bc03bf8a258fa'
+  - '0317b5f6ca155438'
+  - '033f14feaa47597e'
+  - '03a97e72a18c5e48'
+  - '03e95493fbff5c1d'
+  - '055c6ffe01db5864'
+  - '057eb9f2c019548d'
+  - '05d85cf78a525fb2'
+  - '063d6d1640f55688'
+  - '068990e1f0e35c7e'
+  - '095b84ce36e257ec'
+  - '096eb4e157b3563c'
+  - '0a3d3adc5ae45cc2'
+  - '0b1cdeb3c51b5205'
+  - '0c37c42e4e4058e3'
+  - '0d58368e8e125396'
+  - '12eea643bca95f1d'
+  - '137c4a602d535d1c'
+  - '14c25324ce6a5882'
+  - '15416947b62a540e'
+  - '162b92f3a7905adc'
+  - '16747f8ea1e85676'
+  - '175f26661c2a57c9'
+  - '17b350a9e3715073'
+  - '18a984b87ba2506b'
+  - '197ef7518e4657b2'
+  - '1a18ee213e0352d0'
+  - '1acc0a08688c5c99'
+  - '1d68dfeb693b526b'
+  - '1e3c0a57fd545a8b'
+  - '1ef1576ca3b953b3'
+  - '1f463bd4f9a85923'
+  - '204d871fbb455d23'
+  - '20e2686902f55f43'
+  - '2195dc8b26c851ff'
+  - '219c281fb14c52e8'
+  - '230060c908a951b1'
+  - '23f0855cc9475841'
+  - '2409a5f91e2f513d'
+  - '24bbdecdbaa55163'
+  - '25192935de6e5453'
+  - '2556145b71c75f61'
+  - '25b971ffad8d5c53'
+  - '25d2d661dff95f85'
+  - '2609befadf81533d'
+  - '2792f094cbbf5960'
+  - '28ddcbcd8bb254a5'
+  - '296d879cff115ae9'
+  - '2cad2f01cb595862'
+  - '2cdde2c236085d4d'
+
+log_names: ${splitter.log_splits.val}
+map_names: null
+
+num_scenarios_per_type: 25
+limit_total_scenarios: null
+timestamp_threshold_s: 15
+ego_displacement_minimum_m: null    # Whether to remove scenarios where the ego moves less than a certain amount
+ego_start_speed_threshold: null     # Limit to scenarios where the ego reaches a certain speed from below
+ego_stop_speed_threshold: null      # Limit to scenarios where the ego reaches a certain speed from above
+speed_noise_tolerance: null         # Value at or below which a speed change between two timepoints should be ignored as noise.
+
+expand_scenarios: false
+remove_invalid_goals: true
+shuffle: false

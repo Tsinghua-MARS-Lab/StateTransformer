@@ -114,6 +114,7 @@ class ControlTFPlanner(AbstractPlanner):
         # self.use_gpu = False  # torch.cuda.is_available()
         self.use_gpu = model.device != 'cpu'
         self._iteration = 0
+        self.road_dic = None
         del scenario
 
     def initialize(self, initialization: List[PlannerInitialization]) -> None:
@@ -123,7 +124,6 @@ class ControlTFPlanner(AbstractPlanner):
         self.route_roadblock_ids = initialization.route_roadblock_ids
         self._map_api = initialization.map_api
         self.idm_planner.initialize(initialization)
-        self.road_dic = get_road_dict(self._map_api, ego_pose_center=Point2D(0, 0))
 
     def warmup(self):
         # if self.use_gpu:
@@ -168,6 +168,8 @@ class ControlTFPlanner(AbstractPlanner):
         oriented_point = np.array([ego_states[-1].rear_axle.x,
                                    ego_states[-1].rear_axle.y,
                                    ego_states[-1].rear_axle.heading])
+        if self.road_dic is None:
+            self.road_dic = get_road_dict(self._map_api, ego_pose_center=Point2D(oriented_point[0], oriented_point[1]))
         sampled_ego_states = [ego_states[i] for i in sample_frames_in_past_10hz]
         ego_trajectory = np.array([(ego_state.rear_axle.x,
                                     ego_state.rear_axle.y,
@@ -194,7 +196,7 @@ class ControlTFPlanner(AbstractPlanner):
 
         # compute idm trajectory and scenario flag
         traffic_stop_threshold = 5
-        idm_trajectory, flag, relative_distance = self.idm_planner.compute_planner_trajectory(current_input)  # (17, 3)
+        # idm_trajectory, flag, relative_distance = self.idm_planner.compute_planner_trajectory(current_input)  # (17, 3)
         # if flag == "redlight" and relative_distance < traffic_stop_threshold:
         #     return idm_trajectory
 
@@ -211,6 +213,7 @@ class ControlTFPlanner(AbstractPlanner):
                     route_ids=self.route_roadblock_ids,
                     ego_pose=oriented_point,
                     road_dic=self.road_dic,
+                    map=self._map_api.map_name,
                     scenario_type=self.scenario_type if self.scenario_type is not None else None,
                     # idm_reference_global=idm_trajectory._trajectory if flag == "redlight" or (relative_distance is not None and relative_distance < traffic_stop_threshold) else None
                 )
@@ -224,6 +227,7 @@ class ControlTFPlanner(AbstractPlanner):
                     route_ids=self.route_roadblock_ids,
                     ego_pose=oriented_point,
                     road_dic=self.road_dic,
+                    map=self._map_api.map_name,
                     scenario_type=self.scenario_type if self.scenario_type is not None else None,
                     # idm_reference_global=idm_trajectory._trajectory if flag == "redlight" or (relative_distance is not None and relative_distance < traffic_stop_threshold) else None
                 )
@@ -328,9 +332,9 @@ class ControlTFPlanner(AbstractPlanner):
         dx = relative_traj[4::5, 0] - relative_traj[:-4:5, 0]
         dy = relative_traj[4::5, 1] - relative_traj[:-4:5, 1]
         distances = np.sqrt(dx ** 2 + dy ** 2)
-        yaw_angles = np.where(distances > 0.1, np.arctan2(dy, dx), 0)
+        relative_yaw_angles = np.where(distances > 0.1, np.arctan2(dy, dx), 0)
         # accumulate yaw angle
-        relative_yaw_angles = yaw_angles.cumsum()
+        # relative_yaw_angles = yaw_angles.cumsum()
         relative_yaw_angles_full = np.repeat(relative_yaw_angles, 5, axis=0)
         relative_traj[:, -1] = relative_yaw_angles_full
 
@@ -348,7 +352,6 @@ class ControlTFPlanner(AbstractPlanner):
             new[:, -1] = relative_traj[:, -1]
             relative_traj = new
 
-        # print('insptect 354: ', relative_traj)
         if self._iteration == 1:
             import random
             input_dic = {
@@ -358,12 +361,12 @@ class ControlTFPlanner(AbstractPlanner):
                 'trajectory_label': torch.zeros((1, pred_length, 4))
             }
             print('inspect: ', relative_traj.shape, relative_traj, pred_key_points.shape, pred_key_points)
-            save_raster_with_results(path_to_save='/home/sunq/debug_raster_controller/',
-                                     inputs=input_dic,
-                                     sample_index=0,
-                                     prediction_trajectory=relative_traj,
-                                     file_index=f'{self.scenario_id}-{self._map_api.map_name}',
-                                     prediction_key_point=pred_key_points)
+            # save_raster_with_results(path_to_save='/home/sunq/debug_raster_controller/',
+            #                          inputs=input_dic,
+            #                          sample_index=0,
+            #                          prediction_trajectory=relative_traj,
+            #                          file_index=f'{self.scenario_id}-{self._map_api.map_name}',
+            #                          prediction_key_point=pred_key_points)
 
         # reverse again for singapore trajectory
         y_inverse = -1 if self._map_api.map_name == "sg-one-north" else 1
@@ -389,7 +392,7 @@ class ControlTFPlanner(AbstractPlanner):
         agent_seq and statics_seq are both agents in raster definition
         """
         # origin_ego_pose: (x, y, yaw) in current timestamp
-
+        import copy
         road_types = 20
         agent_type = 8
         traffic_types = 4
@@ -406,7 +409,7 @@ class ControlTFPlanner(AbstractPlanner):
         rasters_high_res_channels = cv2.split(rasters_high_res)
         rasters_low_res_channels = cv2.split(rasters_low_res)
         y_inverse = -1 if self._map_api.map_name == "sg-one-north" else 1
-        road_dic = self.road_dic
+        road_dic = copy.deepcopy(self.road_dic)
 
         ## goal route
         cos_, sin_ = math.cos(-origin_ego_pose[2] - math.pi / 2), math.sin(-origin_ego_pose[2] - math.pi / 2)
@@ -899,8 +902,6 @@ def save_raster_with_results(path_to_save,
         agent_colors = np.array([[0.01 * 255] * past_frames_num,
                                  np.linspace(0, 255, past_frames_num),
                                  np.linspace(255, 0, past_frames_num)]).transpose()
-
-        # print('test: ', past_frames_num, agent_type_num, agent.shape)
         for i in range(past_frames_num):
             for j in range(agent_type_num):
                 # if j == 7:

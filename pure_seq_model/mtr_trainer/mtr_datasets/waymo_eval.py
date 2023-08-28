@@ -99,7 +99,7 @@ def transform_preds_to_waymo_format(pred_dicts, top_k_for_eval=-1, eval_second=8
     num_max_objs_per_scene = 0
     for k in range(len(pred_dicts)):
         cur_scenario_id = pred_dicts[k]['scenario_id']
-        if cur_scenario_id not in scene2preds:
+        if  cur_scenario_id not in scene2preds:
             scene2preds[cur_scenario_id] = []
         scene2preds[cur_scenario_id].append(pred_dicts[k])
         num_max_objs_per_scene = max(num_max_objs_per_scene, len(scene2preds[cur_scenario_id]))
@@ -246,96 +246,6 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
     result_dict['---------------------------------------------------------------'] = 0
     result_dict.update(object_type_cnt_dict)
     result_dict['-----Note that this evaluation may have marginal differences with the official Waymo evaluation server-----'] = 0
-
-    return result_dict, result_format_str
-
-def waymo_evaluation_seperate(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
-
-    pred_score, pred_trajectory, gt_infos, object_type_cnt_dict = transform_preds_to_waymo_format(
-        pred_dicts, top_k_for_eval=top_k, eval_second=eval_second,
-    )
-    eval_config = _default_metrics_config(eval_second=eval_second, num_modes_for_eval=num_modes_for_eval)
-
-    pred_score = tf.convert_to_tensor(pred_score, np.float32)
-    pred_trajs = tf.convert_to_tensor(pred_trajectory, np.float32)
-    gt_trajs = tf.convert_to_tensor(gt_infos['gt_trajectory'], np.float32)
-    gt_is_valid = tf.convert_to_tensor(gt_infos['gt_is_valid'], np.bool)
-    pred_gt_indices = tf.convert_to_tensor(gt_infos['pred_gt_indices'], tf.int64)
-    pred_gt_indices_mask = tf.convert_to_tensor(gt_infos['pred_gt_indices_mask'], np.bool)
-    object_type = tf.convert_to_tensor(gt_infos['object_type'], tf.int64)
-
-    metric_names = config_util.get_breakdown_names_from_motion_config(eval_config)
-    
-    scenario_num = pred_score.shape[0]
-    
-    step = 1000
-    for s_i in range(0, scenario_num, step):
-        metric_results = py_metrics_ops.motion_metrics(
-            config=eval_config.SerializeToString(),
-            prediction_trajectory=pred_trajs[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, top_k, num_agents_per_group, num_pred_steps, )
-            prediction_score=pred_score[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, top_k)
-            ground_truth_trajectory=gt_trajs[s_i: s_i+step, ...],  # (batch_size, num_total_agents, num_gt_steps, 7)
-            ground_truth_is_valid=gt_is_valid[s_i: s_i+step, ...],  # (batch_size, num_total_agents, num_gt_steps)
-            prediction_ground_truth_indices=pred_gt_indices[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, num_agents_per_group)
-            prediction_ground_truth_indices_mask=pred_gt_indices_mask[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, num_agents_per_group)
-            object_type=object_type[s_i: s_i+step, ...]  # (batch_size, num_total_agents)
-        )
-    
-        object_count = {}
-        object_count['VEHICLE'] = (object_type[s_i: s_i+step, ...]._numpy() ==1).sum()
-        object_count['PEDESTRIAN'] = (object_type[s_i: s_i+step, ...]._numpy() ==2).sum()
-        object_count['CYCLIST'] = (object_type[s_i: s_i+step, ...]._numpy() ==3).sum()
-        
-        result_dict = {}
-        avg_results = {}
-        for i, m in enumerate(['minADE', 'minFDE', 'MissRate', 'OverlapRate', 'mAP']):
-            avg_results.update({
-                f'{m} - VEHICLE': [0.0, 0], f'{m} - PEDESTRIAN': [0.0, 0], f'{m} - CYCLIST': [0.0, 0]
-            })
-            for j, n in enumerate(metric_names):
-                cur_name = n.split('_')[1]
-                avg_results[f'{m} - {cur_name}'][0] += float(metric_results[i][j])
-                avg_results[f'{m} - {cur_name}'][1] += 1
-                result_dict[f'{m} - {n}\t'] = float(metric_results[i][j])
-
-        for key in avg_results:
-            avg_results[key] = avg_results[key][0] / avg_results[key][1]
-
-        result_dict['-------------------------------------------------------------'] = 0
-        result_dict.update(avg_results)
-
-        final_avg_results = {}
-        result_format_list = [
-            ['Waymo', 'mAP', 'minADE', 'minFDE', 'MissRate', '\n'],
-            ['VEHICLE', None, None, None, None, '\n'],
-            ['PEDESTRIAN', None, None, None, None, '\n'],
-            ['CYCLIST', None, None, None, None, '\n'],
-            ['Avg', None, None, None, None, '\n'],
-        ]
-        name_to_row = {'VEHICLE': 1, 'PEDESTRIAN': 2, 'CYCLIST': 3, 'Avg': 4}
-        name_to_col = {'mAP': 1, 'minADE': 2, 'minFDE': 3, 'MissRate': 4}
-
-        for cur_metric_name in ['minADE', 'minFDE', 'MissRate', 'mAP']:
-            final_avg_results[cur_metric_name] = 0
-            for cur_name in ['VEHICLE', 'PEDESTRIAN', 'CYCLIST']:
-                final_avg_results[cur_metric_name] += avg_results[f'{cur_metric_name} - {cur_name}']
-
-                result_format_list[name_to_row[cur_name]][name_to_col[cur_metric_name]] = '%.4f,' % avg_results[f'{cur_metric_name} - {cur_name}']
-
-            final_avg_results[cur_metric_name] /= 3
-            result_format_list[4][name_to_col[cur_metric_name]] = '%.4f,' % final_avg_results[cur_metric_name]
-
-        result_format_str = ' '.join([x.rjust(12) for items in result_format_list for x in items])
-
-        result_dict['--------------------------------------------------------------'] = 0
-        result_dict.update(final_avg_results)
-        result_dict['---------------------------------------------------------------'] = 0
-        result_dict.update(object_type_cnt_dict)
-        result_dict['-----Note that this evaluation may have marginal differences with the official Waymo evaluation server-----'] = 0
-        
-        print("%d - %d -------------------------------------------------------------- block res, \n" % (s_i, s_i + step))
-        print('count ', object_count)
-        print(result_format_str)
 
     return result_dict, result_format_str
 

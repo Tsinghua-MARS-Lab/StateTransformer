@@ -53,7 +53,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tokenizer', 'gpt2-tokenizer'),
                 d_embed=self.config.n_embd,
             )
-            
             if "raster" in self.model_args.encoder_type:
                 from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
@@ -81,8 +80,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
             cfg_from_yaml_file(self.model_args.mtr_config_path, cfg)
             action_kwargs = dict(
-                    d_embed=self.config.n_embd
-                )
+                d_embed=self.config.n_embd
+            )
             tokenizer_kwargs = dict(
                 dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
                 d_embed=self.config.n_embd,
@@ -91,7 +90,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, tokenizer_kwargs, self.model_args)
         else:
             raise NotImplementedError
-    
+
     def build_decoder(self):
         # load pretrained diffusion keypoint decoder
         #TODO: add diffusion decoder trained from scratch
@@ -119,7 +118,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         position_ids = attention_mask.long().cumsum(-1) - 1
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
-    
+
     def from_joint_to_marginal(self, hidden_state, info_dict):
         agents_num_per_scenario = info_dict["agents_num_per_scenario"]
         scenario_num, _, _ = hidden_state.shape
@@ -131,9 +130,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 hidden_state_marginal.append(hidden_state[i, j::agents_num, :])
         hidden_state_marginal = torch.stack(hidden_state_marginal)
         return hidden_state_marginal
-    
+
     def forward(
-            self,     
+            self,
             return_dict: Optional[bool] = None,
             **kwargs
     ):
@@ -192,16 +191,15 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         forward function.
         """
         # pass the following infos during generate for one sample (non-batch) generate with KP checking
-        map_api = kwargs.get("map_api", None)
+        map_name = kwargs.get("map", None)
         route_ids = kwargs.get("route_ids", None)
         ego_pose = kwargs.get("ego_pose", None)
         road_dic = kwargs.get("road_dic", None)
-        idm_reference_global = kwargs.get("idm_reference_global", None)
+        # idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
         """
         Used for generate with key points
         """
-       
-        input_embeds, info_dict  = self.encoder(**kwargs)
+        input_embeds, info_dict = self.encoder(**kwargs)
 
         selected_indices = info_dict["selected_indices"]
         pred_length = info_dict["pred_length"]
@@ -319,7 +317,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
 
-        if self.model_args.interaction: 
+        if self.model_args.interaction:
             transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
 
         # expected shape for pred trajectory is (b, pred_length, 4)
@@ -391,14 +389,37 @@ def query_current_lane(map_api, target_point):
     }
 
 
+def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
+    import numpy as np
+    points_of_lane = []
+    for each_road_id in route_ids:
+        each_road_id = int(each_road_id)
+        if each_road_id not in road_dic:
+            continue
+        road_block = road_dic[each_road_id]
+        lanes_in_block = road_block['lower_level']
+        for each_lane in lanes_in_block:
+            each_lane = int(each_lane)
+            if each_lane not in road_dic:
+                continue
+            points_of_lane.append(road_dic[each_lane]['xyz'])
+    if len(points_of_lane) <= 1:
+        print('Warning: No lane found in route, return original point.')
+        return org_point
+    points_np = np.vstack(points_of_lane)
+    total_points = points_np.shape[0]
+    dist_xy = abs(points_np[:, :2] - np.repeat(org_point[np.newaxis, :], total_points, axis=0))
+    dist = dist_xy[:, 0] + dist_xy[:, 1]
+    minimal_index = np.argmin(dist)
+    minimal_point = points_np[minimal_index, :2]
+    min_dist = min(dist)
+    return minimal_point
+    # return minimal_point if min_dist < 10 else org_point
+
+
 def build_models(model_args):
     if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
-        config_p = GPT2Config()
-        config_p.n_layer = model_args.n_layers
-        config_p.n_embd = model_args.d_embed
-        config_p.n_inner = model_args.d_inner
-        config_p.n_head = model_args.n_heads
-        config_p.activation_function = model_args.activation_function
+        config_p = None
         if not model_args.autoregressive:
             from transformer4planning.models.vector_model import GPTNonAutoRegressiveModelVector, GPTAutoRegressiveModelVector
             ModelCls = GPTNonAutoRegressiveModelVector
