@@ -8,13 +8,9 @@ from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 from transformer4planning.models.encoder.nuplan_raster_encoder import *
+from transformer4planning.models.utils import nll_loss_gmm_direct
 from transformer4planning.libs.models.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
-
-
-class GPTAutoRegressiveModelVector(GPT2PreTrainedModel):
-    def forward(self, **kwargs):
-        pass
     
     
 class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
@@ -38,6 +34,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # encoder
         self.context_encoder = MTREncoder(vector_model_cfg.CONTEXT_ENCODER)
+        self.context_num = 2
         
         # load intention points
         intention_points_file = vector_model_cfg.MOTION_DECODER.INTENTION_POINTS_FILE
@@ -57,7 +54,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.action_m_embed = nn.Sequential(nn.Linear(4, llm_config.n_embd), nn.Tanh())
         self.llm_n_embd = llm_config.n_embd
 
-        self.traj_decoder = None
         self.k = int(self.model_args.k)
 
         self.next_token_scorer_decoder = None
@@ -147,6 +143,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
         state_embeds = state_embeds.max(dim=1)[0]
         
+        obj_embeds = obj_feature.max(dim=1)[0] # (bs, num_obj, num_timestamp, 256)
+        map_embeds = map_feature.max(dim=1)[0] # (bs, num_poly, num_timestamp, 256)
+        
         # traj
         trajectory_label = input_dict['trajectory_label']
         trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
@@ -165,12 +164,18 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         # create OAOAOA..
         input_embeds = torch.zeros(
-            (batch_size, context_length * 2, self.llm_n_embd),
+            (batch_size, context_length * self.context_num, self.llm_n_embd),
             dtype=torch.float32,
             device=device
         )
-        input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
-        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+        
+        if self.context_num == 2:
+            input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
+            input_embeds[:, 1::2, :] = action_embeds  # index: 2, 4, 6, .., 20
+        elif self.context_num == 3:
+            input_embeds[:, ::3, :] = map_embeds  # index: 0, 2, 4, .., 18
+            input_embeds[:, 1::3, :] = obj_embeds  # index: 1, 3, 5, .., 19
+            input_embeds[:, 2::3, :] = action_embeds  # index: 2, 4, 6, .., 20
         
         # add scenario_embedding
         if self.model_args.token_scenario_tag:
@@ -294,8 +299,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         pred_kps_logits = None
         pred_kps_cls = None
         
-        tot_scenario_contenxt_len = self.scenario_type_len + context_length * 2
-        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * 2 + self.anchor_len
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num
+        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len
         
         if self.use_anchor:
             pred_anchor_embed = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len-1 : tot_scenario_contenxt_len-1+self.anchor_len, :] # (bs, anchor_len, n_embed)
@@ -358,8 +363,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         pred_length = trajectory_label.shape[1]
         
         # anchor embedding
-        tot_scenario_contenxt_len = self.scenario_type_len + context_length * 2
-        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * 2 + self.anchor_len
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num
+        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len
         
         if self.use_anchor:
             dummy_anchor_embedding = self.action_m_embed(torch.zeros((batch_size, 4), device=device)).unsqueeze(1) # (bs, 1, n_embed)
@@ -454,7 +459,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
             # get traj_logits
             traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
-            traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
+            traj_logits = self.traj_decoder(traj_hidden_state)[:, :, :self.pred_dim] # (bs, pred_len, 2)
             all_traj_logits.append(traj_logits[:, None, :, :])
             
         all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
@@ -498,6 +503,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
         loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
         loss += loss_traj
+        
+        # loss_reg_gmm = nll_loss_gmm_direct(
+        #     pred_trajs=pred_traj_logits,
+        #     gt_trajs=gt_traj[:, :, 0:2], gt_valid_mask=gt_traj_mask.squeeze(-1),
+        #     timestamp_loss_weight=None, use_square_gmm=False,
+        # )
+        
+        # loss += loss_reg_gmm.mean()
 
         # loss kps
         if self.ar_future_interval > 0:

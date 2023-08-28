@@ -115,3 +115,48 @@ def uniform_positional_embedding(key_point_num, feat_dim):
     pos_embedding[:, 1::2] = torch.cos(position * div_term)
 
     return pos_embedding
+
+def nll_loss_gmm_direct(pred_trajs, gt_trajs, gt_valid_mask,
+                        timestamp_loss_weight=None, use_square_gmm=False, log_std_range=(-1.609, 5.0), rho_limit=0.5):
+    """
+    GMM Loss for Motion Transformer (MTR): https://arxiv.org/abs/2209.13508
+    Written by Shaoshuai Shi 
+
+    Args:
+        pred_trajs (batch_size, num_modes, num_timestamps, 5 or 3)
+        gt_trajs (batch_size, num_timestamps, 2):
+        gt_valid_mask (batch_size, num_timestamps):
+        timestamp_loss_weight (num_timestamps):
+    """
+    if use_square_gmm:
+        assert pred_trajs.shape[-1] == 3 
+    else:
+        assert pred_trajs.shape[-1] == 5
+
+    nearest_trajs = pred_trajs  # (batch_size, num_timestamps, 5)
+    res_trajs = gt_trajs - nearest_trajs[:, :, 0:2]  # (batch_size, num_timestamps, 2)
+    dx = res_trajs[:, :, 0]
+    dy = res_trajs[:, :, 1]
+
+    if use_square_gmm:
+        log_std1 = log_std2 = torch.clip(nearest_trajs[:, :, 2], min=log_std_range[0], max=log_std_range[1])
+        std1 = std2 = torch.exp(log_std1)   # (0.2m to 150m)
+        rho = torch.zeros_like(log_std1)
+    else:
+        log_std1 = torch.clip(nearest_trajs[:, :, 2], min=log_std_range[0], max=log_std_range[1])
+        log_std2 = torch.clip(nearest_trajs[:, :, 3], min=log_std_range[0], max=log_std_range[1])
+        std1 = torch.exp(log_std1)  # (0.2m to 150m)
+        std2 = torch.exp(log_std2)  # (0.2m to 150m)
+        rho = torch.clip(nearest_trajs[:, :, 4], min=-rho_limit, max=rho_limit)
+
+    gt_valid_mask = gt_valid_mask.type_as(pred_trajs)
+    if timestamp_loss_weight is not None:
+        gt_valid_mask = gt_valid_mask * timestamp_loss_weight[None, :]
+
+    # -log(a^-1 * e^b) = log(a) - b
+    reg_gmm_log_coefficient = log_std1 + log_std2 + 0.5 * torch.log(1 - rho**2)  # (batch_size, num_timestamps)
+    reg_gmm_exp = (0.5 * 1 / (1 - rho**2)) * ((dx**2) / (std1**2) + (dy**2) / (std2**2) - 2 * rho * dx * dy / (std1 * std2))  # (batch_size, num_timestamps)
+
+    reg_loss = ((reg_gmm_log_coefficient + reg_gmm_exp) * gt_valid_mask).sum(dim=-1)
+
+    return reg_loss
