@@ -439,13 +439,13 @@ def main():
     kwargs = {"finetuned_from": model_args.model_pretrain_name_or_path, "tasks": "NuPlanPlanning"}
     
     # push to hub?
-    if model_args.task is not None:
-        kwargs["dataset_tags"] = model_args.task
-        if data_args.dataset_config_name is not None:
-            kwargs["dataset_args"] = data_args.dataset_config_name
-            kwargs["dataset"] = f"{model_args.task} {data_args.dataset_config_name}"
-        else:
-            kwargs["dataset"] = model_args.task
+    # if model_args.task is not None:
+    #     kwargs["dataset_tags"] = model_args.task
+    #     if data_args.dataset_config_name is not None:
+    #         kwargs["dataset_args"] = data_args.dataset_config_name
+    #         kwargs["dataset"] = f"{model_args.task} {data_args.dataset_config_name}"
+    #     else:
+    #         kwargs["dataset"] = model_args.task
 
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
