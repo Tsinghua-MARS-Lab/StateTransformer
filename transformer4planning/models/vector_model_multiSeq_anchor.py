@@ -7,6 +7,7 @@ import torch.nn as nn
 from transformers import GPT2Tokenizer
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformer4planning.libs.models.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
@@ -952,12 +953,8 @@ class GPTNonAutoRegressiveModelVector_MutliSeqAnchor(GPT2PreTrainedModel):
             future_key_point_hidden_state = transformer_outputs_hidden_state[:, [tot_scenario_contenxt_len + i - 1], :] # (bs*num_beam, 1, n_embed)
             pred_kps_logit = center_obj_anchor_pts[:, i, :, :].repeat(1, num_beam, 1) # (bs, num_beam*64, 2)
             
-            if self.use_anchor and i == 0:
-                pred_kps_score = self.anchor_cls_decoder(future_key_point_hidden_state).view(batch_size, num_beam, self.anchor_num).softmax(-1) # (bs, num_beam, 64)
-                
-            else:                
-                pred_kps_score = self.anchor_cls_decoder(future_key_point_hidden_state)  # (bs*num_beam, 1, 64)
-                pred_kps_score = (pred_kps_score.view(batch_size, num_beam, self.anchor_num)/self.beam_search_temp).softmax(-1) # (bs, num_beam, 64)
+            pred_kps_score = self.anchor_cls_decoder.to(device)(future_key_point_hidden_state).view(batch_size, num_beam, self.anchor_num).softmax(-1) # (bs, num_beam, 64)
+
             
             if i == 0:
                 topk_score, topk_indx = torch.topk(pred_kps_score[:, 0, :], dim=-1, k =num_beam) # (bs, num_beam)
