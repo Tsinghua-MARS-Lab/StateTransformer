@@ -651,7 +651,3 @@ class PlanningTrainer(Trainer):
 
         logger.info('Result is save to %s' % eval_output_dir)
         logger.info('****************Evaluation done.*****************')        
-
-    # This function is just to 
-    def log_batch_into_csv(self, batch):
-        pass
