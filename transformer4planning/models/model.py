@@ -294,7 +294,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             if self.model_args.generation_method == 'greedy':
                 pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, length_before_keypoints, key_points_num)
             elif self.model_args.generation_method == 'beam':
-                pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, length_before_keypoints, key_points_num)
+                pred_key_points_during_generate, input_embeds_kpts, kpts_scores, _ = self.beam_search(input_embeds, length_before_keypoints, key_points_num)
             else:
                 raise NotImplementedError
             
@@ -422,7 +422,113 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             raise ValueError("illegal k while generating trajectory", self.k)
         # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
         return torch.cat([key_points_logits, traj_logits], dim=1)
+    
+    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, num_beam=None, out_num_mode=None, center_obj_anchor_pts=None):
+        '''
+        input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
+        
+        return:
+            k_input_embeds_kpts: (bs, num_beam, num_kps, n_embed)
+            k_kpts_scores: (bs, num_beam, num_kps)
+            pred_key_points_during_generate: (bs, num_beam, num_kps, 4)
+        '''
 
+        assert self.k > 1
+        if num_beam is None:
+            num_beam = self.k
+            
+        if out_num_mode is None:
+            out_num_mode = num_beam 
+        
+        assert num_beam <= self.k
+        assert out_num_mode <= num_beam
+
+        self.use_anchor = False
+        self.pred_dim = 2
+        self.beam_search_temp = 1.0
+        
+        if self.use_anchor:
+            key_points_num += self.anchor_len
+        
+        device = input_embeds.device
+        batch_size, tot_len, n_embed = input_embeds.shape
+        pred_key_points_during_generate = torch.zeros((batch_size, num_beam, key_points_num, self.pred_dim), device=device)
+        
+        k_kpts_scores = torch.zeros((batch_size, num_beam, key_points_num), device=device)
+        k_input_embeds = input_embeds[:, None, :, :].repeat(1, num_beam, 1, 1)
+        
+        k_kpts_index = torch.zeros((batch_size, num_beam, key_points_num), device=device)
+        
+        for i in range(key_points_num):
+            # prepare attention mask
+            k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_contenxt_len + i, :].view(batch_size*num_beam, -1, n_embed)
+            attention_mask = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
+            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+            transformer_output = self.transformer(
+                inputs_embeds=k_input_embeds_current,
+                attention_mask=attention_mask,
+                position_ids=position_ids
+            )
+            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, [tot_scenario_contenxt_len + i - 1], :] # (bs*num_beam, 1, n_embed)
+
+            if self.use_anchor and i == 0:
+                pred_kps_score = self.anchor_cls_decoder(future_key_point_hidden_state).view(batch_size, num_beam, 64).softmax(-1) # (bs, num_beam, 64)
+                pred_kps_logit = center_obj_anchor_pts.repeat(1, num_beam, 1) # (bs, num_beam*64, 2)
+            else:
+                # get topk kps
+                pred_kps_logit = self.key_points_decoder(future_key_point_hidden_state) # (bs*num_beam, 1, 4/2 *k)
+                pred_kps_logit = pred_kps_logit.view(batch_size, num_beam*self.k, self.pred_dim) # (bs, num_beam*k, 2)
+                
+                pred_kps_score = self.next_token_scorer_decoder(future_key_point_hidden_state)  # (bs*num_beam, 1, k)
+                pred_kps_score = (pred_kps_score.view(batch_size, num_beam, self.k)/self.beam_search_temp).softmax(-1) # (bs, num_beam, k)
+            
+            if i == 0:
+                topk_score, topk_indx = torch.topk(pred_kps_score[:, 0, :], dim=-1, k =num_beam) # (bs, num_beam)
+            else:
+                # pred_kps_score_accum = k_kpts_scores[:, :, [i-1]].repeat(1, 1, num_beam) * pred_kps_score
+                # pred_kps_score = pred_kps_score_accum.view(batch_size, num_beam*self.k) # (bs, num_beam*k)
+                pred_kps_score = pred_kps_score.view(batch_size, num_beam*self.k) # (bs, num_beam*k)
+                topk_score, topk_indx = torch.topk(pred_kps_score, dim=-1, k =num_beam) # (bs, num_beam)
+            
+            # topk_score = topk_score.softmax(-1)
+            topk_group = torch.div(topk_indx, self.k, rounding_mode='floor')
+            
+            # pred_kps_logit_topk = []
+            # for k_ in range(num_beam):
+            #     pred_kps_logit_topk.append(pred_kps_logit[torch.arange(batch_size), topk_indx[:, k_], :][:, None, :]) 
+            # pred_kps_logit_topk = torch.cat(pred_kps_logit_topk, dim=1) # (bs, num_beam, 2)
+            
+            pred_kps_logit_topk = pred_kps_logit[torch.arange(batch_size)[:, None].repeat(1, num_beam).view(-1), topk_indx.view(-1), :].view(batch_size, num_beam, 2) # # (bs, num_beam, 2)
+
+            pred_kps_logit_topk = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, num_beam, 2), device=device)), dim=-1) # (bs, num_beam, 4)
+
+            # get kps topk embeds
+            pred_kps_logit_topk_embed = self.encoder.action_m_embed(pred_kps_logit_topk)  # b, num_beam, n_embed
+            
+            k_input_embeds[:, :, tot_scenario_contenxt_len + i, :] = pred_kps_logit_topk_embed
+            k_kpts_scores[:, :, i] = topk_score
+            
+            if i > 0:
+                k_input_embeds_kpts_prev = torch.zeros((batch_size, num_beam, i, n_embed), device=device)
+                k_kpts_scores_prev = torch.zeros((batch_size, num_beam, i), device=device)
+                
+                for p_i in range(num_beam):
+                    k_input_embeds_kpts_prev[:, p_i, :, :] = k_input_embeds[torch.arange(batch_size), topk_group[:, p_i], tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :]
+                    k_kpts_scores_prev[:, p_i, :] = k_kpts_scores[torch.arange(batch_size), topk_group[:, p_i], :i]
+                
+                k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + i, :] = k_input_embeds_kpts_prev
+                k_kpts_scores[:, :, :i] = k_kpts_scores_prev
+                
+                k_kpts_scores[:, :, i] *= k_kpts_scores[:, :, i-1]
+            
+            pred_key_points_during_generate[:, :, i, :] = pred_kps_logit_topk[:, :, :self.pred_dim]
+            k_input_embeds_kpts = k_input_embeds[:, :, tot_scenario_contenxt_len: tot_scenario_contenxt_len + key_points_num, :]
+            
+            k_kpts_index[:, :, i] = topk_indx
+        
+        return pred_key_points_during_generate[:, 0:out_num_mode, ...], k_input_embeds_kpts[:, 0:out_num_mode, ...], k_kpts_scores[:, 0:out_num_mode, ...], k_kpts_index
+    
 def query_current_lane(map_api, target_point):
     """
     Query the current road_block id and lane id given a point on the map with map_api from NuPlan.

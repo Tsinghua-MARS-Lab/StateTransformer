@@ -80,7 +80,7 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),
         "map_polylines": map_polylines_data,
-        "polyline_index": data["polyline_index"],
+        "polyline_index": torch.tensor(data["polyline_index"], dtype=torch.int32).unsqueeze(0).repeat(num_ego, 1),
         "map_polylines_mask": map_polylines_mask,
         "current_time_index": torch.tensor(current_time_index, dtype=torch.int32).repeat(num_ego).view(-1, 1),
         # for evaluation

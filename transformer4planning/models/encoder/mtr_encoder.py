@@ -219,7 +219,12 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         self.model_args = model_args
         self.token_scenario_tag = model_args.token_scenario_tag
         self.ar_future_interval = model_args.ar_future_interval
-        self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
+        simple_map = True
+        if simple_map:
+            self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
+        else:
+            self.context_encoder = MTREncoder(mtr_config.CONTEXT_ENCODER)
+        
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
  
     def from_marginal_to_joint(self, hidden_state, info_dict, update_info_dict=False):
