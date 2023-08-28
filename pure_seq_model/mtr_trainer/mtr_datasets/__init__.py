@@ -10,10 +10,12 @@ from torch.utils.data import DataLoader
 from mtr_trainer.mtr_utils import common_utils
 
 from dataset.waymo_dataset_v1_aug import WaymoDatasetV1Aug
+from dataset.waymo_dataset_v1_no_vel import WaymoDatasetV1NoVel
 
 
 __all__ = {
     'WaymoDatasetV1Aug': WaymoDatasetV1Aug,
+    'WaymoDatasetV1NoVel': WaymoDatasetV1NoVel,
 }
 
 

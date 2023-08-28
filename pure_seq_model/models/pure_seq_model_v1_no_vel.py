@@ -8,7 +8,7 @@ import models.base_model as base_model
 from models.mtr_models.polyline_encoder import PointNetPolylineEncoder
 from utils.torch_geometry import global_state_se2_tensor_to_local, coordinates_to_local_frame
 
-class PureSeqModelV1Aug(nn.Module):
+class PureSeqModelV1NoVel(nn.Module):
     def __init__(self, config: Dict) -> None:
         super().__init__()
         self.model_parameter = config.MODEL.model_parameter
@@ -64,7 +64,6 @@ class PureSeqModelV1Aug(nn.Module):
     def forward(self, input_dict: Dict):
         if self.training:
             normed_input_dict = self.normalize_input(copy.deepcopy(input_dict))
-            # normed_input_dict = self.normalize_input(input_dict)
             ego_output, agent_output = self.model_forward(normed_input_dict)
             ego_output, agent_output = self.denormalize_output(ego_output, agent_output)
 
@@ -234,42 +233,33 @@ class PureSeqModelV1Aug(nn.Module):
         return it, epoch
 
     def get_loss(self, ego_output, ego_label, agent_output, agent_label, agent_valid):
-        # ego_output, ego_label: [batch, 8, 5*time_sample_num]
-        # agent_output, agent_label: [batch, 8*max_agent_num, 5*time_sample_num]
+        # ego_output, ego_label: [batch, 8, 3*time_sample_num]
+        # agent_output, agent_label: [batch, 8*max_agent_num, 3*time_sample_num]
         # agent_valid: [batch, 8*max_agent_num]
 
         # get index and weight
-        x_index = list(range(0, ego_output.size(-1), 5))
-        y_index = list(range(1, ego_output.size(-1), 5))
-        heading_index = list(range(2, ego_output.size(-1), 5))
-        vel_x_index = list(range(3, ego_output.size(-1), 5))
-        vel_y_index = list(range(4, ego_output.size(-1), 5))
+        x_index = list(range(0, ego_output.size(-1), 3))
+        y_index = list(range(1, ego_output.size(-1), 3))
+        heading_index = list(range(2, ego_output.size(-1), 3))
 
         x_weight = self.model_parameter.loss_weight['x']
         y_weight = self.model_parameter.loss_weight['y']
         heading_weight = self.model_parameter.loss_weight['heading']
-        vel_x_weight = self.model_parameter.loss_weight['vel_x']
-        vel_y_weight = self.model_parameter.loss_weight['vel_y']
 
         # ego loss
         ego_diff = self._norm(ego_output, ego_label)
         ego_x_loss = x_weight * torch.mean(ego_diff[:, :, x_index])
         ego_y_loss = y_weight * torch.mean(ego_diff[:, :, y_index])
         ego_heading_loss = heading_weight * torch.mean(ego_diff[:, :, heading_index])
-        ego_vel_x_loss = vel_x_weight * torch.mean(ego_diff[:, :, vel_x_index])
-        ego_vel_y_loss = vel_y_weight * torch.mean(ego_diff[:, :, vel_y_index])
 
-        ego_loss = ego_x_loss + ego_y_loss + ego_heading_loss + ego_vel_x_loss + ego_vel_y_loss
+        ego_loss = ego_x_loss + ego_y_loss + ego_heading_loss
 
         # agent loss
         agent_diff = self._norm(agent_output, agent_label)
         agent_x_loss = x_weight * torch.mean(torch.mean(agent_diff[:, :, x_index], dim=-1) * agent_valid)
         agent_y_loss = y_weight * torch.mean(torch.mean(agent_diff[:, :, y_index], dim=-1) * agent_valid)
         agent_heading_loss = heading_weight * torch.mean(torch.mean(agent_diff[:, :, heading_index], dim=-1) * agent_valid)
-        agent_vel_x_loss = vel_x_weight * torch.mean(torch.mean(agent_diff[:, :, vel_x_index], dim=-1) * agent_valid)
-        agent_vel_y_loss = vel_y_weight * torch.mean(torch.mean(agent_diff[:, :, vel_y_index], dim=-1) * agent_valid)
-
-        agent_loss = agent_x_loss + agent_y_loss + agent_heading_loss + agent_vel_x_loss + agent_vel_y_loss
+        agent_loss = agent_x_loss + agent_y_loss + agent_heading_loss
 
         num_valid_agent = torch.sum(agent_valid)/(agent_valid.size(0)*ego_output.size(1))
         agent_num = agent_output.size(1)/ego_output.size(1)
@@ -287,23 +277,43 @@ class PureSeqModelV1Aug(nn.Module):
         tb_dict['ego_x_loss'] = ego_x_loss.item()
         tb_dict['ego_y_loss'] = ego_y_loss.item()
         tb_dict['ego_heading_loss'] = ego_heading_loss.item()
-        tb_dict['ego_vel_x_loss'] = ego_vel_x_loss.item()
-        tb_dict['ego_vel_y_loss'] = ego_vel_y_loss.item()
         tb_dict['ego_loss'] = ego_loss.item()
         tb_dict['agent_x_loss'] = agent_x_loss.item()
         tb_dict['agent_y_loss'] = agent_y_loss.item()
         tb_dict['agent_heading_loss'] = agent_heading_loss.item()
-        tb_dict['agent_vel_x_loss'] = agent_vel_x_loss.item()
-        tb_dict['agent_vel_y_loss'] = agent_vel_y_loss.item()
         tb_dict['agent_loss'] = agent_loss.item()
         tb_dict['num_valid_agent'] = num_valid_agent.item()
 
+        # for i in range(8):
+        #     print('==========================================', i)
+        #     print('ego_output x: ', ego_output[i, :, x_index])
+        #     print('ego_label x: ', ego_label[i, :, x_index])
+        #     print('ego_output y: ', ego_output[i, :, y_index])
+        #     print('ego_label y: ', ego_label[i, :, y_index])
+        #     print('ego_output h: ', ego_output[i, :, heading_index])
+        #     print('ego_label h: ', ego_label[i, :, heading_index])
+
+
+        # for i in range(8):
+        #     print('===========================================', i)
+        #     print("agent output x: ", agent_output[i, 0, x_index])
+        #     print("agent label x: ", agent_label[i, 0, x_index])
+        #     print("agent output y: ", agent_output[i, 0, y_index])
+        #     print("agent label y: ", agent_label[i, 0, y_index])
+        #     print("agent output h: ", agent_output[i, 0, heading_index])
+        #     print("agent label h: ", agent_label[i, 0, heading_index])
+
+        # # for i in range(8):
+        # print((torch.mean(agent_diff[:, :, x_index], dim=-1) * agent_valid)[0, list(range(0, 512, 64))])
+        # print((torch.mean(agent_diff[:, :, x_index], dim=-1) * agent_valid)[1, list(range(0, 512, 64))])
+        # print((torch.mean(agent_diff[:, :, x_index], dim=-1) * agent_valid)[2, list(range(0, 512, 64))])
+        # print(tb_dict)
+        # assert(0)
         return loss, tb_dict, disp_dict
 
     def normalize_input(self, input_dict):
         # warning: this function will modify input_dict!
         xy_norm_para = self.model_parameter.normalization_para['xy']
-        vel_norm_para = self.model_parameter.normalization_para['vel']
 
         # map feature
         map_keys = ['lane_feature', 'road_line_feature', 'road_edge_feature', 'map_others_feature']
@@ -313,23 +323,18 @@ class PureSeqModelV1Aug(nn.Module):
             input_dict[key] = map_feature_tensor
 
         # ego feature
-        xy_index = list(range(0, input_dict['ego_feature'].size(-1)-5, 7)) + list(range(1, input_dict['ego_feature'].size(-1)-5, 7)) + [-5, -4]
-        vel_index = list(range(5, input_dict['ego_feature'].size(-1)-5, 7)) + list(range(6, input_dict['ego_feature'].size(-1)-5, 7))
+        xy_index = list(range(0, input_dict['ego_feature'].size(-1)-5, 5)) + list(range(1, input_dict['ego_feature'].size(-1)-5, 5)) + [-5, -4]
 
         feature_tensor = input_dict['ego_feature']
         feature_tensor[..., xy_index] = feature_tensor[..., xy_index] / xy_norm_para
-        feature_tensor[..., vel_index] = feature_tensor[..., vel_index] / vel_norm_para
         input_dict['ego_feature'] = feature_tensor
 
         # agent feature
-        xy_index = list(range(0, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(1, input_dict['agent_feature'].size(-1)-5, 14)) + \
-                   list(range(7, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(8, input_dict['agent_feature'].size(-1)-5, 14)) + [-5, -4]
-        vel_index = list(range(5, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(6, input_dict['agent_feature'].size(-1)-5, 14)) + \
-                    list(range(12, input_dict['agent_feature'].size(-1)-5, 14)) + list(range(13, input_dict['agent_feature'].size(-1)-5, 14))
+        xy_index = list(range(0, input_dict['agent_feature'].size(-1)-5, 10)) + list(range(1, input_dict['agent_feature'].size(-1)-5, 10)) + \
+                   list(range(5, input_dict['agent_feature'].size(-1)-5, 10)) + list(range(6, input_dict['agent_feature'].size(-1)-5, 10)) + [-5, -4]
 
         feature_tensor = input_dict['agent_feature']
         feature_tensor[..., xy_index] = feature_tensor[..., xy_index] / xy_norm_para
-        feature_tensor[..., vel_index] = feature_tensor[..., vel_index] / vel_norm_para
         input_dict['agent_feature'] = feature_tensor
 
         return input_dict
@@ -337,21 +342,17 @@ class PureSeqModelV1Aug(nn.Module):
     def denormalize_output(self, ego_output, agent_output):
         xy_norm_para = self.model_parameter.normalization_para['xy']
         heading_norm_para = self.model_parameter.normalization_para['heading']
-        vel_norm_para = self.model_parameter.normalization_para['vel']
 
-        xy_index = list(range(0, ego_output.size(-1), 5)) + list(range(1, ego_output.size(-1), 5))
-        heading_index = list(range(2, ego_output.size(-1), 5))
-        vel_index = list(range(3, ego_output.size(-1), 5)) + list(range(4, ego_output.size(-1), 5))
+        xy_index = list(range(0, ego_output.size(-1), 3)) + list(range(1, ego_output.size(-1), 3))
+        heading_index = list(range(2, ego_output.size(-1), 3))
 
         denormed_ego_output = torch.zeros(ego_output.shape, device=ego_output.device)
         denormed_ego_output[..., xy_index] = ego_output[..., xy_index] * xy_norm_para
         denormed_ego_output[..., heading_index] = ego_output[..., heading_index] * heading_norm_para
-        denormed_ego_output[..., vel_index] = ego_output[..., vel_index] * vel_norm_para
 
         denormed_agent_output = torch.zeros(agent_output.shape, device=agent_output.device)
         denormed_agent_output[..., xy_index] = agent_output[..., xy_index] * xy_norm_para
         denormed_agent_output[..., heading_index] = agent_output[..., heading_index] * heading_norm_para
-        denormed_agent_output[..., vel_index] = agent_output[..., vel_index] * vel_norm_para
         
         return denormed_ego_output, denormed_agent_output
 
@@ -377,62 +378,12 @@ class PureSeqModelV1Aug(nn.Module):
         # get trajs in agent own frame
         ego_traj, agent_traj = self.build_traj_from_output(ego_output, agent_output, input_dict['agent_to_predict_num'])
 
-        print_index = list(range(0, 80, 5))
-        # print('=================================================================================')
-        # for i in range(ego_traj.size(0)):
-        #     print('--------------------------------------')
-        #     print('agent_traj x: ', agent_traj[i, 0, print_index, 0])
-        #     print('agent_traj y: ', agent_traj[i, 0, print_index, 1])
-        #     print('agent_traj heading: ', agent_traj[i, 0, print_index, 2])
-        #     print('agent_traj vx: ', agent_traj[i, 0, print_index, 3])
-        #     print('agent_label x: ', input_dict['agent_label'][i, :, 0, 0])
-        #     print('agent_label y: ', input_dict['agent_label'][i, :, 0, 1])
-        #     print('agent_label heading: ', input_dict['agent_label'][i, :, 0, 2])
-        #     print('agent_label vx: ', input_dict['agent_label'][i, :, 0, 3])
-
-        # print('=================================================================================')
-        # print('=================================================================================')
-        # print('=================================================================================')
-
         # transform agent trajs to ego frame
         agent_traj = self.transform_agent_traj_to_origin_frame(input_dict['agent_feature'][:, 0, :, 0:3], agent_traj, input_dict['agent_to_predict_num'])
 
         # transform agent
         ego_current_frame = input_dict['ego_current_pose'][:, 0, :].unsqueeze(1).repeat(1, agent_traj.size(1), 1)
-
-        # print('=================================================================================')
-        # for i in range(ego_traj.size(0)):
-        #     print('--------------------------------------')
-        #     print('agent_traj x: ', agent_traj[i, 0, print_index, 0])
-
-        # print('=================================================================================')
-        # print('=================================================================================')
-        # print('=================================================================================')
         agent_global_traj = self.transform_agent_traj_to_origin_frame(ego_current_frame, agent_traj, input_dict['agent_to_predict_num'])
-
-        # for i in range(ego_traj.size(0)):
-        #     print('--------------------------------------')
-        #     print('ego_traj x: ', ego_traj[i, 0, print_index, 0])
-        #     print('ego_traj y: ', ego_traj[i, 0, print_index, 1])
-        #     print('ego_traj vx: ', ego_traj[i, 0, print_index, 3])
-        #     print('ego_label x: ', input_dict['ego_label'][i, :, 0, 0])
-        #     print('ego_label y: ', input_dict['ego_label'][i, :, 0, 1])
-        #     print('ego_label vx: ', input_dict['ego_label'][i, :, 0, 3])
-
-        # print('=================================================================================')
-        # for i in range(ego_traj.size(0)):
-        #     print('--------------------------------------')
-        #     print('agent_traj x: ', agent_traj[i, 0, print_index, 0])
-            # print('agent_traj y: ', agent_traj[i, 0, print_index, 1])
-            # print('agent_traj heading: ', agent_traj[i, 0, print_index, 2])
-            # print('agent_traj vx: ', agent_traj[i, 0, print_index, 3])
-            # print('agent_label x: ', input_dict['agent_label'][i, :, 0, 0])
-            # print('agent_label y: ', input_dict['agent_label'][i, :, 0, 1])
-            # print('agent_label vx: ', input_dict['agent_label'][i, :, 0, 3])
-            # print('ego_current_pos: ', input_dict['ego_current_pose'][i, 0, :])
-            # print('traj: ', input_dict['center_gt_trajs_src'][i, 0, 0, :, 0])
-
-        # assert(0)
 
         return agent_global_traj
 
@@ -486,28 +437,26 @@ class PureSeqModelV1Aug(nn.Module):
         return map_feature
 
     def transform_ego_feature_from_output(self, last_ego_output: torch.Tensor, last_ego_feature: torch.Tensor):
-        # last_ego_output: [batch, 1, 5*time_sample_num]
-        # last_ego_feature: [batch, 1, 1, 7*time_sample_num+5]
+        # last_ego_output: [batch, 1, 3*time_sample_num]
+        # last_ego_feature: [batch, 1, 1, 5*time_sample_num+5]
         batch_size = last_ego_output.size(0)
         time_sample_num = self.data_config.time_info.time_sample_num
 
         next_ego_feature = last_ego_feature.clone().detach()
         for i in range(batch_size):
             ego_frame = last_ego_output[i, 0, 0:3]
-            rotation_frame = torch.tensor([0, 0, ego_frame[2]], device=last_ego_output.device)
 
-            reshaped_ego_output = last_ego_output[i, 0, :].view(time_sample_num, 5)
-            reshaped_next_ego_feature = next_ego_feature[i, 0, 0, 0:7*time_sample_num].view(time_sample_num, 7)
+            reshaped_ego_output = last_ego_output[i, 0, :].view(time_sample_num, 3)
+            reshaped_next_ego_feature = next_ego_feature[i, 0, 0, 0:5*time_sample_num].view(time_sample_num, 5)
             reshaped_next_ego_feature[:, 0:3] = global_state_se2_tensor_to_local(reshaped_ego_output[:, 0:3], ego_frame)
             reshaped_next_ego_feature[:, 3] = torch.cos(reshaped_next_ego_feature[:, 2])
             reshaped_next_ego_feature[:, 4] = torch.sin(reshaped_next_ego_feature[:, 2])
-            reshaped_next_ego_feature[:, 5:7] = coordinates_to_local_frame(reshaped_ego_output[:, 3:5], rotation_frame)
 
         return next_ego_feature
 
     def transform_agent_feature_from_output(self, last_agent_output: torch.Tensor, last_agent_feature: torch.Tensor, last_ego_output: torch.Tensor):
-        # last_agent_output: [batch, 1*agent_num, 5*time_sample_num]
-        # last_agent_feature: [batch, 1, agent_num, 14*time_sample_num]
+        # last_agent_output: [batch, 1*agent_num, 3*time_sample_num]
+        # last_agent_feature: [batch, 1, agent_num, 10*time_sample_num]
         batch_size = last_ego_output.size(0)
         agent_num = last_agent_feature.size(2)
         time_sample_num = self.data_config.time_info.time_sample_num
@@ -517,8 +466,8 @@ class PureSeqModelV1Aug(nn.Module):
             ego_frame = last_ego_output[i, 0, 0:3]
             rotation_frame = torch.tensor([0, 0, ego_frame[2]], device=last_ego_output.device)
 
-            reshaped_agent_output = last_agent_output[i, :, :].view(agent_num, time_sample_num, 5)
-            reshaped_agent_feature = next_agent_feature[i, 0, :, 0:14*time_sample_num].view(agent_num, time_sample_num, 14)
+            reshaped_agent_output = last_agent_output[i, :, :].view(agent_num, time_sample_num, 3)
+            reshaped_agent_feature = next_agent_feature[i, 0, :, 0:10*time_sample_num].view(agent_num, time_sample_num, 10)
 
             for j in range(agent_num):
                 agent_frame = last_agent_feature[i, 0, j, 0:3]
@@ -527,10 +476,9 @@ class PureSeqModelV1Aug(nn.Module):
                 agent_next_frame = last_agent_output[i, j, 0:3]
                 agent_next_rotation_frame = torch.tensor([0, 0, agent_next_frame[2]], device=last_agent_output.device)
 
-                reshaped_agent_feature[j, :, 7:10] = global_state_se2_tensor_to_local(reshaped_agent_output[j, :, 0:3], agent_next_frame)
-                reshaped_agent_feature[j, :, 10] = torch.cos(reshaped_agent_feature[j, :, 9])
-                reshaped_agent_feature[j, :, 11] = torch.sin(reshaped_agent_feature[j, :, 9])
-                reshaped_agent_feature[j, :, 12:14] = coordinates_to_local_frame(reshaped_agent_output[j, :, 3:5], agent_next_rotation_frame)
+                reshaped_agent_feature[j, :, 5:8] = global_state_se2_tensor_to_local(reshaped_agent_output[j, :, 0:3], agent_next_frame)
+                reshaped_agent_feature[j, :, 8] = torch.cos(reshaped_agent_feature[j, :, 9])
+                reshaped_agent_feature[j, :, 9] = torch.sin(reshaped_agent_feature[j, :, 9])
 
                 last_agent_in_last_ego_frame = global_state_se2_tensor_to_local(torch.zeros(1, 3, device=last_agent_output.device), agent_frame)
                 pose_in_last_ego_frame = global_state_se2_tensor_to_local(reshaped_agent_output[j, :, 0:3], last_agent_in_last_ego_frame[0, :])
@@ -538,20 +486,17 @@ class PureSeqModelV1Aug(nn.Module):
                 reshaped_agent_feature[j, :, 3] = torch.cos(reshaped_agent_feature[j, :, 2])
                 reshaped_agent_feature[j, :, 4] = torch.sin(reshaped_agent_feature[j, :, 2])
 
-                vel_in_last_ego_frame = coordinates_to_local_frame(reshaped_agent_output[j, :, 3:5], -agent_rotation_frame)
-                reshaped_agent_feature[j, :, 5:7] = coordinates_to_local_frame(vel_in_last_ego_frame, rotation_frame)
-
         return next_agent_feature
 
     def build_traj_from_output(self, ego_output, agent_output, agent_to_predict_num):
         # input: 
-        # ego_output, ego_label: [batch, 8, 5*time_sample_num]
-        # agent_output, agent_label: [batch, 8*max_agent_num, 5*time_sample_num]
+        # ego_output, ego_label: [batch, 8, 3*time_sample_num]
+        # agent_output, agent_label: [batch, 8*max_agent_num, 3*time_sample_num]
         # agent_to_predict_num: [batch, 1]
         # output: 
-        # ego_traj: [batch, 1, 80, 5],
-        # agent_traj: [batch, max_agent_num, 80, 5],
-        # 5 is x, y, heading, vel_x, vel_y
+        # ego_traj: [batch, 1, 80, 3],
+        # agent_traj: [batch, max_agent_num, 80, 3],
+        # 3 is x, y, heading
 
         time_set_num = self.data_config.time_info.time_set_num
         total_time_step = self.data_config.time_info.total_time_step
@@ -560,10 +505,10 @@ class PureSeqModelV1Aug(nn.Module):
         max_agent_num = self.data_config.max_agent_num
         batch = ego_output.size(0)
 
-        ego_traj = torch.zeros(batch, 1, total_time_step, 5, device=ego_output.device)
-        agent_traj = torch.zeros(batch, max_agent_num, total_time_step, 5, device=ego_output.device)
+        ego_traj = torch.zeros(batch, 1, total_time_step, 3, device=ego_output.device)
+        agent_traj = torch.zeros(batch, max_agent_num, total_time_step, 3, device=ego_output.device)
 
-        agent_output_reshaped = agent_output.view(batch, 8, max_agent_num, time_sample_num, 5)
+        agent_output_reshaped = agent_output.view(batch, 8, max_agent_num, time_sample_num, 3)
 
         for i in range(batch):
             ego_frame = torch.zeros(3, device=ego_output.device)
@@ -573,7 +518,7 @@ class PureSeqModelV1Aug(nn.Module):
                 # generate ego traj
                 ego_traj[i, 0, j*time_set_interval:(j+1)*time_set_interval, :] = self.output_to_traj_in_one_time_set(
                     base_frame=ego_frame,
-                    output=ego_output[i, j, :].view(time_sample_num, 5)
+                    output=ego_output[i, j, :].view(time_sample_num, 3)
                 )
                 ego_frame = ego_traj[i, 0, (j+1)*time_set_interval-1, 0:3]
 
@@ -590,15 +535,15 @@ class PureSeqModelV1Aug(nn.Module):
     def output_to_traj_in_one_time_set(self, base_frame, output):
         # input:
         # base_frame: [3], outputs are expressed in this frame
-        # output: [time_sample_num, 5]
+        # output: [time_sample_num, 3]
         # output:
-        # traj: [10, 5]
+        # traj: [10, 3]
 
         # interpolate output. Notice that, the output index is reversed
         time_sample_num = self.data_config.time_info.time_sample_num
         time_sample_interval = self.data_config.time_info.time_sample_interval
         if time_sample_num == 5 and time_sample_interval == 2:
-            interpolated_output = torch.zeros(10, 5, device=output.device)
+            interpolated_output = torch.zeros(10, 3, device=output.device)
 
             interpolated_output[[1, 3, 5, 7, 9], :] = output[[4, 3, 2, 1, 0], :]
             interpolated_output[[2, 4, 6, 8], :] = 0.5*(output[[4, 3, 2, 1], :] + output[[3, 2, 1, 0], :])
@@ -610,23 +555,21 @@ class PureSeqModelV1Aug(nn.Module):
         # transform output to origin frame
         origin_in_base_frame = global_state_se2_tensor_to_local(torch.zeros(1, 3, device=output.device), base_frame)
         interpolated_output[:, 0:3] = global_state_se2_tensor_to_local(interpolated_output[:, 0:3], origin_in_base_frame[0, :])
-        interpolated_output[:, 3:5] = coordinates_to_local_frame(interpolated_output[:, 3:5], torch.tensor([0, 0, origin_in_base_frame[0, 2]], device=base_frame.device))
 
         return interpolated_output
 
     def transform_agent_traj_to_origin_frame(self, current_frame, agent_traj, agent_to_predict_num):
         # input:
         # current_frame: [batch, max_agent_num, 3]
-        # agent_traj: [batch, max_agent_num, 80, 5]
+        # agent_traj: [batch, max_agent_num, 80, 3]
         # agent_to_predict_num: [batch, 1]
         # output:
-        # agent_traj: [batch, max_agent_num, 80, 5]
+        # agent_traj: [batch, max_agent_num, 80, 3]
         batch = agent_traj.size(0)
         for i in range(batch):
             for j in range(int(agent_to_predict_num[i, 0].item())):
                 origin_in_current_frame = global_state_se2_tensor_to_local(torch.zeros(1, 3, device=agent_traj.device), current_frame[i, j, :])
 
                 agent_traj[i, j, :, 0:3] = global_state_se2_tensor_to_local(agent_traj[i, j, :, 0:3], origin_in_current_frame[0, :])
-                agent_traj[i, j, :, 3:5] = coordinates_to_local_frame(agent_traj[i, j, :, 3:5], torch.tensor([0, 0, origin_in_current_frame[0, 2]], device=current_frame.device))
 
         return agent_traj
