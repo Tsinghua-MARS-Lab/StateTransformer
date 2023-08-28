@@ -8,6 +8,7 @@ from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 from transformer4planning.models.encoder.nuplan_raster_encoder import *
+from transformer4planning.models.utils import nll_loss_gmm_direct
 from transformer4planning.libs.models.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
     
@@ -53,7 +54,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.action_m_embed = nn.Sequential(nn.Linear(4, llm_config.n_embd), nn.Tanh())
         self.llm_n_embd = llm_config.n_embd
 
-        self.traj_decoder = None
         self.k = int(self.model_args.k)
 
         self.next_token_scorer_decoder = None
@@ -457,7 +457,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
             # get traj_logits
             traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
-            traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
+            traj_logits = self.traj_decoder(traj_hidden_state)[:, :, :self.pred_dim] # (bs, pred_len, 2)
             all_traj_logits.append(traj_logits[:, None, :, :])
             
         all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
@@ -500,6 +500,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
         loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
         loss += loss_traj
+        
+        # loss_reg_gmm = nll_loss_gmm_direct(
+        #     pred_trajs=pred_traj_logits,
+        #     gt_trajs=gt_traj[:, :, 0:2], gt_valid_mask=gt_traj_mask.squeeze(-1),
+        #     timestamp_loss_weight=None, use_square_gmm=False,
+        # )
+        
+        # loss += loss_reg_gmm.mean()
 
         # loss kps
         if self.ar_future_interval > 0:
