@@ -262,7 +262,8 @@ def main():
                                     )
             collate_fn = partial(nuplan_vector_collate_func, 
                                  dic_path=data_args.saved_dataset_folder, 
-                                 map_api=map_api)
+                                 map_api=map_api,
+                                 use_centerline=model_args.use_centerline)
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":
@@ -281,7 +282,6 @@ def main():
                 list_of_dvalues = []
                 for d in batch:
                     if key in excepted_keys:
-                        d[key] = torch.tensor(d[key])
                         if key == "label" and not predict_yaw:
                             d[key] = d[key][:, :2]
                         list_of_dvalues.append(d[key])

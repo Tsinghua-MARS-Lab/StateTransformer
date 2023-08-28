@@ -84,26 +84,30 @@ root-
 
 ## To train and evaluate during training:
 
-model_name consist of ['scratch','pretrain']-['xl','gpt']
+`--model_name` can choose from ["gpt-large","gpt-medium","gpt-small","gpt-mini"] and with prefix of `scratch-` or `pretrain-` to determine wether load pretrained weights from existed checkpoints, whose attributes is `--model_pretrain_name_or_path`
+
+The common training settings are shown below.
 
 `
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run \
 --nproc_per_node=8 runner.py \
+--do_train --do_eval\
 --model_name scratch-gpt-mini --model_pretrain_name_or_path None \
---saved_dataset_folder  /localdata_ssd/nuplan/train-index_boston/boston_index_full \
+--saved_dataset_folder  /localdata_ssd/nuplan/online_dataset \
 --output_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_results  \
 --logging_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_logs \
 --run_name gpt_1.5B_mse_FI1_PI1_k1 --num_train_epochs 100 \
 --per_device_train_batch_size 4 --warmup_steps 50 \
 --weight_decay 0.01 --logging_steps 2 --save_strategy steps \
 --save_steps 1000 --dataloader_num_workers 10 \
---save_total_limit 2  --predict_trajectory True \
---dataloader_drop_last True --do_train \
---activation_function silu --dataset_scale 1 \
---task nuplan --with_traffic_light True --k 1 \
---remove_unused_columns False --future_sample_interval 2 \
---past_sample_interval 5 --do_eval \
+--save_total_limit 2 \
+--dataloader_drop_last True \
+--dataset_scale 1 \
+--task nuplan \
+--k 1 \
+--future_sample_interval 2 \
+--past_sample_interval 5 \
 --evaluation_strategy steps --eval_steps 100 \
 --overwrite_output_dir --loss_fn mse --max_eval_samples 10000\
 --next_token_scorer True \
@@ -116,7 +120,17 @@ python -m torch.distributed.run \
 --forward_specified_key_points False \
 `
 
-if you want to train diffusion decoder only, please set `--task diffusion_decoder` and change the `--saved_dataset_folder` to the folder storing correspond transformerbackbone features dataset. Additionally, to initilize backbone weights, remember to set `--model_pretrain_name_or_path`
+### Train with different encoder(same backbone)
+To choose different encoder, please set the attribute `--encoder_type`. The choices are [`raster`, `vector`]. With different `--task` setting, the encoder can be initilized with different classes.  
+
+### Train with differnet decoder(same backbone)
+To choose different decoder, please set the attribute `--decoder_type`. The choices are [`mlp`, `diffusion`]. 
+
+### Train only diffusion decoder, without backbone
+If you want to train diffusion decoder only, please set `--task` to `train_diffusion_decoder`. In this case, the model is initilized without a transformer backbone(Reduce the infence time to build backbone feature). 
+In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', preprocessed previously. 
+
+## To eval only:
 
 
 ## To predict:
