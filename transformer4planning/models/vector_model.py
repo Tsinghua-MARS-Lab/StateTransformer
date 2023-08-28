@@ -329,6 +329,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                               gt_anchor_mask=gt_anchor_mask,
                               pred_anchor_logits=pred_anchor_logits, # (bs, anchor_len, 64 * 2)
                               gt_anchor_logits = anchor_GT_logits, #(bs, 2)
+                              center_obj_anchor_pts=center_obj_anchor_pts, # (bs, 64, 2)
                               )
 
         if not return_dict:
@@ -401,7 +402,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         if self.use_anchor and self.ar_future_interval == 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
-                                                                                               center_obj_anchor_pts=center_obj_anchor_pts)
+                                                                                               center_obj_anchor_pts=center_obj_anchor_pts, debug_GT_cls=anchor_GT_cls)
             key_points_num = 0
         elif self.generate_method == 'greedy_search':
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num,
@@ -468,7 +469,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                   gt_anchor_cls=None,
                   gt_anchor_mask=None,
                   pred_anchor_logits=None,
-                  gt_anchor_logits=None
+                  gt_anchor_logits=None,
+                  center_obj_anchor_pts=None
                   ):
         """_summary_
 
@@ -543,7 +545,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.use_anchor:
             loss_anchor = self.cls_anchor_loss(pred_anchor_cls.reshape(-1, self.anchor_num).to(torch.float64), gt_anchor_cls.reshape(-1).long())
             loss_anchor = (loss_anchor * gt_anchor_mask.view(-1)).sum()/ (gt_anchor_mask.sum()+1e-7)
-            loss += loss_anchor
+            loss += (loss_anchor * self.cls_anchor_loss_weight)
             
             bs = gt_anchor_cls.shape[0]
             pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
@@ -762,7 +764,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         return pred_key_points_during_generate[:, 0:out_num_mode, ...], k_input_embeds_kpts[:, 0:out_num_mode, ...], k_kpts_scores[:, 0:out_num_mode, ...], k_kpts_index
     
-    def beam_search_anchor_only(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None):
+    def beam_search_anchor_only(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None, debug_GT_cls=None):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
         

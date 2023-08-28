@@ -10,7 +10,7 @@ python -m torch.distributed.run --nproc_per_node=7 --master_port=29502 runner_wa
         --per_device_train_batch_size 16 --warmup_steps 50 \
         --weight_decay 0.01 --logging_steps 100 --save_strategy steps \
         --save_steps 5000 --dataloader_num_workers 10 \
-        --save_total_limit 50  --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
+        --save_total_limit 100  --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True --do_train \
         --d_model 256 --dataset_scale 1 \
         --task waymo --with_traffic_light True --k 1 \
