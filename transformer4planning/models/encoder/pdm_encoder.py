@@ -37,8 +37,8 @@ class PDMEncoder(TrajectoryEncoder):
         """
         batch_size, input_length = kwargs.get("ego_position").shape[:2]
         ego_position = kwargs.get("ego_position").float() # shape (bsz, history_dim, 3)
-        ego_velocity = kwargs.get("ego_velocity").float() # shape (bsz, history_dim, 3)
-        ego_acceleration = kwargs.get("ego_acceleration").float() # shape (bsz, history_dim, 3)
+        ego_velocity = kwargs.get("ego_velocity", torch.zeros_like(ego_position)).float() # shape (bsz, history_dim, 3)
+        ego_acceleration = kwargs.get("ego_acceleration", torch.zeros_like(ego_velocity)).float() # shape (bsz, history_dim, 3)
         planner_centerline = kwargs.get("planner_centerline", None)
         if planner_centerline is not None:
             planner_centerline = planner_centerline.reshape(batch_size, -1).float() # (bsz, centerline_num, 3) -> (bsz, centerline_dim * 3)
