@@ -106,6 +106,8 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         
         # scenario tag encoding
         if self.token_scenario_tag:
+            assert scenario_type is not None, "scenario_type is None for token_scenario_tag"
+            assert scenario_type[0] != 'Unknown', f"scenario_type is Unknown for token_scenario_tag"
             scenario_tag_ids = torch.tensor(self.tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
