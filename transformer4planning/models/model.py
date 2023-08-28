@@ -6,6 +6,7 @@ from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformer4planning.libs.mlp import DecoderResCat
 from transformer4planning.utils import nuplan_utils 
+from transformer4planning.models.decoder.base import TrajectoryDecoder
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from dataclasses import dataclass
 
@@ -94,20 +95,21 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     def build_decoder(self):
         # load pretrained diffusion keypoint decoder
         #TODO: add diffusion decoder trained from scratch
+        self.traj_decoder = TrajectoryDecoder(self.model_args, self.config)
         self.decoder_type = self.model_args.decoder_type
         if self.decoder_type == "diffusion":
-            from transformer4planning.models.decoder.diffusion_decoder import DiffusionKPTrajDecoder
-            self.decoder = DiffusionKPTrajDecoder(self.model_args, self.config)
+            from transformer4planning.models.decoder.diffusion_decoder import KeyPointDiffusionDecoder
+            self.key_points_decoder = KeyPointDiffusionDecoder(self.model_args, self.config)
             if self.model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
                 state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
-                self.decoder.load_state_dict(state_dict) 
+                self.key_points_decoder.load_state_dict(state_dict) 
                 print("Pretrained keypoint decoder has been loaded!")
             else:
                 print("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
         elif self.decoder_type == "mlp":
-            from transformer4planning.models.decoder.mlp_decoder import MultiTrajDecoder
-            self.decoder = MultiTrajDecoder(self.model_args, self.config)
+            from transformer4planning.models.decoder.base import KeyPointMLPDeocder
+            self.key_points_decoder = KeyPointMLPDeocder(self.model_args, self.config)
 
         
     def _prepare_attention_mask_for_generation(self, input_embeds):
@@ -152,8 +154,19 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         
         trajectory_label = info_dict["trajectory_label"]
 
-        traj_logits, loss, loss_items = self.decoder(transformer_outputs_hidden_state, trajectory_label, info_dict)
-
+        loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
+        traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state, 
+                                                                    trajectory_label, 
+                                                                    info_dict)
+        loss += traj_loss
+        kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state,
+                                                                    info_dict)
+        loss += kp_loss
+        traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
+        loss_items = dict(
+            traj_loss=traj_loss,
+            kp_loss=kp_loss
+        )
         if not return_dict:
             output = (traj_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
@@ -233,12 +246,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                 :].reshape(batch_size, 1, -1)
 
                 if self.k > 1:
-                    key_points_logit, pred_logits = self.decoder.generate_keypoints(future_key_point_hidden_state)
+                    key_points_logit, pred_logits = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                     selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
                                         pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
                     key_points_logit = selected_key_point
                 else:
-                    key_points_logit, _ = self.decoder.generate_keypoints(future_key_point_hidden_state)
+                    key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                 pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
                 if self.model_args.predict_yaw:
                     pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
@@ -289,7 +302,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     position_ids=None,
                 )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            key_points_logits, pred_logits = self.decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
+            key_points_logits, pred_logits = self.key_points_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
         else:
             key_points_logits = None
         # predict the whole trajectory
@@ -309,10 +322,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.model_args.interaction: 
             transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
 
-        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         if self.traj_decoder is not None:
-            traj_logits = self.traj_decoder(traj_hidden_state)
+            _, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
+                                                                 trajectory_label,
+                                                                 info_dict
+                                                              )
         else:
             traj_logits = trajectory_label_dummy[..., :2]
 
@@ -433,7 +448,7 @@ def build_models(model_args):
         config_p.activation_function = model_args.activation_function
         
         if "diffusion" in model_args.task:
-            from transformer4planning.models.decoder.diffusion_decoder import (KeypointDiffusionModel, DiffusionWrapper)
+            from transformer4planning.models.decoder.diffusion_decoder import (KeypointDiffusionModel, T4PTrainDiffWrapper)
             out_features = 4 if model_args.predict_yaw else 2
             diffusion_model = KeypointDiffusionModel(config_p.n_inner, 
                                                     config_p.n_embd, 
@@ -443,7 +458,7 @@ def build_models(model_args):
                                                     specified_key_points=model_args.specified_key_points,
                                                     forward_specified_key_points=model_args.forward_specified_key_points
                                                     )
-            model = DiffusionWrapper(diffusion_model, num_key_points=model_args.key_points_num)
+            model = T4PTrainDiffWrapper(diffusion_model, num_key_points=model_args.key_points_num)
             if model_args.key_points_diffusion_decoder_load_from is not None:
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
                 model.load_state_dict(state_dict)
