@@ -80,6 +80,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.anchor_logits_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features= out_features * self.anchor_num)
             self.anchor_len = 1
             self.cls_anchor_loss = CrossEntropyLoss(reduction="none")
+            self.cls_anchor_loss_weight = 1.0
             self.logits_anchor_loss = MSELoss(reduction="none")
         else:
             self.anchor_len = 0
@@ -550,8 +551,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             bs = gt_anchor_cls.shape[0]
             pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
             
+            # loss_anchor_cls_pos = None
             # pred_anchor_cls_argmax = pred_anchor_cls.argmax(-1).view(-1)
-            # pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), pred_anchor_cls_argmax, :] # (bs, 2)
+            # pred_anchor_cls_pos = center_obj_anchor_pts[torch.arange(bs), pred_anchor_cls_argmax, :] # (bs, 2)
+            # loss_anchor_cls_pos = self.logits_anchor_loss(pred_anchor_cls_pos, gt_anchor_logits)
+            # loss_anchor_cls_pos = (loss_anchor_cls_pos * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
+            # loss += loss_anchor_cls_pos
             
             pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)            
             loss_anchor_logits = self.logits_anchor_loss(pred_pos_anchor_logits, gt_anchor_logits)
@@ -569,7 +574,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.debug and loss.device.index == 4:
             self.tot_iter_num += 1
             if self.tot_iter_num % 100 ==0 and self.use_anchor:
-                print("loss traj ", loss_traj, " loss anchor ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, ' tot loss ', loss)
+                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_cls_pos ", loss_anchor_cls_pos, " loss_anchor_logits ", loss_anchor_logits, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k > 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k == 1:
