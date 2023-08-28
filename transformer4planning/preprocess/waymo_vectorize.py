@@ -30,14 +30,14 @@ def waymo_collate_func(batch, data_path=None, interaction=False):
     input_dict = dict()
     for key in new_batch[0].keys():
         input_list = []
-        if key in ["agent_trajs", "map_polylines", "map_polylines_mask"]:
+        if key in ["agent_trajs", "map_polylines", "map_polylines_mask", "polyline_index"]:
             dims = [b[key].shape[1] for b in new_batch]
             max_dim = max(dims)
 
             for idx_b, b in enumerate(new_batch):
                 padded_input_size = [n for n in b[key].shape]
                 padded_input_size[1] = max_dim
-                padded_input = torch.zeros((padded_input_size))
+                padded_input = torch.zeros((padded_input_size)) if key != "polyline_index" else torch.ones((padded_input_size)) * -1
                 for idx_s, scene in enumerate(b[key]):
                     padded_input[idx_s, :dims[idx_b]] = scene
 
@@ -75,10 +75,12 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
     agent_trajs_res = transform_to_center(agent_trajs, center, heading, heading_index=6)
     map_polylines_data = transform_to_center(map_polyline, center, heading, no_time_dim=True)
     map_polylines_mask = torch.from_numpy(data["map_polylines_mask"]).unsqueeze(0).repeat(len(track_index_to_predict), 1, 1, )
+
     ret_dict = {
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),
-        "map_polylines": map_polylines_data, 
+        "map_polylines": map_polylines_data,
+        "polyline_index": data["polyline_index"],
         "map_polylines_mask": map_polylines_mask,
         "current_time_index": torch.tensor(current_time_index, dtype=torch.int32).repeat(num_ego).view(-1, 1),
         # for evaluation
