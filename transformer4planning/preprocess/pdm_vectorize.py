@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import torch
 import math
+from copy import deepcopy
 from typing import List
 from shapely.geometry import Polygon, Point
 from functools import partial
@@ -33,7 +34,7 @@ DRIVABLE_MAP_LAYERS = [
     SemanticMapLayer.CARPARK_AREA,
 ]
 
-def nuplan_vector_collate_func(batch, dic_path=None, map_api=dict()):
+def nuplan_vector_collate_func(batch, dic_path=None, map_api=dict(), use_centerline=True):
     expected_padding_keys = ["road_ids", "route_ids", "traffic_ids"]
     agent_id_lengths = list()
     for i, d in enumerate(batch):
@@ -50,7 +51,7 @@ def nuplan_vector_collate_func(batch, dic_path=None, map_api=dict()):
         for i, _ in enumerate(batch):
             batch[i][key] = padded_tensors[key][i]
     
-    map_func = partial(pdm_vectorize, data_path=dic_path, map_api=map_api)
+    map_func = partial(pdm_vectorize, data_path=dic_path, map_api=map_api, use_centerline=use_centerline)
     new_batch = list()
     for i, d in enumerate(batch):
         rst = map_func(d)
@@ -64,7 +65,10 @@ def nuplan_vector_collate_func(batch, dic_path=None, map_api=dict()):
     # process as data dictionary
     result = dict()
     for key in new_batch[0].keys():
-        result[key] = default_collate([d[key] for d in new_batch])
+        try:
+            result[key] = default_collate([d[key] for d in new_batch])
+        except:
+            print(f"{key} is invalid")
     return result
 
 def get_drivable_area_map(map_api, ego_position, map_radius=50):
@@ -226,7 +230,7 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
     map = sample["map"]
     split = sample["split"]
     frame_id = sample["frame_id"]
-    scenario_type = sample.get("scenario_type", None)
+    scenario_type = sample.get("scenario_type", "unknown")
     map_api = map_api[map]
     route_ids = sample["route_ids"].tolist()
     assert len(route_ids) > 0
@@ -244,28 +248,33 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
         print(f"Error: cannot load {filename} from {data_path} with {map}")
         return None
     # convert ego poses to nuplan format (x, y, heading)
-    ego_poses = agent_dic["ego"]["pose"][(frame_id - past_seconds * frame_rate)//2:frame_id//2].copy()
+    ego_poses = deepcopy(agent_dic["ego"]["pose"][(frame_id - past_seconds * frame_rate)//2:frame_id//2, :])
     ego_shape = agent_dic["ego"]["shape"][0]
     nuplan_ego_poses = [StateSE2(x=ego_pose[0], y=ego_pose[1], heading=ego_pose[-1]) for ego_pose in ego_poses]
     anchor_ego_pose = nuplan_ego_poses[-1]
-    ego_position = convert_absolute_to_relative_poses(anchor_ego_pose, nuplan_ego_poses)
-    ego_velocities = compute_derivative(ego_position, interval=0.1, drop_z_axis=True) # (bsz, 4) -> (bsz, 3)
-    ego_accelerations = compute_derivative(ego_velocities, interval=0.1, drop_z_axis=False) # (bsz, 3) -> (bsz, 3)
+    ego_position = convert_absolute_to_relative_poses(deepcopy(anchor_ego_pose), nuplan_ego_poses)
+    ego_velocities = compute_derivative(deepcopy(ego_position), interval=0.1, drop_z_axis=True) # (bsz, 4) -> (bsz, 3)
+    ego_accelerations = compute_derivative(deepcopy(ego_velocities), interval=0.1, drop_z_axis=False) # (bsz, 3) -> (bsz, 3)
     
     cos_, sin_ = math.cos(-ego_poses[-1][-1]), math.sin(-ego_poses[-1][-1])
-    trajectory_label = agent_dic["ego"]["pose"][frame_id//2:frame_id//2 + 80, :].copy()
-    trajectory_label -= ego_poses[-1]
-    traj_x = trajectory_label[:, 0].copy()
-    traj_y = trajectory_label[:, 1].copy()
+    absolute_traj = deepcopy(agent_dic["ego"]["pose"][frame_id // 2 : frame_id // 2 + 80, :])
+    absolute_traj -= ego_poses[-1]
+    traj_x = deepcopy(absolute_traj[:, 0])
+    traj_y = deepcopy(absolute_traj[:, 1])
+    trajectory_label = np.zeros((absolute_traj.shape[0], 4), dtype=np.float32)
     trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
     trajectory_label[:, 1] = traj_x * sin_ + traj_y * cos_
+    trajectory_label[:, -1] = absolute_traj[:, -1]
+    if trajectory_label.shape[0] < 80:
+        trajectory_label = np.concatenate([trajectory_label, np.zeros((80 - trajectory_label.shape[0], 4), dtype=np.float32)], 
+                                        axis=0)
     if not use_centerline:
         return dict(
             ego_position=ego_position,
             ego_velocity=ego_velocities,
             ego_acceleration=ego_accelerations,
             scenario_type=scenario_type,
-            trajectory_label=trajectory_label,
+            trajectory_label=trajectory_label.astype(np.float32),
             map=map,
             file_name=filename,
             frame_id=frame_id
