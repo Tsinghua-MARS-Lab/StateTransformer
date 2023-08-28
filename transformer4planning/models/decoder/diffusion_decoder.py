@@ -5,7 +5,6 @@ import math
 from typing import Dict
 from transformer4planning.libs.mlp import DecoderResCat
 from transformer4planning.models.utils import *
-from transformer4planning.models.decoder.base import TrajectoryDecoder
 
 from transformer4planning.utils.modify_traj_utils import modify_func
 
@@ -325,92 +324,92 @@ class DiffusionWrapper(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-class DiffusionKPTrajDecoder(TrajectoryDecoder):
+class T4PTrainDiffWrapper(DiffusionWrapper):
+    def __init__(self, 
+                 model,
+                 beta_schedule='linear', 
+                 linear_start=0.01,
+                 linear_end=0.9,
+                 n_timesteps=10,
+                 clip_denoised=True,
+                 predict_epsilon=True,
+                 max_action=100,
+                 num_key_points=None, 
+                 ):
+        super(T4PTrainDiffWrapper, self).__init__(model=model,
+                                                beta_schedule=beta_schedule, 
+                                                linear_start=linear_start,
+                                                linear_end=linear_end,
+                                                n_timesteps=n_timesteps,
+                                                clip_denoised=clip_denoised,
+                                                predict_epsilon=predict_epsilon,
+                                                max_action=max_action,
+                                                num_key_points=num_key_points)
+    
+    def forward(self, hidden_state, label=None, **kwargs):
+        value = super().forward(hidden_state, label=None, **kwargs)
+        if self.training:
+            return dict(loss=value)
+        else:
+            return dict(logits=value[0], scores=value[1])
+
+class KeyPointDiffusionDecoder(nn.Module):
     def __init__(self, model_args, config):
         super().__init__(model_args, config)
-        self.traj_decoder, self.key_points_decoder, self.next_token_scorer_decoder = None, None, None 
-        if not self.model_args.pred_key_points_only:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features)
-        if self.ar_future_interval > 0:
-            diffusion_model = KeypointDiffusionModel(config.n_inner, 
-                                                     config.n_embd, 
-                                                     out_features=self.out_features * self.k,
-                                                     key_point_num=self.model_args.key_points_num,
-                                                     input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
-                                                     specified_key_points=self.model_args.specified_key_points,
-                                                     forward_specified_key_points=self.model_args.forward_specified_key_points
-                                                     )
-            self.key_points_decoder = DiffusionWrapper(diffusion_model, num_key_points=self.model_args.key_points_num)
-        if self.k > 1:
-            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
+        self.model_args = model_args
+        diffusion_model = KeypointDiffusionModel(config.n_inner, 
+                                                config.n_embd, 
+                                                out_features=self.out_features * self.k,
+                                                key_point_num=self.model_args.key_points_num,
+                                                input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
+                                                specified_key_points=self.model_args.specified_key_points,
+                                                forward_specified_key_points=self.model_args.forward_specified_key_points
+                                                )
+        self.model = DiffusionWrapper(diffusion_model, 
+                                    num_key_points=self.model_args.key_points_num)
+        if 'mse' in self.model_args.loss_fn:
+            self.loss_fct = nn.MSELoss(reduction="mean")
+        elif 'l1' in self.model_args.loss_fn:
+            self.loss_fct = nn.SmoothL1Loss()
         
     
-    def forward(self, 
-                hidden_output,
-                label, 
-                info_dict:Dict=None):
+    def compute_keypoint_loss(self, 
+                        hidden_output,
+                        info_dict:Dict=None,
+                        device=None):
         """
         
         """
-        device = hidden_output.device
-        pred_length = info_dict.get("pred_length", label.shape[1])
+        if device is None:
+            device = hidden_output.device
         context_length = info_dict.get("context_length", None)
         assert context_length is not None, "context length can not be None"
+        if context_length is None: # pdm encoder
+           input_length = info_dict.get("input_length", None)
         
-        traj_hidden_state = hidden_output[:, -pred_length -1:-1, :]
-        loss = torch.tensor(0, dtype=torch.float32, device=device)
-        if not self.model_args.pred_key_points_only:
-            traj_logits = self.traj_decoder(traj_hidden_state)
-            if self.model_args.task == "waymo":
-                trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
-                assert trajectory_label_mask is not None, "trajectory_label_mask is None"
-                traj_loss = (self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
-                    trajectory_label_mask.sum() + 1e-7)
-            elif self.model_args.task == "nuplan":
-                traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.model_args.predict_yaw else \
-                            self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))   
-            # Modification here: both waymo&nuplan use the same loss scale and loss fn
-            traj_loss *= self.model_args.trajectory_loss_rescale
-            loss += traj_loss
+        future_key_points = info_dict["future_key_points"]
+        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        # hidden state to predict future kp is different from mlp decoder
+        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
+                    else scenario_type_len + input_length
+        future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
+        
+        if self.training:
+            future_key_points = future_key_points if self.model_args.predict_yaw else future_key_points[..., :2]
+            key_points_logits = future_key_points
+            kp_loss = self.model(future_key_points_hidden_state, future_key_points)  # b, s, 4/2
+
+            return kp_loss, key_points_logits
         else:
-            traj_logits = torch.zeros_like(label[..., :2])
-            traj_loss = None
-        
-        if self.ar_future_interval > 0:
-            future_key_points = info_dict["future_key_points"]
-            scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            # hidden state to predict future kp is different from mlp decoder
-            future_key_points_hidden_state = hidden_output[:, :scenario_type_len + context_length * 2, :]
-            
-            if self.training:
-                future_key_points = future_key_points if self.model_args.predict_yaw else future_key_points[..., :2]
-                key_points_logits = future_key_points
-                kp_loss = self.key_points_decoder(future_key_points_hidden_state, future_key_points)  # b, s, 4/2
-                loss += kp_loss
-                traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
-                loss_items = dict(
-                    trajectory_loss=traj_loss,
-                    key_points_loss=kp_loss,
-                    scorer_loss=None,
-                )
-                return traj_logits, loss, loss_items
+            if self.k == 1:
+                key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
+                kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
+                        self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
             else:
-                if self.k == 1:
-                    key_points_logits, scores = self.key_points_decoder(future_key_points_hidden_state, determin = True)
-                    kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
-                            self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
-                    loss += kp_loss
-                    traj_logits = torch.cat([key_points_logits, traj_logits], dim=1)
-                else:
-                    assert False, 'do not use this method when self.k > 1.'
-                    # raise NotImplementedError("Only nuplan k=1 case is supported")
-            
-            loss_items = dict(
-                trajectory_loss=traj_loss,
-                key_points_loss=kp_loss,
-                scorer_loss=None,
-            )
-            return traj_logits, loss, loss_items
+                assert False, 'do not use this method when self.k > 1.'
+                # raise NotImplementedError("Only nuplan k=1 case is supported")
+        
+        return kp_loss, key_points_logits
     
     def generate_keypoints(self, 
                             hidden_output,
@@ -430,12 +429,15 @@ class DiffusionKPTrajDecoder(TrajectoryDecoder):
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
         context_length = info_dict.get("context_length", None)
-        assert context_length is not None, "context length can not be None"
-        future_key_points_hidden_state = hidden_output[:, :scenario_type_len + context_length * 2, :]
+        if context_length is None: # pdm encoder
+           input_length = info_dict.get("input_length", None)
+        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
+                    else scenario_type_len + input_length
+        future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         if self.k == 1:
-            key_points_logits, scores = self.key_points_decoder(future_key_points_hidden_state, determin = True)
+            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
         else:
-            key_points_logits, scores = self.key_points_decoder(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
+            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
                     reg = key_points_logits,
@@ -446,8 +448,7 @@ class DiffusionKPTrajDecoder(TrajectoryDecoder):
             )
             key_points_logits = reg_sigma_cls_dict["reg"]
             scores = reg_sigma_cls_dict["cls"]
-        return key_points_logits, scores
-    
+        return key_points_logits, scores 
 
     
 
