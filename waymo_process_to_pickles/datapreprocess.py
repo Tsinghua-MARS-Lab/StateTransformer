@@ -144,11 +144,11 @@ def decode_map_features_from_proto(map_features):
         cur_info['polyline_index'] = (point_cnt, point_cnt + len(cur_polyline))
         point_cnt += len(cur_polyline)
 
-    try:
-        polylines = np.concatenate(polylines, axis=0).astype(np.float32)
-    except:
-        polylines = np.zeros((0, 7), dtype=np.float32)
-        print('Empty polylines: ')
+    # try:
+    #     polylines = np.concatenate(polylines, axis=0).astype(np.float32)
+    # except:
+    #     polylines = np.zeros((0, 7), dtype=np.float32)
+    #     print('Empty polylines: ')
     map_infos['all_polylines'] = polylines
     return map_infos
 
@@ -213,6 +213,45 @@ def process_waymo_data_with_scenario_proto(data_file, output_path=None):
         ret_infos.append(info)
     return ret_infos
 
+def process_waymo_data(data_file, output_path=None):
+    dataset = tf.data.TFRecordDataset(data_file, compression_type='')
+    ret_infos = []
+    for cnt, data in enumerate(dataset):
+        info = {}
+        scenario = scenario_pb2.Scenario()
+        scenario.ParseFromString(bytearray(data.numpy()))
+
+        info['scenario_id'] = scenario.scenario_id
+        info['timestamps_seconds'] = list(scenario.timestamps_seconds)  # list of int of shape (91)
+        info['current_time_index'] = scenario.current_time_index  # int, 10
+        info['sdc_track_index'] = scenario.sdc_track_index  # int
+        info['objects_of_interest'] = list(scenario.objects_of_interest)  # list, could be empty list
+
+        info['tracks_to_predict'] = {
+            'track_index': [cur_pred.track_index for cur_pred in scenario.tracks_to_predict],
+            'difficulty': [cur_pred.difficulty for cur_pred in scenario.tracks_to_predict]
+        }  # for training: suggestion of objects to train on, for val/test: need to be predicted
+
+        track_infos = decode_tracks_from_proto(scenario.tracks)
+        info['tracks_to_predict']['object_type'] = [track_infos['object_type'][cur_idx] for cur_idx in info['tracks_to_predict']['track_index']]
+
+        # decode map related data
+        map_infos = decode_map_features_from_proto(scenario.map_features)
+        dynamic_map_infos = decode_dynamic_map_states_from_proto(scenario.dynamic_map_states)
+
+        save_infos = {
+            'track_infos': track_infos,
+            'dynamic_map_infos': dynamic_map_infos,
+            'map_infos': map_infos
+        }
+        save_infos.update(info)
+
+        output_file = os.path.join(output_path, f'sample_{scenario.scenario_id}.pkl')
+        with open(output_file, 'wb') as f:
+            pickle.dump(save_infos, f)
+
+        ret_infos.append(info)
+    return ret_infos
 
 def get_infos_from_protos(data_path, output_path=None, num_workers=8):
     from functools import partial

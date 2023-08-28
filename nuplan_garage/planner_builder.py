@@ -44,15 +44,18 @@ def _build_planner(planner_cfg: DictConfig, scenario: Optional[AbstractScenario]
 
         planner: AbstractPlanner = instantiate(config, model=model)
     elif is_target_type(planner_cfg, ControlTFPlanner):
+        # planner: AbstractPlanner = instantiate(config)
+        # print('testing without initializing model')
         if model is None:
             parser = HfArgumentParser((ModelArguments))
             model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
-            print('Model args: ', model_args.model_name, model_args)
+            model_args.model_name = 'pretrain-gpt-small'
+            print('debug model args: ', model_args.model_name, model_args)
             model_args.model_pretrain_name_or_path = config.checkpoint_path
             model = build_models(model_args=model_args)
             # use cpu only for ray distributed simulations
-            if torch.cuda.is_available():
-                model.to('cuda')
+            # if torch.cuda.is_available():
+            #     model.to('cuda')
         print("control transformer planner initialized")
         planner: AbstractPlanner = instantiate(config, model=model, scenario=scenario)
     else:

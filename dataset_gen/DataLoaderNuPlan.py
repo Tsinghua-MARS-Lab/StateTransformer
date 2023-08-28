@@ -184,7 +184,8 @@ class NuPlanDL:
                  sample_interval,  
                  agent_only=False, 
                  seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
-                 map_name=None):
+                 map_name=None,
+                 scenarios_to_keep=None,):
         new_files_loaded = False
 
         self.current_scenario_index += sample_interval
@@ -237,6 +238,9 @@ class NuPlanDL:
             return None, False
 
         scenario_id = scenario.token
+        if scenarios_to_keep is not None and scenario_id not in scenarios_to_keep:
+            return None, False
+
         self.timestamp = lidar_token_timestamp
         self.total_frames = scenario.get_number_of_iterations()
         data_to_return = self.get_datadic(scenario=scenario,

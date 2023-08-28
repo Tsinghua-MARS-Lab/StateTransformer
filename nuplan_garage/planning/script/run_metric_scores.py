@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--file_path",
     type=str,
-    default = "/home/sunq/nuplan/exp/exp/simulation/open_loop_boxes/2023.08.04.11.46.26/"
+    default="/home/sunq/nuplan/exp/exp/simulation/open_loop_boxes/2023.08.19.00.18.08/"
 )
 parser.add_argument(
     "--save_dir",
