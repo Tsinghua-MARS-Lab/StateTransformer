@@ -468,7 +468,7 @@ def build_models(model_args):
             config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
         
-        if "diffusion" in model_args.task:
+        if model_args.task == "train_diffusion_decoder":
             from transformer4planning.models.decoder.diffusion_decoder import (KeypointDiffusionModel, T4PTrainDiffWrapper)
             out_features = 4 if model_args.predict_yaw else 2
             diffusion_model = KeypointDiffusionModel(config_p.n_inner, 

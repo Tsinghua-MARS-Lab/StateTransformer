@@ -167,7 +167,7 @@ def main():
     assert os.path.isdir(data_args.saved_dataset_folder)
     if model_args.task == "nuplan" or model_args.task == "waymo": # nuplan and waymo datasets are stored in index format
         index_root = os.path.join(data_args.saved_dataset_folder, 'index')
-    elif "diffusion" in model_args.task:
+    elif model_args.task == "train_diffusion_decoder":
         index_root = data_args.saved_dataset_folder
     root_folders = os.listdir(index_root)
         
@@ -272,7 +272,7 @@ def main():
                                  interaction=model_args.interaction)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
-    elif "diffusion" in model_args.task:
+    elif model_args.task == "train_diffusion_decoder":
         from torch.utils.data._utils.collate import default_collate
         def feat_collate_func(batch, predict_yaw):
             excepted_keys = ['label', 'hidden_state']
@@ -289,7 +289,7 @@ def main():
             return result
         collate_fn = partial(feat_collate_func, predict_yaw=model_args.predict_yaw)
     else:
-        raise AttributeError("task must be nuplan or waymo or diffusion_decoder")
+        raise AttributeError("task must be nuplan or waymo or train_diffusion_decoder")
 
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained

@@ -34,7 +34,8 @@ DRIVABLE_MAP_LAYERS = [
     SemanticMapLayer.CARPARK_AREA,
 ]
 
-def nuplan_vector_collate_func(batch, dic_path=None, map_api=dict(), use_centerline=True):
+def nuplan_vector_collate_func(batch, dic_path=None, map_api=dict(), **kwargs):
+    use_centerline = kwargs.get("use_centerline", False)
     expected_padding_keys = ["road_ids", "route_ids", "traffic_ids"]
     agent_id_lengths = list()
     for i, d in enumerate(batch):

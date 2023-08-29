@@ -195,7 +195,7 @@ class PlanningTrainer(Trainer):
                     prediction_trajectory_in_batch = logits[0]
                 else:
                     print('unknown logits type', type(logits), logits)
-                if self.model.ar_future_interval > 0 and "diffusion" not in self.model.model_args.task:
+                if self.model.ar_future_interval > 0 and self.model.model_args.task != "train_diffusion_decoder":
                     length_of_trajectory = trajectory_label_in_batch.shape[1]
                     prediction_key_points = prediction_trajectory_in_batch[:, :-length_of_trajectory, :]
                     prediction_trajectory_in_batch = prediction_trajectory_in_batch[:, -length_of_trajectory:, :]
@@ -279,7 +279,6 @@ class PlanningTrainer(Trainer):
                     else:
                         break
 
-            # for log, TODO: add args
             batch_to_csv = dict(
                 log_name=np.array(inputs['file_name']),
                 scenario_name=np.array(inputs['scenario_id']),
@@ -302,7 +301,7 @@ class PlanningTrainer(Trainer):
                     self.eval_result['heading_error'] = []
                 self.eval_result['heading_error'].append(float(heading_error))
 
-            if self.model.ar_future_interval > 0 and "diffusion" not in self.model.model_args.task:
+            if self.model.ar_future_interval > 0 and self.model.model_args.task != "train_diffusion_decoder":
                 if 'ade_keypoints' not in self.eval_result:
                     self.eval_result['ade_keypoints'] = []
                     self.eval_result['fde_keypoints'] = []
