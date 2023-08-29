@@ -62,13 +62,13 @@ def compute_metrics(prediction: EvalPrediction):
     fde_gen = np.sqrt(fde_x_error_gen ** 2 + fde_y_error_gen ** 2).mean()
     eval_result['fde_gen'] = fde_gen
     ade_key_points_gen = np.sqrt(ade_x_error_key_points_gen ** 2 + ade_y_error_key_points_gen ** 2).mean()
-    eval_result['ade_key_points_gen'] = ade_key_points_gen
+    eval_result['ade_keypoints_gen'] = ade_key_points_gen
     fde_key_points_gen = np.sqrt(fde_x_error_key_points_gen ** 2 + fde_y_error_key_points_gen ** 2).mean()
-    eval_result['fde_key_points_gen'] = fde_key_points_gen
+    eval_result['fde_keypoints_gen'] = fde_key_points_gen
 
     if prediction_key_points_by_generation.shape[-1] == 4:
         heading_error_gen = prediction_key_points_by_generation[:, :, -1] - label_key_points[:, :, -1]
-        eval_result['heading_error_gen'] = heading_error_gen.mean()
+        eval_result['heading_error_by_gen'] = heading_error_gen.mean()
 
     # compute error for forward results
     ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
@@ -85,9 +85,9 @@ def compute_metrics(prediction: EvalPrediction):
     fde_for = np.sqrt(fde_x_error_for ** 2 + fde_y_error_for ** 2).mean()
     eval_result['fde'] = fde_for
     ade_key_points_for = np.sqrt(ade_x_error_key_points_for ** 2 + ade_y_error_key_points_for ** 2).mean()
-    eval_result['ade_key_points'] = ade_key_points_for
+    eval_result['ade_keypoints'] = ade_key_points_for
     fde_key_points_for = np.sqrt(fde_x_error_key_points_for ** 2 + fde_y_error_key_points_for ** 2).mean()
-    eval_result['fde_key_points'] = fde_key_points_for
+    eval_result['fde_keypoints'] = fde_key_points_for
 
     if prediction_key_points_by_forward.shape[-1] == 4:
         heading_error_for = prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1]
@@ -120,6 +120,27 @@ class CustomCallback(DefaultFlowCallback):
         return control
 
 class PlanningTrainer(Trainer):
+
+    def _prepare_inputs(self, inputs: Dict[str, Union[torch.Tensor, Any]]) -> Dict[str, Union[torch.Tensor, Any]]:
+        """
+        Prepare `inputs` before feeding them to the model, converting them to tensors if they are not already and
+        handling potential state.
+
+        Overwrite Note:
+        To skip the assertion when the batch is empty.
+        This might happen due to filters in the preprocess function when batch size is 1.
+        Only tested batch size of 1 when evaluation, but training.
+        """
+        inputs = self._prepare_input(inputs)
+        if len(inputs) == 0:
+            return inputs
+            # raise ValueError(
+            #     "The batch received was empty, your model won't be able to train on it. Double-check that your "
+            #     f"training dataset contains keys expected by the model: {','.join(self._signature_columns)}."
+            # )
+        if self.args.past_index >= 0 and self._past is not None:
+            inputs["mems"] = self._past
+        return inputs
 
     def prediction_step(
             self,
@@ -164,6 +185,8 @@ class PlanningTrainer(Trainer):
         loss_without_labels = True
 
         inputs = self._prepare_inputs(inputs)
+        if len(inputs) == 0:
+            return None, None, None
         if ignore_keys is None:
             if hasattr(self.model, "config"):
                 ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
@@ -226,18 +249,25 @@ class PlanningTrainer(Trainer):
         else:
             prediction_generation = None
 
-        logits = {
-            "prediction_forward": logits[0],
-            "prediction_generation": prediction_generation,
-        }
-
-        # if prediction_loss_only:
-        #     return (loss, None, None)
-
         logits = nested_detach(logits)
         if len(logits) == 1:
             logits = logits[0]
 
+        if logits.shape[0] != self.args.per_device_eval_batch_size:
+            incorrect_batch_size = logits.shape[0]
+            short = self.args.per_device_eval_batch_size - incorrect_batch_size
+            for i in range(short):
+                logits = torch.cat([logits, logits[0].unsqueeze(0)], dim=0)
+                prediction_generation = torch.cat([prediction_generation, prediction_generation[0].unsqueeze(0)], dim=0)
+                labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
+            print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
+
+        logits = {
+            "prediction_forward": logits,
+            "prediction_generation": prediction_generation,
+        }
+        # if prediction_loss_only:
+        #     return (loss, None, None)
         return (loss, logits, labels)
 
     # def prediction_step(
@@ -410,8 +440,8 @@ class PlanningTrainer(Trainer):
     #
     #                 ade_x_error_key_points = prediction_key_points[:, :, 0] - future_key_points[:, :, 0]
     #                 ade_y_error_key_points = prediction_key_points[:, :, 1] - future_key_points[:, :, 1]
-    #                 fde_x_error_key_points = prediction_key_points[:, -1, 0] - future_key_points[:, -1, 0]
-    #                 fde_y_error_key_points = prediction_key_points[:, -1, 1] - future_key_points[:, -1, 1]
+    #                 fde_x_error_key_points = prediction_key_points[:, 0, 0] - future_key_points[:, 0, 0]
+    #                 fde_y_error_key_points = prediction_key_points[:, 0, 1] - future_key_points[:, 0, 1]
     #                 ade_x_error = prediction_trajectory_in_batch[:, :, 0] - trajectory_label_in_batch[:, :, 0]
     #                 ade_y_error = prediction_trajectory_in_batch[:, :, 1] - trajectory_label_in_batch[:, :, 1]
     #                 fde_x_error = prediction_trajectory_in_batch[:, -1, 0] - trajectory_label_in_batch[:, -1, 0]
