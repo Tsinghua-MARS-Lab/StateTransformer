@@ -76,9 +76,6 @@ def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
     model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
 
-    # set default label names
-    training_args.label_names = ['trajectory_label']
-
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
         road_types = 20

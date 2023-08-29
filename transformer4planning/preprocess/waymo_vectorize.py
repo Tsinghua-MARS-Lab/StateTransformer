@@ -66,6 +66,19 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
     current_time_index = data["current_time_index"]
     if interaction: track_index_to_predict = sample["interaction_index"].to(torch.long)
     else: track_index_to_predict = torch.tensor([sample["ego_index"]]).to(torch.long)
+
+    object_id, object_type = [], []
+    if len(data["track_index_to_predict"]) == 1:
+        assert data["track_index_to_predict"][0] == track_index_to_predict
+        object_id.append(data['center_objects_id'])
+        object_type.append(data['center_objects_type'])
+    else:
+        assert len(data["track_index_to_predict"]) == len(data['center_objects_id'])
+        for idx in track_index_to_predict:
+            index_of_track = np.where(data["track_index_to_predict"] == idx)
+            object_id.append(data['center_objects_id'][index_of_track])
+            object_type.append(str(data['center_objects_type'][index_of_track].item()))
+            
     map_polyline = torch.from_numpy(data["map_polyline"])
 
     num_ego = len(track_index_to_predict)
@@ -87,8 +100,8 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
         "scenario_id": [scenario_id] * num_ego,
         "center_objects_world": center_objects_world,
         "center_gt_trajs_src": agent_trajs[track_index_to_predict],
-        "center_objects_id": torch.tensor(data['center_objects_id'], dtype=torch.int32).view(-1, 1),
-        "center_objects_type": [data['center_objects_type']] if isinstance(data['center_objects_type'], (str, bytes)) else data['center_objects_type'],
+        "center_objects_id": torch.tensor(object_id, dtype=torch.int32).view(-1, 1),
+        "center_objects_type": object_type,
         }
     
     return ret_dict
