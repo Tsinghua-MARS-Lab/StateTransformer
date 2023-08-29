@@ -377,32 +377,32 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 else:
                     pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
-            # self.model_args.generate_with_offroad_correction = True
-            if self.model_args.generate_with_offroad_correction and batch_size == 1 and map_name is not None and route_ids is not None and road_dic is not None and map_name != 'sg-one-north':
-                # currently only support batch size 1, i.e. single sample generation
-                pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
-                                                            ego_pose,
-                                                            ego_to_global=True)
-                # find closest point on the route
-                closest_point = project_point_to_nearest_lane_on_route(road_dic, route_ids, pred_key_point_global)
-                closest_point_relative = change_coordination(closest_point, ego_pose, ego_to_global=False)
-                pred_key_point[0, 0, :2] = torch.tensor(closest_point_relative[:2], device=pred_key_point.device)
-            # if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
-            #     # replace last key point with IDM reference
-            #     ego_state_global = idm_reference_global[selected_indices[-1]]
-            #     idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
-            #                                                                                ego_state_global.rear_axle.y]),
-            #                                                                      ego_pose,
-            #                                                                      ego_to_global=False)
-            #     print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
-            #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
-            key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-            # replace embed at the next position
-            input_embeds[:, additional_token_num + context_length * 2 + i, :] = key_point_embed[:, 0, :]
-            if self.model_args.predict_yaw:
-                pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
-            else:
-                pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+                # self.model_args.generate_with_offroad_correction = True
+                if self.model_args.generate_with_offroad_correction and batch_size == 1 and map_name is not None and route_ids is not None and road_dic is not None and map_name != 'sg-one-north':
+                    # currently only support batch size 1, i.e. single sample generation
+                    pred_key_point_global = change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
+                                                                ego_pose,
+                                                                ego_to_global=True)
+                    # find closest point on the route
+                    closest_point = project_point_to_nearest_lane_on_route(road_dic, route_ids, pred_key_point_global)
+                    closest_point_relative = change_coordination(closest_point, ego_pose, ego_to_global=False)
+                    pred_key_point[0, 0, :2] = torch.tensor(closest_point_relative[:2], device=pred_key_point.device)
+                # if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
+                #     # replace last key point with IDM reference
+                #     ego_state_global = idm_reference_global[selected_indices[-1]]
+                #     idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
+                #                                                                                ego_state_global.rear_axle.y]),
+                #                                                                      ego_pose,
+                #                                                                      ego_to_global=False)
+                #     print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
+                #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
+                key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                # replace embed at the next position
+                input_embeds[:, additional_token_num + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+                if self.model_args.predict_yaw:
+                    pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
+                else:
+                    pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
 
             # generate remaining trajectory
             transformer_output = self.transformer(
@@ -412,31 +412,28 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
 
-        if self.model_args.interaction:
-            transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
+            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+            # expected shape for pred trajectory is (b, pred_length, 4)
+            if self.traj_decoder is not None:
+                traj_logits = self.traj_decoder(traj_hidden_state)
+            else:
+                traj_logits = trajectory_label_dummy[..., :2]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:,
+                                            additional_token_num + context_length * 2 - 1:additional_token_num + context_length * 2 +
+                                                                                        future_key_points.shape[1] - 1, :]
 
-        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-        # expected shape for pred trajectory is (b, pred_length, 4)
-        if self.traj_decoder is not None:
-            traj_logits = self.traj_decoder(traj_hidden_state)
-        else:
-            traj_logits = trajectory_label_dummy[..., :2]
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:,
-                                         additional_token_num + context_length * 2 - 1:additional_token_num + context_length * 2 +
-                                                                                    future_key_points.shape[1] - 1, :]
-
-        if self.k > 1:
-            b, _, c = pred_key_points_during_generate[0].shape
-            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(b, -1, c)
-        elif self.k == 1:
-            key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
-            # use previous prediction during generation
-            # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
-            key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
-        else:
-            raise ValueError("illegal k while generating trajectory", self.k)
-        # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
-        return torch.cat([key_points_logits, traj_logits], dim=1)
+            if self.k > 1:
+                b, _, c = pred_key_points_during_generate[0].shape
+                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(b, -1, c)
+            elif self.k == 1:
+                key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2
+                # use previous prediction during generation
+                # print('inspect kp: ', key_points_logits, pred_key_points_during_generate)
+                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(key_points_logits.shape)
+            else:
+                raise ValueError("illegal k while generating trajectory", self.k)
+            # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
+            return torch.cat([key_points_logits, traj_logits], dim=1)
     
     def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, num_beam=None, out_num_mode=None, center_obj_anchor_pts=None):
         '''

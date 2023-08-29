@@ -19,7 +19,7 @@ import os
 import numpy as np
 
 # Custom compute_metrics function
-def compute_metrics(prediction: EvalPrediction):
+def compute_metrics_nuplan(prediction: EvalPrediction):
     """
     All inputs are finalized and gathered, should run only one time.
     """

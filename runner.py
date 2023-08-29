@@ -36,7 +36,6 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import (PlanningTrainer, CustomCallback)
 from torch.utils.data import DataLoader
 from transformers.trainer_callback import DefaultFlowCallback
-from transformer4planning.trainer import compute_metrics
 
 from datasets import Dataset, Value
 
@@ -264,17 +263,17 @@ def main():
                                  dic_path=data_args.saved_dataset_folder, 
                                  map_api=map_api)
         
-        from transformer4planning.trainer import compute_metric_nuplan
-        compute_metrics_fn = partial(compute_metric_nuplan, model_args=model_args)
+        from transformer4planning.trainer import compute_metrics_nuplan
+        compute_metrics_fn = compute_metrics_nuplan
         
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
-        from transformer4planning.trainer import compute_metric_waymo
+        from transformer4planning.trainer import compute_metrics_waymo
         if model_args.encoder_type == "vector":
             collate_fn = partial(waymo_collate_func, 
                                  data_path=data_args.saved_dataset_folder, 
                                  interaction=model_args.interaction)
-            compute_metrics_fn = partial(compute_metric_waymo, model_args=model_args)
+            compute_metrics_fn = compute_metrics_waymo
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
     else:
