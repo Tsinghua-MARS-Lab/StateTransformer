@@ -179,7 +179,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # 0: route raster
     # 1-20: road raster
     # 21-24: traffic raster
-    # 25-56: agent raster (32=8 (agent_types) * 4 (sample_frames_in_past))
+    # 25-89: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
     total_raster_channels = 1 + road_types + traffic_types + agent_types * len(sample_frames_in_past)
 
     rasters_high_res = np.zeros([raster_shape[0],
@@ -197,22 +197,44 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     for route_id in route_ids:
         if int(route_id) == -1:
             continue
-        xyz = road_dic[int(route_id)]["xyz"].copy()
-        xyz[:, :2] -= origin_ego_pose[:2]
-        pts = list(zip(xyz[:, 0], xyz[:, 1]))
-        line = shapely.geometry.LineString(pts)
-        simplified_xyz_line = line.simplify(1)
-        simplified_x, simplified_y = simplified_xyz_line.xy
-        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
-        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-        simplified_xyz[:, 1] *= -1
-        simplified_xyz[:, 0] *= y_inverse
-        high_res_route = (simplified_xyz * high_res_scale + raster_shape[0] // 2).astype('int32')
-        low_res_route = (simplified_xyz * low_res_scale + raster_shape[0] // 2).astype('int32')
+        if kwargs.get('use_route_lanes', False):
+            route_lanes = road_dic[int(route_id)]["lower_level"]
+            for each_route_lane in route_lanes:
+                xyz = road_dic[int(each_route_lane)]["xyz"].copy()
+                xyz[:, :2] -= origin_ego_pose[:2]
+                pts = list(zip(xyz[:, 0], xyz[:, 1]))
+                line = shapely.geometry.LineString(pts)
+                simplified_xyz_line = line.simplify(1)
+                simplified_x, simplified_y = simplified_xyz_line.xy
+                simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:, 1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+                simplified_xyz[:, 1] *= -1
+                simplified_xyz[:, 0] *= y_inverse
+                high_res_route = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+                low_res_route = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
+                for j in range(simplified_xyz.shape[0] - 1):
+                    cv2.line(rasters_high_res_channels[0], tuple(high_res_route[j, :2]),
+                             tuple(high_res_route[j + 1, :2]), (255, 255, 255), 2)
+                    cv2.line(rasters_low_res_channels[0], tuple(low_res_route[j, :2]),
+                             tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
+        else:
+            xyz = road_dic[int(route_id)]["xyz"].copy()
+            xyz[:, :2] -= origin_ego_pose[:2]
+            pts = list(zip(xyz[:, 0], xyz[:, 1]))
+            line = shapely.geometry.LineString(pts)
+            simplified_xyz_line = line.simplify(1)
+            simplified_x, simplified_y = simplified_xyz_line.xy
+            simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:,1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+            simplified_xyz[:, 1] *= -1
+            simplified_xyz[:, 0] *= y_inverse
+            high_res_route = (simplified_xyz * high_res_scale + raster_shape[0] // 2).astype('int32')
+            low_res_route = (simplified_xyz * low_res_scale + raster_shape[0] // 2).astype('int32')
 
-        cv2.fillPoly(rasters_high_res_channels[0], np.int32([high_res_route[:, :2]]), (255, 255, 255))
-        cv2.fillPoly(rasters_low_res_channels[0], np.int32([low_res_route[:, :2]]), (255, 255, 255))
+            cv2.fillPoly(rasters_high_res_channels[0], np.int32([high_res_route[:, :2]]), (255, 255, 255))
+            cv2.fillPoly(rasters_low_res_channels[0], np.int32([low_res_route[:, :2]]), (255, 255, 255))
     # road raster
     for road_id in road_ids:
         if int(road_id) == -1:
