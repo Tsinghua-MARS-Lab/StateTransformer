@@ -26,7 +26,7 @@ from transformers import (
     set_seed,
 )
 from transformer4planning.models.model import build_models
-from transformer4planning.utils import (
+from transformer4planning.utils.args import (
     ModelArguments, 
     DataTrainingArguments, 
     ConfigArguments, 
@@ -36,6 +36,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import (PlanningTrainer, CustomCallback)
 from torch.utils.data import DataLoader
 from transformers.trainer_callback import DefaultFlowCallback
+from transformer4planning.trainer import compute_metrics
 
 from datasets import Dataset, Value
 
@@ -75,6 +76,9 @@ def load_dataset(root, split='train', dataset_scale=1, select=False):
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
     model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
+
+    # set default label names
+    training_args.label_names = ['trajectory_label']
 
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
@@ -183,7 +187,8 @@ def main():
         val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, False)
     else:
         print('Validation set not found, using training set as val set')
-        val_dataset = train_dataset
+        val_dataset = test_dataset
+        # val_dataset = train_dataset
 
     if model_args.task == "nuplan":
         all_maps_dic = {}
@@ -244,18 +249,17 @@ def main():
         if model_args.encoder_type == "raster":
             from transformer4planning.preprocess.nuplan_rasterize import nuplan_rasterize_collate_func
             collate_fn = partial(nuplan_rasterize_collate_func,
-                                dic_path=data_args.saved_dataset_folder,
-                                all_maps_dic=all_maps_dic,
-                                **model_args.__dict__)
+                                 dic_path=data_args.saved_dataset_folder,
+                                 all_maps_dic=all_maps_dic,
+                                 **model_args.__dict__)
         elif model_args.encoder_type == "vector":
             from nuplan.common.maps.nuplan_map.map_factory import get_maps_api
             from transformer4planning.preprocess.pdm_vectorize import nuplan_vector_collate_func
             map_api = dict()
             for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
                 map_api[map] = get_maps_api(map_root=data_args.nuplan_map_path,
-                                    map_version="nuplan-maps-v1.0",
-                                    map_name=map
-                                    )
+                                            map_version="nuplan-maps-v1.0",
+                                            map_name=map)
             collate_fn = partial(nuplan_vector_collate_func, 
                                  dic_path=data_args.saved_dataset_folder, 
                                  map_api=map_api)

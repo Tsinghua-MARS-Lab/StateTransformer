@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 from transformers.training_args import TrainingArguments
 
 @dataclass
@@ -124,24 +124,33 @@ class ModelArguments:
     generate_with_offroad_correction: Optional[bool] = field(
         default=False
     )
+    # WIP for route args
+    use_route_lanes: Optional[bool] = field(
+        default=False
+    )
+    route_in_separate_token: Optional[bool] = field(
+        default=False
+    )
+    # begin of diffusion decoder args
     generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
-        default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
+        default=False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
     )
     diffusion_dataset_save_dir: Optional[str] = field(
-        default = None, metadata = {"help": "The path of the dir to save the diffusion dataset to be generated for Diffusion KeyPoint Decoder."}
+        default=None, metadata={"help": "The path of the dir to save the diffusion dataset to be generated for Diffusion KeyPoint Decoder."}
     )
     key_points_diffusion_decoder_feat_dim: Optional[int] = field(
-        default = 256, metadata = {"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
+        default=256, metadata={"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
     )
     key_points_num: Optional[int] = field(
-        default = 5, metadata = {"help": "Number of key points. Only used to initialize diffusion KP decoder."}
+        default=5, metadata={"help": "Number of key points. Only used to initialize diffusion KP decoder."}
     )
     diffusion_condition_sequence_lenth: Optional[int] = field(
-        default = 16, metadata = {"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
+        default=16, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
     )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
-        default = None, metadata = {"help": "From which file to load the pretrained key_points_diffusion_decoder."}
+        default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
+    # end of diffusion decoder args
     interaction: Optional[bool] = field(
         default=False
     )
@@ -190,8 +199,7 @@ class DataTrainingArguments:
                 "value if set."
             )
         },
-    )    
-
+    )
     dataset_scale: Optional[float] = field(
         default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
@@ -201,6 +209,7 @@ class DataTrainingArguments:
     nuplan_map_path: Optional[str] = field(
         default=None, metadata={"help":"The root path of map file, to init map api used in nuplan package"}
     )
+
 
 @dataclass
 class ConfigArguments:
@@ -222,6 +231,9 @@ class ConfigArguments:
 
 @dataclass
 class PlanningTrainingArguments(TrainingArguments):
+    """
+    Warnings: This overrides the TrainingArguments in transformers. DOES NOT WORK FOR UNKNOWN REASONs.
+    """
     eval_interval: Optional[int] = field(
         default=1,
         metadata={
@@ -230,3 +242,9 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
+    # label_names: Optional[List[str]] = field(
+    #     default=lambda: ['trajectory_label']
+    # )
+    # prediction_loss_only: Optional[bool] = field(
+    #     default=False,
+    # )
