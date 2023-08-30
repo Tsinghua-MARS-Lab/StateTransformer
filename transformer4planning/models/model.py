@@ -31,11 +31,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
-        self.out_features = 4 if self.model_args.predict_yaw else 2
+        out_features = 4 if self.model_args.predict_yaw else 2
         if not self.model_args.pred_key_points_only:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features)
+            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
         if self.ar_future_interval > 0:
-            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features * self.k)
+            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
 
@@ -288,21 +288,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
         input_embeds[:, additional_token_num + context_length * 2:additional_token_num + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
-        # Loop for generation
-        for i in range(key_points_num):
-            input_embeds_current = input_embeds[:, :additional_token_num + context_length * 2 + i, :]
-            attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
-            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-            transformer_output = self.transformer(
-                inputs_embeds=input_embeds_current,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-            )
-            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                            additional_token_num + context_length * 2 + i - 1,
-                                            :].reshape(batch_size, 1, -1)
-
 
         if self.model_args.task == "waymo":
             length_before_keypoints = additional_token_num + context_length * 2
@@ -345,7 +330,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             
             # use last score
             # all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
-
             return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
         else:
             # Loop for generation
