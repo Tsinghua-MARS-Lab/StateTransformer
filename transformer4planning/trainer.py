@@ -323,7 +323,9 @@ class PlanningTrainer(Trainer):
                         self.eval_result['fde_gen'] = []
                     # compute ade by gen
                     ade_by_gen = torch.sqrt(ade_x_error_by_gen.flatten() ** 2 + ade_y_error_by_gen.flatten() ** 2)
-                    batch_to_csv["ade"] = copy.deepcopy(torch.mean(ade_by_gen.reshape(batch_size, -1), dim=-1).detach().cpu().numpy())
+                    batch_to_csv["ade"] = torch.mean(copy.deepcopy(ade_by_gen).reshape(batch_size, -1), dim=-1).detach().cpu().numpy()
+                    batch_to_csv["fde_3"] = copy.deepcopy(ade_by_gen).reshape(batch_size, -1).detach().cpu().numpy()[:, 30]
+                    batch_to_csv["fde_5"] = copy.deepcopy(ade_by_gen).reshape(batch_size, -1).detach().cpu().numpy()[:, 50]
                     ade_by_gen = ade_by_gen.mean()
                     self.eval_result['ade_gen'].append(float(ade_by_gen))
                     # compute fde
