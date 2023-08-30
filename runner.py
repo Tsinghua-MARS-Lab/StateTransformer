@@ -315,6 +315,16 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
+        demo_id = ['ffbd3b860a825ef9'] 
+                #    'ffaf0595e6b15a1d', 'ff9f884349e65234', 'ff87f53ee3b85930', 'ff3e4f2876045591']
+        def filter(sample):
+            if sample["scenario_id"] in demo_id:
+                return True
+            else:
+                return False
+        eval_dataset = eval_dataset.filter(filter)
+        for each in eval_dataset:
+            print("scenario_id", each["scenario_id"], "timestamp", each["timestamp"])
         result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
         logger.info("***** Final Eval results *****")
         logger.info(f"  {result}")

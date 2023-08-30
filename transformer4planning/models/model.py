@@ -195,7 +195,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         route_ids = kwargs.get("route_ids", None)
         ego_pose = kwargs.get("ego_pose", None)
         road_dic = kwargs.get("road_dic", None)
-        # idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
+        idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
         """
         Used for generate with key points
         """
