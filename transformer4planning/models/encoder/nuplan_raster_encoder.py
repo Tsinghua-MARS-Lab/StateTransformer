@@ -56,6 +56,12 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         self.ar_future_interval = model_args.ar_future_interval
         self.model_args = model_args
+
+        if self.model_args.route_in_separate_token:
+            self.route_cnn = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None),
+                                                   in_channels=1,
+                                                   resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
+                                                   pretrain=cnn_kwargs.get("pretrain", False))
         
     def forward(self, **kwargs):
         """
@@ -76,7 +82,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
         _, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1] if context_actions is not None else -1 # -1 in case of pdm encoder 
+        context_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
 
         # add noise to context actions
         context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
@@ -86,7 +92,8 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         
         high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light)
         low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light)
-        
+        # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
+        # context_length: 8, 40 frames / 5
         batch_size, context_length, c, h, w = high_res_seq.shape
 
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
@@ -112,6 +119,14 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
+
+        if self.model_args.route_in_separate_token:
+            route_embed_high_res = self.route_cnn(high_res_seq[:, 0, 0, :, :].to(torch.float32).reshape(batch_size, 1, h, w))
+            route_embed_low_res = self.route_cnn(low_res_seq[:, 0, 0, :, :].to(torch.float32).reshape(batch_size, 1, h, w))
+            route_embed_high_res = route_embed_high_res.reshape(batch_size, 1, -1)
+            route_embed_low_res = route_embed_low_res.reshape(batch_size, 1, -1)
+            route_state_embeds = torch.cat((route_embed_high_res, route_embed_low_res), dim=-1).to(torch.float32)
+            input_embeds = torch.cat([route_state_embeds, input_embeds], dim=1)
 
         # add keypoints encoded embedding
         if self.ar_future_interval == 0:
@@ -142,13 +157,3 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         }
 
         return input_embeds, info_dict
-    
-
-
-
-        
-
-        
-
-
-        

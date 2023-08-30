@@ -22,6 +22,8 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
         # 1-20: road raster
         # 21-24: traffic raster
         # 25-56: agent raster (32=8 (agent_types) * 4 (sample_frames_in_past))
+        
+        # 25-89: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
         """
         each_img = result_dic[each_key]
         goal = each_img[:, :, 0]
@@ -32,7 +34,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
         color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
         target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float32)
         image_shape = target_image.shape
-        for i in range(21):
+        for i in list(range(21))[::-1]:
             road_per_channel = road[:, :, i].copy()
             # repeat on the third dimension into RGB space
             # replace the road channel with the color pallet
@@ -74,4 +76,4 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
                     target_image[x, y, :] = [255, 255, 255]
             cv2.imwrite(os.path.join(path_to_save, split + '_' + image_file_name + '_' + str(each_key) + '_' + str(scale) +'.png'), target_image)
     print('length of action and labels: ', result_dic['context_actions'].shape, result_dic['trajectory_label'].shape)
-    print('debug images saved to: ', path_to_save, file_number)
+    print('debug images saved to: ', path_to_save, file_number, each_img.shape)

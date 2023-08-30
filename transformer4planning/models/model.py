@@ -211,7 +211,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         device = input_embeds.device
         batch_size = trajectory_label.shape[0]
 
-        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        additional_token_num = 0
+        additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        additional_token_num += 1 if self.model_args.route_in_separate_token else 0
 
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.decoder_type == "mlp" and self.ar_future_interval > 0:
