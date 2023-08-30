@@ -266,6 +266,11 @@ class PlanningTrainer(Trainer):
                     # # TODO: this needs to be fixed and made cleaner later.
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
+        
+        logits = nested_detach(logits)
+        if len(logits) == 1:
+            logits = logits[0]
+
         if self.model.ar_future_interval > 0:
             prediction_generation = self.model.generate(**inputs)
         else:
@@ -297,7 +302,7 @@ class PlanningTrainer(Trainer):
             ).view(num_center_objects, num_modes, num_kps, num_kps_feat)
             pred_kps_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
 
-            logits = {
+            logits_dict = {
                 'scenario_id': str_to_tensor(inputs['scenario_id']).to(pred_trajs.device),
                 'pred_trajs': pred_trajs_world[..., 0:2],
                 'pred_scores': pred_scores,
@@ -307,29 +312,27 @@ class PlanningTrainer(Trainer):
                 'gt_trajs': inputs['center_gt_trajs_src'],
                 'track_index_to_predict': inputs['track_index_to_predict'],
             }
+            
         else:
-            logits = {
-                "prediction_forward": logits[0],
+            logits_dict = {
+                "prediction_forward": logits,
                 "prediction_generation": prediction_generation,
             }
 
-        logits = nested_detach(logits)
-
         sample_valid_mask = torch.ones((self.args.per_device_eval_batch_size,), device=labels.device)
-        if len(labels) != self.args.per_device_eval_batch_size:
-            incorrect_batch_size = len(labels)
-            short = self.args.per_device_eval_batch_size - incorrect_batch_size
-            for i in range(short):
-                for k in logits.keys():
-                    logits[k] = torch.cat([logits[k], logits[k][0].unsqueeze(0)], dim=0)
+        actual_batch_size = len(labels)
+        if actual_batch_size != self.args.per_device_eval_batch_size:
+            short = self.args.per_device_eval_batch_size - actual_batch_size
+            for _ in range(short):
+                for k in logits_dict.keys():
+                    logits_dict[k] = torch.cat([logits_dict[k], logits_dict[k][0].unsqueeze(0)], dim=0)
                 labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
-            print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
-            sample_valid_mask[len(labels):] = 0
+            print(f'topping to batch size from {actual_batch_size} to {self.args.per_device_eval_batch_size}')
+            sample_valid_mask[actual_batch_size:] = 0
 
-        logits["sample_valid_mask"] = sample_valid_mask
-        # if prediction_loss_only:
-        #     return (loss, None, None)
-        return (loss, logits, labels)
+        logits_dict["sample_valid_mask"] = sample_valid_mask
+
+        return (loss, logits_dict, labels)
 
     def save_raster(self, path_to_save,
                     inputs, sample_index,
