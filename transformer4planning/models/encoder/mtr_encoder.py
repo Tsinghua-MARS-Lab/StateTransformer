@@ -167,6 +167,11 @@ class MTREncoder(nn.Module):
         obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
         obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)        
         map_polylines_feature = self.map_polyline_encoder(map_polylines, map_polylines_mask)  # (num_center_objects, num_polylines, C)
+        
+        # batch_dict['obj_feature'] = obj_polylines_feature
+        # batch_dict['map_feature'] = map_polylines_feature[:, :, None, :].repeat(1, 1, num_timestamps, 1)
+
+        # return batch_dict
 
         # apply self-attn
         # obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
@@ -202,6 +207,25 @@ class MTREncoder(nn.Module):
         batch_dict['map_mask'] = map_valid_mask
         batch_dict['obj_pos'] = obj_trajs_last_pos
         batch_dict['map_pos'] = map_polylines_center
+        
+        # lane feature
+        # lane_mask = (map_polylines[:, :, 1, 6] == 3) | (map_polylines[:, :, 1, 6] == 2) | (map_polylines[:, :, 1, 6] == 1) # (num_center_objects, num_polylines)
+        # lane_num = [lane_mask[i].sum() for i in range(num_center_objects)]
+        # max_lane_num = max(lane_num)
+
+        # lane_polyline_feature = torch.zeros((num_center_objects, max_lane_num, num_timestamps, n_out_embed), dtype=map_polylines_feature.dtype, device=map_polylines_feature.device)
+        # for i in range(num_center_objects):
+        #     lane_polyline_feature[i, :lane_num[i], ...] = map_polylines_feature[i, lane_mask[i, :], ...]
+        # batch_dict['map_lane_feature'] = lane_polyline_feature
+        
+        # not_lane_mask = torch.logical_not(lane_mask)
+        # not_lane_num = [not_lane_mask[i].sum() for i in range(num_center_objects)]
+        # max_not_lane_num = max(not_lane_num)
+        
+        # not_lane_polyline_feature = torch.zeros((num_center_objects, max_not_lane_num, num_timestamps, n_out_embed), dtype=map_polylines_feature.dtype, device=map_polylines_feature.device)
+        # for i in range(num_center_objects):
+        #     not_lane_polyline_feature[i, :not_lane_num[i], ...] = map_polylines_feature[i, not_lane_mask[i, :], ...]
+        # batch_dict['map_others_feature'] = not_lane_polyline_feature
 
         return batch_dict
     

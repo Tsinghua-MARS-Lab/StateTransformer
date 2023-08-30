@@ -146,12 +146,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         obj_embeds = obj_feature.max(dim=1)[0] # (bs, num_obj, num_timestamp, 256)
         map_embeds = map_feature.max(dim=1)[0] # (bs, num_poly, num_timestamp, 256)
         
+        # map_lane_embeds = batch_dict['map_lane_feature'].max(dim=1)[0] # (bs, num_lane, num_timestamp, 256)
+        # map_others_embeds = batch_dict['map_others_feature'].max(dim=1)[0] # (bs, num_others_lane, num_timestamp, 256)
+        
         # traj
         trajectory_label = input_dict['trajectory_label']
         trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
         
         # action context
-        context_actions = input_dict['center_objects_past']
+        context_actions = input_dict['center_objects_past'][..., :4]
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -587,7 +590,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.debug and loss.device.index == 4:
             self.tot_iter_num += 1
             if self.tot_iter_num % 100 ==0 and self.use_anchor:
-                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_cls_pos ", loss_anchor_cls_pos, " loss_anchor_logits ", loss_anchor_logits, ' tot loss ', loss)
+                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k > 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k == 1:
