@@ -80,20 +80,22 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
             object_type.append(str(data['center_objects_type'][index_of_track].item()))
             
     map_polyline = torch.from_numpy(data["map_polyline"])
-
     num_ego = len(track_index_to_predict)
 
     center_objects_world = agent_trajs[track_index_to_predict, current_time_index]
     center, heading = center_objects_world[..., :3], center_objects_world[..., 6]
     agent_trajs_res = transform_to_center(agent_trajs, center, heading, heading_index=6)
     map_polylines_data = transform_to_center(map_polyline, center, heading, no_time_dim=True)
-    map_polylines_mask = torch.from_numpy(data["map_polylines_mask"]).unsqueeze(0).repeat(len(track_index_to_predict), 1, 1, )
+    map_polylines_mask = torch.from_numpy(data["map_polylines_mask"]).unsqueeze(0).repeat(len(track_index_to_predict), 1, 1)
+    polyline_index = data["polyline_index"]
+    polyline_index.append(len(map_polyline))
+    polyline_index = torch.tensor(polyline_index, dtype=torch.int32).unsqueeze(0).repeat(num_ego, 1)
 
     ret_dict = {
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),
         "map_polylines": map_polylines_data,
-        "polyline_index": torch.tensor(data["polyline_index"], dtype=torch.int32).unsqueeze(0).repeat(num_ego, 1),
+        "polyline_index": polyline_index,
         "map_polylines_mask": map_polylines_mask,
         "current_time_index": torch.tensor(current_time_index, dtype=torch.int32).repeat(num_ego).view(-1, 1),
         # for evaluation

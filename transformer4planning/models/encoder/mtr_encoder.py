@@ -219,11 +219,12 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         self.model_args = model_args
         self.token_scenario_tag = model_args.token_scenario_tag
         self.ar_future_interval = model_args.ar_future_interval
-        simple_map = True
-        if simple_map:
+
+        self.simple_map = False
+        if self.simple_map:
             self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
         else:
-            self.context_encoder = MTREncoder(mtr_config.CONTEXT_ENCODER)
+            self.context_encoder = MTREncoderSimplified(mtr_config.CONTEXT_ENCODER)
         
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
  
@@ -252,6 +253,45 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             })
         
         return hidden_state_joint
+    
+    def prepare_map_input(self, map_polylines, map_polylines_mask, polyline_index):
+        if self.simple_map: return map_polylines, map_polylines_mask, None
+
+        batch_size = len(polyline_index)
+        polyline_index = polyline_index.detach().cpu().to(int).tolist()
+        polyline_num_batch = []
+        polyline_length_batch = []
+        for i in range(batch_size):
+            polyline_index_sample = polyline_index[i]
+            polyline_num = 0
+            polyline_length = []
+            for p in polyline_index_sample:
+                if p < 0: break
+                elif p == 0: continue
+                else:
+                    polyline_length.append(p - polyline_index_sample[polyline_num])
+                    polyline_num += 1
+            polyline_num_batch.append(polyline_num)
+            polyline_length_batch.append(max(polyline_length))
+
+        result_polyline_num, result_polyline_length = max(polyline_num_batch), max(polyline_length_batch)
+        map_polylines_result = torch.zeros((batch_size, result_polyline_num, result_polyline_length, map_polylines.shape[-1]), device=map_polylines.device)
+        map_polylines_mask_result = torch.zeros((batch_size, result_polyline_num, result_polyline_length), device=map_polylines.device)
+        map_polylines_center = torch.zeros((batch_size, result_polyline_num, 3), device=map_polylines.device)
+
+        for i in range(batch_size):
+            for j in range(polyline_num_batch[i]):
+                index = polyline_index[i][j]
+                if index < 0: break
+                elif index == 0: continue
+                else:
+                    last_index = polyline_index[i][j-1]
+                    map_polylines_result[i, j, :index-last_index, :] = map_polylines[i, last_index:index, :]
+                    map_polylines_mask_result[i, j, :index-last_index] = map_polylines_mask[i, last_index:index, 0]
+                    map_polylines_center[i, j, :2] = torch.mean(map_polylines[i, last_index:index, :])
+
+        return map_polylines_result, map_polylines_mask_result, map_polylines_center
+
 
     def forward(self, **kwargs):
         agent_trajs = kwargs.get('agent_trajs')
@@ -260,11 +300,24 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         track_index_to_predict = kwargs.get("track_index_to_predict")
         current_time_index = kwargs.get("current_time_index")[0]
 
-        state_embeds = self.context_encoder(
-            agent_trajs[:, :, :current_time_index + 1, :],
-            map_polylines=kwargs.get("map_polylines"),
-            map_polylines_mask=kwargs.get("map_polylines_mask"),
-        )
+        map_polylines, map_polylines_mask, map_polylines_center = self.prepare_map_input(kwargs.get("map_polylines"), kwargs.get("map_polylines_mask"), kwargs.get("polyline_index"))
+
+        if self.simple_map:
+            state_embeds = self.context_encoder(
+                agent_trajs[:, :, :current_time_index + 1, :],
+                map_polylines=map_polylines,
+                map_polylines_mask=map_polylines_mask,
+            )
+        else:
+            input_dict = {
+                "obj_trajs": agent_trajs[:, :, :current_time_index + 1, :-1],
+                "obj_trajs_mask": agent_trajs[:, :, :current_time_index + 1, -1] > 0,
+                "map_polylines": map_polylines,
+                "map_polylines_mask": map_polylines_mask > 0,
+                "obj_trajs_pos": agent_trajs[:, :, :current_time_index + 1, :3],
+                "map_polylines_center": map_polylines_center,
+            }
+            state_embeds = self.context_encoder({"input_dict": input_dict})
 
         ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
         ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
@@ -336,6 +389,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         return input_embeds, info_dict
     
 class SimpleEncoder(MTREncoder):
+    # Encoder inheritated from MTR encoder but with much simpler map embedding.
     def __init__(self, config):
         super().__init__(config)
         self.output_dim = config.D_MODEL
@@ -377,3 +431,57 @@ class SimpleEncoder(MTREncoder):
         global_token_feature_max, _ = torch.max(global_token_feature.view(num_center_objects, -1, num_timestamps, self.output_dim), dim=1)
 
         return global_token_feature_max.squeeze(1)
+    
+class MTREncoderSimplified(MTREncoder):
+    # Remove unnecessary input and output of MTR Encoder for downstream GPT transformer.
+    def forward(self, batch_dict):
+        """
+        Args:
+            batch_dict:
+              input_dict:
+        """
+        input_dict = batch_dict['input_dict']
+        obj_trajs, obj_trajs_mask = input_dict['obj_trajs'], input_dict['obj_trajs_mask'] 
+        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
+
+        obj_trajs_pos = input_dict['obj_trajs_pos']
+        map_polylines_center = input_dict['map_polylines_center']
+
+        assert obj_trajs_mask.dtype == torch.bool and map_polylines_mask.dtype == torch.bool
+
+        num_center_objects, num_objects, num_timestamps, _ = obj_trajs.shape
+        num_polylines = map_polylines.shape[1]
+
+        # apply polyline encoder
+        obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
+        obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)        
+        map_polylines_feature = self.map_polyline_encoder(map_polylines, map_polylines_mask)  # (num_center_objects, num_polylines, C)
+
+        # apply self-attn
+        # obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
+        obj_valid_mask = obj_trajs_mask
+        map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
+        n_out_embed = obj_polylines_feature.shape[-1]
+
+        global_token_feature = torch.cat((obj_polylines_feature.view(num_center_objects, num_objects*num_timestamps, n_out_embed), map_polylines_feature), dim=1) 
+        global_token_mask = torch.cat((obj_valid_mask.view(num_center_objects, -1), map_valid_mask), dim=1) 
+        global_token_pos = torch.cat((obj_trajs_pos.contiguous().view(num_center_objects, num_objects*num_timestamps, -1), map_polylines_center), dim=1) 
+
+        if self.use_local_attn:
+            global_token_feature = self.apply_local_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos,
+                num_of_neighbors=self.model_cfg.NUM_OF_ATTN_NEIGHBORS
+            )
+        else:
+            global_token_feature = self.apply_global_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
+            )
+
+        obj_polylines_feature = global_token_feature[:, :num_objects*num_timestamps].view(num_center_objects, num_objects, num_timestamps, n_out_embed)
+        map_polylines_feature = global_token_feature[:, num_objects*num_timestamps:][:, :, None, :].repeat(1, 1, num_timestamps, 1)
+        assert map_polylines_feature.shape[1] == num_polylines
+
+        state_embeds = torch.cat((map_polylines_feature, obj_polylines_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        state_embeds = state_embeds.max(dim=1)[0]
+
+        return state_embeds
