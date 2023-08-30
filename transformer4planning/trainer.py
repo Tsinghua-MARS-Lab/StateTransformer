@@ -68,7 +68,7 @@ def compute_metrics_nuplan(prediction: EvalPrediction):
     eval_result['fde_keypoints_gen'] = fde_key_points_gen
 
     if prediction_key_points_by_generation.shape[-1] == 4:
-        heading_error_gen = prediction_key_points_by_generation[:, :, -1] - label_key_points[:, :, -1]
+        heading_error_gen = np.abs(prediction_key_points_by_generation[:, :, -1] - label_key_points[:, :, -1])
         eval_result['heading_error_by_gen'] = heading_error_gen[valid_mask].mean()
 
     # compute error for forward results
@@ -91,7 +91,7 @@ def compute_metrics_nuplan(prediction: EvalPrediction):
     eval_result['fde_keypoints'] = fde_key_points_for
 
     if prediction_key_points_by_forward.shape[-1] == 4:
-        heading_error_for = prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1]
+        heading_error_for = np.abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
         eval_result['heading_error'] = heading_error_for[valid_mask].mean()
 
     return eval_result
