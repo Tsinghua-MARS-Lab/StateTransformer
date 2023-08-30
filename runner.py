@@ -261,6 +261,8 @@ def main():
                                  map_api=map_api)
         
         from transformer4planning.trainer import compute_metrics_nuplan
+        # set default label names
+        training_args.label_names = ['trajectory_label']
         compute_metrics_fn = compute_metrics_nuplan
         
     elif model_args.task == "waymo":
@@ -270,6 +272,8 @@ def main():
             collate_fn = partial(waymo_collate_func, 
                                  data_path=data_args.saved_dataset_folder, 
                                  interaction=model_args.interaction)
+            # set default label names
+            training_args.label_names = ['center_gt_trajs_src']
             compute_metrics_fn = compute_metrics_waymo
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
