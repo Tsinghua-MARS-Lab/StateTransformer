@@ -107,7 +107,7 @@ class Scenario:
                     zorder=5,
                 )
                 
-                ax.text(valid_pred[-1, 0]+1, valid_pred[-1, 1]+1, 's:%f'% (pred_scores[t_i]), color=color)
+                ax.text(valid_pred[-1, 0]+1, valid_pred[-1, 1]+1, 's:%.3f'% (pred_scores[t_i]), color=color)
                 
                 if "pred_kps" in prediction:
                     pred_kps = prediction['pred_kps'][t_i] # (num_kps, 2)
@@ -144,8 +144,8 @@ def parse_config():
     args = parser.parse_args()
     return args
 
-# python visualization/vis_prediction_waymo.py --pkl_file result.pkl  
-#   --out_folder /data_3/madanjiao/model_res/vector_gpt_1.5B_mse_FI1_PI1_k1/training_results/checkpoint-145000/figs
+# python visulization/vis_prediction_waymo.py --pkl_file /data_3/madanjiao/model_res/z_new_gpt_small_k1_KP0_anchored_ep100_gpu7_allType_anchorLogits/training_results/checkpoint-400000/eval_output/result_z_new_gpt_small_k1_KP0_anchored_ep100_gpu7_allType_anchorLogits___checkpoint-400000_20230827-150052.pkl  
+#   --out_folder /data_3/madanjiao/model_res/z_new_gpt_small_k1_KP0_anchored_ep100_gpu7_allType_anchorLogits/training_results/checkpoint-400000/figs
 
 def main():
     args = parse_config()
@@ -157,24 +157,30 @@ def main():
 
     filenames = tf.io.matching_files(test_files)
     print(' tot len ', len(filenames))
+    file_idx = 0
     for filename in tqdm(filenames):
         shard_dataset = tf.data.TFRecordDataset(filename)
         shard_iterator = shard_dataset.as_numpy_iterator()
+        scenario_idx = 0
         for scenario_bytes in shard_iterator:
             scenario = Scenario(scenario_bytes)
 
-        scenario_id = scenario.id
-        # print(f'process {scenario_id}...')
+            scenario_id = scenario.id
+            # print(f'process {scenario_id}...')
 
-        # filter the data to get the data with the same scenario_id
-        predictions = [data[i] for i in range(len(data)) if data[i]['scenario_id'] == scenario_id]
+            # filter the data to get the data with the same scenario_id
+            predictions = [data[i] for i in range(len(data)) if data[i]['scenario_id'] == scenario_id]
 
-        # visualize the result
-        output_file = os.path.join(args.out_folder, f'{scenario_id}.png')
-        os.makedirs(args.out_folder, exist_ok=True)
-        
-        scenario.visualize_result(predictions, output_file=output_file)
+            # visualize the result
+            output_file = os.path.join(args.out_folder, f'{file_idx}_{scenario_idx}_{scenario_id}')
+            os.makedirs(args.out_folder, exist_ok=True)
+            
+            scenario.visualize_result(predictions, output_file=output_file)
+            
+            scenario_idx += 1
         # print(f'saved to {output_file}...')
+        
+        file_idx += 1
         
         # break
         
