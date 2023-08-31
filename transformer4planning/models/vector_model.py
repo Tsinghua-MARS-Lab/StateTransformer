@@ -60,7 +60,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.key_points_decoder = None
         out_features = 4 if model_args.predict_yaw else 2
         
-        self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
+        self.pred_traj = True
+        
+        if self.pred_traj:
+            self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
             
         if self.ar_future_interval > 0:
             self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features * self.k)
@@ -231,13 +234,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
 
         # add future traj embedding
-        if self.ar_future_interval == 0:
+        future_key_points = None
+        future_key_points_gt_mask = None
+        if self.pred_traj and self.ar_future_interval == 0:
             # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
-            future_key_points = None
-            future_key_points_gt_mask = None
-        elif self.ar_future_interval > 0:
+                                      torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)    
+        elif self.pred_traj and self.ar_future_interval > 0:
             # use autoregressive future interval
             if self.model_args.specified_key_points:
                 # 80, 40, 20, 10, 5
@@ -277,8 +280,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
-        else:
-            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
         transformer_outputs = self.transformer(
             past_key_values=past_key_values,
@@ -297,8 +298,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
-        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-        pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
+        pred_traj_logits = None
+        if self.pred_traj:
+            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+            pred_traj_logits = self.traj_decoder(traj_hidden_state)   # (bs, pred_length, 2 * k)
+            
         pred_kps_logits = None
         pred_kps_cls = None
         
@@ -451,6 +455,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
         out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': batch_size}
         
+        if not self.pred_traj:
+            return out_res
+        
         for m_i in range(n_mode):
             input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_anchor_len+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
             transformer_output = self.transformer(
@@ -503,9 +510,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         loss_traj = torch.tensor(0, dtype=torch.float32, device=device)
 
         # loss traj
-        loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
-        loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
-        loss += loss_traj
+        if self.pred_traj:
+            loss_traj = self.reg_trj_loss(pred_traj_logits[..., :self.pred_dim], gt_traj[..., :self.pred_dim].to(device)) * self.model_args.trajectory_loss_rescale
+            loss_traj = (loss_traj * gt_traj_mask).sum() / (gt_traj_mask.sum() + 1e-7)
+            loss += loss_traj
         
         # loss_reg_gmm = nll_loss_gmm_direct(
         #     pred_trajs=pred_traj_logits,
