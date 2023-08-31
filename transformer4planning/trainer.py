@@ -585,6 +585,11 @@ class PlanningTrainer(Trainer):
         anchor_hard_match_num = 0
         anchor_soft_match_num =0
         tot_num = 0
+        
+        save_cls_res = False
+        scenario_anchor_cls_res = {}
+        scenario_anchor_logits_res = {}
+        
         for i, batch_dict in enumerate(dataloader):
             with torch.no_grad():
                 batch_dict = self._prepare_inputs(batch_dict)
@@ -594,6 +599,22 @@ class PlanningTrainer(Trainer):
                 anchor_hard_match_num += batch_pred_dicts['anchor_hard_match_num'].cpu().numpy()
                 anchor_soft_match_num += batch_pred_dicts['anchor_soft_match_num'].cpu().numpy()
                 tot_num += batch_pred_dicts['tot_num']
+                
+                if save_cls_res:
+                    batch_kpts = batch_pred_dicts['key_points_logits'] # (bs, num_mode, num_kpts, 2)
+                    batch_scores = batch_pred_dicts['scores'] # (bs, num_mode)
+                    
+                    scenario_id = batch_dict['input_dict']['scenario_id']
+                    obj_ids = batch_dict['input_dict']['center_objects_id']
+                    batch_size = batch_kpts.shape[0]
+                    
+                    for b_i in range(batch_size):
+                        if scenario_id[b_i] not in scenario_anchor_cls_res:
+                            scenario_anchor_cls_res[scenario_id[b_i]] = {}
+                            scenario_anchor_logits_res[scenario_id[b_i]] = {}
+                            
+                        scenario_anchor_cls_res[scenario_id[b_i]][obj_ids[b_i]] = batch_scores[b_i, :].cpu().numpy() # (6, 2)
+                        scenario_anchor_logits_res[scenario_id[b_i]][obj_ids[b_i]] = batch_kpts[b_i, :, 0, :].cpu().numpy()  # (6) 
                 
                 if 'logits' not in batch_pred_dicts:
                     continue
@@ -621,6 +642,13 @@ class PlanningTrainer(Trainer):
                 break
         
         print('*'*20, ' anchor hard match ', anchor_hard_match_num, " anchor soft match ", anchor_soft_match_num, ' tot num ', tot_num, '*'*20)
+        
+        if save_cls_res:
+            with open(eval_output_dir + 'result_anchor_cls.pkl', 'wb') as f:
+                pickle.dump(scenario_anchor_cls_res, f)
+            
+            with open(eval_output_dir + 'result_anchor_logits.pkl', 'wb') as f:
+                pickle.dump(scenario_anchor_logits_res, f)
 
         if self.is_world_process_zero:
             progress_bar.close()
