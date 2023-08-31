@@ -146,7 +146,7 @@ def transform_preds_to_waymo_format(pred_dicts, top_k_for_eval=-1, eval_second=8
             cur_pred['pred_scores'] = cur_pred['pred_scores'][sort_idxs]
             cur_pred['pred_trajs'] = cur_pred['pred_trajs'][sort_idxs]
 
-            cur_pred['pred_scores'] = cur_pred['pred_scores'] / cur_pred['pred_scores'].sum()
+            # cur_pred['pred_scores'] = cur_pred['pred_scores'] / cur_pred['pred_scores'].sum()
 
             batch_pred_trajs[scene_idx, obj_idx] = cur_pred['pred_trajs'][:topK, np.newaxis, 4::sampled_interval, :][:, :, :num_frame_to_eval, :]
             batch_pred_scores[scene_idx, obj_idx] = cur_pred['pred_scores'][:topK]
