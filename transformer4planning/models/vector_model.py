@@ -232,6 +232,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
             
             gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+        else:
+            anchor_GT_cls = None
+            anchor_GT_logits = None
+            gt_anchor_mask = None
+            center_obj_anchor_pts = None
 
         # add future traj embedding
         future_key_points = None
@@ -313,6 +318,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_anchor_embed = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len-1 : tot_scenario_contenxt_len-1+self.anchor_len, :] # (bs, anchor_len, n_embed)
             pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed) # (bs, anchor_len, 64)
             pred_anchor_logits = self.anchor_logits_decoder(pred_anchor_embed) # (bs, anchor_len, 64 * 2)
+        else:
+            pred_anchor_cls = None
+            pred_anchor_logits = None
 
         if self.ar_future_interval > 0:
             """
@@ -401,9 +409,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                     selected_indices = [79, 39, 19, 9, 4]
                 future_key_points = trajectory_label_dummy[:, selected_indices, :]
                 future_key_points_gt = trajectory_label[:, selected_indices, :]
+                future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
             else:
                 future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
                 future_key_points_gt = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                
             assert future_key_points.shape[1] > 0, 'future points not enough to sample'
             future_key_embeds_dummy = self.action_m_embed(future_key_points)
             input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
@@ -445,15 +456,20 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         # all_traj_scores = all_traj_scores / all_traj_scores.sum()
         all_traj_scores = (all_traj_scores).softmax(-1)
         
-        if self.use_anchor:
-            anchor_kpts_idx = kpts_idx[:, :, 0]
-            hard_match_num = ((anchor_kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
-            soft_match_vec = (anchor_kpts_idx[:, 0] == anchor_GT_cls)
-            for m_i in range(1, 6):
-                soft_match_vec |= (anchor_kpts_idx[:, m_i] == anchor_GT_cls)
-            soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
+        anchor_kpts_idx = kpts_idx[:, :, 0]
+        
+        if not self.use_anchor:
+            pred_gt_dist = torch.norm((pred_key_points_during_generate - future_key_points_gt[:, None, :, :self.pred_dim]), dim=-1).squeeze(-1)
+            anchor_GT_cls = pred_gt_dist.argmin(dim = 1) # (bs, ) 
+            gt_anchor_mask = future_key_points_gt_mask[:, -1, :] # (bs, 1)
+
+        hard_match_num = ((anchor_kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
+        soft_match_vec = (anchor_kpts_idx[:, 0] == anchor_GT_cls)
+        for m_i in range(1, 6):
+            soft_match_vec |= (anchor_kpts_idx[:, m_i] == anchor_GT_cls)
+        soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
             
-        out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': batch_size}
+        out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': gt_anchor_mask.sum().item()}
         
         if not self.pred_traj:
             return out_res
