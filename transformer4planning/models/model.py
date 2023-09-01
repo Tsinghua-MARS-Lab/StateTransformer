@@ -30,17 +30,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.ar_future_interval = self.model_args.ar_future_interval
         self.model_parallel = False
         self.device_map = None
-
-        self.next_token_scorer_decoder = None
-        self.key_points_decoder = None
-        out_features = 4 if self.model_args.predict_yaw else 2
-        if not self.model_args.pred_key_points_only:
-            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
-        if self.ar_future_interval > 0:
-            self.key_points_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features * self.k)
-        if self.k > 1:
-            self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
-
         self.clf_metrics = None
         # Initialize weights and apply final processing
         self.post_init()
@@ -158,10 +147,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                     trajectory_label, 
                                                                     info_dict)
         loss += traj_loss
-        kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state,
-                                                                    info_dict)
-        loss += kp_loss
-        traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
+        kp_loss = None
+        if self.ar_future_interval > 0:
+            kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state,
+                                                                        info_dict)
+            loss += kp_loss
+            traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
         loss_items = dict(
             traj_loss=traj_loss,
             kp_loss=kp_loss
@@ -214,7 +205,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         additional_token_num = 0
         additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         additional_token_num += 1 if self.model_args.route_in_separate_token else 0
-
+        kp_start_index = additional_token_num + context_length * 2 if context_length is not None else additional_token_num + input_length
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.decoder_type == "mlp" and self.ar_future_interval > 0:
             trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
@@ -228,7 +219,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
             if self.model_args.interaction:
                 input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
-            kp_start_index = scenario_type_len + context_length * 2 if context_length is not None else scenario_type_len + input_length * 2
+            
             input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
             pred_key_points_during_generate = []
             for i in range(key_points_num):
@@ -301,8 +292,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     attention_mask=None,
                     position_ids=None,
                 )
+            key_points_num = len(selected_indices)
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             key_points_logits, pred_logits = self.key_points_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
+            pred_key_point = torch.zeros((batch_size, key_points_num, 4), device=device)
+            if self.model_args.predict_yaw:
+                pred_key_point = key_points_logits
+            else:
+                pred_key_point[:, :, :2] = key_points_logits 
+            key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, key_points_num, -1)
+            input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = key_point_embed[:, :, :]
         else:
             key_points_logits = None
         # predict the whole trajectory
@@ -481,7 +480,7 @@ def build_models(model_args):
                                                     specified_key_points=model_args.specified_key_points,
                                                     forward_specified_key_points=model_args.forward_specified_key_points
                                                     )
-            model = T4PTrainDiffWrapper(diffusion_model, num_key_points=model_args.key_points_num)
+            model = T4PTrainDiffWrapper(diffusion_model, num_key_points=model_args.key_points_num, model_args=model_args)
             if model_args.key_points_diffusion_decoder_load_from is not None:
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
                 model.load_state_dict(state_dict)
