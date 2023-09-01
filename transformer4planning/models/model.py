@@ -83,6 +83,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     def build_decoder(self):
         # load pretrained diffusion keypoint decoder
         #TODO: add diffusion decoder trained from scratch
+        if self.model_args.task == "waymo":
+            raise NotImplementedError("waymo task has not been tested yet")
         self.traj_decoder = TrajectoryDecoder(self.model_args, self.config)
         self.decoder_type = self.model_args.decoder_type
         if self.decoder_type == "diffusion":
