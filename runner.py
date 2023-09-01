@@ -169,7 +169,10 @@ def main():
     # loop all datasets
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
-    index_root = os.path.join(data_args.saved_dataset_folder, 'index')
+    if model_args.task == "nuplan" or model_args.task == "waymo": # nuplan and waymo datasets are stored in index format
+        index_root = os.path.join(data_args.saved_dataset_folder, 'index')
+    elif model_args.task == "train_diffusion_decoder":
+        index_root = data_args.saved_dataset_folder
     root_folders = os.listdir(index_root)
         
     if 'train' in root_folders:
@@ -263,7 +266,8 @@ def main():
                                             map_name=map)
             collate_fn = partial(nuplan_vector_collate_func, 
                                  dic_path=data_args.saved_dataset_folder, 
-                                 map_api=map_api)
+                                 map_api=map_api,
+                                 use_centerline=model_args.use_centerline)
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":
@@ -272,8 +276,24 @@ def main():
                                  interaction=model_args.interaction)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
+    elif model_args.task == "train_diffusion_decoder":
+        from torch.utils.data._utils.collate import default_collate
+        def feat_collate_func(batch, predict_yaw):
+            excepted_keys = ['label', 'hidden_state']
+            keys = batch[0].keys()
+            result = dict()
+            for key in keys:
+                list_of_dvalues = []
+                for d in batch:
+                    if key in excepted_keys:
+                        if key == "label" and not predict_yaw:
+                            d[key] = d[key][:, :2]
+                        list_of_dvalues.append(d[key])
+                result[key] = default_collate(list_of_dvalues)
+            return result
+        collate_fn = partial(feat_collate_func, predict_yaw=model_args.predict_yaw)
     else:
-        raise AttributeError("task must be nuplan or waymo")
+        raise AttributeError("task must be nuplan or waymo or train_diffusion_decoder")
 
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
@@ -285,33 +305,6 @@ def main():
         compute_metrics=compute_metrics
     )
     trainer.pop_callback(DefaultFlowCallback)
-        
-    if model_args.generate_diffusion_dataset_for_key_points_decoder:
-        # First we generate the testing set for our diffusion decoder.
-        try:
-            result = trainer.evaluate()
-        except Exception as e:
-            pass
-        # try:
-        #     if model_args.autoregressive or True:
-        #         result = trainer.evaluate()
-        # except Exception as e:
-        #     # The code would throw an exception at the end of evaluation loop since we return None in evaluation step
-        #     # But this is not a big deal since we have just saved everything we need in the model's forward method.
-        #     print(e)
-        #     pass
-        
-        # Then we generate the training set for our diffusion decoder.
-        # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
-        trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
-        trainer.eval_dataset = train_dataset
-        try:
-            result = trainer.evaluate()
-        except Exception as e:
-            print(e)
-            pass
-        
-        assert False, 'The generation has been done.'
     
     # Training
     if training_args.do_train:
@@ -327,6 +320,16 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
+        demo_id = ['ffbd3b860a825ef9'] 
+                #    'ffaf0595e6b15a1d', 'ff9f884349e65234', 'ff87f53ee3b85930', 'ff3e4f2876045591']
+        def filter(sample):
+            if sample["scenario_id"] in demo_id:
+                return True
+            else:
+                return False
+        eval_dataset = eval_dataset.filter(filter)
+        for each in eval_dataset:
+            print("scenario_id", each["scenario_id"], "timestamp", each["timestamp"])
         result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
         logger.info("***** Final Eval results *****")
         logger.info(f"  {result}")

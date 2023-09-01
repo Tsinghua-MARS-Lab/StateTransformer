@@ -13,10 +13,12 @@ from transformers import EvalPrediction
 from transformer4planning.utils import mtr_utils
 from typing import List, Optional, Dict, Any, Tuple, Union
 from datasets import Dataset
+import copy
 import torch
 import torch.nn as nn
 import os
 import numpy as np
+import pandas as pd
 
 # Custom compute_metrics function
 def compute_metrics(prediction: EvalPrediction):

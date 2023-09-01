@@ -238,6 +238,7 @@ class NuPlanDL:
             return None, False
 
         scenario_id = scenario.token
+        # filter scenarios by token id           
         if scenarios_to_keep is not None and scenario_id not in scenarios_to_keep:
             return None, False
 
@@ -265,6 +266,7 @@ class NuPlanDL:
         data_to_return['timestamp'] = lidar_token_timestamp
         data_to_return['file_name'] = log_db.log_name
         data_to_return['map'] = log_db.map_name
+        data_to_return['scenario_id'] = scenario_id
         return data_to_return, new_files_loaded
 
     def get_next_file(self, specify_file_index=None, map_name=None, agent_only=False, sample_interval=2):

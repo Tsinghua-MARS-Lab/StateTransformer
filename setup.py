@@ -26,7 +26,7 @@ setup(
     ext_modules=[
         make_cuda_ext(
             name='knn_cuda',
-            module='transformer4planning.libs.ops.knn',
+            module='transformer4planning.libs.mtr.ops.knn',
             sources=[
                 'src/knn.cpp',
                 'src/knn_gpu.cu',
@@ -35,7 +35,7 @@ setup(
         ),
         make_cuda_ext(
             name='attention_cuda',
-            module='transformer4planning.libs.ops.attention',
+            module='transformer4planning.libs.mtr.ops.attention',
             sources=[
                 'src/attention_api.cpp',
                 'src/attention_func_v2.cpp',
