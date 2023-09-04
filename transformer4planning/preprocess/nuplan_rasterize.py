@@ -399,6 +399,10 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     except:
         # to be compatible with older version dataset without scenario_type
         pass
+    try:
+        result_to_return["scenario_id"] = sample["scenario_id"]
+    except:
+        pass
     result_to_return["route_ids"] = sample['route_ids']
 
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)

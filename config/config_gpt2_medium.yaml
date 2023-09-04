@@ -43,9 +43,21 @@ MODEL:
         NUM_LAYER_IN_MLP_MAP: 5
         NUM_LAYER_IN_PRE_MLP_MAP: 3
 
-        D_MODEL: 256
+        D_MODEL: 768
         NUM_ATTN_LAYERS: 6
         NUM_ATTN_HEAD: 8 
         DROPOUT_OF_ATTN: 0.1 
 
         USE_LOCAL_ATTN: True
+
+    LLM_TRANSFORMER:
+        n_layer: 12
+        n_embd: 768
+        n_inner: 3072
+        n_head: 12
+        activation_function: silu
+
+    MOTION_DECODER:
+        
+        INTENTION_POINTS_FILE: data/waymo/cluster_64_center_dict.pkl
+        OBJECT_TYPE: *object_type

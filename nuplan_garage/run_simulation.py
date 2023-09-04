@@ -115,6 +115,7 @@ def main(cfg: DictConfig) -> None:
 
 if __name__ == '__main__':
     import os
+    os.environ['HYDRA_FULL_ERROR'] = '1'
     os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan'
     os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.0'
     os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/trainval'

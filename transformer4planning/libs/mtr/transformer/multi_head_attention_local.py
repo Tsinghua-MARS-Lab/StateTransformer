@@ -18,7 +18,7 @@ from torch.nn.parameter import Parameter
 from torch.nn import functional as F
 import torch.nn as nn
 
-from transformer4planning.libs.ops import attention
+from transformer4planning.libs.mtr.ops import attention
 
 
 class MultiheadAttentionLocal(nn.Module):

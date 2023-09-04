@@ -1,0 +1,116 @@
+DATA_CONFIG:
+    DATASET: WaymoDatasetV1Aug
+    
+    dataset_info:
+      data_root: '/data/waymo_open_dataset/mtr_processed_data/v1'
+      split_dir: {
+          'train': 'processed_scenarios_training', 
+          'val': 'processed_scenarios_validation'
+      }
+      info_file: {
+          'train': 'processed_scenarios_training_infos.pkl', 
+          'val': 'processed_scenarios_val_infos.pkl'
+      }
+      cache_dir: {
+          'train': 'v1_aug_train_cache',
+          'val': 'v1_aug_val_cache'
+      }
+
+      object_type: ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
+
+      sample_interval: {
+          'train': 1, 
+          'val': 1
+      }
+
+    time_info:
+      time_set_num: 8
+      time_set_interval: 10
+
+      time_sample_num: 5
+      time_sample_interval: 2
+
+      total_time_step: 80
+
+    map_feature:
+      polyline_point_num: 20
+      polyline_subsample_interval: 4
+
+      max_polyline_num: {
+        lane: 512,
+        road_line: 128,
+        road_edge: 128,
+        map_others: 64
+      }
+      feature_dim: {
+        lane: 19,
+        road_line: 14,
+        road_edge: 8,
+        map_others: 9
+      }
+
+    max_agent_num: 64
+
+MODEL:
+    model_name: PureSeqModelV1Aug
+
+    model_parameter:
+      # map encoder
+      in_polyline_dim: 64
+      in_polyline_layer: 3
+      in_polyline_pre_layer: 1
+      between_polyline_dim: 256
+      between_polyline_layer: 3
+      between_polyline_pre_layer: 1
+
+      # seq model
+      seq_embedding_dim: 256
+      seq_inter_dim: 512
+      seq_head: 16
+      seq_layer: 6
+
+      loss_weight: {
+        x: 1.0,
+        y: 1.0,
+        heading: 10.0,
+        vel_x: 1.0,
+        vel_y: 1.0
+      }
+
+      normalization_para: {
+        xy: 50.0,
+        heading: 1.0,
+        vel: 10.0
+      }
+
+      loss_type: 'L2'
+
+    data_dim:
+      # Dim should match dataset, so following parameters are not free parameter. They are used only for convenience.
+      lane: 19
+      road_line: 14
+      road_edge: 8
+      map_others: 9
+
+      ego: 40
+      agent: 75
+
+      ego_target: 25
+      agent_target: 25
+
+      points_in_polyline: 20
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 10
+    NUM_EPOCHS: 30
+
+    OPTIMIZER: AdamW
+    LR: 0.0003
+    WEIGHT_DECAY: 0.01
+
+    SCHEDULER: lambdaLR
+    DECAY_STEP_LIST: [3, 6, 9, 12, 15, 18]
+    LR_DECAY: 0.7
+    LR_CLIP: 0.000001
+
+    GRAD_NORM_CLIP: 1000.0
