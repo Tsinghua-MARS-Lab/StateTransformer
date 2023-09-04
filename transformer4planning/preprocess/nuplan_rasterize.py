@@ -97,8 +97,14 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     frame_id = sample["frame_id"]
     road_ids = sample["road_ids"].tolist()
     agent_ids = sample["agent_ids"]  # list of strings
-    traffic_light_ids = sample["traffic_ids"].tolist()
-    traffic_light_states = sample["traffic_status"].tolist()
+    try:
+        traffic_light_ids = sample["traffic_ids"].tolist()
+    except:
+        traffic_light_ids = sample["traffic_ids"]
+    try:
+        traffic_light_states = sample["traffic_status"].tolist()
+    except:
+        traffic_light_states = sample["traffic_status"]
     route_ids = sample["route_ids"].tolist()
 
     if map == 'sg-one-north':
