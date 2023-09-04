@@ -36,7 +36,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import (PlanningTrainer, CustomCallback)
 from torch.utils.data import DataLoader
 from transformers.trainer_callback import DefaultFlowCallback
-# from transformer4planning.trainer import compute_metrics
+from transformer4planning.trainer import compute_metrics
 
 from datasets import Dataset, Value
 
@@ -312,8 +312,8 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
-        # data_collator=collate_fn,
-        # compute_metrics=compute_metrics
+        data_collator=collate_fn,
+        compute_metrics=compute_metrics
     )
     trainer.pop_callback(DefaultFlowCallback)
     
