@@ -662,12 +662,12 @@ class PlanningTrainer(Trainer):
 
         ret_dict = {}
 
-        with open(eval_output_dir + "result_" + model_name + '_' + cur_time + '.pkl', 'wb') as f:
-            pickle.dump(pred_dicts, f)
-
         result_str, result_dict = dataset.evaluation(
             pred_dicts,
         )
+        
+        with open(eval_output_dir + "result_" + model_name + '_' + cur_time + '.pkl', 'wb') as f:
+            pickle.dump(pred_dicts, f)
 
         logger.info(result_str)
         ret_dict.update(result_dict)

@@ -750,7 +750,7 @@ class WaymoDataset(DatasetTemplate):
             except:
                 num_modes_for_eval = 6
             metric_results, result_format_str = waymo_evaluation(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval, eval_second=8)
-            # metric_results, result_format_str = waymo_evaluation_seperate(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval, eval_second=8)
+            # waymo_evaluation_seperate(pred_dicts=pred_dicts, num_modes_for_eval=num_modes_for_eval, eval_second=8)
 
             metric_result_str = '\n'
             for key in metric_results:

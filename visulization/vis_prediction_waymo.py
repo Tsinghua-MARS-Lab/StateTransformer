@@ -52,7 +52,7 @@ class Scenario:
         all_polylines = np.column_stack((np.concatenate(all_polylines_x), np.concatenate(all_polylines_y)))
         return all_polylines
 
-    def visualize_result(self, predictions, current_time_idx=10, visualize_past=True, output_file=None):    
+    def visualize_result(self, predictions, eval_res=None, current_time_idx=10, visualize_past=True, output_file=None):    
         f, ax = plt.subplots(1, 1, figsize=(50, 50))
         all_polylines = self.visualize_map(ax)
         ax.set_xlim([all_polylines[:, 0].min(), all_polylines[:, 0].max()])
@@ -121,6 +121,21 @@ class Scenario:
                         zorder=5,
                     )
 
+        if eval_res is not None:
+            x_shift = all_polylines[:, 0].min()
+            y_shift = all_polylines[:, 1].min()
+            
+            ax.text(x_shift+20, y_shift+25, 'minADE     minFDE     MissRate     OverlapRate    mAP', color=(1,0,0), fontsize=16)
+            ax.text(x_shift+1,  y_shift+20, 'VEHICLE', color=(1,0,0), fontsize=16)
+            ax.text(x_shift+1,  y_shift+15, 'PEDESTRIAN', color=(1,0,0), fontsize=16)
+            ax.text(x_shift+1,  y_shift+10, 'CYCLIST', color=(1,0,0), fontsize=16)
+            
+            c_i=0
+            for m in ['minADE', 'minFDE', 'MissRate', 'OverlapRate', 'mAP']:
+                ax.text(x_shift+20+c_i, y_shift+20, '%.3f  '% (eval_res[m + ' - VEHICLE']), color=(1,0,0), fontsize=16)
+                ax.text(x_shift+20+c_i, y_shift+15, '%.3f  '% (eval_res[m + ' - PEDESTRIAN']), color=(1,0,0), fontsize=16)
+                ax.text(x_shift+20+c_i, y_shift+10, '%.3f  '% (eval_res[m + ' - CYCLIST']), color=(1,0,0), fontsize=16)
+                c_i += 12
             
         f.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
 
@@ -149,8 +164,13 @@ def parse_config():
 
 def main():
     args = parse_config()
+    args.pkl_file = "/data_3/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results/checkpoint-330000/eval_output/result_vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits___checkpoint-330000_20230904-225356.pkl"
+    args.out_folder = "/data_3/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results/checkpoint-330000/figs_2"
+
     with open(args.pkl_file, 'rb') as f:
         data = pickle.load(f)
+        
+    eval_data = data.pop(-1)
 
     scenario_folder = args.scenario_folder
     test_files = os.path.join(args.scenario_folder, f'{args.dataset}/*')
@@ -170,12 +190,15 @@ def main():
 
             # filter the data to get the data with the same scenario_id
             predictions = [data[i] for i in range(len(data)) if data[i]['scenario_id'] == scenario_id]
+            
+            if len(predictions) == 0:
+                continue
 
             # visualize the result
             output_file = os.path.join(args.out_folder, f'{file_idx}_{scenario_idx}_{scenario_id}')
             os.makedirs(args.out_folder, exist_ok=True)
             
-            scenario.visualize_result(predictions, output_file=output_file)
+            scenario.visualize_result(predictions, eval_res=eval_data[scenario_id], output_file=output_file)
             
             scenario_idx += 1
         # print(f'saved to {output_file}...')

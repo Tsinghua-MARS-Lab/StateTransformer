@@ -3,7 +3,7 @@
 # Written by Shaoshuai Shi 
 # All Rights Reserved
 
-
+import pickle
 import numpy as np
 import tensorflow as tf
 import os
@@ -267,8 +267,9 @@ def waymo_evaluation_seperate(pred_dicts, top_k=-1, eval_second=8, num_modes_for
     metric_names = config_util.get_breakdown_names_from_motion_config(eval_config)
     
     scenario_num = pred_score.shape[0]
+    scenario_res = {}
     
-    step = 1000
+    step = 1
     for s_i in range(0, scenario_num, step):
         metric_results = py_metrics_ops.motion_metrics(
             config=eval_config.SerializeToString(),
@@ -333,9 +334,18 @@ def waymo_evaluation_seperate(pred_dicts, top_k=-1, eval_second=8, num_modes_for
         result_dict.update(object_type_cnt_dict)
         result_dict['-----Note that this evaluation may have marginal differences with the official Waymo evaluation server-----'] = 0
         
-        print("%d - %d -------------------------------------------------------------- block res, \n" % (s_i, s_i + step))
-        print('count ', object_count)
-        print(result_format_str)
+        # print("%d - %d -------------------------------------------------------------- block res, \n" % (s_i, s_i + step))
+        # print('count ', object_count)
+        # print(result_format_str)
+        
+        scenario_id = gt_infos['scenario_id'][s_i]
+        scenario_res[scenario_id] = {}
+        
+        for m in ['minADE', 'minFDE', 'MissRate', 'OverlapRate', 'mAP']:
+            for n in ['VEHICLE', 'PEDESTRIAN', 'CYCLIST']:
+                scenario_res[scenario_id][m + ' - ' + n] = result_dict[m + ' - ' + n]
+    
+    pred_dicts.append(scenario_res)
 
     return result_dict, result_format_str
 
