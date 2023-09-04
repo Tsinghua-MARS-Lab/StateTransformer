@@ -36,7 +36,6 @@ class CNNDownSamplingResNet(nn.Module):
         x = self.cnn(x)
         output = self.classifier(x.squeeze(-1).squeeze(-1))
         return output
-    
 
 
 class NuplanRasterizeEncoder(TrajectoryEncoder):
@@ -56,12 +55,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         self.ar_future_interval = model_args.ar_future_interval
         self.model_args = model_args
-
-        if self.model_args.route_in_separate_token:
-            self.route_cnn = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None),
-                                                   in_channels=1,
-                                                   resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
-                                                   pretrain=cnn_kwargs.get("pretrain", False))
         
     def forward(self, **kwargs):
         """
@@ -119,14 +112,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
-
-        if self.model_args.route_in_separate_token:
-            route_embed_high_res = self.route_cnn(high_res_seq[:, 0, 0, :, :].to(torch.float32).reshape(batch_size, 1, h, w))
-            route_embed_low_res = self.route_cnn(low_res_seq[:, 0, 0, :, :].to(torch.float32).reshape(batch_size, 1, h, w))
-            route_embed_high_res = route_embed_high_res.reshape(batch_size, 1, -1)
-            route_embed_low_res = route_embed_low_res.reshape(batch_size, 1, -1)
-            route_state_embeds = torch.cat((route_embed_high_res, route_embed_low_res), dim=-1).to(torch.float32)
-            input_embeds = torch.cat([route_state_embeds, input_embeds], dim=1)
 
         # add keypoints encoded embedding
         if self.ar_future_interval == 0:

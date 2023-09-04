@@ -18,13 +18,11 @@ scenario_types: # List of scenario types to include
   - following_lane_with_lead
 
 scenario_tokens:
-  - ffbd3b860a825ef9
-  - ffaf0595e6b15a1d
-  - ff9f884349e65234
-  - ff87f53ee3b85930
-  - ff3e4f2876045591
-
- 
+  - 'ffbd3b860a825ef9'
+  - 'ffaf0595e6b15a1d'
+  - 'ff9f884349e65234'
+  - 'ff87f53ee3b85930'
+  - 'ff3e4f2876045591'
 
 log_names: ${splitter.log_splits.val}
 map_names: null

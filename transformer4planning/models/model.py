@@ -129,7 +129,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     ):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        input_embeds, info_dict = self.encoder(**kwargs)
+        input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
 
         attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
         
@@ -192,7 +192,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         """
         Used for generate with key points
         """
-        input_embeds, info_dict = self.encoder(**kwargs)
+        input_embeds, info_dict = self.encoder(is_training=False, **kwargs)
 
         selected_indices = info_dict["selected_indices"]
         pred_length = info_dict["pred_length"]
@@ -206,7 +206,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         additional_token_num = 0
         additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-        additional_token_num += 1 if self.model_args.route_in_separate_token else 0
         kp_start_index = additional_token_num + context_length * 2 if context_length is not None else additional_token_num + input_length
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.decoder_type == "mlp" and self.ar_future_interval > 0:
