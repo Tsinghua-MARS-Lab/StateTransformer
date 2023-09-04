@@ -36,7 +36,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformer4planning.trainer import (PlanningTrainer, CustomCallback)
 from torch.utils.data import DataLoader
 from transformers.trainer_callback import DefaultFlowCallback
-from transformer4planning.trainer import compute_metrics
+# from transformer4planning.trainer import compute_metrics
 
 from datasets import Dataset, Value
 
@@ -280,9 +280,8 @@ def main():
         from torch.utils.data._utils.collate import default_collate
         def feat_collate_func(batch, predict_yaw):
             excepted_keys = ['label', 'hidden_state']
-            keys = batch[0].keys()
             result = dict()
-            for key in keys:
+            for key in excepted_keys:
                 list_of_dvalues = []
                 for d in batch:
                     if key in excepted_keys:
@@ -301,8 +300,8 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
-        data_collator=collate_fn,
-        compute_metrics=compute_metrics
+        # data_collator=collate_fn,
+        # compute_metrics=compute_metrics
     )
     trainer.pop_callback(DefaultFlowCallback)
     
@@ -320,16 +319,17 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
-        demo_id = ['ffbd3b860a825ef9'] 
-                #    'ffaf0595e6b15a1d', 'ff9f884349e65234', 'ff87f53ee3b85930', 'ff3e4f2876045591']
-        def filter(sample):
-            if sample["scenario_id"] in demo_id:
-                return True
-            else:
-                return False
-        eval_dataset = eval_dataset.filter(filter)
-        for each in eval_dataset:
-            print("scenario_id", each["scenario_id"], "timestamp", each["timestamp"])
+        # demo_id = ['ffbd3b860a825ef9'] 
+        # demo_id = ['ff3e4f2876045591']
+        #         #    'ffaf0595e6b15a1d', 'ff9f884349e65234', 'ff87f53ee3b85930', 'ff3e4f2876045591']
+        # def filter(sample):
+        #     if sample["scenario_id"] in demo_id:
+        #         return True
+        #     else:
+        #         return False
+        # eval_dataset = eval_dataset.filter(filter)
+        # for each in eval_dataset:
+        #     print("scenario_id", each["scenario_id"], "timestamp", each["timestamp"], "frame_id", each["frame_id"])
         result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
         logger.info("***** Final Eval results *****")
         logger.info(f"  {result}")
