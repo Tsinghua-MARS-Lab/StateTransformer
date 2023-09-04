@@ -62,6 +62,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         self.pred_traj = True
         
+        self.load_cls_res = False
+        if self.load_cls_res:
+            anchor_cls_path = "/data/madanjiao/model_res/z_gptS_k1_KP0_anchored_ep100_AllType_anchorLossOnly/training_results/checkpoint-150000/eval_output/result_anchor_cls.pkl"
+            anchor_logits_path = "/data/madanjiao/model_res/z_gptS_k1_KP0_anchored_ep100_AllType_anchorLossOnly/training_results/checkpoint-150000/eval_output/result_anchor_logits.pkl"
+            
+            self.anchor_cls_data = pickle.load(open(anchor_cls_path, 'rb'))
+            self.anchor_logits_data = pickle.load(open(anchor_logits_path, 'rb'))
+        
         if self.pred_traj:
             self.traj_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=out_features)
             
@@ -424,7 +432,33 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embeds = torch.cat([input_embeds,
                                     torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
         
-        if self.use_anchor and self.ar_future_interval == 0:
+        if self.load_cls_res:
+            scenario_id = input_dict['scenario_id']
+            obj_ids = input_dict['center_objects_id']
+        
+            out_num_mode = 6
+            kpts_scores = torch.zeros((batch_size, out_num_mode, 1), device=device) # (bs, out_num_mode, 1)
+            kpts_idx = torch.zeros((batch_size, out_num_mode, 1), device=device) # (bs, out_num_mode, 1)
+            pred_key_points_during_generate = torch.zeros((batch_size, out_num_mode, 1, 2), device=device)  # (bs, out_num_mode, 1, 2)
+            
+            for b_i in range(batch_size):
+                key_points_num = 0
+                scenario_i = scenario_id[b_i]
+                obj_id_i = obj_ids[b_i]
+                
+                cur_score = torch.from_numpy(self.anchor_cls_data[scenario_i][obj_id_i]).to(device) # (out_num_mode, )
+                cur_logits = torch.from_numpy(self.anchor_logits_data[scenario_i][obj_id_i]).to(device) # (out_num_mode, 2)
+                
+                kpts_scores[b_i, :, 0] = cur_score
+                pred_key_points_during_generate[b_i, :, 0, :] = cur_logits
+                
+                logits_dist = torch.norm((cur_logits.unsqueeze(1) - center_obj_anchor_pts[[b_i], :, :]), dim=-1) # (out_num_mode, 64)
+                kpts_idx[b_i, :, 0] = logits_dist.argmin(-1)
+            
+            pred_kps_logit_topk = torch.cat((pred_key_points_during_generate, torch.zeros((batch_size, out_num_mode, 1, 2), device=device)), dim=-1) # (bs, out_num_mode, 1, 4)
+            input_embeds_kpts = self.action_m_embed(pred_kps_logit_topk)  # (b, out_num_mode, 1, n_embed)
+        
+        elif self.use_anchor and self.ar_future_interval == 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
                                                                                                center_obj_anchor_pts=center_obj_anchor_pts, debug_GT_cls=anchor_GT_cls)
             key_points_num = 0

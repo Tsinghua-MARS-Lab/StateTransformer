@@ -652,6 +652,9 @@ class PlanningTrainer(Trainer):
 
         if self.is_world_process_zero:
             progress_bar.close()
+        
+        if len(pred_dicts) == 0:
+            return
 
         logger.info('*************** Performance of EPOCH *****************' )
         sec_per_example = (time.time() - start_time) / len(dataloader.dataset)
