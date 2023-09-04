@@ -129,9 +129,6 @@ class ModelArguments:
         default=False
     )
     # begin of diffusion decoder args
-    generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
-    )
     mc_num: Optional[int] = field(
         default = 200, metadata = {"help": "The number of sampled KP trajs the diffusionKPdecoder is going to generate. After generating this many KP trajs, they go through the EM algorithm and give a group of final KP trajs of number k. This arg only works when we use diffusionKPdecoder and set k > 1."}
     )

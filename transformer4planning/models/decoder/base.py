@@ -22,6 +22,13 @@ class TrajectoryDecoder(nn.Module):
                           label, 
                           info_dict,
                           device=None):
+        """
+        pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
+        params:
+            hidden_output: whole hidden state output from transformer backbone
+            label: ground truth trajectory in future 8-s
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
+        """
         pred_length = info_dict.get("pred_length", label.shape[1])
         traj_hidden_state = hidden_output[:, -pred_length -1:-1, :]
         if device is None:
@@ -65,7 +72,10 @@ class KeyPointMLPDeocder(nn.Module):
                         device=None
                         ):
         """
-        
+        pred the next key point conditioned on all the previous points are ground truth, and then compute the correspond loss
+        param:
+            hidden_output: the whole hidden_state output from transformer backbone
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
         """
         if device is None:
             device = hidden_output.device

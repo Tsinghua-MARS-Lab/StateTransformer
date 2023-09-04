@@ -143,9 +143,11 @@ class DiffusionWrapper(nn.Module):
                  predict_epsilon=True,
                  max_action=100,
                  num_key_points=None, 
+                 model_args=None
                  ):
         super(DiffusionWrapper, self).__init__()
         self.model = model
+        self.model_args = model_args
         self.n_timesteps = int(n_timesteps)
         self.action_dim = model.out_features
         self.num_key_points = num_key_points
@@ -187,7 +189,7 @@ class DiffusionWrapper(nn.Module):
         print("When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.")
 
         self.loss_fn = nn.MSELoss(reduction='mean')
-
+    
     def forward(self, hidden_state, label=None, **kwargs):
         if self.training:
             return self.train_forward(hidden_state, label)
@@ -334,7 +336,8 @@ class T4PTrainDiffWrapper(DiffusionWrapper):
                  clip_denoised=True,
                  predict_epsilon=True,
                  max_action=100,
-                 num_key_points=None, 
+                 num_key_points=None,
+                 model_args=None 
                  ):
         super(T4PTrainDiffWrapper, self).__init__(model=model,
                                                 beta_schedule=beta_schedule, 
@@ -344,10 +347,11 @@ class T4PTrainDiffWrapper(DiffusionWrapper):
                                                 clip_denoised=clip_denoised,
                                                 predict_epsilon=predict_epsilon,
                                                 max_action=max_action,
-                                                num_key_points=num_key_points)
+                                                num_key_points=num_key_points,
+                                                model_args=model_args)
     
     def forward(self, hidden_state, label=None, **kwargs):
-        value = super().forward(hidden_state, label=None, **kwargs)
+        value = super().forward(hidden_state, label=label, **kwargs)
         if self.training:
             return dict(loss=value)
         else:
@@ -355,16 +359,20 @@ class T4PTrainDiffWrapper(DiffusionWrapper):
 
 class KeyPointDiffusionDecoder(nn.Module):
     def __init__(self, model_args, config):
-        super().__init__(model_args, config)
+        super().__init__()
         self.model_args = model_args
+        self.out_features = 4 if model_args.predict_yaw else 2
+        self.k = model_args.k
+        self.ar_future_interval = model_args.ar_future_interval
         diffusion_model = KeypointDiffusionModel(config.n_inner, 
                                                 config.n_embd, 
-                                                out_features=self.out_features * self.k,
+                                                out_features=self.out_features * self.model_args.k,
                                                 key_point_num=self.model_args.key_points_num,
                                                 input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
                                                 specified_key_points=self.model_args.specified_key_points,
                                                 forward_specified_key_points=self.model_args.forward_specified_key_points
                                                 )
+
         self.model = DiffusionWrapper(diffusion_model, 
                                     num_key_points=self.model_args.key_points_num)
         if 'mse' in self.model_args.loss_fn:

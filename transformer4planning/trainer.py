@@ -19,6 +19,9 @@ import torch.nn as nn
 import os
 import numpy as np
 import pandas as pd
+import copy
+
+FDE_THRESHHOLD = 8 # keep same with nuplan simulation
 
 # Custom compute_metrics function
 def compute_metrics(prediction: EvalPrediction):
@@ -59,10 +62,19 @@ def compute_metrics(prediction: EvalPrediction):
     fde_x_error_gen = prediction_trajectory_by_generation[:, -1, 0] - labels[:, -1, 0]
     fde_y_error_gen = prediction_trajectory_by_generation[:, -1, 1] - labels[:, -1, 1]
 
-    ade_gen = np.sqrt(ade_x_error_gen ** 2 + ade_y_error_gen ** 2).mean()
+    ade_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2).mean()
     eval_result['ade_gen'] = ade_gen
-    fde_gen = np.sqrt(fde_x_error_gen ** 2 + fde_y_error_gen ** 2).mean()
-    eval_result['fde_gen'] = fde_gen
+    fde3_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)[:, 29]
+    fde5_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)[:, 49]
+    fde8_gen = np.sqrt(fde_x_error_gen ** 2 + fde_y_error_gen ** 2)
+    avg_fde = (fde3_gen + fde5_gen + fde8_gen)/3
+    score = np.ones_like(avg_fde) - avg_fde/FDE_THRESHHOLD
+    score = np.where(score < 0, np.zeros_like(score), score)
+    eval_result['fde_horison3_gen'] = fde3_gen.mean()
+    eval_result['fde_horison5_gen'] = fde5_gen.mean()
+    eval_result['fde_horison8_gen'] = fde8_gen.mean()
+    eval_result['metric_fde'] = avg_fde.mean()
+    eval_result['score'] = score.mean()
     ade_key_points_gen = np.sqrt(ade_x_error_key_points_gen ** 2 + ade_y_error_key_points_gen ** 2).mean()
     eval_result['ade_keypoints_gen'] = ade_key_points_gen
     fde_key_points_gen = np.sqrt(fde_x_error_key_points_gen ** 2 + fde_y_error_key_points_gen ** 2).mean()
@@ -254,7 +266,7 @@ class PlanningTrainer(Trainer):
         logits = nested_detach(logits)
         if len(logits) == 1:
             logits = logits[0]
-
+        logits = torch.as_tensor(logits)
         if logits.shape[0] != self.args.per_device_eval_batch_size:
             # must top to the eval batch size, or will cause error and stuck the whole pipeline
             incorrect_batch_size = logits.shape[0]
