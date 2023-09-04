@@ -67,7 +67,7 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['fde_keypoints_gen'] = fde_key_points_gen
 
     if prediction_key_points_by_generation.shape[-1] == 4:
-        heading_error_gen = prediction_key_points_by_generation[:, :, -1] - label_key_points[:, :, -1]
+        heading_error_gen = abs(prediction_key_points_by_generation[:, :, -1] - label_key_points[:, :, -1])
         eval_result['heading_error_by_gen'] = heading_error_gen.mean()
 
     # compute error for forward results
@@ -90,7 +90,7 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['fde_keypoints'] = fde_key_points_for
 
     if prediction_key_points_by_forward.shape[-1] == 4:
-        heading_error_for = prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1]
+        heading_error_for = abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
         eval_result['heading_error'] = heading_error_for.mean()
 
     return eval_result
@@ -254,6 +254,7 @@ class PlanningTrainer(Trainer):
             logits = logits[0]
 
         if logits.shape[0] != self.args.per_device_eval_batch_size:
+            # must top to the eval batch size, or will cause error and stuck the whole pipeline
             incorrect_batch_size = logits.shape[0]
             short = self.args.per_device_eval_batch_size - incorrect_batch_size
             for i in range(short):

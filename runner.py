@@ -66,7 +66,14 @@ def load_dataset(root, split='train', dataset_scale=1, select=False):
         dataset = Dataset.load_from_disk(index_root_folders)
     # add split column
     dataset.features.update({'split': Value('string')})
-    dataset = dataset.add_column(name='split', column=[split] * len(dataset))
+    try:
+        # for some new dataset, split column is already added
+        if split == 'train_alltype':
+            dataset = dataset.add_column(name='split', column=['train'] * len(dataset))
+        else:
+            dataset = dataset.add_column(name='split', column=[split] * len(dataset))
+    except:
+        pass
     dataset.set_format(type='torch')
     if select:
         samples = int(len(dataset) * float(dataset_scale))
@@ -92,7 +99,6 @@ def main():
                 model_args.raster_channels = 1 + road_types + traffic_types + agent_types
             else:
                 model_args.raster_channels = 1 + road_types + agent_types
-
 
     # Setup logging
     logging.basicConfig(
@@ -171,11 +177,17 @@ def main():
     assert os.path.isdir(data_args.saved_dataset_folder)
     index_root = os.path.join(data_args.saved_dataset_folder, 'index')
     root_folders = os.listdir(index_root)
-        
-    if 'train' in root_folders:
-        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, True)
+
+    if data_args.use_full_training_set:
+        if 'train_alltype' in root_folders:
+            train_dataset = load_dataset(index_root, "train_alltype", data_args.dataset_scale, True)
+        else:
+            raise ValueError("No training dataset found in {}, must include at least one city in /train_alltype".format(index_root))
     else:
-        raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+        if 'train' in root_folders:
+            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, True)
+        else:
+            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
     
     if training_args.do_eval and 'test' in root_folders:
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, False)

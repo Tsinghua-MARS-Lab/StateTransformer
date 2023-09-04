@@ -118,7 +118,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     ):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        input_embeds, info_dict = self.encoder(**kwargs)
+        input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
 
         attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
         device = input_embeds.device
@@ -169,7 +169,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             future_key_points = info_dict["future_key_points"]
             additional_token_num = 0
             additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            additional_token_num += 1 if self.model_args.route_in_separate_token else 0
+
             future_key_points_hidden_state = transformer_outputs_hidden_state[:, additional_token_num + context_length * 2 - 1:additional_token_num + context_length * 2 + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
@@ -260,7 +260,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         """
         Used for generate with key points
         """
-        input_embeds, info_dict = self.encoder(**kwargs)
+        input_embeds, info_dict = self.encoder(is_training=False, **kwargs)
 
         selected_indices = info_dict["selected_indices"]
         pred_length = info_dict["pred_length"]
@@ -272,7 +272,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         additional_token_num = 0
         additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-        additional_token_num += 1 if self.model_args.route_in_separate_token else 0
 
         assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
         trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
@@ -299,9 +298,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 position_ids=position_ids,
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                            additional_token_num + context_length * 2 + i - 1,
-                                            :].reshape(batch_size, 1, -1)
+            future_key_point_hidden_state = transformer_outputs_hidden_state[:, additional_token_num + context_length * 2 + i - 1, :].reshape(batch_size, 1, -1)
 
             if self.k > 1:
                 key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
@@ -366,9 +363,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             traj_logits = self.traj_decoder(traj_hidden_state)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
-        future_key_points_hidden_state = transformer_outputs_hidden_state[:,
-                                         additional_token_num + context_length * 2 - 1:additional_token_num + context_length * 2 +
-                                                                                    future_key_points.shape[1] - 1, :]
+        future_key_points_hidden_state = transformer_outputs_hidden_state[:, additional_token_num + context_length * 2 - 1:additional_token_num + context_length * 2 + future_key_points.shape[1] - 1, :]
 
         if self.k > 1:
             b, _, c = pred_key_points_during_generate[0].shape

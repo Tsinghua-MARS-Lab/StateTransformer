@@ -64,7 +64,7 @@ class ModelArguments:
         default=True
     )
     raster_channels: Optional[int] = field(
-        default=33,
+        default=34,  # updated channels (added both block and lanes for route), change to 33 for older version
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     predict_yaw: Optional[bool] = field(
@@ -122,13 +122,6 @@ class ModelArguments:
         default=None
     )
     generate_with_offroad_correction: Optional[bool] = field(
-        default=False
-    )
-    # WIP for route args
-    use_route_lanes: Optional[bool] = field(
-        default=False
-    )
-    route_in_separate_token: Optional[bool] = field(
         default=False
     )
     # begin of diffusion decoder args
@@ -205,6 +198,9 @@ class DataTrainingArguments:
     )
     nuplan_map_path: Optional[str] = field(
         default=None, metadata={"help":"The root path of map file, to init map api used in nuplan package"}
+    )
+    use_full_training_set: Optional[bool] = field(
+        default=False, metadata={"help":"Whether to use the full training index from train_alltype"}
     )
 
 
