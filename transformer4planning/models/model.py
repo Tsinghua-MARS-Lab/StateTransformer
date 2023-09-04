@@ -468,13 +468,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             # prepare attention mask
             k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_contenxt_len + i, :].view(batch_size*num_beam, -1, n_embed)
             if attention_mask is None: 
-                k_attention_mask = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
+                k_attention_mask_input = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
             else:
-                k_attention_mask = k_attention_mask[:, :, :tot_scenario_contenxt_len + i].view(batch_size*num_beam, -1)
-            position_ids = self._prepare_position_ids_for_generation(k_attention_mask.clone())
+                k_attention_mask_input = k_attention_mask[:, :, :tot_scenario_contenxt_len + i].view(batch_size*num_beam, -1)
+            position_ids = self._prepare_position_ids_for_generation(k_attention_mask_input.clone())
             transformer_output = self.transformer(
                 inputs_embeds=k_input_embeds_current,
-                attention_mask=k_attention_mask,
+                attention_mask=k_attention_mask_input,
                 position_ids=position_ids
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
