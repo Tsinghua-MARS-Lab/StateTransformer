@@ -64,7 +64,7 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
     
     agent_trajs = data['agent_trajs']  # (num_objects, num_timestamp, 10)
     current_time_index = data["current_time_index"]
-    if interaction: track_index_to_predict = sample["interaction_index"].to(torch.long)
+    if interaction: track_index_to_predict = sample["interactive_index"].to(torch.long)
     else: track_index_to_predict = torch.tensor([sample["ego_index"]]).to(torch.long)
 
     object_id, object_type = [], []

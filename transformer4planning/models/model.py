@@ -39,6 +39,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
 
+        self.diff_series = self.model_args.diff_series
+
         self.clf_metrics = None
         # Initialize weights and apply final processing
         self.post_init()
@@ -120,7 +122,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         input_embeds, info_dict = self.encoder(**kwargs)
 
-        attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
+        attention_mask = info_dict["instance_valid_mask"] if self.model_args.task == "waymo" else None
+        # attention_mask = None
+        # print(attention_mask.shape, input_embeds.shape)
+        # exit()
         device = input_embeds.device
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
@@ -134,6 +139,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         pred_length = info_dict["pred_length"]
         trajectory_label = info_dict["trajectory_label"]
         context_length = info_dict["context_length"]
+        
+        if not self.diff_series: context_length = context_length * 2
+
         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
         # expected shape for pred trajectory is (b, pred_length, 4)
         loss = torch.tensor(0, dtype=torch.float32, device=device)
@@ -170,7 +178,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             additional_token_num = 0
             additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
             additional_token_num += 1 if self.model_args.route_in_separate_token else 0
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, additional_token_num + context_length * 2 - 1:additional_token_num + context_length * 2 + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, additional_token_num + context_length - 1:additional_token_num + context_length + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -266,6 +274,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         pred_length = info_dict["pred_length"]
         trajectory_label = info_dict["trajectory_label"]
         context_length = info_dict["context_length"]
+        
+        if not self.diff_series: context_length = context_length * 2
 
         device = input_embeds.device
         batch_size = trajectory_label.shape[0]
@@ -286,15 +296,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         if self.model_args.interaction:
             input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
-        input_embeds[:, additional_token_num + context_length * 2:additional_token_num + context_length * 2 + key_points_num, :] = future_key_embeds_dummy
+        input_embeds[:, additional_token_num + context_length:additional_token_num + context_length + key_points_num, :] = future_key_embeds_dummy
         pred_key_points_during_generate = []
 
         if self.model_args.task == "waymo":
-            length_before_keypoints = additional_token_num + context_length * 2
-            if self.model_args.generation_method == 'greedy':
-                pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, length_before_keypoints, key_points_num)
-            elif self.model_args.generation_method == 'beam':
-                pred_key_points_during_generate, input_embeds_kpts, kpts_scores, _ = self.beam_search(input_embeds, length_before_keypoints, key_points_num)
+            length_before_keypoints = additional_token_num + context_length
+            if self.model_args.generation_method == 'beam':
+                pred_key_points_during_generate, input_embeds_kpts, kpts_scores, _ = self.beam_search(input_embeds, length_before_keypoints, key_points_num, attention_mask=info_dict.get("instance_valid_mask", None))
             else:
                 raise NotImplementedError
             
@@ -306,7 +314,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 input_embeds[:, length_before_keypoints:length_before_keypoints+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
                 transformer_output = self.transformer(
                     inputs_embeds=input_embeds,
-                    attention_mask=None,
+                    attention_mask=info_dict.get("instance_valid_mask", None),
                     position_ids=None,
                 )
                 transformer_outputs_hidden_state = transformer_output['last_hidden_state']
@@ -334,7 +342,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         else:
             # Loop for generation
             for i in range(key_points_num):
-                input_embeds_current = input_embeds[:, :additional_token_num + context_length * 2 + i, :]
+                input_embeds_current = input_embeds[:, :additional_token_num + context_length + i, :]
                 attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
                 position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
                 transformer_output = self.transformer(
@@ -344,7 +352,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 )
                 transformer_outputs_hidden_state = transformer_output['last_hidden_state']
                 future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                                additional_token_num + context_length * 2 + i - 1,
+                                                additional_token_num + context_length + i - 1,
                                                 :].reshape(batch_size, 1, -1)
 
                 if self.k > 1:
@@ -382,7 +390,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                 key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                 # replace embed at the next position
-                input_embeds[:, additional_token_num + context_length * 2 + i, :] = key_point_embed[:, 0, :]
+                input_embeds[:, additional_token_num + context_length + i, :] = key_point_embed[:, 0, :]
                 if self.model_args.predict_yaw:
                     pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
                 else:
@@ -403,7 +411,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 traj_logits = trajectory_label_dummy[..., :2]
             future_key_points_hidden_state = transformer_outputs_hidden_state[:,
-                                            additional_token_num + context_length * 2 - 1:additional_token_num + context_length * 2 +
+                                            additional_token_num + context_length - 1:additional_token_num + context_length +
                                                                                         future_key_points.shape[1] - 1, :]
 
             if self.k > 1:
@@ -419,7 +427,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
             return torch.cat([key_points_logits, traj_logits], dim=1)
     
-    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, num_beam=None, out_num_mode=None, center_obj_anchor_pts=None):
+    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, attention_mask=None, num_beam=None, out_num_mode=None, center_obj_anchor_pts=None):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
         
@@ -452,17 +460,21 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         
         k_kpts_scores = torch.zeros((batch_size, num_beam, key_points_num), device=device)
         k_input_embeds = input_embeds[:, None, :, :].repeat(1, num_beam, 1, 1)
+        if attention_mask is not None: k_attention_mask = attention_mask[:, None, :].repeat(1, num_beam, 1)
         
         k_kpts_index = torch.zeros((batch_size, num_beam, key_points_num), device=device)
         
         for i in range(key_points_num):
             # prepare attention mask
             k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_contenxt_len + i, :].view(batch_size*num_beam, -1, n_embed)
-            attention_mask = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
-            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+            if attention_mask is None: 
+                k_attention_mask = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
+            else:
+                k_attention_mask = k_attention_mask[:, :, :tot_scenario_contenxt_len + i].view(batch_size*num_beam, -1)
+            position_ids = self._prepare_position_ids_for_generation(k_attention_mask.clone())
             transformer_output = self.transformer(
                 inputs_embeds=k_input_embeds_current,
-                attention_mask=attention_mask,
+                attention_mask=k_attention_mask,
                 position_ids=position_ids
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']

@@ -133,7 +133,7 @@ def get_batch_offsets(batch_idxs, bs):
     :param bs: int
     :return: batch_offsets: (bs + 1)
     '''
-    batch_offsets = torch.zeros(bs + 1).int().cuda()
+    batch_offsets = torch.zeros(bs + 1).int().to(batch_idxs.device)
     for i in range(bs):
         batch_offsets[i + 1] = batch_offsets[i] + (batch_idxs == i).sum()
     assert batch_offsets[-1] == batch_idxs.shape[0]

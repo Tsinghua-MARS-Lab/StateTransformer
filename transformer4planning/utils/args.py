@@ -160,6 +160,9 @@ class ModelArguments:
     generation_method: Optional[str] = field(
         default="beam"
     )
+    diff_series: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:

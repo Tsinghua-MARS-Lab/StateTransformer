@@ -283,7 +283,6 @@ class PlanningTrainer(Trainer):
             pred_trajs = prediction_generation['logits'][:, :, -pred_length:, :]
 
             pred_scores = prediction_generation['scores']
-            pred_kps = prediction_generation['key_points_logits']
             center_objects_world = inputs['center_objects_world'].type_as(pred_trajs)
 
             num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
@@ -295,18 +294,10 @@ class PlanningTrainer(Trainer):
             ).view(num_center_objects, num_modes, num_timestamps, num_feat)
             pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
 
-            num_center_objects, num_modes, num_kps, num_kps_feat = pred_kps.shape
-            pred_kps_world = rotate_points_along_z(
-                points=pred_kps.view(num_center_objects, num_modes * num_kps, num_kps_feat),
-                angle=center_objects_world[:, 6].view(num_center_objects)
-            ).view(num_center_objects, num_modes, num_kps, num_kps_feat)
-            pred_kps_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
-
             logits_dict = {
                 'scenario_id': str_to_tensor(inputs['scenario_id']).to(pred_trajs.device),
                 'pred_trajs': pred_trajs_world[..., 0:2],
                 'pred_scores': pred_scores,
-                'pred_kps': pred_kps_world,
                 'object_id': inputs['center_objects_id'],
                 'object_type': str_to_tensor(inputs['center_objects_type']).to(pred_trajs.device),
                 'gt_trajs': inputs['center_gt_trajs_src'],

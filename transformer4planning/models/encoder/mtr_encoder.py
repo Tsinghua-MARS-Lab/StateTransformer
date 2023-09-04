@@ -224,7 +224,10 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         if self.simple_map:
             self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
         else:
-            self.context_encoder = MTREncoderSimplified(mtr_config.CONTEXT_ENCODER)
+            if self.model_args.diff_series:
+                self.context_encoder = MTREncoderOriginal(mtr_config.CONTEXT_ENCODER)
+            else:
+                self.context_encoder = MTREncoderSimplified(mtr_config.CONTEXT_ENCODER)
         
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
  
@@ -254,41 +257,83 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         
         return hidden_state_joint
     
+    def prepare_agent_input(self, agent_trajs, track_index_to_predict, current_time_index):
+        batch_size, original_agent_num, time_horizon, attribute_dim = agent_trajs.shape
+        agent_num = 128
+        agent_trajs_result = torch.zeros((batch_size, agent_num, time_horizon, attribute_dim), device=agent_trajs.device)
+
+        for i in range(batch_size):
+            ego_num = len(track_index_to_predict[i])
+            agent_trajs_result[i, :ego_num, :, :] = agent_trajs[i, track_index_to_predict[i], :, :]
+            selected_agent_index = ego_num
+            assert ego_num == 1
+            current_dist_to_ego = torch.sum(torch.abs(agent_trajs[i, :, current_time_index, :2] - agent_trajs_result[i, :ego_num, current_time_index, :2]), dim=-1)
+            _, sorted_agent_index = torch.sort(current_dist_to_ego)
+            # static_agent_index = []
+            # for j in range(original_agent_num):
+            #     if selected_agent_index >= agent_num: break
+            #     if j in track_index_to_predict[i] or not agent_trajs[i, j, current_time_index, -1]: continue
+            #     valid_index = torch.nonzero(agent_trajs[i, j, :, -1])
+            #     first_valid_index, last_valid_index = valid_index[0], valid_index[-1]
+            #     if torch.abs(agent_trajs[i, j, first_valid_index, 0] - agent_trajs[i, j, last_valid_index, 0]) < 0.1 and torch.abs(agent_trajs[i, j, first_valid_index, 1] - agent_trajs[i, j, last_valid_index, 1]) < 0.1:
+            #         static_agent_index.append(j)
+            #     else:
+            #         agent_trajs_result[i, selected_agent_index, :, :] = agent_trajs[i, j, :, :]
+            #         selected_agent_index += 1
+
+            # if selected_agent_index < agent_num:
+            #     short = agent_num - selected_agent_index
+            #     static_agent_num = len(static_agent_index)
+            #     if short <= static_agent_num:
+            #         agent_trajs_result[i, selected_agent_index:, :, :] = agent_trajs[i, static_agent_index[:short], :, :]
+            #     else:
+            #         agent_trajs_result[i, selected_agent_index:selected_agent_index+static_agent_num, :, :] = agent_trajs[i, static_agent_index, :, :]
+
+            for idx in sorted_agent_index:
+                if selected_agent_index >= agent_num: break
+                if idx in track_index_to_predict[i] or not agent_trajs[i, idx, current_time_index, -1]: continue
+
+                agent_trajs_result[i, selected_agent_index, :, :] = agent_trajs[i, idx, :, :]
+                selected_agent_index += 1
+
+        return agent_trajs_result
+
     def prepare_map_input(self, map_polylines, map_polylines_mask, polyline_index):
+        polyline_num = 768
         if self.simple_map: return map_polylines, map_polylines_mask, None
 
         batch_size = len(polyline_index)
         polyline_index = polyline_index.detach().cpu().to(int).tolist()
-        polyline_num_batch = []
         polyline_length_batch = []
         for i in range(batch_size):
             polyline_index_sample = polyline_index[i]
-            polyline_num = 0
             polyline_length = []
-            for p in polyline_index_sample:
+            for idx_p, p in enumerate(polyline_index_sample):
                 if p < 0: break
-                elif p == 0: continue
+                elif p == 0: 
+                    assert idx_p == 0
+                    continue
                 else:
-                    polyline_length.append(p - polyline_index_sample[polyline_num])
-                    polyline_num += 1
-            polyline_num_batch.append(polyline_num)
+                    polyline_length.append(p - polyline_index_sample[idx_p - 1])
             polyline_length_batch.append(max(polyline_length))
 
-        result_polyline_num, result_polyline_length = max(polyline_num_batch), max(polyline_length_batch)
-        map_polylines_result = torch.zeros((batch_size, result_polyline_num, result_polyline_length, map_polylines.shape[-1]), device=map_polylines.device)
-        map_polylines_mask_result = torch.zeros((batch_size, result_polyline_num, result_polyline_length), device=map_polylines.device)
-        map_polylines_center = torch.zeros((batch_size, result_polyline_num, 3), device=map_polylines.device)
+        result_polyline_length = max(polyline_length_batch)
+        map_polylines_result = torch.zeros((batch_size, polyline_num, result_polyline_length, map_polylines.shape[-1]), device=map_polylines.device)
+        map_polylines_mask_result = torch.zeros((batch_size, polyline_num, result_polyline_length), device=map_polylines.device)
+        map_polylines_center = torch.zeros((batch_size, polyline_num, 3), device=map_polylines.device)
 
         for i in range(batch_size):
-            for j in range(polyline_num_batch[i]):
-                index = polyline_index[i][j]
-                if index < 0: break
-                elif index == 0: continue
+            polyline_index_sample = polyline_index[i]
+            for idx_p, p in enumerate(polyline_index_sample):
+                if p < 0 or idx_p >= polyline_num: break
+                elif p == 0: 
+                    assert idx_p == 0
+                    continue
                 else:
-                    last_index = polyline_index[i][j-1]
-                    map_polylines_result[i, j, :index-last_index, :] = map_polylines[i, last_index:index, :]
-                    map_polylines_mask_result[i, j, :index-last_index] = map_polylines_mask[i, last_index:index, 0]
-                    map_polylines_center[i, j, :2] = torch.mean(map_polylines[i, last_index:index, :])
+                    last_index = polyline_index_sample[idx_p - 1]
+                    map_polylines_result[i, idx_p, :p-last_index, :] = map_polylines[i, last_index:p, :]
+                    map_polylines_mask_result[i, idx_p, :p-last_index] = map_polylines_mask[i, last_index:p, 0]
+                    map_polylines_center[i, idx_p, :2] = torch.mean(map_polylines[i, last_index:p, :])
 
         return map_polylines_result, map_polylines_mask_result, map_polylines_center
 
@@ -298,9 +343,16 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         batch_size = agent_trajs.shape[0]
         device = agent_trajs.device
         track_index_to_predict = kwargs.get("track_index_to_predict")
-        current_time_index = kwargs.get("current_time_index")[0]
+        current_time_index = int(kwargs.get("current_time_index")[0])
 
+        
         map_polylines, map_polylines_mask, map_polylines_center = self.prepare_map_input(kwargs.get("map_polylines"), kwargs.get("map_polylines_mask"), kwargs.get("polyline_index"))
+        ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
+        ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
+
+        trajectory_label = ego_trajs[:, current_time_index + 1:, [0, 1, 2, 6]]
+        pred_length = trajectory_label.shape[1]
+        trajectory_label_mask = ego_trajs[:, current_time_index + 1:, -1].unsqueeze(-1)
 
         if self.simple_map:
             state_embeds = self.context_encoder(
@@ -309,44 +361,55 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                 map_polylines_mask=map_polylines_mask,
             )
         else:
-            input_dict = {
+            if self.model_args.diff_series:
+                agent_trajs_samples = self.prepare_agent_input(agent_trajs, track_index_to_predict, current_time_index)
+                input_dict = {
+                    "obj_trajs": agent_trajs_samples[:, :, :current_time_index + 1, :-1],
+                    "obj_trajs_mask": agent_trajs_samples[:, :, :current_time_index + 1, -1] > 0,
+                    "map_polylines": map_polylines,
+                    "map_polylines_mask": map_polylines_mask > 0,
+                    "obj_trajs_last_pos": agent_trajs_samples[:, :, current_time_index, :3],
+                    "map_polylines_center": map_polylines_center,
+                }
+
+                obj_polylines_feature, map_polylines_feature, instance_valid_mask = self.context_encoder({"input_dict": input_dict})
+                input_embeds = torch.cat((obj_polylines_feature, map_polylines_feature), dim=1)
+                _, context_length, n_embed = input_embeds.shape
+            else:
+                input_dict = {
                 "obj_trajs": agent_trajs[:, :, :current_time_index + 1, :-1],
                 "obj_trajs_mask": agent_trajs[:, :, :current_time_index + 1, -1] > 0,
                 "map_polylines": map_polylines,
                 "map_polylines_mask": map_polylines_mask > 0,
                 "obj_trajs_pos": agent_trajs[:, :, :current_time_index + 1, :3],
                 "map_polylines_center": map_polylines_center,
-            }
-            state_embeds = self.context_encoder({"input_dict": input_dict})
+                }
+                state_embeds = self.context_encoder({"input_dict": input_dict})
+                context_actions = ego_trajs[:, :current_time_index + 1, [0, 1, 2, 6]]
 
-        ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
-        ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
+                # add noise to context actions
+                context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
+                
+                action_embeds = self.action_m_embed(context_actions)
+                context_length = context_actions.shape[1]
 
-        trajectory_label = ego_trajs[:, current_time_index + 1:, [0, 1, 2, 6]]
-        pred_length = trajectory_label.shape[1]
-        trajectory_label_mask = ego_trajs[:, current_time_index + 1:, -1].unsqueeze(-1)
-        context_actions = ego_trajs[:, :current_time_index + 1, [0, 1, 2, 6]]
-
-        # add noise to context actions
-        context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
-        
-        action_embeds = self.action_m_embed(context_actions)
-        context_length = context_actions.shape[1]
-
-        n_embed = action_embeds.shape[-1]
-        input_embeds = torch.zeros(
-            (batch_size, context_length * 2, n_embed),
-            dtype=torch.float32,
-            device=device
-        )
-        input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
-        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+                n_embed = action_embeds.shape[-1]
+                input_embeds = torch.zeros(
+                    (batch_size, context_length * 2, n_embed),
+                    dtype=torch.float32,
+                    device=device
+                )
+                input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
+                input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19   
 
         future_embeds_shape = (batch_size, pred_length, n_embed)
         # add keypoints encoded embedding
         if self.ar_future_interval == 0:
             input_embeds = torch.cat([input_embeds,
                                       torch.zeros((future_embeds_shape), device=device)], dim=1)
+            if self.model_args.diff_series:
+                instance_valid_mask = torch.cat([instance_valid_mask,
+                                      torch.ones((future_embeds_shape[:-1]), device=device)], dim=1)
 
         elif self.ar_future_interval > 0:
             # use autoregressive future interval
@@ -362,6 +425,9 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros(future_embeds_shape, device=device)], dim=1)
+            if self.model_args.diff_series: 
+                instance_valid_mask = torch.cat([instance_valid_mask, torch.ones(future_key_embeds.shape[:-1], device=device),
+                                      torch.ones(future_embeds_shape[:-1], device=device)], dim=1)
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
@@ -378,6 +444,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             "future_key_points": future_key_points,
             "future_key_points_gt_mask": future_key_points_gt_mask,
             "selected_indices": selected_indices,
+            "instance_valid_mask": instance_valid_mask if self.model_args.diff_series else None
         }
 
         if self.model_args.interaction:
@@ -485,3 +552,180 @@ class MTREncoderSimplified(MTREncoder):
         state_embeds = state_embeds.max(dim=1)[0]
 
         return state_embeds
+
+from transformer4planning.libs.models.mtr import orginal_mtr
+
+class MTREncoderOriginal(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.model_cfg = config
+
+        # build polyline encoders
+        self.agent_polyline_encoder = self.build_polyline_encoder(
+            in_channels=self.model_cfg.NUM_INPUT_ATTR_AGENT + 1,
+            hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_AGENT,
+            num_layers=self.model_cfg.NUM_LAYER_IN_MLP_AGENT,
+            out_channels=self.model_cfg.D_MODEL
+        )
+        self.map_polyline_encoder = self.build_polyline_encoder(
+            in_channels=self.model_cfg.NUM_INPUT_ATTR_MAP,
+            hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_MAP,
+            num_layers=self.model_cfg.NUM_LAYER_IN_MLP_MAP,
+            num_pre_layers=self.model_cfg.NUM_LAYER_IN_PRE_MLP_MAP,
+            out_channels=self.model_cfg.D_MODEL
+        )
+
+        # build transformer encoder layers
+        self.use_local_attn = self.model_cfg.get('USE_LOCAL_ATTN', False)
+        self_attn_layers = []
+        for _ in range(self.model_cfg.NUM_ATTN_LAYERS):
+            self_attn_layers.append(self.build_transformer_encoder_layer(
+                d_model=self.model_cfg.D_MODEL,
+                nhead=self.model_cfg.NUM_ATTN_HEAD,
+                dropout=self.model_cfg.get('DROPOUT_OF_ATTN', 0.1),
+                normalize_before=False,
+                use_local_attn=self.use_local_attn
+            ))
+
+        self.self_attn_layers = nn.ModuleList(self_attn_layers)
+        self.num_out_channels = self.model_cfg.D_MODEL
+
+    def build_polyline_encoder(self, in_channels, hidden_dim, num_layers, num_pre_layers=1, out_channels=None):
+        ret_polyline_encoder = orginal_mtr.PointNetPolylineEncoder(
+            in_channels=in_channels,
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            num_pre_layers=num_pre_layers,
+            out_channels=out_channels
+        )
+        return ret_polyline_encoder
+
+    def build_transformer_encoder_layer(self, d_model, nhead, dropout=0.1, normalize_before=False, use_local_attn=False):
+        single_encoder_layer = transformer_encoder_layer.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=d_model * 4, dropout=dropout,
+            normalize_before=normalize_before, use_local_attn=use_local_attn
+        )
+        return single_encoder_layer
+
+    def apply_global_attn(self, x, x_mask, x_pos):
+        """
+
+        Args:
+            x (batch_size, N, d_model):
+            x_mask (batch_size, N):
+            x_pos (batch_size, N, 3):
+        """
+        assert torch.all(x_mask.sum(dim=-1) > 0)
+
+        batch_size, N, d_model = x.shape
+        x_t = x.permute(1, 0, 2)
+        x_mask_t = x_mask.permute(1, 0, 2)
+        x_pos_t = x_pos.permute(1, 0, 2)
+ 
+        pos_embedding = position_encoding_utils.gen_sineembed_for_position(x_pos_t, hidden_dim=d_model)
+
+        for k in range(len(self.self_attn_layers)):
+            x_t = self.self_attn_layers[k](
+                src=x_t,
+                src_key_padding_mask=~x_mask_t,
+                pos=pos_embedding
+            )
+        x_out = x_t.permute(1, 0, 2)  # (batch_size, N, d_model)
+        return x_out
+
+    def apply_local_attn(self, x, x_mask, x_pos, num_of_neighbors):
+        """
+
+        Args:
+            x (batch_size, N, d_model):
+            x_mask (batch_size, N):
+            x_pos (batch_size, N, 3):
+        """
+        assert torch.all(x_mask.sum(dim=-1) > 0)
+        batch_size, N, d_model = x.shape
+
+        x_stack_full = x.view(-1, d_model)  # (batch_size * N, d_model)
+        x_mask_stack = x_mask.view(-1)
+        x_pos_stack_full = x_pos.view(-1, 3)
+        batch_idxs_full = torch.arange(batch_size).type_as(x)[:, None].repeat(1, N).view(-1).int()  # (batch_size * N)
+
+        # filter invalid elements
+        x_stack = x_stack_full[x_mask_stack]
+        x_pos_stack = x_pos_stack_full[x_mask_stack]
+        batch_idxs = batch_idxs_full[x_mask_stack]
+
+        # knn
+        batch_offsets = mtr_utils.get_batch_offsets(batch_idxs=batch_idxs, bs=batch_size).int()  # (batch_size + 1)
+        batch_cnt = batch_offsets[1:] - batch_offsets[:-1]
+
+        index_pair = knn_utils.knn_batch_mlogk(
+            x_pos_stack, x_pos_stack,  batch_idxs, batch_offsets, num_of_neighbors
+        )  # (num_valid_elems, K)
+
+        # positional encoding
+        pos_embedding = position_encoding_utils.gen_sineembed_for_position(x_pos_stack[None, :, 0:2], hidden_dim=d_model)[0]
+
+        # local attn
+        output = x_stack
+        for k in range(len(self.self_attn_layers)):
+            output = self.self_attn_layers[k](
+                src=output,
+                pos=pos_embedding,
+                index_pair=index_pair,
+                query_batch_cnt=batch_cnt,
+                key_batch_cnt=batch_cnt,
+                index_pair_batch=batch_idxs
+            )
+
+        ret_full_feature = torch.zeros_like(x_stack_full)  # (batch_size * N, d_model)
+        ret_full_feature[x_mask_stack] = output
+
+        ret_full_feature = ret_full_feature.view(batch_size, N, d_model)
+        return ret_full_feature
+
+    def forward(self, batch_dict):
+        """
+        Args:
+            batch_dict:
+              input_dict:
+        """
+        input_dict = batch_dict['input_dict']
+        obj_trajs, obj_trajs_mask = input_dict['obj_trajs'], input_dict['obj_trajs_mask']
+        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask'] 
+
+        obj_trajs_last_pos = input_dict['obj_trajs_last_pos']
+        map_polylines_center = input_dict['map_polylines_center']
+
+        assert obj_trajs_mask.dtype == torch.bool and map_polylines_mask.dtype == torch.bool
+
+        _, num_objects, _, _ = obj_trajs.shape
+        num_polylines = map_polylines.shape[1]
+
+        # apply polyline encoder
+        obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
+        obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, C)
+        map_polylines_feature = self.map_polyline_encoder(map_polylines, map_polylines_mask)  # (num_center_objects, num_polylines, C)
+
+        # apply self-attn
+        obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
+        map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
+
+        global_token_feature = torch.cat((obj_polylines_feature, map_polylines_feature), dim=1) 
+        global_token_mask = torch.cat((obj_valid_mask, map_valid_mask), dim=1) 
+        global_token_pos = torch.cat((obj_trajs_last_pos, map_polylines_center), dim=1) 
+
+        if self.use_local_attn:
+            global_token_feature = self.apply_local_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos,
+                num_of_neighbors=self.model_cfg.NUM_OF_ATTN_NEIGHBORS
+            )
+        else:
+            global_token_feature = self.apply_global_attn(
+                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
+            )
+
+        obj_polylines_feature = global_token_feature[:, :num_objects]
+        map_polylines_feature = global_token_feature[:, num_objects:]
+        assert map_polylines_feature.shape[1] == num_polylines
+        
+        return obj_polylines_feature, map_polylines_feature, global_token_mask
