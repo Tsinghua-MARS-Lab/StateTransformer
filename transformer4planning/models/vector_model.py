@@ -460,7 +460,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         elif self.use_anchor and self.ar_future_interval == 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
-                                                                                               center_obj_anchor_pts=center_obj_anchor_pts, debug_GT_cls=anchor_GT_cls)
+                                                                                               center_obj_anchor_pts=center_obj_anchor_pts, debug_GT_cls=anchor_GT_cls, 
+                                                                                               debug_GT_logits=trajectory_label[:, [-1], :2])
             key_points_num = 0
         elif self.generate_method == 'greedy_search':
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, tot_scenario_contenxt_len, key_points_num,
@@ -843,7 +844,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         return pred_key_points_during_generate[:, 0:out_num_mode, ...], k_input_embeds_kpts[:, 0:out_num_mode, ...], k_kpts_scores[:, 0:out_num_mode, ...], k_kpts_index
     
-    def beam_search_anchor_only(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None, debug_GT_cls=None):
+    def beam_search_anchor_only(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None, debug_GT_cls=None, debug_GT_logits=None):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
         
@@ -856,6 +857,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         device = input_embeds.device
         batch_size, tot_len, n_embed = input_embeds.shape
+        
+        debug_anchor_logits = center_obj_anchor_pts[torch.arange(batch_size), debug_GT_cls, :] # (bs, 2)
 
         # prepare attention mask
         input_embeds_current = input_embeds[:, :tot_scenario_contenxt_len, :].view(batch_size, -1, n_embed)

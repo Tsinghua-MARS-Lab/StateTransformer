@@ -1,4 +1,5 @@
 import os
+import math
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,7 +25,8 @@ class Scenario:
             ('road_edge', 'black'),
             ('crosswalk', '#f1f289'),
             ('speed_bump', '#fab6e6'),
-            ('driveway', '#b3b3b3')
+            ('driveway', 'green'),
+            ('stop_sign', 'red')
         ]
 
         # draw the road graph
@@ -51,10 +53,46 @@ class Scenario:
                         ax.plot(x, y, '-', c=color, lw=4, zorder=1)
         all_polylines = np.column_stack((np.concatenate(all_polylines_x), np.concatenate(all_polylines_y)))
         return all_polylines
+    
+    def visualize_agent(self, ax):
+        scenario_tracks = self.scenario.tracks
+        tracks_to_predict_idx = [t.track_index for t in self.scenario.tracks_to_predict]
+        
+        object_colors = {
+            0: 'gray', # unset
+            1: 'blue', # vehicle
+            2: 'red', # pedestrian
+            3: 'green', # cyclist
+            4: 'black', # other
+        }
+
+        for i in range(len(scenario_tracks)):
+            if i in tracks_to_predict_idx:
+                continue
+            
+            track = scenario_tracks[i]
+            color = object_colors[track.object_type]
+            
+            # time 0
+            if track.states[10].valid and track.object_type == 1:
+                length, width, heading = track.states[10].length, track.states[10].width, track.states[10].heading / math.pi * 180.
+                center_x, center_y = track.states[10].center_x, track.states[10].center_y
+                
+                rect = plt.Rectangle((center_x, center_y), length/2., width/2., heading, color=color)
+                ax.add_patch(rect)
+                
+            
+            for s_i in range(0, 10):
+                st = track.states[s_i]
+                if st.valid:
+                    ax.plot(st.center_x, st.center_y, 'o', c=color, lw=4, zorder=1)
+            
+        
 
     def visualize_result(self, predictions, eval_res=None, current_time_idx=10, visualize_past=True, output_file=None):    
         f, ax = plt.subplots(1, 1, figsize=(50, 50))
         all_polylines = self.visualize_map(ax)
+        self.visualize_agent(ax)
         ax.set_xlim([all_polylines[:, 0].min(), all_polylines[:, 0].max()])
         ax.set_ylim([all_polylines[:, 1].min(), all_polylines[:, 1].max()])
         ax.set_aspect('equal')
