@@ -57,12 +57,7 @@ __all__ = {
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-
 def main():
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
     model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
 
@@ -156,30 +151,6 @@ def main():
         use_raster = False
     else:
         use_raster = True
-    
-    nuplan_dataset = dict()
-    
-    if training_args.do_train:
-        train_set = __all__[cfg.DATA_CONFIG.DATASET](
-            dataset_cfg=cfg.DATA_CONFIG,
-            training=True,
-            logger=logger, 
-            use_raster=use_raster
-        )
-        nuplan_dataset.update(train=train_set)
-    
-    if training_args.do_eval:
-        test_set = __all__[cfg.DATA_CONFIG.DATASET](
-            dataset_cfg=cfg.DATA_CONFIG,
-            training=False,
-            logger=logger, 
-            use_raster=use_raster
-        )
-
-        nuplan_dataset.update(validation=test_set)
-    
-    if training_args.do_predict:
-        nuplan_dataset.update(test=test_set)
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model_args.vector_model_cfg = cfg.MODEL
@@ -205,7 +176,12 @@ def main():
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
             os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / 8))
-        train_dataset = nuplan_dataset["train"]
+        train_dataset = __all__[cfg.DATA_CONFIG.DATASET](
+            dataset_cfg=cfg.DATA_CONFIG,
+            training=True,
+            logger=logger, 
+            use_raster=use_raster
+        )
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
@@ -213,7 +189,12 @@ def main():
         collate_fn = train_dataset.collate_batch
 
     if training_args.do_eval:
-        eval_dataset = nuplan_dataset["validation"]
+        eval_dataset = __all__[cfg.DATA_CONFIG.DATASET](
+            dataset_cfg=cfg.DATA_CONFIG,
+            training=False,
+            logger=logger, 
+            use_raster=use_raster
+        )
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
@@ -221,7 +202,12 @@ def main():
         collate_fn = eval_dataset.collate_batch
 
     if training_args.do_predict:
-        predict_dataset = nuplan_dataset["test"]
+        predict_dataset = __all__[cfg.DATA_CONFIG.DATASET](
+            dataset_cfg=cfg.DATA_CONFIG,
+            training=False,
+            logger=logger, 
+            use_raster=use_raster
+        )
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
             predict_dataset = predict_dataset.select(range(max_predict_samples))
@@ -240,6 +226,10 @@ def main():
 
     # Training
     if training_args.do_train:
+        if model_args.task == "waymo_save_feature":
+            trainer.save_features_for_diffusion_waymo()
+            return
+        
         checkpoint = None
         if training_args.resume_from_checkpoint is not None:
             checkpoint = training_args.resume_from_checkpoint
@@ -252,7 +242,10 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
-        if model_args.task == "waymo":
+        if model_args.task == "waymo_save_feature":
+            trainer.save_features_for_diffusion_waymo()
+            return
+        elif model_args.task == "waymo":
             trainer.evaluate_waymo()
             return
             

@@ -915,3 +915,53 @@ class PlanningTrainer(Trainer):
 
         logger.info('Result is save to %s' % eval_output_dir)
         logger.info('****************Evaluation done.*****************')        
+
+
+    def save_features_for_diffusion_waymo(
+        self,
+        dataset: Optional[Dataset] = None,
+    ) -> Dict[str, float]:
+        self.model.eval()
+
+        dataloader = self.get_eval_dataloader(dataset)
+        dataset = dataloader.dataset
+
+        model_path = self.model.model_args.model_pretrain_name_or_path
+
+        eval_output_dir = model_path + '/eval_output/feature_out/'
+        os.makedirs(eval_output_dir, exist_ok=True)
+        
+        for i, batch_dict in tqdm.tqdm(enumerate(dataloader)):
+            with torch.no_grad():
+                batch_dict = self._prepare_inputs(batch_dict)
+                input_embeds, anchor_GT_label, anchor_GT_cls, gt_anchor_mask = self.model.generate_feature(**batch_dict)
+                
+                single_dict = {
+                    'hidden_state': input_embeds,
+                    'label': anchor_GT_label,
+                    'label_cls': anchor_GT_cls,
+                    'label_mask': gt_anchor_mask
+                }
+            
+            batch_sample_count = batch_dict['batch_sample_count']
+            start_obj_idx = 0
+            for bs_idx in range(batch_dict['batch_size']):
+                scenario_id = batch_dict['input_dict']['scenario_id'][start_obj_idx]
+                end_obj_idx = start_obj_idx + batch_sample_count[bs_idx]
+                
+                single_dict = {
+                    'hidden_state': input_embeds[start_obj_idx: end_obj_idx, ...].cpu().numpy(),
+                    'label': anchor_GT_label[start_obj_idx: end_obj_idx, ...].cpu().numpy(),
+                    'label_cls': anchor_GT_cls[start_obj_idx: end_obj_idx, ...].cpu().numpy(),
+                    'label_mask': gt_anchor_mask[start_obj_idx: end_obj_idx, ...].cpu().numpy()
+                }
+                
+                start_obj_idx += batch_sample_count[bs_idx]
+                
+                with open(eval_output_dir + f'opt_res_{scenario_id}.pkl', 'wb') as f:
+                    pickle.dump(single_dict, f)
+                    
+            # break
+            
+        
+

@@ -905,3 +905,28 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         return pred_kps_logit_topk[:, :, None, :self.pred_dim], pred_kps_logit_topk_embed, k_kpts_scores, k_kpts_index
     
+    def generate_feature(self, batch_size, input_dict, batch_sample_count, **kwargs) -> torch.FloatTensor:
+        
+        batch_size = input_dict['obj_trajs'].shape[0]
+        device = input_dict['obj_trajs'].device
+        scenario_type = kwargs.get("scenario_type", None)
+        
+        # input_embeds: (bs, context_length*2 + scenario_len, n_embd)
+        input_embeds, context_length, trajectory_label, trajectory_label_mask = self._prepare_OA_inputs(input_dict, batch_sample_count, scenario_type) 
+        
+        # anchor embedding
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num
+        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len
+        
+        center_obj_types = input_dict['center_objects_type']
+        center_obj_anchor_pts = [self.intention_points[center_obj_types[i]].unsqueeze(0) for i in range(batch_size)]
+        center_obj_anchor_pts = torch.cat(center_obj_anchor_pts, dim=0) # (bs, 64, 2)
+        
+        dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_anchor_pts, dim=2)
+        anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+        anchor_GT_label = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] # (bs, 2)
+        
+        gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+        
+        return input_embeds, anchor_GT_label, anchor_GT_cls, gt_anchor_mask
+    
