@@ -8,7 +8,7 @@ from transformers import GPT2Tokenizer
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
-from transformer4planning.libs.models.mlp import DecoderResCat
+from transformer4planning.libs.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 
 
