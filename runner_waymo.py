@@ -66,6 +66,7 @@ def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
     model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
 
+    # training_args.learning_rate = 1e-5
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
         road_types = 20

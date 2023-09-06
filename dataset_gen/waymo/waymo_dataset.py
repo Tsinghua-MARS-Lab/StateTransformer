@@ -33,6 +33,9 @@ class WaymoDataset(DatasetTemplate):
         
         self.obj_dist_thres = 1000
         self.do_filter = False
+        
+        self.do_norm = False
+        self.norm_scale = 10
 
     def get_all_infos(self, info_path):
         self.logger.info(f'Start to load infos from {info_path}')
@@ -177,6 +180,23 @@ class WaymoDataset(DatasetTemplate):
             ret_dict['map_polylines'] = map_polylines_data
             ret_dict['map_polylines_mask'] = (map_polylines_mask > 0)
             ret_dict['map_polylines_center'] = map_polylines_center
+            
+        # norm
+        if self.do_norm:
+            ret_dict['obj_trajs'][..., :2] /= self.norm_scale
+            ret_dict['obj_trajs_last_pos'][..., :2] /= self.norm_scale
+            ret_dict['obj_trajs_pos'][..., :2] /= self.norm_scale
+            ret_dict['obj_trajs_future_state'][..., :2] /= self.norm_scale
+            ret_dict['center_gt_trajs'][..., :2] /= self.norm_scale
+            ret_dict['center_gt_trajs_src'][..., :2] /= self.norm_scale
+         
+            ret_dict['map_polylines'][..., :2] /= self.norm_scale
+            ret_dict['map_polylines_center'][..., :2] /= self.norm_scale
+            
+            ret_dict['trajectory_label'][..., :2] /= self.norm_scale
+            ret_dict['center_objects_past'][..., :2] /= self.norm_scale
+            ret_dict['center_objects_world'][..., :2] /= self.norm_scale
+        
 
         return ret_dict
 
@@ -523,6 +543,13 @@ class WaymoDataset(DatasetTemplate):
         pred_trajs = batch_pred_dicts['logits'][:, :, -pred_length:, :]
         pred_scores = batch_pred_dicts['scores']
         pred_kps = batch_pred_dicts['key_points_logits']
+        
+        if self.do_norm:
+            pred_trajs[..., :2] *= self.norm_scale 
+            pred_kps[..., :2] *= self.norm_scale 
+            input_dict['center_gt_trajs_src'][..., :2] *= self.norm_scale
+            input_dict['center_objects_world'][..., :2] *= self.norm_scale
+            
         center_objects_world = input_dict['center_objects_world'].type_as(pred_trajs)
 
         num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape

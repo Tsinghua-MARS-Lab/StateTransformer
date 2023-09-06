@@ -41,12 +41,18 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         with open(intention_points_file, 'rb') as f:
             intention_points_dict = pickle.load(f)
 
+        self.do_norm = False
+        self.norm_scale = 10
+        
         self.intention_points = {}
         for cur_type in vector_model_cfg.MOTION_DECODER.OBJECT_TYPE:
             cur_intention_points = intention_points_dict[cur_type]
             cur_intention_points = torch.from_numpy(cur_intention_points).float().view(-1, 2).cuda()
             self.intention_points[cur_type] = cur_intention_points
         
+            if self.do_norm:
+                self.intention_points[cur_type] /= self.norm_scale
+            
         # decoder
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
@@ -489,7 +495,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         # kpts_score: accumulated score
         all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
         # all_traj_scores = all_traj_scores / all_traj_scores.sum()
-        all_traj_scores = (all_traj_scores).softmax(-1)
+        
+        all_traj_scores = all_traj_scores.softmax(-1)
+        
+        # score_thresh = 0.8
+        # low_score_mask = (all_traj_scores[:, 0] < score_thresh) # (bs,)
+        # high_score_mask = (all_traj_scores[:, 0] >= score_thresh) # (bs,)
+        # all_traj_scores[low_score_mask] = all_traj_scores[low_score_mask].softmax(-1)
+        # all_traj_scores[high_score_mask] = all_traj_scores[high_score_mask] / (all_traj_scores[high_score_mask].sum(-1).unsqueeze(1)) 
         
         anchor_kpts_idx = kpts_idx[:, :, 0]
         
