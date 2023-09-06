@@ -29,7 +29,7 @@ class DataAugmentation(nn.Module):
 
         Returns: Augmented trajectory
         """
-        if x_noise_scale == 1 and y_noise_scale == 1:
+        if x_noise_scale == 0 and y_noise_scale == 0:
             return target_traj
         # augment with linear scale
         device = target_traj.device

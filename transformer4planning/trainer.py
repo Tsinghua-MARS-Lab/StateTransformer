@@ -257,14 +257,13 @@ class PlanningTrainer(Trainer):
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
 
-
         if self.model.ar_future_interval > 0:
             prediction_generation = self.model.generate(**inputs)
         else:
             prediction_generation = None
 
         logits = nested_detach(logits)
-        if len(logits) == 1:
+        if len(logits) >= 1:
             logits = logits[0]
         logits = torch.as_tensor(logits)
         if logits.shape[0] != self.args.per_device_eval_batch_size:
