@@ -36,7 +36,6 @@ class CNNDownSamplingResNet(nn.Module):
         x = self.cnn(x)
         output = self.classifier(x.squeeze(-1).squeeze(-1))
         return output
-    
 
 
 class NuplanRasterizeEncoder(TrajectoryEncoder):
@@ -76,7 +75,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
         _, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1] if context_actions is not None else -1 # -1 in case of pdm encoder 
+        context_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
 
         # add noise to context actions
         context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
@@ -86,7 +85,8 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         
         high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light)
         low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light)
-        
+        # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
+        # context_length: 8, 40 frames / 5
         batch_size, context_length, c, h, w = high_res_seq.shape
 
         high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
@@ -142,13 +142,3 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         }
 
         return input_embeds, info_dict
-    
-
-
-
-        
-
-        
-
-
-        

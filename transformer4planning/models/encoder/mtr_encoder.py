@@ -6,10 +6,10 @@ import torch
 import torch.nn as nn
 
 
-from transformer4planning.libs.models.mtr.transformer import (transformer_encoder_layer, position_encoding_utils)
-from transformer4planning.libs.models.mtr import polyline_encoder
+from transformer4planning.libs.mtr.transformer import (transformer_encoder_layer, position_encoding_utils)
+from transformer4planning.libs.mtr import polyline_encoder
 from transformer4planning.utils import mtr_utils
-from transformer4planning.libs.ops.knn import knn_utils
+from transformer4planning.libs.mtr.ops.knn import knn_utils
 
 
 class MTREncoder(nn.Module):

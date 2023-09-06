@@ -29,13 +29,12 @@ from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
 from nuplan.planning.simulation.planner.planner_report import PlannerReport
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
 from transformer4planning.models.model import build_models
-from transformer4planning.utils import ModelArguments
+from transformer4planning.utils.args import ModelArguments
 from omegaconf import DictConfig
 import time
 from nuplan.planning.simulation.planner.ml_planner.transform_utils import _get_absolute_agent_states_from_numpy_poses, _get_fixed_timesteps
 from nuplan_garage.planning.simulation.planner.pdm_planner.abstract_pdm_planner import AbstractPDMPlanner
 from transformers import (HfArgumentParser)
-from transformer4planning.utils import euclidean_distance, normalize_angle
 
 def generate_contour_pts(center_pt, w, l, direction):
     pt1 = rotate(center_pt, (center_pt[0] - w / 2, center_pt[1] - l / 2), direction, tuple=True)
@@ -325,6 +324,9 @@ class ControlTFPlanner(AbstractPlanner):
         #         print(time.time() - start)
         #         return idm_trajectory
 
+        # fix indices
+        pred_traj[:-1, :] = pred_traj[1:, :]
+        pred_traj[-1, :] = pred_traj[-2, :] + (pred_traj[-2, :] - pred_traj[-3, :])
 
         relative_traj = pred_traj.copy()
         yaw_change_upper_threshold = 0.1

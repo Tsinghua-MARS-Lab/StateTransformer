@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 from transformers.training_args import TrainingArguments
 
 @dataclass
@@ -64,7 +64,7 @@ class ModelArguments:
         default=True
     )
     raster_channels: Optional[int] = field(
-        default=33,
+        default=34,  # updated channels (added both block and lanes for route), change to 33 for older version
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     predict_yaw: Optional[bool] = field(
@@ -112,6 +112,10 @@ class ModelArguments:
         default='raster',
         metadata={"help": "choose from [raster, vector]"}
     )
+    decoder_type: Optional[str] = field(
+        default='mlp',
+        metadata={"help": "choose from [mlp, diffusion]"}
+    )
     past_sample_interval: Optional[int] = field(
         default=5
     )
@@ -124,29 +128,31 @@ class ModelArguments:
     generate_with_offroad_correction: Optional[bool] = field(
         default=False
     )
-    generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
-        default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
-    )
-    diffusion_dataset_save_dir: Optional[str] = field(
-        default = None, metadata = {"help": "The path of the dir to save the diffusion dataset to be generated for Diffusion KeyPoint Decoder."}
+    # begin of diffusion decoder args
+    mc_num: Optional[int] = field(
+        default = 200, metadata = {"help": "The number of sampled KP trajs the diffusionKPdecoder is going to generate. After generating this many KP trajs, they go through the EM algorithm and give a group of final KP trajs of number k. This arg only works when we use diffusionKPdecoder and set k > 1."}
     )
     key_points_diffusion_decoder_feat_dim: Optional[int] = field(
-        default = 256, metadata = {"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
+        default=256, metadata={"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
     )
     key_points_num: Optional[int] = field(
-        default = 5, metadata = {"help": "Number of key points. Only used to initialize diffusion KP decoder."}
+        default=5, metadata={"help": "Number of key points. Only used to initialize diffusion KP decoder."}
     )
     diffusion_condition_sequence_lenth: Optional[int] = field(
-        default = 16, metadata = {"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
+        default=16, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
     )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
-        default = None, metadata = {"help": "From which file to load the pretrained key_points_diffusion_decoder."}
+        default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
+    # end of diffusion decoder args
     interaction: Optional[bool] = field(
         default=False
     )
     mtr_config_path: Optional[str] = field(
         default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+    )
+    use_centerline: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
 
 @dataclass
@@ -187,8 +193,7 @@ class DataTrainingArguments:
                 "value if set."
             )
         },
-    )    
-
+    )
     dataset_scale: Optional[float] = field(
         default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
@@ -198,6 +203,10 @@ class DataTrainingArguments:
     nuplan_map_path: Optional[str] = field(
         default=None, metadata={"help":"The root path of map file, to init map api used in nuplan package"}
     )
+    use_full_training_set: Optional[bool] = field(
+        default=False, metadata={"help":"Whether to use the full training index from train_alltype"}
+    )
+
 
 @dataclass
 class ConfigArguments:
@@ -219,6 +228,9 @@ class ConfigArguments:
 
 @dataclass
 class PlanningTrainingArguments(TrainingArguments):
+    """
+    Warnings: This overrides the TrainingArguments in transformers. DOES NOT WORK FOR UNKNOWN REASONs.
+    """
     eval_interval: Optional[int] = field(
         default=1,
         metadata={
@@ -227,3 +239,9 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
+    # label_names: Optional[List[str]] = field(
+    #     default=lambda: ['trajectory_label']
+    # )
+    # prediction_loss_only: Optional[bool] = field(
+    #     default=False,
+    # )

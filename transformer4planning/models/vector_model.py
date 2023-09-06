@@ -9,7 +9,7 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 from transformer4planning.models.encoder.nuplan_raster_encoder import *
 from transformer4planning.models.utils import nll_loss_gmm_direct
-from transformer4planning.libs.models.mlp import DecoderResCat
+from transformer4planning.libs.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
     
     
