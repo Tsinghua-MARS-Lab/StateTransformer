@@ -274,7 +274,7 @@ class PlanningTrainer(Trainer):
         if self.model.ar_future_interval > 0:
             prediction_generation = self.model.generate(**inputs)
         else:
-            prediction_generation = None
+            prediction_generation = self.model.generate(**inputs)
                        
         if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
             from transformer4planning.utils.mtr_utils import rotate_points_along_z, str_to_tensor

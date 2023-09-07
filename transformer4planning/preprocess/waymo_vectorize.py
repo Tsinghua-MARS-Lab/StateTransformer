@@ -5,7 +5,7 @@ import torch
 from functools import partial
 from torch.utils.data._utils.collate import default_collate
 
-def waymo_collate_func(batch, data_path=None, interaction=False):
+def waymo_collate_func(batch, data_path=None, interaction=False, use_intention=False):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
     To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
@@ -16,7 +16,7 @@ def waymo_collate_func(batch, data_path=None, interaction=False):
     """
     data_path = os.path.join(data_path, batch[0]["split"])
     
-    map_func = partial(waymo_preprocess, interaction=interaction, data_path=data_path)
+    map_func = partial(waymo_preprocess, interaction=interaction, use_intention=use_intention, data_path=data_path)
     # with ThreadPoolExecutor(max_workers=len(batch)) as executor:
     #     batch = list(executor.map(map_func, batch))
     new_batch = list()
@@ -54,7 +54,7 @@ def waymo_collate_func(batch, data_path=None, interaction=False):
 
     return input_dict
 
-def waymo_preprocess(sample, interaction=False, data_path=None):
+def waymo_preprocess(sample, interaction=False, use_intention=False, data_path=None):
     filename = sample["file_name"]
     with open(os.path.join(data_path, filename), "rb") as f:
         info = pickle.load(f)
@@ -91,6 +91,14 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
     polyline_index.append(len(map_polyline))
     polyline_index = torch.tensor(polyline_index, dtype=torch.int32).unsqueeze(0).repeat(num_ego, 1)
 
+    if use_intention:
+        with open("/home/ldr/workspace/transformer4planning/data/waymo/cluster_64_center_dict.pkl", "rb") as f:
+            intention_points_dict = pickle.load(f)
+        intention_points = torch.tensor([intention_points_dict[agent_type] for agent_type in object_type], dtype=torch.float32)
+    else:
+        intention_points = torch.zeros((num_ego, ), dtype=torch.float32)
+        
+
     ret_dict = {
         "agent_trajs": agent_trajs_res,
         "track_index_to_predict": track_index_to_predict.view(-1, 1),
@@ -104,6 +112,8 @@ def waymo_preprocess(sample, interaction=False, data_path=None):
         "center_gt_trajs_src": agent_trajs[track_index_to_predict],
         "center_objects_id": torch.tensor(object_id, dtype=torch.int32).view(-1, 1),
         "center_objects_type": object_type,
+        # for intention points
+        "intention_points": intention_points
         }
     
     return ret_dict

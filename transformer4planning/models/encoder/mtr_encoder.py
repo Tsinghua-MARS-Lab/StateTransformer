@@ -230,6 +230,10 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                 self.context_encoder = MTREncoderSimplified(mtr_config.CONTEXT_ENCODER)
         
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        self.prev_model = True
+        if self.ar_future_interval > 0 and not self.prev_model: self.kpts_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if self.model_args.use_intention: self.intention_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
+        
  
     def from_marginal_to_joint(self, hidden_state, info_dict, update_info_dict=False):
         device = hidden_state.device
@@ -299,14 +303,15 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         return agent_trajs_result
 
     def prepare_map_input(self, map_polylines, map_polylines_mask, polyline_index):
-        polyline_num = 768
         if self.simple_map: return map_polylines, map_polylines_mask, None
 
         batch_size = len(polyline_index)
         polyline_index = polyline_index.detach().cpu().to(int).tolist()
+        polyline_num_batch = []
         polyline_length_batch = []
         for i in range(batch_size):
             polyline_index_sample = polyline_index[i]
+            polyline_num = 0
             polyline_length = []
             for idx_p, p in enumerate(polyline_index_sample):
                 if p < 0: break
@@ -315,8 +320,11 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                     continue
                 else:
                     polyline_length.append(p - polyline_index_sample[idx_p - 1])
+                    polyline_num += 1
+            polyline_num_batch.append(polyline_num)
             polyline_length_batch.append(max(polyline_length))
 
+        polyline_num = 768 if self.model_args.diff_series else max(polyline_num_batch) 
         result_polyline_length = max(polyline_length_batch)
         map_polylines_result = torch.zeros((batch_size, polyline_num, result_polyline_length, map_polylines.shape[-1]), device=map_polylines.device)
         map_polylines_mask_result = torch.zeros((batch_size, polyline_num, result_polyline_length), device=map_polylines.device)
@@ -344,7 +352,6 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         device = agent_trajs.device
         track_index_to_predict = kwargs.get("track_index_to_predict")
         current_time_index = int(kwargs.get("current_time_index")[0])
-
         
         map_polylines, map_polylines_mask, map_polylines_center = self.prepare_map_input(kwargs.get("map_polylines"), kwargs.get("map_polylines_mask"), kwargs.get("polyline_index"))
         ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
@@ -400,7 +407,15 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                     device=device
                 )
                 input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
-                input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19   
+                input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+
+        if self.model_args.use_intention:
+            intention_points = kwargs.get('intention_points')
+            dist2GT = torch.norm(trajectory_label[:, [-1], :2] - intention_points, dim=2)
+            anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+            anchor_GT_logits = intention_points[torch.arange(batch_size), anchor_GT_cls, :] # (bs, 2)
+            anchor_embedding = self.intention_m_embed(anchor_GT_logits).unsqueeze(1)
+            input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
 
         future_embeds_shape = (batch_size, pred_length, n_embed)
         # add keypoints encoded embedding
@@ -422,29 +437,33 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
 
-            future_key_embeds = self.action_m_embed(future_key_points_aug)
+            future_key_embeds = self.kpts_m_embed(future_key_points_aug) if not self.prev_model else self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros(future_embeds_shape, device=device)], dim=1)
+            
+            if selected_indices is not None:
+                future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
+            else:
+                future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+
             if self.model_args.diff_series: 
                 instance_valid_mask = torch.cat([instance_valid_mask, torch.ones(future_key_embeds.shape[:-1], device=device),
                                       torch.ones(future_embeds_shape[:-1], device=device)], dim=1)
         else:
             raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
 
-        if selected_indices is not None:
-            future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
-        else:
-            future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
         
         info_dict = {
             "trajectory_label": trajectory_label,
             "trajectory_label_mask": trajectory_label_mask,
             "pred_length": pred_length,
             "context_length": context_length,
-            "future_key_points": future_key_points,
-            "future_key_points_gt_mask": future_key_points_gt_mask,
-            "selected_indices": selected_indices,
-            "instance_valid_mask": instance_valid_mask if self.model_args.diff_series else None
+            "future_key_points": future_key_points if self.ar_future_interval > 0 else None,
+            "future_key_points_gt_mask": future_key_points_gt_mask if self.ar_future_interval > 0 else None,
+            "selected_indices": selected_indices if self.ar_future_interval > 0 else None,
+            "instance_valid_mask": instance_valid_mask if self.model_args.diff_series else None,
+            "gt_anchor_cls": anchor_GT_cls if self.model_args.use_intention else None,
+            "gt_anchor_logits": anchor_GT_logits if self.model_args.use_intention else None,
         }
 
         if self.model_args.interaction:

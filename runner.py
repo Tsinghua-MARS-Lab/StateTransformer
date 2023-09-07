@@ -271,7 +271,8 @@ def main():
         if model_args.encoder_type == "vector":
             collate_fn = partial(waymo_collate_func, 
                                  data_path=data_args.saved_dataset_folder, 
-                                 interaction=model_args.interaction)
+                                 interaction=model_args.interaction,
+                                 use_intention=model_args.use_intention)
             # set default label names
             training_args.label_names = ['center_gt_trajs_src']
             compute_metrics_fn = compute_metrics_waymo

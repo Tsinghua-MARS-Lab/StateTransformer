@@ -14,6 +14,8 @@ import torch
 from waymo_open_dataset.protos import scenario_pb2
 from waymo_process_to_pickles.datapreprocess import decode_tracks_from_proto, decode_map_features_from_proto
 
+agent_types = ["TYPE_CYCLIST"]
+
 def create_map_data(map_infos):
     map_polylines = []
     last_polyline_index = 0
@@ -104,11 +106,12 @@ def main(args):
                         }
                 else:
                     for idx in ego_index:
-                        yield {
-                            "file_name": file_name,
-                            "scenario_id": scenario.scenario_id,
-                            "ego_index": idx,
-                        }
+                        if track_infos['object_type'][idx] in agent_types:
+                            yield {
+                                "file_name": file_name,
+                                "scenario_id": scenario.scenario_id,
+                                "ego_index": idx,
+                            }
 
             if len(dicts_to_save.keys()) > 0:
                 with open(os.path.join(output_path, file_name), "wb") as f:

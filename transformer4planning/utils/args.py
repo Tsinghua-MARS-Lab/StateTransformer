@@ -163,6 +163,9 @@ class ModelArguments:
     diff_series: Optional[bool] = field(
         default=False
     )
+    use_intention: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:

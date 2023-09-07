@@ -39,6 +39,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.k > 1:
             self.next_token_scorer_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
 
+        if self.model_args.task == "waymo" and self.model_args.use_intention:
+            self.anchor_num = 64
+            self.anchor_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.anchor_num)
+            self.anchor_logits_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features= out_features * self.anchor_num)
+            self.anchor_len = 1
+            self.cls_anchor_loss = nn.CrossEntropyLoss(reduction="none")
+            self.logits_anchor_loss = nn.MSELoss(reduction="none")
+        else:
+            self.anchor_len = 0
+
         self.diff_series = self.model_args.diff_series
 
         self.clf_metrics = None
@@ -121,11 +131,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         input_embeds, info_dict = self.encoder(**kwargs)
-
         attention_mask = info_dict["instance_valid_mask"] if self.model_args.task == "waymo" else None
         # attention_mask = None
-        # print(attention_mask.shape, input_embeds.shape)
-        # exit()
+
         device = input_embeds.device
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
@@ -166,6 +174,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         else:
             traj_logits = torch.zeros_like(trajectory_label[..., :2])
 
+        additional_token_num = 0
+        additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        additional_token_num += 1 if self.model_args.route_in_separate_token else 0
         if self.ar_future_interval > 0:
             """
             for example:
@@ -175,10 +186,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             output_embed: [A, O, A, FutureKey1, FutureKey2, Traj1, Traj2.., x(Attentionally Blank)]
             """
             future_key_points = info_dict["future_key_points"]
-            additional_token_num = 0
-            additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-            additional_token_num += 1 if self.model_args.route_in_separate_token else 0
-            future_key_points_hidden_state = transformer_outputs_hidden_state[:, additional_token_num + context_length - 1:additional_token_num + context_length + future_key_points.shape[1] - 1, :]
+            future_key_points_hidden_state = transformer_outputs_hidden_state[:, additional_token_num + context_length + self.anchor_len - 1:additional_token_num + context_length + self.anchor_len + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
             if self.k == 1:
@@ -227,6 +235,27 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 else:
                     print('WARNING: Randomly select key points for evaluation, try to use next_token_scorer_decoder')
                     traj_logits = torch.cat([key_points_logits[0].reshape(b, s, -1), traj_logits], dim=1)
+
+        if self.model_args.task == "waymo" and self.model_args.use_intention:
+            pred_anchor_embed = transformer_outputs_hidden_state[:, additional_token_num + context_length - 1 : additional_token_num + context_length - 1 + self.anchor_len, :] # (bs, anchor_len, n_embed)
+            pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed) # (bs, anchor_len, 64)
+            pred_anchor_logits = self.anchor_logits_decoder(pred_anchor_embed)
+            gt_anchor_cls = info_dict["gt_anchor_cls"]
+            gt_anchor_mask = info_dict["trajectory_label_mask"][:, -1, :]
+            loss_anchor = self.cls_anchor_loss(pred_anchor_cls.reshape(-1, self.anchor_num).to(torch.float64), gt_anchor_cls.reshape(-1).long())
+            loss_anchor = (loss_anchor * gt_anchor_mask.view(-1)).sum()/ (gt_anchor_mask.sum()+1e-7)
+            loss += loss_anchor
+            
+            bs = gt_anchor_cls.shape[0]
+            pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
+            
+            # pred_anchor_cls_argmax = pred_anchor_cls.argmax(-1).view(-1)
+            # pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), pred_anchor_cls_argmax, :] # (bs, 2)
+            
+            pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)            
+            loss_anchor_logits = self.logits_anchor_loss(pred_pos_anchor_logits, info_dict["gt_anchor_logits"])
+            loss_anchor_logits = (loss_anchor_logits * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
+            loss += loss_anchor_logits
 
         # evaluate accuracy if on eval
         if not self.training and self.clf_metrics is not None:
@@ -284,32 +313,43 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         additional_token_num += 1 if self.model_args.route_in_separate_token else 0
 
-        assert self.ar_future_interval > 0, 'ar_future_interval should be larger than 0, else do not use generate'
         trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
-        if self.model_args.specified_key_points:
-            future_key_points = trajectory_label_dummy[:, selected_indices, :]
-        else:
-            future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-        assert future_key_points.shape[1] > 0, 'future points not enough to sample'
-        future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
-        key_points_num = future_key_points.shape[1]
+        if self.ar_future_interval > 0:
+            if self.model_args.specified_key_points:
+                future_key_points = trajectory_label_dummy[:, selected_indices, :]
+            else:
+                future_key_points = trajectory_label_dummy[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+            assert future_key_points.shape[1] > 0, 'future points not enough to sample'
+            future_key_embeds_dummy = self.encoder.kpts_m_embed(future_key_points) if not self.encoder.prev_model else self.encoder.action_m_embed(future_key_points)
+            key_points_num = future_key_points.shape[1]
 
-        if self.model_args.interaction:
-            input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
-        input_embeds[:, additional_token_num + context_length:additional_token_num + context_length + key_points_num, :] = future_key_embeds_dummy
-        pred_key_points_during_generate = []
+            if self.model_args.interaction:
+                input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
+            input_embeds[:, additional_token_num + context_length:additional_token_num + context_length + key_points_num, :] = future_key_embeds_dummy
+        elif self.ar_future_interval == 0:
+            key_points_num = 0
+
 
         if self.model_args.task == "waymo":
-            length_before_keypoints = additional_token_num + context_length
+            if self.model_args.use_intention:
+                length_before_intention = additional_token_num + context_length
+                dummy_anchor_embedding = self.encoder.intention_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1) # (bs, 1, n_embed)
+                input_embeds[:, length_before_intention:length_before_intention+self.anchor_len, :] = dummy_anchor_embedding
+                length_before_keypoints = length_before_intention + self.anchor_len
+                center_obj_anchor_pts = kwargs.get("intention_points")
+            else:
+                length_before_keypoints = additional_token_num + context_length
+                center_obj_anchor_pts = None
+                
             if self.model_args.generation_method == 'beam':
-                pred_key_points_during_generate, input_embeds_kpts, kpts_scores, _ = self.beam_search(input_embeds, length_before_keypoints, key_points_num, attention_mask=info_dict.get("instance_valid_mask", None))
+                pred_key_points_during_generate, input_embeds_kpts, kpts_scores, _ = self.beam_search(input_embeds, length_before_keypoints, key_points_num, attention_mask=info_dict.get("instance_valid_mask", None), center_obj_anchor_pts=center_obj_anchor_pts, gt_intention_cls=info_dict["gt_anchor_cls"])
             else:
                 raise NotImplementedError
             
+            if self.model_args.use_intention: key_points_num += self.anchor_len
             all_traj_logits = []
             all_kps_logits = []
             n_mode = input_embeds_kpts.shape[1]
-            
             for m_i in range(n_mode):
                 input_embeds[:, length_before_keypoints:length_before_keypoints+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
                 transformer_output = self.transformer(
@@ -388,7 +428,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 #                                                                      ego_to_global=False)
                 #     print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
                 #     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
-                key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                key_point_embed = self.encoder.kpts_m_embed(pred_key_point).reshape(batch_size, 1, -1) if not self.encoder.prev_model else self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1) # b, 1, n_embed
                 # replace embed at the next position
                 input_embeds[:, additional_token_num + context_length + i, :] = key_point_embed[:, 0, :]
                 if self.model_args.predict_yaw:
@@ -427,7 +467,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
             return torch.cat([key_points_logits, traj_logits], dim=1)
     
-    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, attention_mask=None, num_beam=None, out_num_mode=None, center_obj_anchor_pts=None):
+    def beam_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num, attention_mask=None, num_beam=None, out_num_mode=None, center_obj_anchor_pts=None, gt_intention_cls=None):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
         
@@ -447,13 +487,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         assert num_beam <= self.k
         assert out_num_mode <= num_beam
 
-        self.use_anchor = False
         self.pred_dim = 2
         self.beam_search_temp = 1.0
         
-        if self.use_anchor:
+        if self.model_args.use_intention:
             key_points_num += self.anchor_len
-        
+
         device = input_embeds.device
         batch_size, tot_len, n_embed = input_embeds.shape
         pred_key_points_during_generate = torch.zeros((batch_size, num_beam, key_points_num, self.pred_dim), device=device)
@@ -463,7 +502,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if attention_mask is not None: k_attention_mask = attention_mask[:, None, :].repeat(1, num_beam, 1)
         
         k_kpts_index = torch.zeros((batch_size, num_beam, key_points_num), device=device)
-        
+
         for i in range(key_points_num):
             # prepare attention mask
             k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_contenxt_len + i, :].view(batch_size*num_beam, -1, n_embed)
@@ -472,15 +511,17 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 k_attention_mask_input = k_attention_mask[:, :, :tot_scenario_contenxt_len + i].view(batch_size*num_beam, -1)
             position_ids = self._prepare_position_ids_for_generation(k_attention_mask_input.clone())
+
             transformer_output = self.transformer(
                 inputs_embeds=k_input_embeds_current,
                 attention_mask=k_attention_mask_input,
-                position_ids=position_ids
+                position_ids=position_ids,
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             future_key_point_hidden_state = transformer_outputs_hidden_state[:, [tot_scenario_contenxt_len + i - 1], :] # (bs*num_beam, 1, n_embed)
 
-            if self.use_anchor and i == 0:
+            if self.model_args.use_intention and i == 0:
+                # pred_kps_score = nn.functional.one_hot(gt_intention_cls, num_classes=64).unsqueeze(1).repeat(1, num_beam, 1)
                 pred_kps_score = self.anchor_cls_decoder(future_key_point_hidden_state).view(batch_size, num_beam, 64).softmax(-1) # (bs, num_beam, 64)
                 pred_kps_logit = center_obj_anchor_pts.repeat(1, num_beam, 1) # (bs, num_beam*64, 2)
             else:
@@ -492,7 +533,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 pred_kps_score = (pred_kps_score.view(batch_size, num_beam, self.k)/self.beam_search_temp).softmax(-1) # (bs, num_beam, k)
             
             if i == 0:
-                topk_score, topk_indx = torch.topk(pred_kps_score[:, 0, :], dim=-1, k =num_beam) # (bs, num_beam)
+                topk_score, topk_indx = torch.topk(pred_kps_score[:, 0, :], dim=-1, k=num_beam) # (bs, num_beam)
             else:
                 # pred_kps_score_accum = k_kpts_scores[:, :, [i-1]].repeat(1, 1, num_beam) * pred_kps_score
                 # pred_kps_score = pred_kps_score_accum.view(batch_size, num_beam*self.k) # (bs, num_beam*k)
@@ -512,7 +553,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             pred_kps_logit_topk = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, num_beam, 2), device=device)), dim=-1) # (bs, num_beam, 4)
 
             # get kps topk embeds
-            pred_kps_logit_topk_embed = self.encoder.action_m_embed(pred_kps_logit_topk)  # b, num_beam, n_embed
+            if i == 0 and self.model_args.use_intention:
+                pred_kps_logit_topk_embed = self.encoder.intention_m_embed(pred_kps_logit_topk)
+            else:
+                pred_kps_logit_topk_embed = self.encoder.kpts_m_embed(pred_kps_logit_topk) if not self.encoder.prev_model else self.encoder.action_m_embed(pred_kps_logit_topk) # b, num_beam, n_embed
             
             k_input_embeds[:, :, tot_scenario_contenxt_len + i, :] = pred_kps_logit_topk_embed
             k_kpts_scores[:, :, i] = topk_score
