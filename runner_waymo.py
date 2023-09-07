@@ -48,6 +48,8 @@ from transformers.trainer_callback import DefaultFlowCallback
 from datasets import Dataset, Features, Value, Array2D, Sequence, Array4D
 
 from dataset_gen.waymo.waymo_dataset import WaymoDataset
+from dataset_gen.waymo.waymo_diffusion_dataset import WaymoDiffusionDataset
+
 from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
 __all__ = {
     'WaymoDataset': WaymoDataset,
@@ -176,12 +178,21 @@ def main():
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
             os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / 8))
-        train_dataset = __all__[cfg.DATA_CONFIG.DATASET](
-            dataset_cfg=cfg.DATA_CONFIG,
-            training=True,
-            logger=logger, 
-            use_raster=use_raster
-        )
+        
+        if model_args.task == "train_diffusion_decoder":
+            train_dataset = WaymoDiffusionDataset(
+                dataset_cfg=cfg.DATA_CONFIG,
+                training=True,
+                logger=logger, 
+                saved_dataset_folder=data_args.saved_dataset_folder
+            )
+        else:
+            train_dataset = __all__[cfg.DATA_CONFIG.DATASET](
+                dataset_cfg=cfg.DATA_CONFIG,
+                training=True,
+                logger=logger, 
+                use_raster=use_raster
+            )
         if data_args.max_train_samples is not None:
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
@@ -226,10 +237,6 @@ def main():
 
     # Training
     if training_args.do_train:
-        if model_args.task == "waymo_save_feature":
-            trainer.save_features_for_diffusion_waymo()
-            return
-        
         checkpoint = None
         if training_args.resume_from_checkpoint is not None:
             checkpoint = training_args.resume_from_checkpoint
