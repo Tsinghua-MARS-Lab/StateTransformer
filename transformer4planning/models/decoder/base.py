@@ -86,7 +86,7 @@ class KeyPointMLPDeocder(nn.Module):
         future_key_points = info_dict["future_key_points"]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         kp_start_index = scenario_type_len + context_length * 2 - 1 if context_length is not None \
-            else scenario_type_len + input_length
+            else scenario_type_len + input_length - 1
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
         
