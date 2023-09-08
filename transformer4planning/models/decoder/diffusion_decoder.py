@@ -448,14 +448,14 @@ class KeyPointDiffusionDecoder(nn.Module):
             key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
-                    reg = key_points_logits,
-                    cls = scores,
+                    reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)]
+                    cls = [cls for cls in scores.detach().unsqueeze(1)],
                 ),
                 num_mods_out = self.k,
                 EM_Iter = 25,
             )
-            key_points_logits = reg_sigma_cls_dict["reg"]
-            scores = reg_sigma_cls_dict["cls"]
+            key_points_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
+            scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
         return key_points_logits, scores 
 
     
