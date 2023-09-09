@@ -80,8 +80,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.ar_future_interval > 0:
             self.key_points_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.out_features * self.k)
             
-        if self.k > 1:
-            self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
+            if self.k > 1:
+                self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
         
         self.use_anchor = True
         
@@ -94,6 +94,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         else:
             self.anchor_len = 0
 
+        self.out_num_mode = 6
         self.clf_metrics = None
 
         # Initialize weights and apply final processing
@@ -510,14 +511,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             else:
                 key_points_num = len(selected_indices)
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            key_points_logits, pred_logits = self.anchor_logits_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
-            pred_key_point = torch.zeros((batch_size, key_points_num, 4), device=device)
+            key_points_logits, kpts_scores = self.anchor_logits_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
+            pred_key_points_during_generate = torch.zeros((batch_size, self.out_num_mode, key_points_num, 4), device=device)
             if self.model_args.predict_yaw:
-                pred_key_point = key_points_logits
+                pred_key_points_during_generate = key_points_logits
             else:
-                pred_key_point[:, :, :2] = key_points_logits 
-            key_point_embed = self.action_m_embed(pred_key_point).reshape(batch_size, key_points_num, -1)
-            input_embeds[:, tot_scenario_contenxt_len:tot_scenario_contenxt_len + key_points_num, :] = key_point_embed[:, :, :]
+                pred_key_points_during_generate[:, :, :, :2] = key_points_logits 
+            input_embeds_kpts = self.action_m_embed(pred_key_points_during_generate)
         
         elif self.use_anchor and self.ar_future_interval == 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
