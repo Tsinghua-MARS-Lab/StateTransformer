@@ -230,11 +230,10 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                 self.context_encoder = MTREncoderSimplified(mtr_config.CONTEXT_ENCODER)
         
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        self.prev_model = True
+        self.prev_model = False
         if self.ar_future_interval > 0 and not self.prev_model: self.kpts_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         if self.model_args.use_intention: self.intention_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
         
- 
     def from_marginal_to_joint(self, hidden_state, info_dict, update_info_dict=False):
         device = hidden_state.device
         agents_num_per_scenario = info_dict["agents_num_per_scenario"]

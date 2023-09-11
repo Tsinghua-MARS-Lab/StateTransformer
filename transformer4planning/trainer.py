@@ -99,26 +99,45 @@ def compute_metrics_nuplan(prediction: EvalPrediction):
 def compute_metrics_waymo(eval_input):
     total_eval_num = eval_input.label_ids.shape[0]
     predictions = eval_input.predictions
-    pred_keys = predictions.keys()
+    metrics = {}
+    # from transformer4planning.utils.mtr_utils import _num_to_str
+    # predictions["scenario_id"] = _num_to_str(predictions["scenario_id"])
+    # predictions["object_type"] = _num_to_str(predictions["object_type"])
 
-    from transformer4planning.utils.mtr_utils import _num_to_str
-    predictions["scenario_id"] = _num_to_str(predictions["scenario_id"])
-    predictions["object_type"] = _num_to_str(predictions["object_type"])
+    # pred_list = []
+    # for i in range(total_eval_num):
+    #     pred = {}
+    #     for key in ['scenario_id',
+    #             'pred_trajs',
+    #             'pred_scores',
+    #             'object_id',
+    #             'object_type',
+    #             'gt_trajs',
+    #             'track_index_to_predict']:
+    #         pred[key] = predictions[key][i]
 
-    pred_list = []
-    for i in range(total_eval_num):
-        pred = {}
-        for key in pred_keys:
-            pred[key] = predictions[key][i]
+    #     pred_list.append(pred)
 
-        pred_list.append(pred)
+    # from dataset_gen.waymo.waymo_eval import waymo_evaluation
+    # _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=pred_list, num_modes_for_eval=6)
 
-    from dataset_gen.waymo.waymo_eval import waymo_evaluation
-    _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=pred_list, num_modes_for_eval=6)
-
-    print(result_format_str)
-
-    return final_avg_results
+    # print(result_format_str)
+    # metrics.update(final_avg_results)
+    
+    use_intention = True
+    if use_intention:
+        total_nums = {}
+        for key in ['anchor_hard_match_num', 
+                           'anchor_soft_match_num',
+                            'tot_num',"sample_valid_mask"]:
+            total_nums[key] = sum(predictions[key])
+        
+        # return final_avg_results
+        metrics.update({"hard_match_rate": total_nums["anchor_hard_match_num"] / total_nums["sample_valid_mask"],
+                "soft_match_rate": total_nums["anchor_soft_match_num"] / total_nums["sample_valid_mask"]
+                })
+    
+    return metrics
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -279,30 +298,35 @@ class PlanningTrainer(Trainer):
         if self.model.model_args.task == "waymo" and self.model.model_args.encoder_type == "vector":
             from transformer4planning.utils.mtr_utils import rotate_points_along_z, str_to_tensor
 
-            pred_length = inputs['center_gt_trajs_src'].shape[1] - inputs['current_time_index'][0] - 1
-            pred_trajs = prediction_generation['logits'][:, :, -pred_length:, :]
+            # pred_length = inputs['center_gt_trajs_src'].shape[1] - inputs['current_time_index'][0] - 1
+            # pred_trajs = prediction_generation['logits'][:, :, -pred_length:, :]
 
-            pred_scores = prediction_generation['scores']
-            center_objects_world = inputs['center_objects_world'].type_as(pred_trajs)
+            # pred_scores = prediction_generation['scores']
+            # center_objects_world = inputs['center_objects_world'].type_as(pred_trajs)
 
-            num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
-            # assert num_feat == 7
+            # num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
+            # # assert num_feat == 7
 
-            pred_trajs_world = rotate_points_along_z(
-                points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
-                angle=center_objects_world[:, 6].view(num_center_objects)
-            ).view(num_center_objects, num_modes, num_timestamps, num_feat)
-            pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+            # pred_trajs_world = rotate_points_along_z(
+            #     points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
+            #     angle=center_objects_world[:, 6].view(num_center_objects)
+            # ).view(num_center_objects, num_modes, num_timestamps, num_feat)
+            # pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+            logits_dict = {}
+            # logits_dict.update({
+            #     'scenario_id': str_to_tensor(inputs['scenario_id']).to(pred_trajs.device),
+            #     'pred_trajs': pred_trajs_world[..., 0:2],
+            #     'pred_scores': pred_scores,
+            #     'object_id': inputs['center_objects_id'],
+            #     'object_type': str_to_tensor(inputs['center_objects_type']).to(pred_trajs.device),
+            #     'gt_trajs': inputs['center_gt_trajs_src'],
+            #     'track_index_to_predict': inputs['track_index_to_predict'],
+            # })
 
-            logits_dict = {
-                'scenario_id': str_to_tensor(inputs['scenario_id']).to(pred_trajs.device),
-                'pred_trajs': pred_trajs_world[..., 0:2],
-                'pred_scores': pred_scores,
-                'object_id': inputs['center_objects_id'],
-                'object_type': str_to_tensor(inputs['center_objects_type']).to(pred_trajs.device),
-                'gt_trajs': inputs['center_gt_trajs_src'],
-                'track_index_to_predict': inputs['track_index_to_predict'],
-            }
+            if self.model.model_args.use_intention and not self.model.model_args.use_gmm:
+                logits_dict.update({'anchor_hard_match_num': torch.tensor(prediction_generation["anchor_hard_match_num"], device=labels.device), 
+                           'anchor_soft_match_num': torch.tensor(prediction_generation["anchor_soft_match_num"], device=labels.device),
+                            'tot_num': torch.tensor(prediction_generation["tot_num"], device=labels.device)})
             
         else:
             logits_dict = {

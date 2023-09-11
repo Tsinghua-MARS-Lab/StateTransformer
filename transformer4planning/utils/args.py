@@ -166,6 +166,9 @@ class ModelArguments:
     use_intention: Optional[bool] = field(
         default=False
     )
+    use_gmm: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:

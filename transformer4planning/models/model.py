@@ -32,6 +32,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
         out_features = 4 if self.model_args.predict_yaw else 2
+        if self.model_args.task == "waymo" and self.model_args.use_gmm: out_features = 5
         if not self.model_args.pred_key_points_only:
             self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
         if self.ar_future_interval > 0:
@@ -42,7 +43,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.model_args.task == "waymo" and self.model_args.use_intention:
             self.anchor_num = 64
             self.anchor_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.anchor_num)
-            self.anchor_logits_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features= out_features * self.anchor_num)
+            # self.anchor_logits_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features= out_features * self.anchor_num)
             self.anchor_len = 1
             self.cls_anchor_loss = nn.CrossEntropyLoss(reduction="none")
             self.logits_anchor_loss = nn.MSELoss(reduction="none")
@@ -157,13 +158,14 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             loss_fct = nn.MSELoss(reduction="mean")
         elif 'l1' in self.model_args.loss_fn:
             loss_fct = nn.SmoothL1Loss()
+
         if not self.model_args.pred_key_points_only:
             traj_logits = self.traj_decoder(traj_hidden_state)
             if self.model_args.task == "waymo":
                 trajectory_label_mask = info_dict["trajectory_label_mask"]
                 loss_fct = nn.MSELoss(reduction="none")
                 _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
-                            trajectory_label_mask.sum() + 1e-7)
+                            trajectory_label_mask.sum() + 1e-7)  * 0.1
                 loss += _loss
             else:
                 if self.model_args.predict_yaw:
@@ -239,23 +241,49 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.model_args.task == "waymo" and self.model_args.use_intention:
             pred_anchor_embed = transformer_outputs_hidden_state[:, additional_token_num + context_length - 1 : additional_token_num + context_length - 1 + self.anchor_len, :] # (bs, anchor_len, n_embed)
             pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed) # (bs, anchor_len, 64)
-            pred_anchor_logits = self.anchor_logits_decoder(pred_anchor_embed)
+            # pred_anchor_logits = self.anchor_logits_decoder(pred_anchor_embed)
             gt_anchor_cls = info_dict["gt_anchor_cls"]
             gt_anchor_mask = info_dict["trajectory_label_mask"][:, -1, :]
             loss_anchor = self.cls_anchor_loss(pred_anchor_cls.reshape(-1, self.anchor_num).to(torch.float64), gt_anchor_cls.reshape(-1).long())
-            loss_anchor = (loss_anchor * gt_anchor_mask.view(-1)).sum()/ (gt_anchor_mask.sum()+1e-7)
+            loss_anchor = (loss_anchor * gt_anchor_mask.view(-1)).sum() / (gt_anchor_mask.sum()+1e-7)
             loss += loss_anchor
             
-            bs = gt_anchor_cls.shape[0]
-            pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
+            # bs = gt_anchor_cls.shape[0]
+            # pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
             
             # pred_anchor_cls_argmax = pred_anchor_cls.argmax(-1).view(-1)
             # pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), pred_anchor_cls_argmax, :] # (bs, 2)
             
-            pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)            
-            loss_anchor_logits = self.logits_anchor_loss(pred_pos_anchor_logits, info_dict["gt_anchor_logits"])
-            loss_anchor_logits = (loss_anchor_logits * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
-            loss += loss_anchor_logits
+            # pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)            
+            # loss_anchor_logits = self.logits_anchor_loss(pred_pos_anchor_logits, info_dict["gt_anchor_logits"])
+            # loss_anchor_logits = (loss_anchor_logits * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
+            # loss += loss_anchor_logits
+
+        # if self.model_args.task == "waymo" and self.model_args.use_gmm:
+        #     from transformer4planning.libs.models.mtr.orginal_mtr import nll_loss_gmm_direct
+        #     intention_points = kwargs.get('intention_points')
+        #     mode_num = intention_points.shape[1]
+        #     pred_trajs = []
+        #     for i in range(mode_num):
+        #         intention_point_batch = intention_points[:, i, :].unsqueeze(1)
+        #         intention_embed_batch = self.encoder.intention_m_embed(intention_point_batch)
+        #         input_embeds_mode = input_embeds.clone()
+        #         input_embeds_mode[:, additional_token_num + context_length: additional_token_num + context_length + self.anchor_len, :] = intention_embed_batch
+        #         transformer_outputs = self.transformer(
+        #             inputs_embeds=input_embeds_mode,
+        #             attention_mask=attention_mask,
+        #             return_dict=return_dict,
+        #             # **kwargs
+        #         )
+
+        #         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+        #         traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+        #         traj_logits = self.traj_decoder(traj_hidden_state)
+        #         pred_trajs.append(traj_logits)
+
+        #     pred_trajs = torch.stack(pred_trajs, dim=1)
+        #     gmm_loss, _ = nll_loss_gmm_direct(pred_anchor_cls, pred_trajs, trajectory_label, trajectory_label_mask)
+        #     loss += gmm_loss
 
         # evaluate accuracy if on eval
         if not self.training and self.clf_metrics is not None:
@@ -268,7 +296,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if not return_dict:
             output = (traj_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
-
+        
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
             logits=traj_logits,
@@ -337,48 +365,101 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 input_embeds[:, length_before_intention:length_before_intention+self.anchor_len, :] = dummy_anchor_embedding
                 length_before_keypoints = length_before_intention + self.anchor_len
                 center_obj_anchor_pts = kwargs.get("intention_points")
+
+                if self.model_args.use_gmm:
+                    from transformer4planning.utils.mtr_utils import batch_nms
+                    transformer_outputs = self.transformer(
+                        inputs_embeds=input_embeds,
+                        attention_mask=None,
+                        return_dict=None,
+                        # **kwargs
+                    )
+
+                    transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+
+                    pred_anchor_embed = transformer_outputs_hidden_state[:, length_before_intention - 1 : length_before_intention - 1 + self.anchor_len, :] # (bs, anchor_len, n_embed)
+                    pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed) # (bs, anchor_len, 64)
+
+                    mode_num = center_obj_anchor_pts.shape[1]
+                    pred_trajs = []
+                    for i in range(mode_num):
+                        intention_point_batch = center_obj_anchor_pts[:, i, :].unsqueeze(1)
+                        intention_embed_batch = self.encoder.intention_m_embed(intention_point_batch)
+                        input_embeds_mode = input_embeds.clone()
+                        input_embeds_mode[:, length_before_intention:length_before_intention+self.anchor_len, :] = intention_embed_batch
+                        transformer_outputs = self.transformer(
+                            inputs_embeds=input_embeds_mode,
+                            attention_mask=None,
+                            return_dict=None,
+                            # **kwargs
+                        )
+
+                        transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+                        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+                        traj_logits = self.traj_decoder(traj_hidden_state)
+                        pred_trajs.append(traj_logits)
+
+                    pred_trajs = torch.stack(pred_trajs, dim=1)
+                    trajs, scores, _ = batch_nms(pred_trajs, pred_anchor_cls.squeeze(1), 2.5)
+                    
+                    output_dict = {'logits': trajs, 'scores': scores}
+
+                    return output_dict
             else:
                 length_before_keypoints = additional_token_num + context_length
                 center_obj_anchor_pts = None
-                
+            
             if self.model_args.generation_method == 'beam':
-                pred_key_points_during_generate, input_embeds_kpts, kpts_scores, _ = self.beam_search(input_embeds, length_before_keypoints, key_points_num, attention_mask=info_dict.get("instance_valid_mask", None), center_obj_anchor_pts=center_obj_anchor_pts, gt_intention_cls=info_dict["gt_anchor_cls"])
+                pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search(input_embeds, length_before_keypoints, key_points_num, attention_mask=info_dict.get("instance_valid_mask", None), center_obj_anchor_pts=center_obj_anchor_pts, gt_intention_cls=info_dict["gt_anchor_cls"])
             else:
                 raise NotImplementedError
             
-            if self.model_args.use_intention: key_points_num += self.anchor_len
-            all_traj_logits = []
-            all_kps_logits = []
-            n_mode = input_embeds_kpts.shape[1]
-            for m_i in range(n_mode):
-                input_embeds[:, length_before_keypoints:length_before_keypoints+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
-                transformer_output = self.transformer(
-                    inputs_embeds=input_embeds,
-                    attention_mask=info_dict.get("instance_valid_mask", None),
-                    position_ids=None,
-                )
-                transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            # if self.model_args.use_intention: key_points_num += self.anchor_len
+            # all_traj_logits = []
+            # all_kps_logits = []
+            # n_mode = input_embeds_kpts.shape[1]
+            # for m_i in range(n_mode):
+            #     input_embeds[:, length_before_keypoints:length_before_keypoints+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
+            #     transformer_output = self.transformer(
+            #         inputs_embeds=input_embeds,
+            #         attention_mask=info_dict.get("instance_valid_mask", None),
+            #         position_ids=None,
+            #     )
+            #     transformer_outputs_hidden_state = transformer_output['last_hidden_state']
                 
-                # get traj_logits
-                traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
-                traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
-                all_traj_logits.append(traj_logits[:, None, :, :])
+            #     # get traj_logits
+            #     traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
+            #     traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
+            #     all_traj_logits.append(traj_logits[:, None, :, :])
                 
-            all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
-            all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
+            # all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
+            # all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
             
-            kpts_scores = kpts_scores.softmax(dim=1) # (bs, k, num_kps)
+            # kpts_scores = kpts_scores.softmax(dim=1) # (bs, k, num_kps)
             
-            # use accumulated score
-            all_traj_scores = torch.ones((batch_size, n_mode), device=device)
+            # # use accumulated score
+            # all_traj_scores = torch.ones((batch_size, n_mode), device=device)
             
-            for k_i in range(key_points_num):
-                all_traj_scores *= kpts_scores[:, :, k_i]
-            all_traj_scores = all_traj_scores / all_traj_scores.sum()
+            # for k_i in range(key_points_num):
+            #     all_traj_scores *= kpts_scores[:, :, k_i]
+            # all_traj_scores = all_traj_scores / all_traj_scores.sum()
             
+            output_dict = {}
+            # output_dict.update({'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores})
+            
+            if self.model_args.use_intention:
+                gt_anchor_cls = info_dict["gt_anchor_cls"]
+                gt_anchor_mask = info_dict["trajectory_label_mask"][:, -1, :]
+                anchor_kpts_idx = kpts_idx[:, :, 0]
+                hard_match_num = ((anchor_kpts_idx[:, 0] == gt_anchor_cls) * gt_anchor_mask[:, 0]).sum()
+                soft_match_vec = (anchor_kpts_idx[:, 0] == gt_anchor_cls)
+                for m_i in range(1, 6):
+                    soft_match_vec |= (anchor_kpts_idx[:, m_i] == gt_anchor_cls)
+                soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
+                output_dict.update({'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': batch_size})
             # use last score
             # all_traj_scores = kpts_scores[:, :, -1] # (bs, n_mode)
-            return {'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores}
+            return output_dict
         else:
             # Loop for generation
             for i in range(key_points_num):
