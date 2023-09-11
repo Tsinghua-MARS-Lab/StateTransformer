@@ -11,6 +11,7 @@ from transformer4planning.models.encoder.nuplan_raster_encoder import *
 from transformer4planning.models.utils import nll_loss_gmm_direct
 from transformer4planning.libs.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
+from transformer4planning.utils.mtr_utils import batch_nms
     
     
 class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
@@ -94,7 +95,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         else:
             self.anchor_len = 0
 
-        self.out_num_mode = 6
+        self.use_nms = False
+        
+        if self.use_nms:
+            self.out_num_mode = 64
+            self.nms_dist_thresh = 2.5
+        else:
+            self.out_num_mode = 6
+            
         self.clf_metrics = None
 
         # Initialize weights and apply final processing
@@ -520,7 +528,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embeds_kpts = self.action_m_embed(pred_key_points_during_generate)
         
         elif self.use_anchor and self.ar_future_interval == 0:
-            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=6,
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=self.out_num_mode,
                                                                                                center_obj_anchor_pts=center_obj_anchor_pts, debug_GT_cls=anchor_GT_cls, 
                                                                                                debug_GT_logits=trajectory_label[:, [-1], :2])
             key_points_num = 0
@@ -592,6 +600,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             all_traj_logits.append(traj_logits[:, None, :, :])
             
         all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
+        
+        if self.use_nms:
+            all_traj_logits, scores, _ = batch_nms(all_traj_logits, all_traj_scores, self.nms_dist_thresh)
+            out_res.update(logits=all_traj_logits, scores=scores)
+            return out_res
         
         out_res.update(logits=all_traj_logits)
 
