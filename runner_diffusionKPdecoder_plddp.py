@@ -23,7 +23,7 @@ import numpy as np
 from transformer4planning.utils.modify_traj_utils import modify_func
 from dataset_gen.waymo.config import cfg_from_yaml_file, cfg
 
-os.environ["WANDB_DISABLED"] = "true"
+# os.environ["WANDB_DISABLED"] = "true"
 
 cfg_from_yaml_file("/home/QJ00367/danjiao/dlnets/transformer4planning/config/config_gpt2_small.yaml", cfg)
 
@@ -271,7 +271,7 @@ class PL_MODEL_WRAPPER(pl.LightningModule):
 
 def main():
     # Define default hyperparameters
-    NAME = 'Waymo70002-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest-ade6valloss'
+    NAME = 'diffusion_decoder'
     HYPERPARAMS = {
         "NAME": NAME,
         "SEED": 42,
@@ -282,12 +282,12 @@ def main():
         "NUM_WORKERS": 10,
         "LR": 8e-5,
         "WEIGHT_DECAY": 2e-5,
-        "TRAIN_DIR": '/data/madanjiao/model_res/z_gptS_vehicle_k1_KP0_anchored1_e100_finetuneWithAnchorClsOnly/training_results/checkpoint-430000/eval_output/feature_out/',
-        "TEST_DIR": '/data/madanjiao/model_res/z_gptS_vehicle_k1_KP0_anchored1_e100_finetuneWithAnchorClsOnly/training_results/checkpoint-430000/eval_output/feature_out/',
+        "TRAIN_DIR": '/data/madanjiao/model_res/z_gptS_vehicle_k1_KP0_anchored1_e100_finetuneWithAnchorClsOnly/training_results/checkpoint-430000/eval_output/feature_out_train/',
+        "TEST_DIR": '/data/madanjiao/model_res/z_gptS_vehicle_k1_KP0_anchored1_e100_finetuneWithAnchorClsOnly/training_results/checkpoint-430000/eval_output/feature_out_val/',
         "SAVING_K": 2,
-        "SAVING_DIR": f"/localdata_ssd/waymo_1/waymo_Newckpt100000_diff_new_keypoints_decoderTFBased_saving_dir/{NAME}",
+        "SAVING_DIR": f"/data/madanjiao/model_res/diffusion_decoder/{NAME}",
         "WANDB_PROJECT": f"diffusion_decoder_TFBased_{NAME}",
-        "WANDB_ENTITY": "jingzheshi",
+        "WANDB_ENTITY": "madanjiao1993",
         "MAX_EPOCHS": 300,
         "PRECISION": 32,
         "TRAIN_INIT_IDX": 6999,
@@ -419,14 +419,14 @@ def main():
         shuffle = True,
     )
     
-    # test_dataloader = DataLoader(
-    #     test_dataset,
-    #     batch_size = BATCH_SIZE,
-    #     num_workers = NUM_WORKERS,
-    #     pin_memory = True,
-    #     collate_fn = collate_fn_eval,
-    #     shuffle = False,
-    # )
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size = BATCH_SIZE,
+        num_workers = NUM_WORKERS,
+        pin_memory = True,
+        collate_fn = collate_fn_eval,
+        shuffle = False,
+    )
 
     now=datetime.datetime.now()
     timestr=now.strftime("%Y_%m_%d___%H_%M_%S")
@@ -457,7 +457,7 @@ def main():
                        gpus=list(range(NUM_GPU)),
                        max_epochs=MAX_EPOCHS,precision=PRECISION)
     
-    trainer.fit(plmodel,train_dataloader,None)
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
 
 
 if __name__ == '__main__':
