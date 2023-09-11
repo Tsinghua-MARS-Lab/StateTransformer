@@ -983,7 +983,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         scenario_type = kwargs.get("scenario_type", None)
         
         # input_embeds: (bs, context_length*2 + scenario_len, n_embd)
-        input_embeds, context_length, trajectory_label, trajectory_label_mask = self._prepare_OA_inputs(input_dict, batch_sample_count, scenario_type) 
+        input_embeds, info_dict = self._prepare_OA_inputs(input_dict, batch_sample_count, scenario_type)
+        context_length = info_dict['context_length']
+        trajectory_label = info_dict['trajectory_label']
+        trajectory_label_mask = info_dict['trajectory_label_mask']
         
         # anchor embedding
         tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num
