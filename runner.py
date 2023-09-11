@@ -6,6 +6,7 @@ Train a Transformer ML Model for Planning
 
 import logging
 import os
+os.environ["WANDB_DISABLED"] = "true"
 import sys
 import pickle
 import copy
@@ -166,6 +167,7 @@ def main():
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
     index_root = os.path.join(data_args.saved_dataset_folder, 'index')
+    # print("shijz added: use full dataset.")
     root_folders = os.listdir(index_root)
         
     if 'train' in root_folders:
@@ -259,12 +261,16 @@ def main():
             collate_fn = partial(nuplan_vector_collate_func, 
                                  dic_path=data_args.saved_dataset_folder, 
                                  map_api=map_api)
+        from transformer4planning.trainer import compute_metric_nuplan
+        compute_metrics_fn = partial(compute_metric_nuplan, model_args=model_args)
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
+        from transformer4planning.trainer import compute_metric_waymo
         if model_args.encoder_type == "vector":
             collate_fn = partial(waymo_collate_func, 
                                  data_path=data_args.saved_dataset_folder, 
                                  interaction=model_args.interaction)
+            compute_metrics_fn = partial(compute_metric_waymo, model_args=model_args)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
     else:
@@ -276,15 +282,19 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
-        data_collator=collate_fn
+        data_collator=collate_fn,
+        compute_metrics = compute_metrics_fn,
     )
     trainer.pop_callback(DefaultFlowCallback)
         
     if model_args.generate_diffusion_dataset_for_key_points_decoder:
         # First we generate the testing set for our diffusion decoder.
+        trainer.train_dataset = eval_dataset
         try:
-            result = trainer.evaluate()
+            result = trainer.train()
         except Exception as e:
+            print(e)
+            print("We continue to generate features.")
             pass
         # try:
         #     if model_args.autoregressive or True:
@@ -298,9 +308,10 @@ def main():
         # Then we generate the training set for our diffusion decoder.
         # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
         trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-5] + 'train/'
+        trainer.train_dataset = train_dataset
         trainer.eval_dataset = train_dataset
         try:
-            result = trainer.evaluate()
+            result = trainer.train()
         except Exception as e:
             print(e)
             pass

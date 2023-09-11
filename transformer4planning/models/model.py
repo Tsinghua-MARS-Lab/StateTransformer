@@ -7,7 +7,9 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformer4planning.libs.models.mlp import DecoderResCat
 from transformer4planning.utils import nuplan_utils 
 
-from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+# from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
+from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints
+from modify_traj_utils import modify_func
 
 class LTMOutput(CausalLMOutputWithCrossAttentions):
     loss: Optional[torch.FloatTensor] = None
@@ -43,6 +45,25 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
         self.build_encoder()
+        if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            assert self.ar_future_interval > 0, ''
+            self.save_training_diffusion_dataset_dir = os.path.join(self.model_args.diffusion_dataset_save_dir,'train/')
+            self.save_testing_diffusion_dataset_dir  = os.path.join(self.model_args.diffusion_dataset_save_dir,'test/')
+            if not os.path.exists(self.save_training_diffusion_dataset_dir):
+                os.makedirs(self.save_training_diffusion_dataset_dir)
+            if not os.path.exists(self.save_testing_diffusion_dataset_dir):
+                os.makedirs(self.save_testing_diffusion_dataset_dir)
+            self.current_idx = 0
+            self.gpu_device_count = torch.cuda.device_count()
+            # Notice that although we check and create two directories (train/ and test/) here, in the forward method we only save features in eval loops.
+            # This is because evaluation is way faster than training (since there are no backward propagation), and after saving features for evaluation, we just change our test set to training set and then run the evaluation loop again.
+            # The related code can be found in runner.py at around line 511.
+        if  "diffusion_KP_decoder" in self.model_args.model_name:
+            from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints
+            self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.out_features)
+            self.key_points_decoder = DiffusionDecoderTFBasedForKeyPoints(config.n_inner, config.n_embd, out_features=out_features, num_key_points = self.model_args.key_points_num, input_feature_seq_lenth = self.model_args.diffusion_condition_sequence_lenth,
+                                                                          specified_key_points = self.model_args.specified_key_points, forward_specified_key_points = self.model_args.forward_specified_key_points)
+
         
     def build_encoder(self):
         if self.model_args.task == "nuplan":
@@ -119,8 +140,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     ):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        
         input_embeds, info_dict = self.encoder(**kwargs)
-
+        if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            self.eval()
+            current_device_idx = int(str(input_embeds.device)[-1])
         attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
         device = input_embeds.device
         
@@ -170,6 +194,68 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             """
             future_key_points = info_dict["future_key_points"]
             scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+            
+            if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+                future_key_points_hidden_state = transformer_outputs_hidden_state[:, :scenario_type_len + context_length * 2, :]
+                save_id = self.gpu_device_count * self.current_idx + current_device_idx
+                assert not self.training, 'do not save feature when model is set to training mode..'
+                future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
+                torch.save(future_key_points_hidden_state.detach().cpu(),os.path.join(self.save_testing_diffusion_dataset_dir, f'future_key_points_hidden_state_{save_id}.pth'), )
+                torch.save(future_key_points.detach().cpu(), os.path.join(self.save_testing_diffusion_dataset_dir, f'future_key_points_{save_id}.pth'), )
+                torch.save(future_key_points_gt_mask.detach().cpu(), os.path.join(self.save_testing_diffusion_dataset_dir, f'future_key_points_gt_mask_{save_id}.pth'))
+                self.current_idx += 1 # This would be executed on every gpu.
+                if not return_dict:
+                    output = (traj_logits,) + transformer_outputs[1:]
+                    return ((loss,) + output) if loss is not None else output
+                return CausalLMOutputWithCrossAttentions(
+                    loss=loss,
+                    logits=traj_logits,
+                    past_key_values=transformer_outputs.past_key_values,
+                    hidden_states=transformer_outputs.hidden_states,
+                    attentions=transformer_outputs.attentions,
+                    cross_attentions=transformer_outputs.cross_attentions,
+                )
+            if type(self.key_points_decoder) == DiffusionDecoderTFBasedForKeyPoints:
+                future_key_points_hidden_state = transformer_outputs_hidden_state[:, :scenario_type_len + context_length * 2, :]
+                # key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
+                self.key_points_decoder.train()
+                # print("future_key_points.shape==",future_key_points.shape)
+                # print("future_key_points_hidden_state.shape==",future_key_points_hidden_state.shape)
+                key_points_loss = self.key_points_decoder.train_forward(future_key_points_hidden_state, future_key_points[...,:2] if not self.model_args.predict_yaw else future_key_points[...,:], reduction='none')
+                while len(key_points_loss.shape) > 1:
+                    key_points_loss = key_points_loss.mean(dim=-1)
+                future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
+                multiply_mask = future_key_points_gt_mask.int().bool()
+                while len(multiply_mask.shape) > 1:
+                    multiply_mask = multiply_mask.all(dim=-1)
+                key_points_loss = key_points_loss * multiply_mask.to(key_points_loss.device).to(key_points_loss.dtype) # only add loss on the key points that are not masked
+                
+                loss += key_points_loss.mean()
+                self.key_points_decoder.eval()
+                key_points_logits = self.key_points_decoder.sample_forward(future_key_points_hidden_state, mc_num=1, determin=True) # when training & evaluation, only generate ONE sample in the forward method. multiple samples are generated in the 'generate' method.
+                if not self.training and self.clf_metrics is not None:
+                    pass
+                    # we do not care next_token_scorer_decoder here.
+                    # if self.next_token_scorer_decoder is not None:
+                    #     # classification on k predictions
+                    #     predictions = torch.argmax(pred_logits, dim=-1)  # b, s, k
+                    #     for _, metric in self.clf_metrics.items():
+                    #         metric.add_batch(references=min_loss_indices.reshape(-1), predictions=predictions.reshape(-1))
+                if not return_dict:
+                    output = (traj_logits,) + transformer_outputs[1:]
+                    return ((loss,) + output) if loss is not None else output
+
+                return CausalLMOutputWithCrossAttentions(
+                    loss=loss,
+                    logits=traj_logits,
+                    past_key_values=transformer_outputs.past_key_values,
+                    hidden_states=transformer_outputs.hidden_states,
+                    attentions=transformer_outputs.attentions,
+                    cross_attentions=transformer_outputs.cross_attentions,
+                )
+            else: # not diffusionKPdecoder
+                pass
+            
             future_key_points_hidden_state = transformer_outputs_hidden_state[:, scenario_type_len + context_length * 2 - 1:scenario_type_len + context_length * 2 + future_key_points.shape[1] - 1, :]
             key_points_logits = self.key_points_decoder(future_key_points_hidden_state)  # b, s, 4/2*k
 
@@ -295,6 +381,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.greedy_search(input_embeds, length_before_keypoints, key_points_num)
             elif self.model_args.generation_method == 'beam':
                 pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.beam_search(input_embeds, length_before_keypoints, key_points_num)
+            elif self.model_args.generation_method == 'diffusion':
+                pred_key_points_during_generate, input_embeds_kpts, kpts_scores = self.diffusion_search(input_embeds, length_before_keypoints, key_points_num)
             else:
                 raise NotImplementedError
             
@@ -431,6 +519,65 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             # print('Inspect shape in model generate: ', key_points_logits.shape, traj_logits.shape)
             return torch.cat([key_points_logits, traj_logits], dim=1)
     
+    @torch.no_grad()
+    def diffusion_search(self, input_embeds, tot_scenario_context_len, key_points_num):
+        '''
+        input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
+        
+        return:
+            key_points_pred: (bs, self.k, num_kps, 4/2)
+            k_input_embeds_kpts: (bs, k, num_kps, n_embed)
+            cls_pred: (bs, k, num_kps)   
+                actually the diffusion decoder outputs (bs, k). 
+                we simply do num_kps times root to get the score for each key point in order not to change the other part of the code.
+                since in the generate method the score of a trajectory is the product of the scores of all key points.
+        '''
+        device = input_embeds.device
+        batch_size, cur_len, n_embed = input_embeds.shape
+        pred_key_points_during_generate = torch.zeros((batch_size, 1, key_points_num, self.out_features), device=device)
+        
+        input_embeds_kpts = torch.zeros((batch_size, 1, key_points_num, n_embed), device=device)
+        kpts_scores = torch.zeros((batch_size, 1, key_points_num), device=device)
+        k_input_embeds = input_embeds[:, None, :, :].repeat(1, 1, 1, 1)
+        k_input_embeds_current = k_input_embeds[:, :, :tot_scenario_context_len, :].view(batch_size, -1, n_embed)
+        attention_mask = torch.ones(k_input_embeds_current.shape[:2], dtype=torch.long, device=device)
+        position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+        transformer_output = self.transformer(
+                inputs_embeds=k_input_embeds_current,
+                attention_mask=attention_mask,
+                position_ids=position_ids
+            )
+        transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+        future_key_point_hidden_state = transformer_outputs_hidden_state[:, :tot_scenario_context_len, :] # (bs, tot_scenario_context_len, n_embed)
+        key_points_pred, cls_pred = self.key_points_decoder.sample_forward(
+                future_key_point_hidden_state,
+                mc_num=50,
+                determin=False,
+                verbose = False,
+                cal_elbo = False,
+                return_diffusion = False,
+            )
+        out_dict = modify_func(
+                output = dict(
+                    reg = [traj_p for traj_p in key_points_pred.detach().unsqueeze(1)],
+                    cls = [cls for cls in cls_pred.detach().unsqueeze(1)],
+                ),
+                num_mods_out=6
+            )
+        key_points_pred = torch.cat(out_dict['reg'],dim=0) # bs, self.k, num_kps, 4/2
+        cls_pred = torch.cat(out_dict['cls'],dim=0) # bs, self.k, num_kps, 1
+        # print("key_points_pred.shape==", key_points_pred.shape)
+        if not self.model_args.predict_yaw:
+            key_points_pred_zeros = torch.zeros_like(key_points_pred)
+            key_points_pred = torch.cat([key_points_pred,key_points_pred_zeros],dim=-1) 
+        # key_points_pred: bs, self.k, num_kps, 4. (if not pred_yaw, key_points_pred[...,2:]==0)
+        k_input_embeds_kpts = self.encoder.action_m_embed(key_points_pred) # bs, self.k, num_kps, n_embed
+        
+        return key_points_pred, k_input_embeds_kpts, (cls_pred**(1/key_points_num)).unsqueeze(-1).repeat(1,1,key_points_num)
+        
+        
+        
+        
     def greedy_search(self, input_embeds, tot_scenario_contenxt_len, key_points_num):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
@@ -438,7 +585,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         return:
             input_embeds_kpts: (bs, 1, num_kps, n_embed)
             kpts_scores: (bs, 1, num_kps)
-            pred_key_points_during_generate: (bs, self.k, num_kps, 4)
+            pred_key_points_during_generate: (bs, self.k, num_kps, 4/2)
         '''
         
         device = input_embeds.device
@@ -685,14 +832,15 @@ def build_models(model_args):
                 ModelCls = TrajectoryGPT
                 tag = 'GPTTrajectory'
             else:
-                from transformer4planning.models.diffusion_KP_model import TrajectoryGPTDiffusionKPDecoder
-                ModelCls = TrajectoryGPTDiffusionKPDecoder
+                # from transformer4planning.models.diffusion_KP_model import TrajectoryGPTDiffusionKPDecoder
+                ModelCls = TrajectoryGPT
                 tag = 'GPTTrajectory with Diffusion Key Point Decoder'
         else:
-            from transformer4planning.models.diffusion_KP_model import TrajectoryGPTFeatureGen
+            # from transformer4planning.models.diffusion_KP_model import TrajectoryGPTFeatureGen
+            # we simply use TrajectoryGPT class.
             print("Now generating features.")
-            ModelCls = TrajectoryGPTFeatureGen
-            tag = 'GPTTrajectory: Model For Generating and Saving Features used for training DiffusionKeyPointDecoder'
+            ModelCls = TrajectoryGPT
+            tag = 'GPTTrajectory: Generating and Saving Features used for training DiffusionKeyPointDecoder'
     elif 'transxl' in model_args.model_name:
         config_p = TransfoXLConfig()
         config_p.pad_token_id = 0
@@ -752,12 +900,16 @@ def build_models(model_args):
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
     
     if model_args.key_points_diffusion_decoder_load_from is not None:
-        assert type(model) == TrajectoryGPTDiffusionKPDecoder, ''
+        import copy
+        from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints, PL_MODEL_WRAPPER
+        # assert type(model) == TrajectoryGPTDiffusionKPDecoder, ''
         print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
-        from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoderTFBasedForKeyPoints
-        state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
-        pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(1024, 256, out_features = 4 if model_args.predict_yaw else 2, feat_dim=model_args.key_points_diffusion_decoder_feat_dim, num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
-        pretrained_key_points_diffusion_decoder.load_state_dict(state_dict)
-        model.key_points_decoder = pretrained_key_points_diffusion_decoder
+        kpmodel = DiffusionDecoderTFBasedForKeyPoints(config_p.n_inner, config_p.n_embd, out_features = 4 if model_args.predict_yaw else 2, feat_dim=model_args.key_points_diffusion_decoder_feat_dim, num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
+        plmodel = PL_MODEL_WRAPPER.load_from_checkpoint(checkpoint_path = model_args.key_points_diffusion_decoder_load_from, model = kpmodel, lr = 1e-4, weight_decay = 1e-5)
+        
+        # state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
+        # pretrained_key_points_diffusion_decoder = DiffusionDecoderTFBasedForKeyPoints(1024, 256, out_features = 4 if model_args.predict_yaw else 2, feat_dim=model_args.key_points_diffusion_decoder_feat_dim, num_key_points = model_args.key_points_num, input_feature_seq_lenth = model_args.diffusion_condition_sequence_lenth)
+        # pretrained_key_points_diffusion_decoder.load_state_dict(state_dict)
+        model.key_points_decoder = copy.deepcopy(plmodel.model)
         
     return model

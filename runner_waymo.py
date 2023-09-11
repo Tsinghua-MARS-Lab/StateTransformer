@@ -435,10 +435,11 @@ def main():
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
         train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
+        eval_dataset=test_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
         data_collator=collate_fn
     )
+    print("Using test set as eval set.")
     
     trainer.pop_callback(DefaultFlowCallback)
 

@@ -3,9 +3,68 @@ import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
 import math
-from transformer4planning.models.decoder import DecoderResCat
-from transformer4planning.models.utils import *
+from transformer4planning.models.decoder.base import DecoderResCat
+from transformer4planning.models.diff_utils import *
 import einops
+import pytorch_lightning as pl
+class PL_MODEL_WRAPPER(pl.LightningModule):
+    def __init__(self,
+                 model,
+                 lr,
+                 weight_decay):
+        super().__init__()
+        self.model = model
+        self.lr = lr
+        self.weight_decay = weight_decay
+    def forward(self,x):
+        return self.model(x)
+    def training_step(self,batch,batch_idx):
+        self.model.train()
+        traj,cond = batch['traj'],batch['cond']
+        train_loss = self.model.train_forward(cond,traj)
+        self.log_dict({"train_loss":train_loss})
+        return {"loss":train_loss}
+    def validation_step(self,batch,batch_idx):
+        self.model.eval()
+        # with torch.no_grad():
+        #     traj,cond = batch['traj'],batch['cond']
+        #     traj_pred, cls_pred = self.model.sample_forward(cond,verbose=False, cal_elbo=False,return_diffusion=False,mc_num=1,determin=True)
+        #     # calculate mean ADE and FDE between traj and traj_pred.
+        #     error = traj - traj_pred if traj_pred.shape[-1] == 4 else traj[...,:2] - traj_pred
+        #     # batchsize * length * 4
+        #     error = error[...,:2] # batchsize * length * 2
+        #     ADE = torch.mean(torch.sqrt(torch.sum(error**2,dim=-1)),dim=-1) # batchsize
+        #     FDE = torch.sqrt(torch.sum(error[...,-1]**2,dim=-1)) # batchsize
+        #     # use ade as validation loss.
+        #     val_loss = ADE.mean()
+        with torch.no_grad():
+            traj,cond = batch['traj'],batch['cond']
+            traj_pred, cls_pred = self.model.sample_forward(cond,verbose=False, cal_elbo=False,return_diffusion=False,mc_num=50,determin=False)
+            
+            out_dict = modify_func(
+                output = dict(
+                    reg = [traj_p for traj_p in traj_pred.detach().unsqueeze(1)],
+                    cls = [cls for cls in cls_pred.detach().unsqueeze(1)],
+                ),
+                num_mods_out=6
+            )
+            traj_pred = torch.cat(out_dict['reg'],dim=0)
+            cls_pred = torch.cat(out_dict['cls'],dim=0)
+            
+            # calculate mean ADE and FDE between traj and traj_pred.
+            # print(traj.shape)
+            # print(traj_pred.shape)
+            error = traj.unsqueeze(1) - traj_pred if traj_pred.shape[-1] == 4 else traj[...,:2].unsqueeze(1) - traj_pred
+            # batchsize * 6 * length * 2/4
+            error = error[...,:2] # batchsize * 6 * length * 2
+            ADE = torch.mean(torch.sqrt(torch.sum(error**2,dim=-1)),dim=-1) # batchsize * 6
+            FDE = torch.sqrt(torch.sum(error[...,-1]**2,dim=-1)) # batchsize * 6
+            # use ade as validation loss.
+            val_loss = (ADE.min(dim=-1)[0]).mean()
+        self.log_dict({"val_loss":val_loss})
+        return {"val_loss":val_loss}
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.model.parameters(),lr=self.lr,weight_decay=self.weight_decay)
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -152,17 +211,17 @@ class DiffusionDecoderTFBased(nn.Module):
         print("We are now using diffusion model for decoder.")
         print("When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.")
 
-        self.loss_fn = nn.MSELoss(reduction='none')
+        self.loss_fn = nn.MSELoss(reduction='mean')
 
-    def fowrard(self, *args):
+    def forward(self, *args, **kwargs):
         if self.training:
-            return self.train_forward(self,*args)
+            return self.train_forward(self,*args, **kwargs)
         else:
-            return self.sample_forward(self,*args)
+            return self.sample_forward(self,*args, **kwargs)
 
 
     # ------------------------- Train -------------------------
-    def train_forward(self, hidden_states, trajectory_label):
+    def train_forward(self, hidden_states, trajectory_label, reduction='mean'):
         trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
         # print(trajectory_label.shape)
@@ -170,23 +229,23 @@ class DiffusionDecoderTFBased(nn.Module):
         # print("xsuifhqwouedcnakjdafeawliu")
         # assert False, 'debugging 2'
         # returns loss
-        return self.train_loss(trajectory_label, hidden_states)
+        return self.train_loss(trajectory_label, hidden_states, reduction=reduction)
 
-    def train_loss(self, x, state):
+    def train_loss(self, x, state, reduction='mean'):
         batch_size=len(x)
         t = torch.randint(0,self.n_timesteps,(batch_size,), device = x.device).long()
-        return self.p_losses(x, state, t)
+        return self.p_losses(x, state, t, reduction=reduction)
 
-    def p_losses(self, x_start, state, t):
+    def p_losses(self, x_start, state, t, reduction='mean'):
         noise = torch.randn_like(x_start)
         x_noisy = self.q_sample(x_start = x_start, t=t, noise = noise)
         x_recon = self.model(x_noisy, t, state)
         assert noise.shape == x_recon.shape
 
         if self.predict_epsilon:
-            loss = self.loss_fn(x_recon, noise)
+            loss = self.loss_fn(x_recon, noise) if reduction == 'mean' else torch.nn.functional.mse_loss(x_recon, noise, reduction='none')
         else:
-            loss = self.loss_fn(x_recon, x_start)
+            loss = self.loss_fn(x_recon, x_start) if reduction == 'mean' else torch.nn.functional.mse_loss(x_recon, x_start, reduction='none')
         return loss
 
     def q_sample(self, x_start, t, noise=None):
@@ -222,7 +281,7 @@ class DiffusionDecoderTFBased(nn.Module):
                 # sjjjjjj 0313 try: double the noise.
             else:
                 x = torch.zeros(shape, device=device)
-            total_cls = -(torch.mean(x.detach()**2, dim=1))         # Consider the prior score
+            total_cls = -(torch.mean(x.detach()**2, dim=1).mean(dim=-1))         # Consider the prior score
             assert not verbose, 'not supported'
             assert not cal_elbo, 'not supported'
             assert not return_diffusion, 'not supported'
@@ -231,7 +290,7 @@ class DiffusionDecoderTFBased(nn.Module):
             for i in reversed(range(0,self.n_timesteps)):
                 timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
                 x, cls = self.p_sample(x, timesteps, state, determin=determin)
-                total_cls = total_cls + cls
+                total_cls = total_cls + cls.mean(dim=-1)
                 progress.update({'t': i})
 
             return x, total_cls
@@ -241,16 +300,17 @@ class DiffusionDecoderTFBased(nn.Module):
             shape = tuple([batch_size * mc_num] + list(shape[1:]))
             assert not determin, 'It does not make sense to use deterministic sampling with mc_num > 1'
             x = torch.randn(shape, device=device)
-            total_cls = -(torch.mean(x.detach()**2, dim=1))         # Consider the prior score
+            total_cls = -(torch.mean(x.detach()**2, dim=-1).mean(dim=-1))         # Consider the prior score
             progress = Silent()
             # repeat state in dim 0 for mc_num times.
             # we don't know the shape of state, so we use torch.repeat_interleave
             state = torch.repeat_interleave(state, mc_num, dim=0)
             # then we reshape state into shape()
             for i in reversed(range(0,self.n_timesteps)):
-                timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
+                timesteps = torch.full((batch_size * mc_num,), i, device=device, dtype=torch.long)
                 x, cls = self.p_sample(x, timesteps, state, determin=determin)
-                total_cls = total_cls + cls
+                # print('cls.shape==',cls.shape)
+                total_cls = total_cls + cls.mean(dim=-1)
                 progress.update({'t': i})
 
             # reshape x into shape (batch_size, mc_num, ...)
@@ -308,12 +368,12 @@ class DiffusionDecoderTFBased(nn.Module):
 class DiffusionDecoderTFBasedForKeyPoints(DiffusionDecoderTFBased):
     def __init__(self, hidden_size, in_features, out_features = 2,
                  beta_schedule = 'linear', linear_start=0.01,linear_end=0.9,n_timesteps=10,
-                 loss_type='l2', clip_denoised=True,predict_epsilon=True,max_action = 100,feat_dim=1024,num_key_points = 5,input_feature_seq_lenth = 16,
+                 clip_denoised=True,predict_epsilon=True,max_action = 100,feat_dim=1024,num_key_points = 5,input_feature_seq_lenth = 16,
                  specified_key_points = True, forward_specified_key_points = True,
                  ):
         super(DiffusionDecoderTFBasedForKeyPoints, self).__init__(hidden_size, in_features, out_features = out_features,
                  beta_schedule = beta_schedule, linear_start=linear_start,linear_end=linear_end,n_timesteps=n_timesteps,
-                 loss_type=loss_type, clip_denoised=clip_denoised,predict_epsilon=predict_epsilon,max_action = max_action,feat_dim=feat_dim,)
+                 clip_denoised=clip_denoised,predict_epsilon=predict_epsilon,max_action = max_action,feat_dim=feat_dim,)
         self.input_feature_seq_lenth = input_feature_seq_lenth
         self.num_key_points = num_key_points
         self.model = NewDecoderTFBasedForKeyPoints(hidden_size, in_features, out_features,feat_dim=feat_dim,input_feature_seq_lenth = input_feature_seq_lenth,key_point_num=num_key_points,
@@ -384,10 +444,10 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
         )
 
         if specified_key_points:
-            if forward_specified_key_points:
+            if not forward_specified_key_points:
                 key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
             else:
-                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)[...,::-1]
+                key_points_position_embedding = torch.flip(exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0),[-2])
         else:
             key_points_position_embedding = uniform_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
             
@@ -398,11 +458,9 @@ class NewDecoderTFBasedForKeyPoints(nn.Module):
         
     def forward(self,x,t,state):
         seq_lenth = x.shape[-2]
-        # First encode the cond, time, x.
-        state_embedding = self.state_encoder2(self.state_encoder1(state)) # B * 40 * feat_dim
-        x_embedding = self.x_encoder(x) # B * 40 * feat_dim
-        time_embedding = self.time_encoder(t) # B * feat_dim.
-        # change the shape of time_embedding to B * 1 * feat_dim.
+        state_embedding = self.state_encoder2(self.state_encoder1(state)) 
+        x_embedding = self.x_encoder(x) 
+        time_embedding = self.time_encoder(t) 
         time_embedding = einops.rearrange(time_embedding,'... d -> ... 1 d')
         seq = torch.cat([state_embedding, x_embedding],dim = -2)
         seq = seq + time_embedding + self.position_embedding

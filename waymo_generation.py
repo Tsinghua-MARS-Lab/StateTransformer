@@ -63,15 +63,15 @@ def main(args):
                 scenario = scenario_pb2.Scenario()
                 scenario.ParseFromString(bytearray(data.numpy()))
 
+                track_infos = decode_tracks_from_proto(scenario.tracks)
+                track_index_to_predict = torch.tensor([cur_pred.track_index for cur_pred in scenario.tracks_to_predict])
+                agent_trajs = torch.from_numpy(track_infos['trajs'])  # (num_objects, num_timestamp, 10)
+                current_time_index = scenario.current_time_index
+                ego_index = torch.tensor([idx for idx in track_index_to_predict if agent_trajs[idx, current_time_index, -1] == 1], dtype=torch.int32)
+                
                 if save_dict:
-                    track_infos = decode_tracks_from_proto(scenario.tracks)
-                    track_index_to_predict = torch.tensor([cur_pred.track_index for cur_pred in scenario.tracks_to_predict])
-                    map_infos = decode_map_features_from_proto(scenario.map_features)
-                    
-                    agent_trajs = torch.from_numpy(track_infos['trajs'])  # (num_objects, num_timestamp, 10)
-                    current_time_index = scenario.current_time_index
-                    ego_index = torch.tensor([idx for idx in track_index_to_predict if agent_trajs[idx, current_time_index, -1] == 1], dtype=torch.int32)
                     # agent_dict = process_agents(agent_trajs=agent_trajs)
+                    map_infos = decode_map_features_from_proto(scenario.map_features)
                     map_polylines_data, map_polylines_mask, polyline_index = create_map_data(map_infos=map_infos)
                         
                     dicts_to_save[scenario.scenario_id] = {
@@ -103,10 +103,12 @@ def main(args):
                             "interaction_index": interaction_index,
                         }
                 else:
-                    yield {
-                        "file_name": file_name,
-                        "scenario_id": scenario.scenario_id,
-                    }
+                    for idx in ego_index:
+                        yield {
+                            "file_name": file_name,
+                            "scenario_id": scenario.scenario_id,
+                            "ego_index": idx,
+                        }
 
             if len(dicts_to_save.keys()) > 0:
                 with open(os.path.join(output_path, file_name), "wb") as f:
@@ -150,8 +152,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_dict', default=False, action='store_true')
     parser.add_argument('--interaction', default=False, action='store_true')
     
-    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_testing/data_dict')
-    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_testing/waymo_cache')
+    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_tmp/data_dict')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_tmp/waymo_cache')
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
 
     parser.add_argument('--num_proc', type=int, default=20)

@@ -1,0 +1,153 @@
+Global seed set to 42
+wandb: Currently logged in as: jingzheshi. Use `wandb login --relogin` to force relogin
+wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: Tracking run with wandb version 0.15.8
+wandb: Run data is saved locally in /home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/wandb/run-20230823_101730-mvvgtyyv
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run _runtime:2023_08_23___10_17_27
+wandb: ⭐️ View project at https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+wandb: 🚀 View run at https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest/runs/mvvgtyyv
+GPU available: True, used: True
+TPU available: False, using: 0 TPU cores
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 0, MEMBER: 1/2
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 1, MEMBER: 2/2
+----------------------------------------------------------------------------------------------------
+distributed_backend=nccl
+All DDP processes registered. Starting ddp with 2 processes
+----------------------------------------------------------------------------------------------------
+
+LOCAL_RANK: 1 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+
+  | Name  | Type                                | Params
+--------------------------------------------------------------
+0 | model | DiffusionDecoderTFBasedForKeyPoints | 13.4 M
+--------------------------------------------------------------
+13.4 M    Trainable params
+0         Non-trainable params
+13.4 M    Total params
+53.645    Total estimated model params size (MB)
+We use the following hyper-parameters:
+NAME                 : Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 256
+BATCH_SIZE           : 5
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 2
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 13411362
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+Validation sanity check: 0it [00:00, ?it/s]Validation sanity check:   0%|          | 0/2 [00:00<?, ?it/s]We use the following hyper-parameters:
+NAME                 : Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 256
+BATCH_SIZE           : 5
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 2
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 13411362
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+We are now using modifyTraj function defined in traj_modify_from_MultiPathPP.py.
+Currently using fde sampling method to initialize the output of EM algorithm. Default is fde.
+We are now using modifyTraj function defined in traj_modify_from_MultiPathPP.py.
+Currently using fde sampling method to initialize the output of EM algorithm. Default is fde.
+Now we run for 15 iterations of EM algorithm.
+wandb: Waiting for W&B process to finish... (failed 1). Press Control-C to abort syncing.
+Now we run for 15 iterations of EM algorithm.
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 371, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 367, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 844, in run_train
+    self.run_sanity_check(self.lightning_module)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 1112, in run_sanity_check
+    self.run_evaluation()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 967, in run_evaluation
+    output = self.evaluation_loop.evaluation_step(batch, batch_idx, dataloader_idx)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/evaluation_loop.py", line 174, in evaluation_step
+    output = self.trainer.accelerator.validation_step(args)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 226, in validation_step
+    return self.training_type_plugin.validation_step(*args)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/ddp.py", line 340, in validation_step
+    return self.model(*args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
+    output = self.module(*inputs[0], **kwargs[0])
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/overrides/base.py", line 57, in forward
+    output = self.module.validation_step(*inputs, **kwargs)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 172, in validation_step
+    cls_pred = torch.cat(out_dict['cls'][0],dim=0)
+TypeError: cat() received an invalid combination of arguments - got (Tensor, dim=int), but expected one of:
+ * (tuple of Tensors tensors, int dim, *, Tensor out)
+ * (tuple of Tensors tensors, name dim, *, Tensor out)
+
+wandb: - 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: \ 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: | 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: / 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: - 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: \ 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: | 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: / 0.015 MB of 0.015 MB uploaded (0.000 MB deduped)wandb: 🚀 View run _runtime:2023_08_23___10_17_27 at: https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest/runs/mvvgtyyv
+wandb: ️⚡ View job at https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60015-allvalid-256FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest/jobs/QXJ0aWZhY3RDb2xsZWN0aW9uOjkyMjc3ODc0/version_details/v0
+wandb: Synced 6 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20230823_101730-mvvgtyyv/logs

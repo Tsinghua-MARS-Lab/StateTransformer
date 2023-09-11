@@ -9,7 +9,7 @@ class WaymoDL:
 
         self.data_root = data_path["WAYMO_DATA_ROOT"]
         self.split_dir = data_path["SPLIT_DIR"][mode]
-        if mode == "val" or mode == "test" and interaction == True: self.split_dir += "_interactive"
+        if (mode == "val" or mode == "test") and interaction == True: self.split_dir += "_interactive"
         self.data_path = os.path.join(self.data_root, self.split_dir)
         src_files = glob.glob(os.path.join(self.data_path, '*.tfrecord*'))
         src_files.sort()

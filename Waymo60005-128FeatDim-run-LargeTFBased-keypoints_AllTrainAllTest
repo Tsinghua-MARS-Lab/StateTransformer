@@ -1,0 +1,42 @@
+Global seed set to 42
+We use the following hyper-parameters:
+NAME                 : Waymo60005-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60005-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60005-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 6000
+TRAIN_FINI_IDX       : 60870
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 5500
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Traceback (most recent call last):
+  File "runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "runner_diffusionKPdecoder_plddp.py", line 257, in main
+    train_dataset = Tensor_Dataset(TRAIN_DIR,split="train",start_idx = TRAIN_INIT_IDX, finish_idx = TRAIN_FINI_IDX, traj_or_keypoints = TRAJ_OR_KEYPOINTS)
+  File "runner_diffusionKPdecoder_plddp.py", line 91, in __init__
+    assert os.path.exists(traj_file)
+AssertionError

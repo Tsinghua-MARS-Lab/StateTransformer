@@ -134,7 +134,7 @@ class ModelArguments:
         default = 5, metadata = {"help": "Number of key points. Only used to initialize diffusion KP decoder."}
     )
     diffusion_condition_sequence_lenth: Optional[int] = field(
-        default = 16, metadata = {"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
+        default = 22, metadata = {"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
     )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default = None, metadata = {"help": "From which file to load the pretrained key_points_diffusion_decoder."}
@@ -143,7 +143,7 @@ class ModelArguments:
         default=False
     )
     mtr_config_path: Optional[str] = field(
-        default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+        default="/public/MARS/t4p/gpt.yaml"
     )
     generation_method: Optional[str] = field(
         default="beam"

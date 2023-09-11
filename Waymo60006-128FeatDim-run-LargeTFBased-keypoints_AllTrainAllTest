@@ -1,0 +1,844 @@
+Global seed set to 42
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: / Waiting for wandb.init()...wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: / Waiting for wandb.init()...wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: / Waiting for wandb.init()...wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: Tracking run with wandb version 0.15.8
+wandb: Run data is saved locally in /home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/wandb/run-20230823_080540-e66japbu
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run _runtime:2023_08_23___08_05_34
+wandb: ⭐️ View project at https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+wandb: 🚀 View run at https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest/runs/e66japbu
+GPU available: True, used: True
+TPU available: False, using: 0 TPU cores
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 1, MEMBER: 2/8
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 2, MEMBER: 3/8
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 3, MEMBER: 4/8
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 4, MEMBER: 5/8
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 5, MEMBER: 6/8
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 0, MEMBER: 1/8
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 6, MEMBER: 7/8
+Global seed set to 42
+Global seed set to 42
+initializing ddp: GLOBAL_RANK: 7, MEMBER: 8/8
+----------------------------------------------------------------------------------------------------
+distributed_backend=nccl
+All DDP processes registered. Starting ddp with 8 processes
+----------------------------------------------------------------------------------------------------
+
+LOCAL_RANK: 7 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 5 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 4 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 6 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 1 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 3 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+LOCAL_RANK: 2 - CUDA_VISIBLE_DEVICES: [0,1,2,3,4,5,6,7]
+
+  | Name  | Type                                | Params
+--------------------------------------------------------------
+0 | model | DiffusionDecoderTFBasedForKeyPoints | 7.5 M 
+--------------------------------------------------------------
+7.5 M     Trainable params
+0         Non-trainable params
+7.5 M     Total params
+30.111    Total estimated model params size (MB)
+We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+Validation sanity check: 0it [00:00, ?it/s]Validation sanity check:   0%|          | 0/2 [00:00<?, ?it/s]We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+We use the following hyper-parameters:
+NAME                 : Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+SEED                 : 42
+N_INNER              : 1024
+N_EMBED              : 256
+FEAT_DIM             : 128
+BATCH_SIZE           : 50
+NUM_WORKERS          : 10
+LR                   : 8e-05
+WEIGHT_DECAY         : 2e-05
+TRAIN_DIR            : /localdata_ssd/waymo_1/diffusion_dataset/train/
+TEST_DIR             : /localdata_ssd/waymo_1/diffusion_dataset/test/
+SAVING_K             : 2
+SAVING_DIR           : /localdata_ssd/waymo_1/waymo_diff_new_keypoints_decoderTFBased_saving_dir/Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_PROJECT        : diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest
+WANDB_ENTITY         : jingzheshi
+MAX_EPOCHS           : 100
+PRECISION            : 32
+TRAIN_INIT_IDX       : 1380
+TRAIN_FINI_IDX       : 16400
+TEST_INIT_IDX        : 0
+TEST_FINI_IDX        : 1360
+TRAJ_OR_KEYPOINTS    : keypoints
+NUM_KEY_POINTS       : 5
+FEATURE_SEQ_LENTH    : 22
+PREDICT_YAW          : False
+SPECIFIED_KEY_POINTS : True
+FORWARD_SPECIFIED_KEY_POINTS : False
+NUM_GPU              : 8
+We are now using diffusion model for decoder.
+When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
+Number of parameters == 7527778
+Now checking if all files exist for train set...
+Now checking if all files exist for test set...
+Validation sanity check:  50%|█████     | 1/2 [00:02<00:02,  2.61s/it]Validation sanity check: 100%|██████████| 2/2 [00:03<00:00,  1.52s/it]                                                                      Global seed set to 42
+Global seed set to 42
+Global seed set to 42
+Global seed set to 42
+Global seed set to 42
+Global seed set to 42
+Global seed set to 42
+Global seed set to 42
+Training: 0it [00:00, ?it/s]Training:   0%|          | 0/42 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/42 [00:00<?, ?it/s] [W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
+wandb: Waiting for W&B process to finish... (failed 1). Press Control-C to abort syncing.
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
+Traceback (most recent call last):
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_waymo_1/transformer4planning/runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
+wandb: 🚀 View run _runtime:2023_08_23___08_05_34 at: https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest/runs/e66japbu
+wandb: ️⚡ View job at https://wandb.ai/jingzheshi/diffusion_decoder_TFBased_Waymo60006-128FeatDim-run-LargeTFBased-keypoints_AllTrainAllTest/jobs/QXJ0aWZhY3RDb2xsZWN0aW9uOjkyMjQxNzEy/version_details/v0
+wandb: Synced 6 W&B file(s), 0 media file(s), 2 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20230823_080540-e66japbu/logs
+Traceback (most recent call last):
+  File "runner_diffusionKPdecoder_plddp.py", line 330, in <module>
+    main()
+  File "runner_diffusionKPdecoder_plddp.py", line 326, in main
+    trainer.fit(plmodel,train_dataloader,test_dataloader)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 460, in fit
+    self._run(model)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 758, in _run
+    self.dispatch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 799, in dispatch
+    self.accelerator.start_training(self)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/accelerators/accelerator.py", line 96, in start_training
+    self.training_type_plugin.start_training(trainer)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/plugins/training_type/training_type_plugin.py", line 144, in start_training
+    self._results = trainer.run_stage()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 809, in run_stage
+    return self.run_train()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/trainer.py", line 871, in run_train
+    self.train_loop.run_training_epoch()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/training_loop.py", line 491, in run_training_epoch
+    for batch_idx, (batch, is_last_batch) in train_dataloader:
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/profiler/profilers.py", line 112, in profile_iterable
+    value = next(iterator)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 530, in prefetch_iterator
+    last = next(it)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 464, in __next__
+    return self.request_next_batch(self.loader_iters)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/trainer/supporters.py", line 478, in request_next_batch
+    return apply_to_collection(loader_iters, Iterator, next)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/pytorch_lightning/utilities/apply_func.py", line 85, in apply_to_collection
+    return function(data, *args, **kwargs)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+NameError: Caught NameError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 47, in fetch
+    return self.collate_fn(data)
+  File "runner_diffusionKPdecoder_plddp.py", line 281, in collate_fn_train
+    return collate_fn('train',batch)
+  File "runner_diffusionKPdecoder_plddp.py", line 271, in collate_fn
+    traj = interpolate_with_exp_interval(traj,mask)
+  File "runner_diffusionKPdecoder_plddp.py", line 40, in interpolate_with_exp_interval
+    max_pairs = get_range_indices(mask[:,:,0].t())
+NameError: name 'get_range_indices' is not defined
+
