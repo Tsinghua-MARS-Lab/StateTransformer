@@ -278,7 +278,7 @@ def main():
         "N_INNER": 1024,
         "N_EMBED": 256,
         "FEAT_DIM": 256,
-        "BATCH_SIZE": 8,
+        "BATCH_SIZE": 16,
         "NUM_WORKERS": 10,
         "LR": 8e-5,
         "WEIGHT_DECAY": 2e-5,
@@ -300,7 +300,7 @@ def main():
         "PREDICT_YAW": False,
         "SPECIFIED_KEY_POINTS": True,
         "FORWARD_SPECIFIED_KEY_POINTS": False,
-        "NUM_GPU":1,
+        "NUM_GPU":7,
         "LOAD_FROM":None,
     }
 
