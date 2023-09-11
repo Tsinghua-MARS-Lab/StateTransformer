@@ -188,26 +188,28 @@ class DiffusionWrapper(nn.Module):
         print("We are now using diffusion model for decoder.")
         print("When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.")
 
-        self.loss_fn = nn.MSELoss(reduction='mean')
+        self.loss_fn = nn.MSELoss(reduction='none')
     
     def forward(self, hidden_state, label=None, **kwargs):
         if self.training:
-            return self.train_forward(hidden_state, label)
+            return self.train_forward(hidden_state, label, **kwargs)
         else:
             return self.sample_forward(hidden_state, **kwargs)
 
     # ------------------------- Train -------------------------
-    def train_forward(self, hidden_state, trajectory_label):
+    def train_forward(self, hidden_state, trajectory_label, **kwargs):
         trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
-        return self.train_loss(trajectory_label, hidden_state)
+        trajectory_label_cls = torch.nn.functional.one_hot(kwargs['label_cls'], num_classes=64).unsqueeze(1).float()
+        # return self.train_loss(trajectory_label_cls, hidden_state, **kwargs)
+        return self.train_loss(trajectory_label, hidden_state, **kwargs)
 
-    def train_loss(self, x, state):
+    def train_loss(self, x, state, **kwargs):
         batch_size=len(x)
         t = torch.randint(0,self.n_timesteps,(batch_size,), device = x.device).long()
-        return self.p_losses(x, state, t)
+        return self.p_losses(x, state, t, **kwargs)
 
-    def p_losses(self, x_start, state, t):
+    def p_losses(self, x_start, state, t, **kwargs):
         noise = torch.randn_like(x_start)
         x_noisy = self.q_sample(x_start = x_start, t=t, noise = noise)
         x_recon = self.model(x_noisy, t, state)
@@ -217,6 +219,10 @@ class DiffusionWrapper(nn.Module):
             loss = self.loss_fn(x_recon, noise)
         else:
             loss = self.loss_fn(x_recon, x_start)
+        
+        label_mask = kwargs['label_mask']
+        loss = (loss.mean(dim=-1) * label_mask).sum() / (label_mask.sum() + 1e-7)
+            
         return loss
 
     def q_sample(self, x_start, t, noise=None):
