@@ -352,7 +352,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         track_index_to_predict = kwargs.get("track_index_to_predict")
         current_time_index = int(kwargs.get("current_time_index")[0])
         
-        map_polylines, map_polylines_mask, map_polylines_center = self.prepare_map_input(kwargs.get("map_polylines"), kwargs.get("map_polylines_mask"), kwargs.get("polyline_index"))
+        map_polylines, map_polylines_mask, map_polylines_center = kwargs.get("map_polylines"), kwargs.get("map_polylines_mask"), kwargs.get("map_polylines_center")
         ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
         ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
 
@@ -383,12 +383,12 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                 _, context_length, n_embed = input_embeds.shape
             else:
                 input_dict = {
-                "obj_trajs": agent_trajs[:, :, :current_time_index + 1, :-1],
-                "obj_trajs_mask": agent_trajs[:, :, :current_time_index + 1, -1] > 0,
-                "map_polylines": map_polylines,
-                "map_polylines_mask": map_polylines_mask > 0,
-                "obj_trajs_pos": agent_trajs[:, :, :current_time_index + 1, :3],
-                "map_polylines_center": map_polylines_center,
+                    "obj_trajs": kwargs.get('agent_trajs_input'),
+                    "obj_trajs_mask": agent_trajs[:, :, :current_time_index + 1, -1] > 0,
+                    "map_polylines": map_polylines,
+                    "map_polylines_mask": map_polylines_mask > 0,
+                    "obj_trajs_pos": agent_trajs[:, :, :current_time_index + 1, :3],
+                    "map_polylines_center": map_polylines_center,
                 }
                 state_embeds = self.context_encoder({"input_dict": input_dict})
                 context_actions = ego_trajs[:, :current_time_index + 1, [0, 1, 2, 6]]
@@ -464,12 +464,6 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             "gt_anchor_cls": anchor_GT_cls if self.model_args.use_intention else None,
             "gt_anchor_logits": anchor_GT_logits if self.model_args.use_intention else None,
         }
-
-        if self.model_args.interaction:
-            info_dict.update({
-                "agents_num_per_scenario": kwargs.get("agents_num_per_scenario"),
-            })
-            input_embeds = self.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=True)
 
         return input_embeds, info_dict
     

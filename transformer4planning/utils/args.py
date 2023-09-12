@@ -151,11 +151,8 @@ class ModelArguments:
         default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
     # end of diffusion decoder args
-    interaction: Optional[bool] = field(
-        default=False
-    )
     mtr_config_path: Optional[str] = field(
-        default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+        default="/home/ldr/workspace/transformer4planning/config/gpt_small.yaml"
     )
     generation_method: Optional[str] = field(
         default="beam"

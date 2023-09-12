@@ -32,7 +32,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.next_token_scorer_decoder = None
         self.key_points_decoder = None
         out_features = 4 if self.model_args.predict_yaw else 2
-        if self.model_args.task == "waymo" and self.model_args.use_gmm: out_features = 5
+        # if self.model_args.task == "waymo" and self.model_args.use_gmm: out_features = 5
         if not self.model_args.pred_key_points_only:
             self.traj_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
         if self.ar_future_interval > 0:
@@ -165,7 +165,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 trajectory_label_mask = info_dict["trajectory_label_mask"]
                 loss_fct = nn.MSELoss(reduction="none")
                 _loss = (loss_fct(traj_logits[..., :2], trajectory_label[..., :2].to(device)) * trajectory_label_mask).sum() / (
-                            trajectory_label_mask.sum() + 1e-7)  * 0.1
+                            trajectory_label_mask.sum() + 1e-7)
                 loss += _loss
             else:
                 if self.model_args.predict_yaw:
@@ -351,8 +351,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             future_key_embeds_dummy = self.encoder.kpts_m_embed(future_key_points) if not self.encoder.prev_model else self.encoder.action_m_embed(future_key_points)
             key_points_num = future_key_points.shape[1]
 
-            if self.model_args.interaction:
-                input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
             input_embeds[:, additional_token_num + context_length:additional_token_num + context_length + key_points_num, :] = future_key_embeds_dummy
         elif self.ar_future_interval == 0:
             key_points_num = 0
@@ -395,8 +393,50 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         )
 
                         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
-                        traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
-                        traj_logits = self.traj_decoder(traj_hidden_state)
+                        if key_points_num > 0:
+                            assert self.model_args.ar_future_interval > 0 and self.k == 1
+                            length_before_keypoints = length_before_intention + self.anchor_len
+                            for i in range(key_points_num):
+                                input_embeds_current = input_embeds[:, :length_before_keypoints + i, :]
+                                attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+                                position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+                                transformer_output = self.transformer(
+                                    inputs_embeds=input_embeds_current,
+                                    attention_mask=attention_mask,
+                                    position_ids=position_ids,
+                                )
+                                transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+                                future_key_point_hidden_state = transformer_outputs_hidden_state[:,
+                                                                length_before_keypoints + i - 1,
+                                                                :].reshape(batch_size, 1, -1)
+
+                                key_points_logit = self.key_points_decoder(future_key_point_hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2
+                                pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
+                                if self.model_args.predict_yaw:
+                                    pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
+                                else:
+                                    pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+
+                                key_point_embed = self.encoder.kpts_m_embed(pred_key_point).reshape(batch_size, 1, -1) if not self.encoder.prev_model else self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1) # b, 1, n_embed
+                                # replace embed at the next position
+                                input_embeds[:, length_before_keypoints + i, :] = key_point_embed[:, 0, :]
+
+                            # generate remaining trajectory
+                            transformer_output = self.transformer(
+                                inputs_embeds=input_embeds,
+                                attention_mask=None,
+                                position_ids=None,
+                            )
+                            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+                            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+                            # expected shape for pred trajectory is (b, pred_length, 4)
+                            if self.traj_decoder is not None:
+                                traj_logits = self.traj_decoder(traj_hidden_state)
+                            else:
+                                traj_logits = trajectory_label_dummy[..., :2]
+                        else:
+                            traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length - 1:-1, :]
+                            traj_logits = self.traj_decoder(traj_hidden_state)
                         pred_trajs.append(traj_logits)
 
                     pred_trajs = torch.stack(pred_trajs, dim=1)
@@ -414,38 +454,38 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             else:
                 raise NotImplementedError
             
-            # if self.model_args.use_intention: key_points_num += self.anchor_len
-            # all_traj_logits = []
-            # all_kps_logits = []
-            # n_mode = input_embeds_kpts.shape[1]
-            # for m_i in range(n_mode):
-            #     input_embeds[:, length_before_keypoints:length_before_keypoints+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
-            #     transformer_output = self.transformer(
-            #         inputs_embeds=input_embeds,
-            #         attention_mask=info_dict.get("instance_valid_mask", None),
-            #         position_ids=None,
-            #     )
-            #     transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            if self.model_args.use_intention: key_points_num += self.anchor_len
+            all_traj_logits = []
+            all_kps_logits = []
+            n_mode = input_embeds_kpts.shape[1]
+            for m_i in range(n_mode):
+                input_embeds[:, length_before_keypoints:length_before_keypoints+key_points_num, :] = input_embeds_kpts[:, m_i, :, :] # (bs, num_kpts, n_embdes)
+                transformer_output = self.transformer(
+                    inputs_embeds=input_embeds,
+                    attention_mask=info_dict.get("instance_valid_mask", None),
+                    position_ids=None,
+                )
+                transformer_outputs_hidden_state = transformer_output['last_hidden_state']
                 
-            #     # get traj_logits
-            #     traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
-            #     traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
-            #     all_traj_logits.append(traj_logits[:, None, :, :])
+                # get traj_logits
+                traj_hidden_state = transformer_outputs_hidden_state[:, -pred_length-1:-1, :]
+                traj_logits = self.traj_decoder(traj_hidden_state) # (bs, pred_len, 2)
+                all_traj_logits.append(traj_logits[:, None, :, :])
                 
-            # all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
-            # all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
+            all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
+            all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
             
-            # kpts_scores = kpts_scores.softmax(dim=1) # (bs, k, num_kps)
+            kpts_scores = kpts_scores.softmax(dim=1) # (bs, k, num_kps)
             
-            # # use accumulated score
-            # all_traj_scores = torch.ones((batch_size, n_mode), device=device)
+            # use accumulated score
+            all_traj_scores = torch.ones((batch_size, n_mode), device=device)
             
-            # for k_i in range(key_points_num):
-            #     all_traj_scores *= kpts_scores[:, :, k_i]
-            # all_traj_scores = all_traj_scores / all_traj_scores.sum()
+            for k_i in range(key_points_num):
+                all_traj_scores *= kpts_scores[:, :, k_i]
+            all_traj_scores = all_traj_scores / all_traj_scores.sum()
             
             output_dict = {}
-            # output_dict.update({'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores})
+            output_dict.update({'key_points_logits': all_kps_logits, 'logits': all_traj_logits, 'scores': all_traj_scores})
             
             if self.model_args.use_intention:
                 gt_anchor_cls = info_dict["gt_anchor_cls"]

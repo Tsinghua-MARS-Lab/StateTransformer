@@ -72,7 +72,6 @@ def main(args):
                 ego_index = torch.tensor([idx for idx in track_index_to_predict if agent_trajs[idx, current_time_index, -1] == 1], dtype=torch.int32)
                 
                 if save_dict:
-                    # agent_dict = process_agents(agent_trajs=agent_trajs)
                     map_infos = decode_map_features_from_proto(scenario.map_features)
                     map_polylines_data, map_polylines_mask, polyline_index = create_map_data(map_infos=map_infos)
                         
