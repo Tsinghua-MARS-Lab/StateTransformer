@@ -529,7 +529,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embeds_kpts = self.action_m_embed(pred_key_points_during_generate)
         
         elif self.use_anchor:
-            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.beam_search_anchor_only(input_embeds, tot_scenario_contenxt_len, out_num_mode=self.out_num_mode,
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.anchor_topK_search(input_embeds, tot_scenario_contenxt_len, out_num_mode=self.out_num_mode,
                                                                                                center_obj_anchor_pts=center_obj_anchor_pts, key_point_num=key_points_num,
                                                                                                debug_GT_cls=anchor_GT_cls,debug_GT_logits=future_key_points,
                                                                                                debug_GT_logits_mask=future_key_points_gt_mask)
@@ -929,7 +929,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         return pred_key_points_during_generate[:, 0:out_num_mode, ...], k_input_embeds_kpts[:, 0:out_num_mode, ...], k_kpts_scores[:, 0:out_num_mode, ...], k_kpts_index
     
-    def beam_search_anchor_only(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None, key_point_num=5,
+    def anchor_topK_search(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None, key_point_num=5,
                                 debug_GT_cls=None, debug_GT_logits=None, debug_GT_logits_mask=None):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
