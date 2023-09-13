@@ -36,7 +36,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # encoder
         self.context_encoder = MTREncoder(vector_model_cfg.CONTEXT_ENCODER)
-        self.context_num = 2
+        self.context_num = 3
         
         # load intention points
         intention_points_file = vector_model_cfg.MOTION_DECODER.INTENTION_POINTS_FILE
@@ -194,7 +194,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         map_feature = batch_dict['map_feature']
         state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
         state_embeds = state_embeds.max(dim=1)[0]
-        
+        print(obj_embeds.shape, info_dict["obj_types"].shape)
+        exit()
         obj_embeds = obj_feature.max(dim=1)[0] # (bs, num_obj, num_timestamp, 256)
         map_embeds = map_feature.max(dim=1)[0] # (bs, num_poly, num_timestamp, 256)
         
