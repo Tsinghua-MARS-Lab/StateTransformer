@@ -10,7 +10,8 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformer4planning.models.encoder.nuplan_raster_encoder import *
 from transformer4planning.models.utils import nll_loss_gmm_direct
 from transformer4planning.libs.mlp import DecoderResCat
-from transformer4planning.models.encoder.mtr_encoder import MTREncoder
+from transformer4planning.models.encoder.mtr_encoder import MTREncoder, MTREncoderWithType
+# from transformer4planning.models.encoder.mtr_encoder_legacy import MTREncoder
 from transformer4planning.utils.mtr_utils import batch_nms
     
     
@@ -35,7 +36,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.transformer = GPT2Model(llm_config)
         
         # encoder
-        self.context_encoder = MTREncoder(vector_model_cfg.CONTEXT_ENCODER)
+        self.type_embed = True
+        if self.type_embed:
+            self.context_encoder = MTREncoderWithType(vector_model_cfg.CONTEXT_ENCODER)
+        else:
+            self.context_encoder = MTREncoder(vector_model_cfg.CONTEXT_ENCODER)
         self.context_num = 3
         
         # load intention points
@@ -205,14 +210,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         batch_dict = self.context_encoder({'input_dict': input_dict, 
                                            'batch_sample_count': batch_sample_count})
         
-        obj_feature = batch_dict['obj_feature']
-        map_feature = batch_dict['map_feature']
-        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
-        state_embeds = state_embeds.max(dim=1)[0]
-        print(obj_embeds.shape, info_dict["obj_types"].shape)
-        exit()
-        obj_embeds = obj_feature.max(dim=1)[0] # (bs, num_obj, num_timestamp, 256)
-        map_embeds = map_feature.max(dim=1)[0] # (bs, num_poly, num_timestamp, 256)
+        obj_embeds = batch_dict['obj_feature']
+        map_embeds = batch_dict['map_feature']
+        state_embeds = torch.cat((map_embeds, obj_embeds), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        
+        if not self.type_embed:
+            state_embeds = state_embeds.max(dim=1)[0]
+
+            obj_embeds = obj_embeds.max(dim=1)[0] # (bs, num_obj, num_timestamp, 256)
+            map_embeds = map_embeds.max(dim=1)[0] # (bs, num_poly, num_timestamp, 256)
         
         # map_lane_embeds = batch_dict['map_lane_feature'].max(dim=1)[0] # (bs, num_lane, num_timestamp, 256)
         # map_others_embeds = batch_dict['map_others_feature'].max(dim=1)[0] # (bs, num_others_lane, num_timestamp, 256)

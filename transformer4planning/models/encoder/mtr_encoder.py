@@ -11,13 +11,24 @@ from transformer4planning.libs.mtr import polyline_encoder
 from transformer4planning.utils import mtr_utils
 from transformer4planning.libs.mtr.ops.knn import knn_utils
 
+AGENT_TYPES = ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST', 'TYPE_OTHERS']
+MAP_TYPES = [1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19]
+
 
 class MTREncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.model_cfg = config
-
+        self.num_agent_type = 4
+        self.num_road_type = 16
         # build polyline encoders
+        # self.agent_polyline_encoder = [self.build_polyline_encoder(
+        #     in_channels=self.model_cfg.NUM_INPUT_ATTR_AGENT + 1,
+        #     hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_AGENT,
+        #     num_layers=self.model_cfg.NUM_LAYER_IN_MLP_AGENT,
+        #     out_channels=self.model_cfg.D_MODEL,
+        #     return_multipoints_feature=True
+        # ) for _ in range(self.num_agent_type)] 
         self.agent_polyline_encoder = self.build_polyline_encoder(
             in_channels=self.model_cfg.NUM_INPUT_ATTR_AGENT + 1,
             hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_AGENT,
@@ -25,14 +36,15 @@ class MTREncoder(nn.Module):
             out_channels=self.model_cfg.D_MODEL,
             return_multipoints_feature=True
         )
-        self.map_polyline_encoder = self.build_polyline_encoder(
+
+        self.map_polyline_encoder = nn.ModuleList([self.build_polyline_encoder(
             in_channels=self.model_cfg.NUM_INPUT_ATTR_MAP,
             hidden_dim=self.model_cfg.NUM_CHANNEL_IN_MLP_MAP,
             num_layers=self.model_cfg.NUM_LAYER_IN_MLP_MAP,
             num_pre_layers=self.model_cfg.NUM_LAYER_IN_PRE_MLP_MAP,
             out_channels=self.model_cfg.D_MODEL,
             return_multipoints_feature=False
-        )
+        ) for _ in range(self.num_road_type)])
 
         # build transformer encoder layers
         self.use_local_attn = self.model_cfg.get('USE_LOCAL_ATTN', False)
@@ -142,6 +154,73 @@ class MTREncoder(nn.Module):
 
         ret_full_feature = ret_full_feature.view(batch_size, N, d_model)
         return ret_full_feature
+    
+    def organize_by_type(self, input_dict):
+        obj_trajs, obj_trajs_mask = input_dict['obj_trajs'], input_dict['obj_trajs_mask']
+        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
+
+        obj_trajs_pos = input_dict['obj_trajs_pos']
+        map_polylines_center = input_dict['map_polylines_center']
+        
+        # num_center_objects, _, num_timestamps, num_attr = obj_trajs.shape
+        # print(obj_trajs.shape)
+        # obj_types = input_dict["obj_types"][None, :]
+        # print(obj_types.shape)
+        # obj_trajs_typed, obj_trajs_mask_typed, obj_trajs_pos_typed = {}, {}, {}
+        # for i in range(self.num_agent_type):
+        #     agent_type = AGENT_TYPES[i]
+        #     mask = (obj_types[:, :] == agent_type)
+        #     print(mask.shape)
+        #     exit()
+        #     num = [mask[j].sum() for j in range(num_center_objects)]
+        #     max_num = max(num)
+        #     if max_num == 0: continue
+
+        #     agent_input = torch.zeros((num_center_objects, max_num, num_timestamps, num_attr), dtype=obj_trajs.dtype, device=obj_trajs.device)
+        #     agent_mask = torch.zeros((num_center_objects, max_num, num_timestamps), dtype=obj_trajs.dtype, device=obj_trajs.device)
+        #     agent_pos = torch.zeros((num_center_objects, max_num, num_timestamps, 3), dtype=obj_trajs.dtype, device=obj_trajs.device)
+        #     for j in range(num_center_objects):
+        #         agent_input[j, :num[j], ...] = obj_trajs[j, mask[j, :], ...]
+        #         agent_mask[j, :num[j], ...] = obj_trajs_mask[j, mask[j, :], ...]
+        #         agent_pos[j, :num[j], ...] = obj_trajs_pos[j, mask[j, :], ...]
+
+        #     obj_trajs_typed[agent_type] = agent_input
+        #     obj_trajs_mask_typed[agent_type] = agent_mask > 0
+        #     obj_trajs_pos_typed[agent_type] = agent_pos
+        
+        map_polylines_type = map_polylines[:, :, 1, 6]
+        num_center_objects, _, num_polyline, num_attr = map_polylines.shape
+        map_polylines_typed, map_polylines_mask_typed, map_polylines_center_typed = {}, {}, {}
+        for i in range(self.num_road_type):
+            map_type = MAP_TYPES[i]
+            mask = (map_polylines_type[:, :] == map_type)
+            num = [mask[j].sum() for j in range(num_center_objects)]
+            max_num = max(num)
+            
+            if max_num == 0: continue
+
+            map_input = torch.zeros((num_center_objects, max_num, num_polyline, num_attr), dtype=map_polylines.dtype, device=map_polylines.device)
+            map_mask = torch.zeros((num_center_objects, max_num, num_polyline), dtype=map_polylines.dtype, device=map_polylines.device)
+            map_pos = torch.zeros((num_center_objects, max_num, 3), dtype=map_polylines.dtype, device=map_polylines.device)
+            for j in range(num_center_objects):
+                map_input[j, :num[j], ...] = map_polylines[j, mask[j, :], ...]
+                map_mask[j, :num[j], ...] = map_polylines_mask[j, mask[j, :], ...]
+                map_pos[j, :num[j], ...] = map_polylines_center[j, mask[j, :], ...]
+
+            map_polylines_typed[map_type] = map_input
+            map_polylines_mask_typed[map_type] = map_mask > 0
+            map_polylines_center_typed[map_type] = map_pos
+
+        input_dict.update({
+            # "obj_trajs": obj_trajs_typed,
+            # "obj_trajs_mask": obj_trajs_mask_typed,
+            # "obj_trajs_pos": obj_trajs_pos_typed,
+            "map_polylines": map_polylines_typed,
+            "map_polylines_mask": map_polylines_mask_typed,
+            "map_polylines_center": map_polylines_center_typed,
+        })
+
+        return input_dict
 
     def forward(self, batch_dict):
         """
@@ -149,35 +228,53 @@ class MTREncoder(nn.Module):
             batch_dict:
               input_dict:
         """
-        input_dict = batch_dict['input_dict']
-        obj_trajs, obj_trajs_mask = input_dict['obj_trajs'].cuda(), input_dict['obj_trajs_mask'].cuda() 
-        map_polylines, map_polylines_mask = input_dict['map_polylines'].cuda(), input_dict['map_polylines_mask'].cuda() 
+        input_dict = self.organize_by_type(batch_dict['input_dict'])
+        obj_trajs, obj_trajs_mask = input_dict['obj_trajs'], input_dict['obj_trajs_mask']
+        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
 
-        obj_trajs_last_pos = input_dict['obj_trajs_last_pos'].cuda() 
-        obj_trajs_pos = input_dict['obj_trajs_pos'].cuda() 
-        map_polylines_center = input_dict['map_polylines_center'].cuda() 
-        track_index_to_predict = input_dict['track_index_to_predict']
+        obj_trajs_pos = input_dict['obj_trajs_pos']
+        map_polylines_center = input_dict['map_polylines_center']
+        
+        # obj_polylines_feature_typed, obj_polylines_mask_typed, obj_polylines_pos_typed = [], [], []
+        # for i in range(self.num_agent_type):
+        #     agent_type = AGENT_TYPES[i]
+        #     if agent_type in obj_trajs.keys():
+        #         obj_trajs_per_type = obj_trajs[agent_type]
+        #         obj_trajs_mask_per_type = obj_trajs_mask[agent_type]
+        #         obj_trajs_pos_per_type = obj_trajs_pos[agent_type]
 
-        assert obj_trajs_mask.dtype == torch.bool and map_polylines_mask.dtype == torch.bool
-
-        num_center_objects, num_objects, num_timestamps, _ = obj_trajs.shape
-        num_polylines = map_polylines.shape[1]
-
-        # apply polyline encoder
+                # apply polyline encoder
         obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
         obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)        
-        map_polylines_feature = self.map_polyline_encoder(map_polylines, map_polylines_mask)  # (num_center_objects, num_polylines, C)
-        
-        # batch_dict['obj_feature'] = obj_polylines_feature
-        # batch_dict['map_feature'] = map_polylines_feature[:, :, None, :].repeat(1, 1, num_timestamps, 1)
 
-        # return batch_dict
+        #         obj_polylines_feature_typed.append(obj_polylines_feature)
+        #         obj_polylines_mask_typed.append(obj_trajs_mask_per_type)
+        #         obj_polylines_pos_typed.append(obj_trajs_pos_per_type)
 
-        # apply self-attn
-        # obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
+        map_polylines_feature_typed, map_polylines_mask_typed, map_polylines_pos_typed = [], [], []
+        for i in range(self.num_road_type):
+            map_type = MAP_TYPES[i]      
+            if map_type in map_polylines.keys():
+                map_polylines_per_type = map_polylines[map_type]
+                map_polylines_mask_per_type = map_polylines_mask[map_type]
+                map_polylines_center_per_type = map_polylines_center[map_type]
+
+                map_polylines_feature = self.map_polyline_encoder[i](map_polylines_per_type, map_polylines_mask_per_type)  # (num_center_objects, num_polylines, C)
+
+                map_polylines_feature_typed.append(map_polylines_feature)
+                map_polylines_mask_typed.append(map_polylines_mask_per_type)
+                map_polylines_pos_typed.append(map_polylines_center_per_type)
+                
+        # obj_polylines_feature = torch.cat(obj_polylines_feature_typed, dim=1)
         obj_valid_mask = obj_trajs_mask
-        map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
-        n_out_embed = obj_polylines_feature.shape[-1]
+        # obj_trajs_pos = torch.cat(obj_polylines_pos_typed, dim=1)
+
+        map_polylines_feature = torch.cat(map_polylines_feature_typed, dim=1)
+        map_valid_mask = (torch.cat(map_polylines_mask_typed, dim=1).sum(dim=-1) > 0)
+        map_polylines_center = torch.cat(map_polylines_pos_typed, dim=1)
+
+        num_center_objects, num_objects, num_timestamps, n_out_embed = obj_polylines_feature.shape
+        num_polylines = map_polylines_feature.shape[1]
 
         global_token_feature = torch.cat((obj_polylines_feature.view(num_center_objects, num_objects*num_timestamps, n_out_embed), map_polylines_feature), dim=1) 
         global_token_mask = torch.cat((obj_valid_mask.view(num_center_objects, -1), map_valid_mask), dim=1) 
@@ -198,15 +295,15 @@ class MTREncoder(nn.Module):
         assert map_polylines_feature.shape[1] == num_polylines
 
         # organize return features
-        center_objects_feature = obj_polylines_feature[torch.arange(num_center_objects), track_index_to_predict]
+        # center_objects_feature = obj_polylines_feature[torch.arange(num_center_objects), track_index_to_predict]
 
-        batch_dict['center_objects_feature'] = center_objects_feature
+        # batch_dict['center_objects_feature'] = center_objects_feature
         batch_dict['obj_feature'] = obj_polylines_feature
         batch_dict['map_feature'] = map_polylines_feature
-        batch_dict['obj_mask'] = obj_valid_mask
-        batch_dict['map_mask'] = map_valid_mask
-        batch_dict['obj_pos'] = obj_trajs_last_pos
-        batch_dict['map_pos'] = map_polylines_center
+        # batch_dict['obj_mask'] = obj_valid_mask
+        # batch_dict['map_mask'] = map_valid_mask
+        # batch_dict['obj_pos'] = obj_trajs_last_pos
+        # batch_dict['map_pos'] = map_polylines_center
         
         # lane feature
         # lane_mask = (map_polylines[:, :, 1, 6] == 3) | (map_polylines[:, :, 1, 6] == 2) | (map_polylines[:, :, 1, 6] == 1) # (num_center_objects, num_polylines)
@@ -229,170 +326,35 @@ class MTREncoder(nn.Module):
 
         return batch_dict
     
-from typing import Dict
-from transformer4planning.models.encoder.base import TrajectoryEncoder
-
-class WaymoVectorizeEncoder(TrajectoryEncoder):
-    def __init__(self, 
-                 mtr_config,
-                 action_kwargs:Dict,
-                 tokenizer_kwargs:Dict = None,
-                 model_args = None
-                 ):
-        super().__init__(model_args, tokenizer_kwargs)
-        self.model_args = model_args
-        self.token_scenario_tag = model_args.token_scenario_tag
-        self.ar_future_interval = model_args.ar_future_interval
-        self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
-        self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
- 
-    def from_marginal_to_joint(self, hidden_state, info_dict, update_info_dict=False):
-        device = hidden_state.device
-        agents_num_per_scenario = info_dict["agents_num_per_scenario"]
-        max_agents_num = max(agents_num_per_scenario)
-        scenario_num = len(agents_num_per_scenario)
-        feature_length, hidden_dim = hidden_state.shape[-2:]
-        hidden_state_joint = torch.zeros((scenario_num, max_agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
-        input_embeds_mask = torch.zeros((scenario_num, max_agents_num * feature_length), dtype=torch.bool, device=device)
-        agent_index_global = 0
-        for i in range(scenario_num):
-            agents_num = agents_num_per_scenario[i]
-            scenario_embeds = torch.zeros((agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
-            for j in range(agents_num):
-                scenario_embeds[j::agents_num, :] = hidden_state[agent_index_global]
-                agent_index_global += 1
-
-            hidden_state_joint[i, :agents_num * feature_length, :] = scenario_embeds
-            input_embeds_mask[i, :agents_num * feature_length] = 1
-        
-        if update_info_dict:
-            info_dict.update({
-                "input_embeds_mask": input_embeds_mask,
-            })
-        
-        return hidden_state_joint
-
-    def forward(self, **kwargs):
-        agent_trajs = kwargs.get('agent_trajs')
-        batch_size = agent_trajs.shape[0]
-        device = agent_trajs.device
-        track_index_to_predict = kwargs.get("track_index_to_predict")
-        current_time_index = kwargs.get("current_time_index")[0]
-
-        state_embeds = self.context_encoder(
-            agent_trajs[:, :, :current_time_index + 1, :],
-            map_polylines=kwargs.get("map_polylines"),
-            map_polylines_mask=kwargs.get("map_polylines_mask"),
-        )
-
-        ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
-        ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
-
-        trajectory_label = ego_trajs[:, current_time_index + 1:, [0, 1, 2, 6]]
-        pred_length = trajectory_label.shape[1]
-        trajectory_label_mask = ego_trajs[:, current_time_index + 1:, -1].unsqueeze(-1)
-        context_actions = ego_trajs[:, :current_time_index + 1, [0, 1, 2, 6]]
-
-        # add noise to context actions
-        context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
-        
-        action_embeds = self.action_m_embed(context_actions)
-        context_length = context_actions.shape[1]
-
-        n_embed = action_embeds.shape[-1]
-        input_embeds = torch.zeros(
-            (batch_size, context_length * 2, n_embed),
-            dtype=torch.float32,
-            device=device
-        )
-        input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
-        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
-
-        future_embeds_shape = (batch_size, pred_length, n_embed)
-        # add keypoints encoded embedding
-        if self.ar_future_interval == 0:
-            input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((future_embeds_shape), device=device)], dim=1)
-
-        elif self.ar_future_interval > 0:
-            # use autoregressive future interval
-            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
-            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
-            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
-            # argument future trajectory
-            future_key_points_aug = self.augmentation.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
-            if not self.model_args.predict_yaw:
-                # keep the same information when generating future points
-                future_key_points_aug[:, :, 2:] = 0
-
-            future_key_embeds = self.action_m_embed(future_key_points_aug)
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros(future_embeds_shape, device=device)], dim=1)
-        else:
-            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
-
-        if selected_indices is not None:
-            future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
-        else:
-            future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-        
-        info_dict = {
-            "trajectory_label": trajectory_label,
-            "trajectory_label_mask": trajectory_label_mask,
-            "pred_length": pred_length,
-            "context_length": context_length,
-            "future_key_points": future_key_points,
-            "future_key_points_gt_mask": future_key_points_gt_mask,
-            "selected_indices": selected_indices,
-        }
-
-        if self.model_args.interaction:
-            info_dict.update({
-                "agents_num_per_scenario": kwargs.get("agents_num_per_scenario"),
-            })
-            input_embeds = self.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=True)
-
-        return input_embeds, info_dict
-    
-class SimpleEncoder(MTREncoder):
+class MTREncoderWithType(MTREncoder):
     def __init__(self, config):
         super().__init__(config)
-        self.output_dim = config.D_MODEL
-        self.map_polyline_encoder = nn.Sequential(nn.Linear(2, 128, bias=False), nn.ReLU(),
-                                                  nn.Linear(128, 256, bias=False), nn.ReLU(),
-                                                  nn.Linear(256, self.output_dim, bias=True), nn.ReLU(),)
+        self.map_pooling = nn.Sequential(nn.Linear(self.model_cfg.D_MODEL * self.num_road_type, self.model_cfg.D_MODEL), nn.Tanh())
 
-    def forward(self, past_trajs, map_polylines, map_polylines_mask):
-        num_center_objects, num_objects, num_timestamps, _ = past_trajs.shape
-        agent_trajs_mask = past_trajs[..., -1] > 0
-        map_polylines_mask = map_polylines_mask[..., 0] > 0
-        # apply polyline encoder
-        obj_polylines_feature = self.agent_polyline_encoder(past_trajs, agent_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)   
-        map_polylines_feature = self.map_polyline_encoder(map_polylines)  # (num_center_objects, num_polylines, C)
-        map_polylines_feature, _ = torch.max(map_polylines_feature, dim=1, keepdim=True)
-        map_polylines_feature = map_polylines_feature.repeat(1, num_timestamps, 1)
+    def forward(self, batch_dict):
+        input_dict = self.organize_by_type(batch_dict['input_dict'])
+        obj_trajs, obj_trajs_mask = input_dict['obj_trajs'], input_dict['obj_trajs_mask']
+        map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
 
-        agents_attention_mask = agent_trajs_mask.view(num_center_objects, -1)
-        map_attention_mask = torch.ones((num_center_objects, num_timestamps), device=past_trajs.device, dtype=torch.bool)
+        obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
+        obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask).max(dim=1)[0]  # (num_center_objects, num_objects, num_timestamp, C)        
 
-        n_out_embed = obj_polylines_feature.shape[-1]
-        global_token_feature = torch.cat((obj_polylines_feature.view(num_center_objects, num_objects*num_timestamps, n_out_embed), map_polylines_feature), dim=1) 
-        global_token_mask = torch.cat((agents_attention_mask, map_attention_mask), dim=1)
+        num_center_objects, _, num_timesteps, _ = obj_trajs.shape
 
-        obj_trajs_pos = past_trajs[..., :3]
-        map_polylines_center = torch.zeros((num_center_objects, num_timestamps, 3), device=past_trajs.device)
-        global_token_pos = torch.cat((obj_trajs_pos.contiguous().view(num_center_objects, num_objects*num_timestamps, -1), map_polylines_center), dim=1)
+        map_polylines_feature_typed = []
+        for i in range(self.num_road_type):
+            map_type = MAP_TYPES[i]      
+            if map_type in map_polylines.keys():
+                map_polylines_per_type = map_polylines[map_type]
+                map_polylines_mask_per_type = map_polylines_mask[map_type]
 
-        if self.use_local_attn:
-            global_token_feature = self.apply_local_attn(
-                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos,
-                num_of_neighbors=self.model_cfg.NUM_OF_ATTN_NEIGHBORS
-            )
-        else:
-            global_token_feature = self.apply_global_attn(
-                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
-            )
+                map_polylines_feature = self.map_polyline_encoder[i](map_polylines_per_type, map_polylines_mask_per_type).max(dim=1)[0]  # (num_center_objects, num_polylines, C)
+            else:
+                map_polylines_feature = self.map_polyline_encoder[i](torch.zeros(num_center_objects, 1, 1, self.model_cfg.NUM_INPUT_ATTR_MAP, device=obj_trajs.device), torch.zeros(num_center_objects, 1, 1, dtype=bool, device=obj_trajs.device)).squeeze(1)
+            map_polylines_feature_typed.append(map_polylines_feature)
+        map_polylines_feature_typed = torch.stack(map_polylines_feature_typed, dim=1).view(num_center_objects, -1)
+        map_polylines_feature = self.map_pooling(map_polylines_feature_typed).unsqueeze(1).repeat(1, num_timesteps, 1)
+        batch_dict['obj_feature'] = obj_polylines_feature
+        batch_dict['map_feature'] = map_polylines_feature
 
-        global_token_feature_max, _ = torch.max(global_token_feature.view(num_center_objects, -1, num_timestamps, self.output_dim), dim=1)
-
-        return global_token_feature_max.squeeze(1)
+        return batch_dict
