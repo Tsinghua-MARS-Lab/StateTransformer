@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
-export CUDA_VISIBLE_DEVICES=0;
+export CUDA_VISIBLE_DEVICES=7;
 python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_waymo.py \
         --model_name pretrain-vector-gpt \
-        --model_pretrain_name_or_path /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results/checkpoint-330000 \
-        --output_dir /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results  \
-        --run_name gpt_mse_FI1_PI1_k1_test \
-        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
+        --model_pretrain_name_or_path /localdata_ssd/liderun/tmp/debug/training_results/checkpoint-55000 \
+        --output_dir /localdata_ssd/liderun/tmp/debug/training_results  \
+        --run_name debug \
+        --per_device_eval_batch_size 8 --dataloader_num_workers 10 --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True \
         --d_model 256 --dataset_scale 1 \
         --task waymo \

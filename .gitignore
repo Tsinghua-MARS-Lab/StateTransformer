@@ -1,0 +1,12 @@
+__pycache__
+data/
+build
+**egg-info**
+*.so
+*.png
+log_eval*
+*.pkl
+
+wandb
+*.sh
+*.egg

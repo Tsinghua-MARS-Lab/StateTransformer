@@ -24,11 +24,11 @@ from transformer4planning.utils.nuplan_utils import generate_contour_pts
 class WaymoDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, training=True, logger=None, use_raster=False):
         super().__init__(dataset_cfg=dataset_cfg, training=training, logger=logger)
-        self.data_root = cfg.ROOT_DIR / self.dataset_cfg.DATA_ROOT
-        self.data_path = self.data_root / self.dataset_cfg.SPLIT_DIR[self.mode]
+        self.data_root = "/localdata_ssd/liderun/t4p_waymo_mtr"
+        self.data_path = os.path.join(self.data_root, self.dataset_cfg.SPLIT_DIR[self.mode])
         self.use_raster = use_raster
 
-        self.infos = self.get_all_infos(self.data_root / self.dataset_cfg.INFO_FILE[self.mode])
+        self.infos = self.get_all_infos(os.path.join(self.data_root, self.dataset_cfg.INFO_FILE[self.mode]))
         self.logger.info(f'Total scenes after filters: {len(self.infos)}')
         
         self.obj_dist_thres = 1000
@@ -96,7 +96,7 @@ class WaymoDataset(DatasetTemplate):
         info = self.infos[index]
         scene_id = info['scenario_id']
         filtered_tracks_to_predict = info['tracks_to_predict']
-        with open(self.data_path / f'sample_{scene_id}.pkl', 'rb') as f:
+        with open(os.path.join(self.data_path, f'sample_{scene_id}.pkl'), 'rb') as f:
             info = pickle.load(f)
             
         info['tracks_to_predict'] = filtered_tracks_to_predict
@@ -153,8 +153,8 @@ class WaymoDataset(DatasetTemplate):
             'obj_ids': obj_ids,
 
             'center_objects_world': center_objects,
-            "center_objects_past": center_gt_past_trajs, # (x, y, z, rot, vx, vy)
-            # "center_objects_past": center_objects_past[..., [0,1,2,6]], # (x, y, z, l, w, h, heading, vx, vy, valid)
+            # "center_objects_past": center_gt_past_trajs, # (x, y, z, rot, vx, vy)
+            "center_objects_past": center_objects_past, # (x, y, z, l, w, h, heading, vx, vy, valid)
             'trajectory_label': center_gt_trajs_labels, # ( x, y, z, heading)
             'center_objects_id': np.array(track_infos['object_id'])[track_index_to_predict],
             'center_objects_type': np.array(track_infos['object_type'])[track_index_to_predict],
@@ -197,6 +197,10 @@ class WaymoDataset(DatasetTemplate):
             ret_dict['center_objects_past'][..., :2] /= self.norm_scale
             ret_dict['center_objects_world'][..., :2] /= self.norm_scale
         
+        # add dynamic infos
+        # dynamic_map_infos = info["dynamic_map_infos"]
+        # print(np.array(dynamic_map_infos["lane_id"]).shape, np.array(dynamic_map_infos["state"]).shape, np.array(dynamic_map_infos["stop_point"]).shape)
+        # exit()
 
         return ret_dict
 

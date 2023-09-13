@@ -147,7 +147,7 @@ def main():
     2. Pass the folder of an index files to load one sub-dataset of one city
     """
     
-    cfg_from_yaml_file("/home/QJ00367/danjiao/dlnets/transformer4planning/config/config_gpt2_small.yaml", cfg)
+    cfg_from_yaml_file("/home/ldr/workspace/transformer4planning/config/config_gpt2_small.yaml", cfg)
     
     if 'vector' in model_args.model_name:
         use_raster = False

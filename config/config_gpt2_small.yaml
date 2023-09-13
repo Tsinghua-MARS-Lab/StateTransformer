@@ -1,11 +1,11 @@
 DATA_CONFIG:
     DATASET: WaymoDataset
-    OBJECT_TYPE: &object_type ['TYPE_VEHICLE']
+    OBJECT_TYPE: &object_type ['TYPE_CYCLIST']
     
     DATA_ROOT: 'data/waymo'
     SPLIT_DIR: {
-        'train': 'processed_scenarios_training', 
-        'test': 'processed_scenarios_validation'
+        'train': 'train', 
+        'test': 'val'
     }
 
     INFO_FILE: {
