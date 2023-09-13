@@ -276,13 +276,13 @@ class DiffusionWrapper(nn.Module):
             state = torch.repeat_interleave(state, mc_num, dim=0)
             # then we reshape state into shape()
             for i in reversed(range(0,self.n_timesteps)):
-                timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
+                timesteps = torch.full((shape[0],), i, device=device, dtype=torch.long)
                 x, cls = self.p_sample(x, timesteps, state, determin=determin)
                 total_cls = total_cls + cls
 
             # reshape x into shape (batch_size, mc_num, ...)
             x = x.reshape(batch_size, mc_num, *x.shape[1:])
-            total_cls = total_cls.reshape(batch_size, mc_num)
+            total_cls = total_cls.reshape(batch_size, mc_num, self.action_dim)
             return x, total_cls
 
     def p_sample(self, x, t, s, determin=True):
@@ -438,7 +438,7 @@ class KeyPointDiffusionDecoder(nn.Module):
                     scores: batch_size * self.k. assert torch.sum(scores, dim=1) == 1, ''
                     
         '''
-        assert self.ar_future_interval > 0, ''
+        # assert self.ar_future_interval > 0, ''
         assert not self.training, ''
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder

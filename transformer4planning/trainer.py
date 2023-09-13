@@ -879,8 +879,8 @@ class PlanningTrainer(Trainer):
                             f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
                             f'{disp_str}')
             
-            if i > 100:    
-                break
+            # if i > 100:    
+            #     break
         
         print('*'*20, ' anchor hard match ', anchor_hard_match_num, " anchor soft match ", anchor_soft_match_num, ' tot num ', tot_num, '*'*20)
         
