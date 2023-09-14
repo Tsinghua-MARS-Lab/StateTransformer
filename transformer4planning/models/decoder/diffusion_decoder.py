@@ -41,7 +41,7 @@ class BaseDiffusionModel(nn.Module):
         elif feat_dim == 1024:
             connect_dim = 1600
         else:
-            connect_dim = feat_dim * 1.5
+            connect_dim = int(feat_dim * 1.5)
             
         self.state_encoder = nn.Sequential(
             DecoderResCat(hidden_size, in_features, connect_dim),
@@ -96,7 +96,7 @@ class KeypointDiffusionModel(BaseDiffusionModel):
                 in_features,
                 out_features=4,
                 layer_num=7,
-                feat_dim=1024,
+                feat_dim=256,
                 input_feature_seq_lenth=16,
                 key_point_num=5,
                 specified_key_points=True, 

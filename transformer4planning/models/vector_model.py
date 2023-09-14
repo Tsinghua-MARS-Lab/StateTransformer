@@ -161,23 +161,23 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)['state_dict']
                 
                 all_state_keys = list(state_dict.keys())
-                for k in all_state_keys:
-                    state_dict['model.'+k] = state_dict[k]
-                    del state_dict[k]
-
                 # for k in all_state_keys:
-                #     if k.startswith('model.model.state_encoder1'):
-                #         new_k = 'model.model.state_encoder.0' + k.split('model.model.state_encoder1')[1]
-                #         state_dict[new_k] = state_dict[k]
-                #         del state_dict[k]
-                #     if k.startswith('model.model.state_encoder2'):
-                #         new_k = 'model.model.state_encoder.1' + k.split('model.model.state_encoder2')[1]
-                #         state_dict[new_k] = state_dict[k]
-                #         del state_dict[k]
-                #     if k.startswith('model.model.transformerblock_list'):
-                #         new_k = 'model.model.backbone' + k.split('model.model.transformerblock_list')[1]
-                #         state_dict[new_k] = state_dict[k]
-                #         del state_dict[k]
+                #     state_dict['model.'+k] = state_dict[k]
+                #     del state_dict[k]
+
+                for k in all_state_keys:
+                    if k.startswith('model.model.state_encoder1'):
+                        new_k = 'model.model.state_encoder.0' + k.split('model.model.state_encoder1')[1]
+                        state_dict[new_k] = state_dict[k]
+                        del state_dict[k]
+                    if k.startswith('model.model.state_encoder2'):
+                        new_k = 'model.model.state_encoder.1' + k.split('model.model.state_encoder2')[1]
+                        state_dict[new_k] = state_dict[k]
+                        del state_dict[k]
+                    if k.startswith('model.model.transformerblock_list'):
+                        new_k = 'model.model.backbone' + k.split('model.model.transformerblock_list')[1]
+                        state_dict[new_k] = state_dict[k]
+                        del state_dict[k]
     
                 self.anchor_logits_decoder.load_state_dict(state_dict) 
                 print("Pretrained keypoint decoder has been loaded!")
@@ -325,9 +325,11 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
             anchor_GT_logits = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] # (bs, 2)
             anchor_embedding = self.action_m_embed(torch.cat([anchor_GT_logits, torch.zeros((batch_size, 2), device=device)], dim = 1)).unsqueeze(1)
+            gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+            
+            # anchor_embedding = anchor_embedding*gt_anchor_mask.unsqueeze(-1)
             input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
             
-            gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
         else:
             anchor_GT_cls = None
             anchor_GT_logits = None
