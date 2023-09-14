@@ -88,7 +88,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         if self.use_anchor:
             self.anchor_num = 64
-            self.anchor_len = 1
+            self.anchor_len = 0
+            self.anchor_points_embed = nn.Sequential(nn.Linear(2, llm_config.n_embd), nn.Tanh())
             self.cls_anchor_loss = CrossEntropyLoss(reduction="none")
             self.cls_anchor_loss_weight = 1.0
             self.logits_anchor_loss = MSELoss(reduction="none")
@@ -321,11 +322,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             center_obj_types = input_dict['center_objects_type']
             center_obj_anchor_pts = [self.intention_points[center_obj_types[i]].unsqueeze(0) for i in range(batch_size)]
             center_obj_anchor_pts = torch.cat(center_obj_anchor_pts, dim=0) # (bs, 64, 2)
+            
+            center_obj_anchor_embed = self.anchor_points_embed(center_obj_anchor_pts) # (bs, 64, 256)
+            
             dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_anchor_pts, dim=2)
             anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
             anchor_GT_logits = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] # (bs, 2)
-            anchor_embedding = self.action_m_embed(torch.cat([anchor_GT_logits, torch.zeros((batch_size, 2), device=device)], dim = 1)).unsqueeze(1)
-            input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
+            # anchor_embedding = self.action_m_embed(torch.cat([anchor_GT_logits, torch.zeros((batch_size, 2), device=device)], dim = 1)).unsqueeze(1)
+            
+            input_embeds = torch.cat([input_embeds, center_obj_anchor_embed], dim=1)
             
             gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
         else:
@@ -391,8 +396,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         pred_kps_logits = None
         pred_kps_cls = None
         
-        tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num
-        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num + self.anchor_num
+        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len + self.anchor_num
         
         if self.use_anchor and self.anchor_len > 0:
             pred_anchor_embed = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len-1 : tot_scenario_contenxt_len-1+self.anchor_len, :] # (bs, anchor_len, n_embed)
@@ -463,13 +468,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         future_key_points = info_dict['future_key_points']
         future_key_points_gt_mask = info_dict['future_key_points_gt_mask']
         
-        # anchor embedding
-        tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num
-        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len
+        # anchor embedding        
+        tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num + self.anchor_num
+        tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len + self.anchor_num
         
         if self.use_anchor:
-            dummy_anchor_embedding = self.action_m_embed(torch.zeros((batch_size, 4), device=device)).unsqueeze(1) # (bs, 1, n_embed)
-            input_embeds = torch.cat([input_embeds, dummy_anchor_embedding], dim=1)
+            # dummy_anchor_embedding = self.action_m_embed(torch.zeros((batch_size, 4), device=device)).unsqueeze(1) # (bs, 1, n_embed)
+            # input_embeds = torch.cat([input_embeds, dummy_anchor_embedding], dim=1)
             
             center_obj_types = input_dict['center_objects_type']
             center_obj_anchor_pts = [self.intention_points[center_obj_types[i]].unsqueeze(0) for i in range(batch_size)]
@@ -480,6 +485,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             anchor_GT_logits = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] # (bs, 2)
             
             gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+            
+            center_obj_anchor_embed = self.anchor_points_embed(center_obj_anchor_pts) # (bs, 64, 256)
+            input_embeds = torch.cat([input_embeds, center_obj_anchor_embed], dim=1)
         else:
             center_obj_anchor_pts = None
 
@@ -750,10 +758,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         if self.debug and loss.device.index == 4:
             self.tot_iter_num += 1
-            if self.tot_iter_num % 100 ==0 and self.use_anchor and self.ar_future_interval == 0:
+            if self.tot_iter_num % 100 ==0 and self.use_anchor and self.anchor_len>0 and self.ar_future_interval == 0:
                 print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.use_anchor and self.ar_future_interval > 0:
-                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, 
+                print("loss traj ", loss_traj, 
                       " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k > 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
@@ -892,7 +900,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             future_key_point_hidden_state = transformer_outputs_hidden_state[:, [tot_scenario_contenxt_len + i - 1], :] # (bs*num_beam, 1, n_embed)
 
-            if self.use_anchor and i == 0:
+            if self.use_anchor and self.anchor_len > 0 and i == 0:
                 pred_kps_score = self.anchor_cls_decoder(future_key_point_hidden_state).view(batch_size, num_beam, 64).softmax(-1) # (bs, num_beam, 64)
                 pred_kps_logit = center_obj_anchor_pts.repeat(1, num_beam, 1) # (bs, num_beam*64, 2)
             else:
