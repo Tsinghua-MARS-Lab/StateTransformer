@@ -200,7 +200,7 @@ class DiffusionWrapper(nn.Module):
     def train_forward(self, hidden_state, trajectory_label, **kwargs):
         trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
-        trajectory_label_cls = torch.nn.functional.one_hot(kwargs['label_cls'], num_classes=64).unsqueeze(1).float()
+        # trajectory_label_cls = torch.nn.functional.one_hot(kwargs['label_cls'], num_classes=64).unsqueeze(1).float()
         # return self.train_loss(trajectory_label_cls, hidden_state, **kwargs)
         return self.train_loss(trajectory_label, hidden_state, **kwargs)
 
@@ -220,8 +220,11 @@ class DiffusionWrapper(nn.Module):
         else:
             loss = self.loss_fn(x_recon, x_start)
         
-        label_mask = kwargs['label_mask']
-        loss = (loss.mean(dim=-1) * label_mask).sum() / (label_mask.sum() + 1e-7)
+        if 'label_mask' not in kwargs:
+            return loss.mean()
+        else:
+            label_mask = kwargs['label_mask']
+            loss = (loss.mean(dim=-1) * label_mask).sum() / (label_mask.sum() + 1e-7)
             
         return loss
 
@@ -372,7 +375,7 @@ class KeyPointDiffusionDecoder(nn.Module):
         self.ar_future_interval = model_args.ar_future_interval
         diffusion_model = KeypointDiffusionModel(config.n_inner, 
                                                 config.n_embd, 
-                                                out_features=self.out_features * self.model_args.k,
+                                                out_features=self.out_features,
                                                 key_point_num=self.model_args.key_points_num,
                                                 input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
                                                 specified_key_points=self.model_args.specified_key_points,
@@ -401,7 +404,7 @@ class KeyPointDiffusionDecoder(nn.Module):
         if context_length is None: # pdm encoder
            input_length = info_dict.get("input_length", None)
         
-        future_key_points = info_dict["future_key_points"]
+        # future_key_points = info_dict["future_key_points"][:, [0], :]
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
         kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
@@ -452,6 +455,7 @@ class KeyPointDiffusionDecoder(nn.Module):
             key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
         else:
             key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
+            scores = scores.mean(-1) # (bs, mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
                     reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)],

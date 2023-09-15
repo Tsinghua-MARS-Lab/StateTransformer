@@ -158,13 +158,15 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.anchor_logits_decoder = KeyPointDiffusionDecoder(self.model_args, self.llm_config)
             if self.model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
-                state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)['state_dict']
+                # state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
                 
-                all_state_keys = list(state_dict.keys())
+                # all_state_keys = list(state_dict.keys())
                 # for k in all_state_keys:
                 #     state_dict['model.'+k] = state_dict[k]
                 #     del state_dict[k]
 
+                state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)['state_dict']
+                all_state_keys = list(state_dict.keys())
                 for k in all_state_keys:
                     if k.startswith('model.model.state_encoder1'):
                         new_k = 'model.model.state_encoder.0' + k.split('model.model.state_encoder1')[1]
@@ -180,6 +182,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                         del state_dict[k]
     
                 self.anchor_logits_decoder.load_state_dict(state_dict) 
+                self.state_dict_anchor =state_dict
+                self.resume_anchor = False
                 print("Pretrained keypoint decoder has been loaded!")
             else:
                 print("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
@@ -528,23 +532,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embeds_kpts = self.action_m_embed(pred_kps_logit_topk)  # (b, out_num_mode, 1, n_embed)
             
         elif self.decoder_type == "diffusion":
-            transformer_output = self.transformer(
-                    inputs_embeds=input_embeds,
-                    attention_mask=None,
-                    position_ids=None,
-                )
-            if self.use_anchor and self.ar_future_interval == 0:
-                key_points_num = 1
-            else:
-                key_points_num = len(selected_indices)
-            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            key_points_logits, kpts_scores = self.anchor_logits_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
-            pred_key_points_during_generate = torch.zeros((batch_size, self.out_num_mode, key_points_num, 4), device=device)
-            if self.model_args.predict_yaw:
-                pred_key_points_during_generate = key_points_logits
-            else:
-                pred_key_points_during_generate[:, :, :, :2] = key_points_logits 
-            input_embeds_kpts = self.action_m_embed(pred_key_points_during_generate)
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.search_by_diffusion(input_embeds, center_obj_anchor_pts, info_dict)
         
         elif self.use_anchor and self.anchor_len > 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.anchor_topK_search(input_embeds, tot_scenario_contenxt_len, out_num_mode=self.out_num_mode,
@@ -1035,6 +1023,46 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 anchor_kpts_input_embeds[:, n_mode, self.anchor_len+i, :] = key_point_embed
         
         return anchor_kpts_logits, anchor_kpts_input_embeds, k_kpts_scores, k_kpts_index
+    
+    def search_by_diffusion(self, input_embeds, center_obj_anchor_pts, info_dict):
+        
+        batch_size, tot_len, n_embed = input_embeds.shape
+        device = input_embeds.device
+        selected_indices = info_dict['selected_indices']
+        
+        if not self.resume_anchor:
+            self.anchor_logits_decoder.load_state_dict(self.state_dict_anchor)
+            self.resume_anchor = True
+            
+        transformer_output = self.transformer(
+                inputs_embeds=input_embeds,
+                attention_mask=None,
+                position_ids=None,
+            )
+        if self.use_anchor and self.ar_future_interval == 0:
+            key_points_num = 1
+        else:
+            key_points_num = len(selected_indices)
+        transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+        key_points_logits, kpts_scores = self.anchor_logits_decoder.generate_keypoints(input_embeds[:, :22, :], info_dict)
+        
+        # self.anchor_logits_decoder.compute_keypoint_loss(input_embeds[:, :22, :], info_dict)
+        
+        distDiffu2GT = torch.norm(key_points_logits- center_obj_anchor_pts.unsqueeze(1), dim=-1)
+        anchor_diffu_cls = distDiffu2GT[:, :].argmin(dim = -1) # (bs, num_mode)
+        anchor_diffu_logits = center_obj_anchor_pts[torch.arange(batch_size)[:, None].repeat(1, self.out_num_mode).view(-1), anchor_diffu_cls.view(-1), :].view(
+            batch_size, self.out_num_mode, 2) # (bs, num_mode, 2)
+        
+        pred_key_points_during_generate = torch.zeros((batch_size, self.out_num_mode, key_points_num, 4), device=device)
+        if self.model_args.predict_yaw:
+            pred_key_points_during_generate = key_points_logits
+        else:
+            pred_key_points_during_generate[:, :, :, :2] = key_points_logits 
+        input_embeds_kpts = self.action_m_embed(pred_key_points_during_generate)
+        kpts_scores = kpts_scores.unsqueeze(-1)
+        kpts_idx = anchor_diffu_cls.unsqueeze(-1) # (bs, out_num_mode, 1)
+        
+        return pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx
     
     def generate_feature(self, batch_size, input_dict, batch_sample_count, **kwargs) -> torch.FloatTensor:
         
