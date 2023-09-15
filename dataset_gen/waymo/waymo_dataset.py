@@ -19,7 +19,7 @@ from dataset_gen.waymo.config import cfg
 from dataset_gen.waymo.waymo_eval import waymo_evaluation, waymo_evaluation_seperate
 from transformer4planning.utils.nuplan_utils import generate_contour_pts
 
-
+OBJECT_TYPE = ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
 
 class WaymoDataset(DatasetTemplate):
     def __init__(self, dataset_cfg, training=True, logger=None, use_raster=False):
@@ -36,6 +36,8 @@ class WaymoDataset(DatasetTemplate):
         
         self.do_norm = False
         self.norm_scale = 10
+
+        self.intention_raster = True
 
     def get_all_infos(self, info_path):
         self.logger.info(f'Start to load infos from {info_path}')
@@ -153,8 +155,7 @@ class WaymoDataset(DatasetTemplate):
             'obj_ids': obj_ids,
 
             'center_objects_world': center_objects,
-            # "center_objects_past": center_gt_past_trajs, # (x, y, z, rot, vx, vy)
-            "center_objects_past": center_objects_past, # (x, y, z, l, w, h, heading, vx, vy, valid)
+            "center_objects_past": center_gt_past_trajs, # (x, y, z, rot, vx, vy)
             'trajectory_label': center_gt_trajs_labels, # ( x, y, z, heading)
             'center_objects_id': np.array(track_infos['object_id'])[track_index_to_predict],
             'center_objects_type': np.array(track_infos['object_type'])[track_index_to_predict],
@@ -379,7 +380,8 @@ class WaymoDataset(DatasetTemplate):
         # ret_obj_valid_mask[np.arange(len(center_indices)), center_indices, :] = 0
         ret_obj_trajs[ret_obj_valid_mask == 0] = 0
         
-        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6, 7, 8]]
+        # ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6, 7, 8]]
+        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :]
         ret_center_past_trajs_mask = obj_trajs[np.arange(len(center_indices)), center_indices, :, -1]
         ret_center_past_trajs[ret_center_past_trajs_mask == 0] = 0
 
@@ -598,20 +600,9 @@ class WaymoDataset(DatasetTemplate):
 
         return pred_dict_list
 
-    def create_raster(self, ret_infos):
-        out_ret_infos = {}
-        out_ret_infos['trajectory_label'] = ret_infos['trajectory_label'] #  (bs, 80, 4)
-        out_ret_infos['context_actions'] = ret_infos['center_objects_past'] # (bs, 11, 4)
-        out_ret_infos['center_objects_world'] = ret_infos['center_objects_world'] 
-        out_ret_infos['scenario_id'] = ret_infos['scenario_id'] 
-        out_ret_infos['center_objects_id'] = ret_infos['center_objects_id'] 
-        out_ret_infos['center_objects_type'] = ret_infos['center_objects_type'] 
-        out_ret_infos['center_gt_trajs_src'] = ret_infos['center_gt_trajs_src'] 
-        out_ret_infos['track_index_to_predict'] = ret_infos['track_index_to_predict'] 
-        
-        
+    def create_raster(self, ret_infos):   
         bs = ret_infos['obj_trajs'].shape[0]
-        agent_types_value = [self.dataset_cfg.OBJECT_TYPE.index(obj_t) for obj_t in ret_infos['obj_types']]
+        agent_types_value = [OBJECT_TYPE.index(obj_t) for obj_t in ret_infos['obj_types']]
         rasters_high_res = []
         raster_low_res = []
         
@@ -623,30 +614,30 @@ class WaymoDataset(DatasetTemplate):
             
             rasters_high, rasters_low = self.static_coor_rasterize(agent_trajs, agent_types_value, agent_trajs_mask,
                                                                            map_trajs, map_trajs_mask,
-                                                                           out_ret_infos['trajectory_label'][i, ...], out_ret_infos['context_actions'][i, ...],
-                                                                           str(i) + '_' + ret_infos['scenario_id'][i])
+                                                                           ret_infos['trajectory_label'][i, ...], ret_infos['center_objects_past'][i, ...],
+                                                                           str(i) + '_' + ret_infos['scenario_id'][i], ret_infos['center_objects_type'][i], ret_infos['track_index_to_predict'][i])
             
             rasters_high_res.append(rasters_high[None, ...])
             raster_low_res.append(rasters_low[None, ...])
         
-        out_ret_infos['high_res_raster'] = np.concatenate(rasters_high_res, axis=0)  
-        out_ret_infos['low_res_raster'] = np.concatenate(raster_low_res, axis=0)  
+        ret_infos['high_res_raster'] = np.concatenate(rasters_high_res, axis=0)  
+        ret_infos['low_res_raster'] = np.concatenate(raster_low_res, axis=0)  
         
-        return out_ret_infos
+        return ret_infos
     
     def static_coor_rasterize(self, agent_trajs, agent_types_value, agent_trajs_mask, map_trajs, map_trajs_mask, 
-                              trajectory_label, context_actions, scenario_id,
+                              trajectory_label, context_actions, scenario_id, ego_type, ego_idx,
                               raster_shape=(224, 224),
                               high_res_scale=4, low_res_scale=0.77,
-                              road_types=20, agent_types=3,
+                              road_types=16, agent_types=3,
                               debug_raster=False):
 
         past_frames_num = agent_trajs.shape[1]
         
         # channels:
-        # 0-19: road raster
-        # 20-end: agent raster (33=3 (agent_types) * 11 (sample_frames_in_past))
-        total_raster_channels = road_types + agent_types * past_frames_num
+        # 0-15: road raster
+        # 15-end: agent raster (33=3 (agent_types) * 11 (sample_frames_in_past))
+        total_raster_channels = road_types + agent_types * past_frames_num + 1 if self.intention_raster else road_types + agent_types * past_frames_num
 
         rasters_high_res = np.zeros([raster_shape[0],
                                     raster_shape[1],
@@ -657,46 +648,51 @@ class WaymoDataset(DatasetTemplate):
         rasters_high_res_channels = cv2.split(rasters_high_res)
         rasters_low_res_channels = cv2.split(rasters_low_res)
 
+        road_type_index = [-1, 0, 1, 2, -1, -1, 3, 4, 5, 6, 7, 8, 9, 10, -1, 11, 12, 13, 14, 15]
+
         # road raster
         num_polylines = map_trajs.shape[0]
         
         for polyline_id in range(num_polylines):
-            valid_points = map_trajs[polyline_id, ...][map_trajs_mask[polyline_id, ...]] # (20, 9)
-            if valid_points.shape[0] < 7:
-                continue
+            map_points = map_trajs[polyline_id, ...]
+            valid_points = map_points[map_trajs_mask[polyline_id, ...]] # (20, 9)
             xyz = valid_points[:, 0:3]
-            
-            road_type = int(valid_points[0, 6])
-            pts = list(zip(xyz[:, 0], xyz[:, 1]))
-            line = shapely.geometry.LineString(pts)
-            simplified_xyz_line = line.simplify(1)
-            simplified_x, simplified_y = simplified_xyz_line.xy
-            simplified_xyz = np.ones((len(simplified_x), 2))
-            simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-
-            high_res_road = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
-            low_res_road = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
-            if road_type in [5, 17, 18, 19]:
-                cv2.fillPoly(rasters_high_res_channels[road_type + 1], np.int32([high_res_road[:, :2]]), (255, 255, 255))
-                cv2.fillPoly(rasters_low_res_channels[road_type + 1], np.int32([low_res_road[:, :2]]), (255, 255, 255))
+            if xyz.shape[0] < 2: continue
+ 
+            road_type = int(map_points[0, 6])
+            channel = road_type_index[road_type]
+            assert channel != -1
+            if road_type in [17, 18, 19]:
+                high_res_road = (xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+                low_res_road = (xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
+                cv2.fillPoly(rasters_high_res_channels[channel], np.int32([high_res_road[:, :2]]), (255, 255, 255))
+                cv2.fillPoly(rasters_low_res_channels[channel], np.int32([low_res_road[:, :2]]), (255, 255, 255))
             else:
+                pts = list(zip(xyz[:, 0], xyz[:, 1]))
+                line = shapely.geometry.LineString(pts)
+                simplified_xyz_line = line.simplify(1)
+                simplified_x, simplified_y = simplified_xyz_line.xy
+                simplified_xyz = np.ones((len(simplified_x), 2))
+                simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+
+                high_res_road = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+                low_res_road = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
                 for j in range(simplified_xyz.shape[0] - 1):
-                    cv2.line(rasters_high_res_channels[road_type + 1], tuple(high_res_road[j, :2]),
+                    cv2.line(rasters_high_res_channels[channel], tuple(high_res_road[j, :2]),
                             tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
-                    cv2.line(rasters_low_res_channels[road_type + 1], tuple(low_res_road[j, :2]),
+                    cv2.line(rasters_low_res_channels[channel], tuple(low_res_road[j, :2]),
                             tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
  
         # agent
         num_agents = agent_trajs.shape[0] # (num_objects, num_timestamps_past, 29)
         
         for agent_id in range(num_agents):
-            valid_points = agent_trajs[agent_id, ...][agent_trajs_mask[agent_id, ...]] # (num_timestamps_past, 29)
-            if valid_points.shape[0] != past_frames_num:
-                continue
+            agent_points = agent_trajs[agent_id, ...] # (num_timestamps_past, 29)
                 
             agent_tp = agent_types_value[agent_id]
             for time_id in range(past_frames_num):
-                pose = valid_points[time_id, :] # (x, y, z, dx, dy, dz, ...., sin, cos, vel_x, vel_y, acc_x, acc_y)
+                if agent_trajs_mask[agent_id, time_id] == 0: continue
+                pose = agent_points[time_id, :] # (x, y, z, dx, dy, dz, ...., sin, cos, vel_x, vel_y, acc_x, acc_y)
 
                 rect_pts = generate_contour_pts((pose[0], pose[1]), w=pose[3], l=pose[4], direction= math.atan2(pose[-6], pose[-5]))
                 rect_pts = np.array(rect_pts, dtype=np.int32)
@@ -709,6 +705,24 @@ class WaymoDataset(DatasetTemplate):
                 cv2.drawContours(rasters_low_res_channels[road_types + agent_tp * past_frames_num + time_id],
                                 [rect_pts_low_res], -1, (255, 255, 255), -1)
 
+        if self.intention_raster:
+            with open("/home/ldr/workspace/transformer4planning/data/waymo/cluster_64_center_dict.pkl", 'rb') as f:
+                intention_points_dict = pickle.load(f)
+
+            intention_points = intention_points_dict[ego_type].reshape(-1, 2)
+            for ipt in intention_points:
+                if agent_trajs_mask[ego_idx, -1] == 0: continue
+                pose = agent_trajs[ego_idx, -1, :]
+                # draw on high resolution
+                rect_pts = generate_contour_pts(ipt, w=pose[3], l=pose[4], direction= math.atan2(pose[-6], pose[-5]))
+                rect_pts = np.array(rect_pts, dtype=np.int32)
+                rect_pts_high_res = (high_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
+                cv2.drawContours(rasters_high_res_channels[-1],
+                                [rect_pts_high_res], -1, (255, 255, 255), -1)
+                # draw on low resolution
+                rect_pts_low_res = (low_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
+                cv2.drawContours(rasters_low_res_channels[-1],
+                                [rect_pts_low_res], -1, (255, 255, 255), -1)
 
         rasters_high_res = np.array(cv2.merge(rasters_high_res_channels).astype(bool))
         rasters_low_res = np.array(cv2.merge(rasters_low_res_channels).astype(bool))

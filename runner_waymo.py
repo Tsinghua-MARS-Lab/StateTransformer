@@ -149,10 +149,7 @@ def main():
     
     cfg_from_yaml_file("/home/ldr/workspace/transformer4planning/config/config_gpt2_small.yaml", cfg)
     
-    if 'vector' in model_args.model_name:
-        use_raster = False
-    else:
-        use_raster = True
+    use_raster = model_args.use_raster
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model_args.vector_model_cfg = cfg.MODEL

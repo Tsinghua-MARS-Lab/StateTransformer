@@ -78,9 +78,6 @@ class DatasetTemplate(torch_data.Dataset):
             else:
                 val_list = [torch.from_numpy(x) for x in val_list]
                 input_dict[key] = torch.cat(val_list, dim=0)
-
-        if 'high_res_raster' in input_dict:
-            return input_dict
         
         batch_sample_count = [len(x['track_index_to_predict']) for x in batch_list]
         batch_dict = {'batch_size': batch_size, 'input_dict': input_dict, 'batch_sample_count': batch_sample_count}

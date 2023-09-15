@@ -4,19 +4,19 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6; \
 python -m torch.distributed.run --nproc_per_node=7 --master_port=29502 runner_waymo.py \
         --model_name scratch-vector-gpt --model_pretrain_name_or_path None \
         --saved_dataset_folder  /localdata_ssd/liderun/index \
-        --output_dir /localdata_ssd/liderun/tmp/debug/training_results  \
-        --logging_dir /localdata_ssd/liderun/tmp/debug/training_logs \
-        --run_name debug --num_train_epochs 100 \
-        --per_device_train_batch_size 8 --warmup_steps 50 \
+        --output_dir /localdata_ssd/liderun/tmp/raster_kps_ipraster/training_results  \
+        --logging_dir /localdata_ssd/liderun/tmp/raster_kps_ipraster/training_logs \
+        --run_name raster_kps_ipraster --num_train_epochs 100 \
+        --per_device_train_batch_size 4 --warmup_steps 50 \
         --weight_decay 0.01 --logging_steps 100 --save_strategy steps \
         --save_steps 5000 --dataloader_num_workers 10 \
-        --save_total_limit 100  --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
+        --save_total_limit 100  --ar_future_interval 5 --specified_key_points True --forward_specified_key_points False \
         --dataloader_drop_last True --do_train \
         --d_model 256 --dataset_scale 1 \
-        --task waymo --with_traffic_light True --k 1 \
+        --task waymo --with_traffic_light True --k 6 \
         --remove_unused_columns False --future_sample_interval 1 \
         --past_sample_interval 1 \
-        --overwrite_output_dir --loss_fn mse
+        --overwrite_output_dir --loss_fn mse --use_raster True --raster_channels 20
 
 # export CUDA_VISIBLE_DEVICES=0; \
 # python -m torch.distributed.run --nproc_per_node=1 --master_port=29510 runner_waymo.py \

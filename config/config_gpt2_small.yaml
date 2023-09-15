@@ -1,6 +1,6 @@
 DATA_CONFIG:
     DATASET: WaymoDataset
-    OBJECT_TYPE: &object_type ['TYPE_CYCLIST']
+    OBJECT_TYPE: &object_type ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
     
     DATA_ROOT: 'data/waymo'
     SPLIT_DIR: {

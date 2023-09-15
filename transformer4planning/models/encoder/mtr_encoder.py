@@ -329,7 +329,7 @@ class MTREncoder(nn.Module):
 class MTREncoderWithType(MTREncoder):
     def __init__(self, config):
         super().__init__(config)
-        self.map_pooling = nn.Sequential(nn.Linear(self.model_cfg.D_MODEL * self.num_road_type, self.model_cfg.D_MODEL), nn.Tanh())
+        self.map_pooling = nn.Sequential(nn.Linear(self.model_cfg.D_MODEL * (self.num_road_type + 1), self.model_cfg.D_MODEL), nn.Tanh())
 
     def forward(self, batch_dict):
         input_dict = self.organize_by_type(batch_dict['input_dict'])
@@ -337,7 +337,8 @@ class MTREncoderWithType(MTREncoder):
         map_polylines, map_polylines_mask = input_dict['map_polylines'], input_dict['map_polylines_mask']
 
         obj_trajs_in = torch.cat((obj_trajs, obj_trajs_mask[:, :, :, None].type_as(obj_trajs)), dim=-1)
-        obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask).max(dim=1)[0]  # (num_center_objects, num_objects, num_timestamp, C)        
+        obj_polylines_feature_agents = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)
+        obj_polylines_feature = obj_polylines_feature_agents.max(dim=1)[0]  # (num_center_objects, num_objects, num_timestamp, C)        
 
         num_center_objects, _, num_timesteps, _ = obj_trajs.shape
 
@@ -351,10 +352,18 @@ class MTREncoderWithType(MTREncoder):
                 map_polylines_feature = self.map_polyline_encoder[i](map_polylines_per_type, map_polylines_mask_per_type).max(dim=1)[0]  # (num_center_objects, num_polylines, C)
             else:
                 map_polylines_feature = self.map_polyline_encoder[i](torch.zeros(num_center_objects, 1, 1, self.model_cfg.NUM_INPUT_ATTR_MAP, device=obj_trajs.device), torch.zeros(num_center_objects, 1, 1, dtype=bool, device=obj_trajs.device)).squeeze(1)
+            
             map_polylines_feature_typed.append(map_polylines_feature)
-        map_polylines_feature_typed = torch.stack(map_polylines_feature_typed, dim=1).view(num_center_objects, -1)
-        map_polylines_feature = self.map_pooling(map_polylines_feature_typed).unsqueeze(1).repeat(1, num_timesteps, 1)
+
+        map_polylines_feature_typed = torch.stack(map_polylines_feature_typed, dim=1)
+        global_token_feature = torch.cat((map_polylines_feature_typed.unsqueeze(1).repeat(1, num_timesteps, 1, 1), obj_polylines_feature.unsqueeze(2)), dim=2).view(num_center_objects, num_timesteps, -1)
+        global_token_feature = self.map_pooling(global_token_feature)
         batch_dict['obj_feature'] = obj_polylines_feature
         batch_dict['map_feature'] = map_polylines_feature
+        batch_dict["global_feature"] = global_token_feature
+
+        batch_dict['obj_feature_agents'] = obj_polylines_feature_agents
+        batch_dict['obj_mask'] = (obj_trajs_mask.sum(dim=-1) > 0)
+        batch_dict['obj_pos'] = input_dict['obj_trajs_last_pos']
 
         return batch_dict

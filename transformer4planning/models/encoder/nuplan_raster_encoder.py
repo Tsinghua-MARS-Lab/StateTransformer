@@ -142,3 +142,33 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         }
 
         return input_embeds, info_dict
+
+class WaymoRasterizeEncoder(NuplanRasterizeEncoder):
+    def forward(self, batch_dict):
+        input_dict = batch_dict['input_dict']
+        high_res_raster = input_dict["high_res_raster"]
+        low_res_raster = input_dict["low_res_raster"]
+        context_actions = input_dict["center_objects_past"]
+        trajectory_label = input_dict["trajectory_label"]
+
+        assert trajectory_label is not None, "trajectory_label should not be None"
+        device = trajectory_label.device
+        context_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
+
+        # add noise to context actions
+        context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
+        
+        high_res_seq = cat_raster_seq_for_waymo_intention(high_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+        low_res_seq = cat_raster_seq_for_waymo_intention(low_res_raster.permute(0, 3, 2, 1).to(device), context_length)
+        # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
+        # context_length: 8, 40 frames / 5
+        batch_size, context_length, c, h, w = high_res_seq.shape
+
+        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+
+        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+
+        return state_embeds

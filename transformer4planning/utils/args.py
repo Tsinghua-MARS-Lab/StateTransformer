@@ -154,6 +154,9 @@ class ModelArguments:
     use_centerline: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
+    use_raster: Optional[bool] = field(
+        default=False
+    )
 
 @dataclass
 class DataTrainingArguments:
