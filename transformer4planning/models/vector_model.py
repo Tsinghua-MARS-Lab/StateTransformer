@@ -532,7 +532,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             input_embeds_kpts = self.action_m_embed(pred_kps_logit_topk)  # (b, out_num_mode, 1, n_embed)
             
         elif self.decoder_type == "diffusion":
-            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.search_by_diffusion(input_embeds, center_obj_anchor_pts, info_dict)
+            pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx, dist2GT = self.search_by_diffusion(input_embeds, center_obj_anchor_pts, info_dict, 
+                                                                                                debug_GT_cls=anchor_GT_cls, debug_anchor_logits=anchor_GT_logits,
+                                                                                                debug_GT_logits=future_key_points,
+                                                                                                debug_GT_logits_mask=future_key_points_gt_mask)
         
         elif self.use_anchor and self.anchor_len > 0:
             pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx = self.anchor_topK_search(input_embeds, tot_scenario_contenxt_len, out_num_mode=self.out_num_mode,
@@ -584,7 +587,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
             hard_match_num = ((anchor_kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
             soft_match_vec = (anchor_kpts_idx[:, 0] == anchor_GT_cls)
-            for m_i in range(1, 6):
+            for m_i in range(1, self.out_num_mode):
                 soft_match_vec |= (anchor_kpts_idx[:, m_i] == anchor_GT_cls)
             soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
         else:
@@ -1024,7 +1027,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         return anchor_kpts_logits, anchor_kpts_input_embeds, k_kpts_scores, k_kpts_index
     
-    def search_by_diffusion(self, input_embeds, center_obj_anchor_pts, info_dict):
+    def search_by_diffusion(self, input_embeds, center_obj_anchor_pts, info_dict, 
+                            debug_GT_cls=None, debug_anchor_logits=None, debug_GT_logits=None, debug_GT_logits_mask=None):
         
         batch_size, tot_len, n_embed = input_embeds.shape
         device = input_embeds.device
@@ -1044,12 +1048,17 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         else:
             key_points_num = len(selected_indices)
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-        key_points_logits, kpts_scores = self.anchor_logits_decoder.generate_keypoints(input_embeds[:, :22, :], info_dict)
+        key_points_logits, kpts_scores = self.anchor_logits_decoder.generate_keypoints(input_embeds[:, :22, :], info_dict) # (bs, out_mode, 2)
+        
+        if len(key_points_logits.shape) == 3:
+            dist2GT = torch.norm(key_points_logits.squeeze(1)-debug_anchor_logits, dim=-1)
+            key_points_logits = key_points_logits.unsqueeze(1)
+            kpts_scores = kpts_scores.unsqueeze(-1)
         
         # self.anchor_logits_decoder.compute_keypoint_loss(input_embeds[:, :22, :], info_dict)
         
-        distDiffu2GT = torch.norm(key_points_logits- center_obj_anchor_pts.unsqueeze(1), dim=-1)
-        anchor_diffu_cls = distDiffu2GT[:, :].argmin(dim = -1) # (bs, num_mode)
+        distDiffu2IP = torch.norm(key_points_logits- center_obj_anchor_pts.unsqueeze(1), dim=-1)
+        anchor_diffu_cls = distDiffu2IP[:, :].argmin(dim = -1) # (bs, num_mode)
         anchor_diffu_logits = center_obj_anchor_pts[torch.arange(batch_size)[:, None].repeat(1, self.out_num_mode).view(-1), anchor_diffu_cls.view(-1), :].view(
             batch_size, self.out_num_mode, 2) # (bs, num_mode, 2)
         
@@ -1057,12 +1066,13 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.model_args.predict_yaw:
             pred_key_points_during_generate = key_points_logits
         else:
+            # pred_key_points_during_generate[:, :, :, :2] = anchor_diffu_logits.unsqueeze(2) 
             pred_key_points_during_generate[:, :, :, :2] = key_points_logits 
         input_embeds_kpts = self.action_m_embed(pred_key_points_during_generate)
         kpts_scores = kpts_scores.unsqueeze(-1)
         kpts_idx = anchor_diffu_cls.unsqueeze(-1) # (bs, out_num_mode, 1)
         
-        return pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx
+        return pred_key_points_during_generate, input_embeds_kpts, kpts_scores, kpts_idx, dist2GT
     
     def generate_feature(self, batch_size, input_dict, batch_sample_count, **kwargs) -> torch.FloatTensor:
         

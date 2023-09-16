@@ -453,9 +453,10 @@ class KeyPointDiffusionDecoder(nn.Module):
         future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         if self.k == 1:
             key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
+            scores = scores.mean(dim=-1)
         else:
             key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
-            scores = scores.mean(-1) # (bs, mc_num)
+            scores = scores.mean(dim=-1)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
                     reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)],
