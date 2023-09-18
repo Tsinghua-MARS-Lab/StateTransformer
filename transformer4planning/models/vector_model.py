@@ -3,12 +3,13 @@ import pickle
 from typing import List, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 from transformer4planning.models.encoder.nuplan_raster_encoder import *
-from transformer4planning.models.utils import nll_loss_gmm_direct
+from transformer4planning.models.utils import nll_loss_gmm_direct, build_mlps
 from transformer4planning.libs.mlp import DecoderResCat
 from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 from transformer4planning.utils.mtr_utils import batch_nms
@@ -161,28 +162,28 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             self.anchor_logits_diffu_decoder = KeyPointDiffusionDecoder(self.model_args, self.llm_config)
             if self.model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
-                # state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
+                state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
                 
-                # all_state_keys = list(state_dict.keys())
-                # for k in all_state_keys:
-                #     state_dict['model.'+k] = state_dict[k]
-                #     del state_dict[k]
-
-                state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)['state_dict']
                 all_state_keys = list(state_dict.keys())
                 for k in all_state_keys:
-                    if k.startswith('model.model.state_encoder1'):
-                        new_k = 'model.model.state_encoder.0' + k.split('model.model.state_encoder1')[1]
-                        state_dict[new_k] = state_dict[k]
-                        del state_dict[k]
-                    if k.startswith('model.model.state_encoder2'):
-                        new_k = 'model.model.state_encoder.1' + k.split('model.model.state_encoder2')[1]
-                        state_dict[new_k] = state_dict[k]
-                        del state_dict[k]
-                    if k.startswith('model.model.transformerblock_list'):
-                        new_k = 'model.model.backbone' + k.split('model.model.transformerblock_list')[1]
-                        state_dict[new_k] = state_dict[k]
-                        del state_dict[k]
+                    state_dict['model.'+k] = state_dict[k]
+                    del state_dict[k]
+
+                # state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)['state_dict']
+                # all_state_keys = list(state_dict.keys())
+                # for k in all_state_keys:
+                #     if k.startswith('model.model.state_encoder1'):
+                #         new_k = 'model.model.state_encoder.0' + k.split('model.model.state_encoder1')[1]
+                #         state_dict[new_k] = state_dict[k]
+                #         del state_dict[k]
+                #     if k.startswith('model.model.state_encoder2'):
+                #         new_k = 'model.model.state_encoder.1' + k.split('model.model.state_encoder2')[1]
+                #         state_dict[new_k] = state_dict[k]
+                #         del state_dict[k]
+                #     if k.startswith('model.model.transformerblock_list'):
+                #         new_k = 'model.model.backbone' + k.split('model.model.transformerblock_list')[1]
+                #         state_dict[new_k] = state_dict[k]
+                #         del state_dict[k]
     
                 self.anchor_logits_diffu_decoder.load_state_dict(state_dict) 
                 self.state_dict_anchor =state_dict
@@ -1123,6 +1124,18 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         trajectory_label = info_dict['trajectory_label']
         trajectory_label_mask = info_dict['trajectory_label_mask']
         
+        dummy_anchor_embedding = self.action_m_embed(torch.zeros((batch_size, 4), device=device)).unsqueeze(1) # (bs, 1, n_embed)
+        input_embeds = torch.cat([input_embeds, dummy_anchor_embedding], dim=1)
+        
+        transformer_output = self.transformer(
+                inputs_embeds=input_embeds,
+                attention_mask=None,
+                position_ids=None,
+        )
+        
+        transformer_outputs_hidden_state = transformer_output['last_hidden_state'] # (bs, 23, 256)
+        traj_GT_label = trajectory_label[:, -1, :2] #(bs, 2)
+        
         # anchor embedding
         tot_scenario_contenxt_len = self.scenario_type_len + context_length * self.context_num
         tot_scenario_contenxt_anchor_len = self.scenario_type_len + context_length * self.context_num + self.anchor_len
@@ -1137,5 +1150,6 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
         
-        return input_embeds, anchor_GT_label, anchor_GT_cls, gt_anchor_mask
+        # return input_embeds, anchor_GT_label, anchor_GT_cls, gt_anchor_mask
+        return transformer_outputs_hidden_state, traj_GT_label, anchor_GT_cls, gt_anchor_mask
     
