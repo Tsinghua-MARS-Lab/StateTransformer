@@ -22,6 +22,10 @@ import pandas as pd
 import copy
 
 FDE_THRESHHOLD = 8 # keep same with nuplan simulation
+ADE_THRESHHOLD = 8 # keep same with nuplan simulation
+HEADING_ERROR_THRESHHOLD = 0.8 # keep same with nuplan simulation
+MISS_RATE_THRESHHOLD = 0.3
+MISS_THRESHHOLD = [6, 8, 16]
 
 # Custom compute_metrics function
 def compute_metrics(prediction: EvalPrediction):
@@ -62,28 +66,78 @@ def compute_metrics(prediction: EvalPrediction):
     fde_x_error_gen = prediction_trajectory_by_generation[:, -1, 0] - labels[:, -1, 0]
     fde_y_error_gen = prediction_trajectory_by_generation[:, -1, 1] - labels[:, -1, 1]
 
-    ade_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2).mean()
-    eval_result['ade_gen'] = ade_gen
-    fde3_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)[:, 29]
-    fde5_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)[:, 49]
+    # ADE metrics computation
+    ade_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)
+    ade3_gen = np.mean(copy.deepcopy(ade_gen[:, :30]), axis=1)
+    ade5_gen = np.mean(copy.deepcopy(ade_gen[:, :50]), axis=1)
+    ade8_gen = np.mean(copy.deepcopy(ade_gen[:, :80]), axis=1)
+    avg_ade = (ade3_gen + ade5_gen + ade8_gen)/3
+    ade_score = np.ones_like(avg_ade) - avg_ade/ADE_THRESHHOLD
+    ade_score = np.where(ade_score < 0, np.zeros_like(ade_score), ade_score)
+    eval_result['ade_horison3_gen'] = ade3_gen.mean()
+    eval_result['ade_horison5_gen'] = ade5_gen.mean()
+    eval_result['ade_horison8_gen'] = ade8_gen.mean()
+    eval_result['metric_ade'] = avg_ade.mean()
+    eval_result['ade_score'] = ade_score.mean()
+
+    # FDE metrics computation
+    fde3_gen = copy.deepcopy(ade_gen[:, 29])
+    fde5_gen = copy.deepcopy(ade_gen[:, 49])
     fde8_gen = np.sqrt(fde_x_error_gen ** 2 + fde_y_error_gen ** 2)
     avg_fde = (fde3_gen + fde5_gen + fde8_gen)/3
-    score = np.ones_like(avg_fde) - avg_fde/FDE_THRESHHOLD
-    score = np.where(score < 0, np.zeros_like(score), score)
+    fde_score = np.ones_like(avg_fde) - avg_fde/FDE_THRESHHOLD
+    fde_score = np.where(fde_score < 0, np.zeros_like(fde_score), fde_score)
     eval_result['fde_horison3_gen'] = fde3_gen.mean()
     eval_result['fde_horison5_gen'] = fde5_gen.mean()
     eval_result['fde_horison8_gen'] = fde8_gen.mean()
     eval_result['metric_fde'] = avg_fde.mean()
-    eval_result['score'] = score.mean()
+    eval_result['fde_score'] = fde_score.mean()
     ade_key_points_gen = np.sqrt(ade_x_error_key_points_gen ** 2 + ade_y_error_key_points_gen ** 2).mean()
     eval_result['ade_keypoints_gen'] = ade_key_points_gen
     fde_key_points_gen = np.sqrt(fde_x_error_key_points_gen ** 2 + fde_y_error_key_points_gen ** 2).mean()
     eval_result['fde_keypoints_gen'] = fde_key_points_gen
 
-    if prediction_key_points_by_generation.shape[-1] == 4:
-        heading_error_gen = abs(prediction_key_points_by_generation[:, :, -1] - label_key_points[:, :, -1])
-        eval_result['heading_error_by_gen'] = heading_error_gen.mean()
+    # heading error
+    if prediction_trajectory_by_generation.shape[-1] == 4:
+        # average heading error comutation
+        heading_error_gen = abs(prediction_trajectory_by_generation[:, :, -1] - labels[:, :, -1])
+        ahe3_gen = np.mean(copy.deepcopy(heading_error_gen[:, :30]), axis=1)
+        ahe5_gen = np.mean(copy.deepcopy(heading_error_gen[:, :50]), axis=1)
+        ahe8_gen = np.mean(copy.deepcopy(heading_error_gen[:, :80]), axis=1)
+        avg_ahe = (ahe3_gen + ahe5_gen + ahe8_gen)/3
+        ahe_score = np.ones_like(avg_ahe) - avg_ahe/HEADING_ERROR_THRESHHOLD
+        ahe_score = np.where(ahe_score < 0, np.zeros_like(ahe_score), ahe_score)
+        eval_result['ahe_horison3_gen'] = ahe3_gen.mean()
+        eval_result['ahe_horison5_gen'] = ahe5_gen.mean()
+        eval_result['ahe_horison8_gen'] = ahe8_gen.mean()
+        eval_result['metric_ahe'] = avg_ahe.mean()
+        eval_result['ahe_score'] = ahe_score.mean()
 
+        # final heading error computation
+        fhe3_gen = copy.deepcopy(heading_error_gen[:, 29])
+        fhe5_gen = copy.deepcopy(heading_error_gen[:, 49])
+        fhe8_gen = copy.deepcopy(heading_error_gen[:, 79])
+        avg_fhe = (fhe3_gen + fhe5_gen + fhe8_gen)/3
+        fhe_score = np.ones_like(avg_fhe) - avg_fhe/HEADING_ERROR_THRESHHOLD
+        fhe_score = np.where(fhe_score < 0, np.zeros_like(fhe_score), fhe_score)
+        eval_result['fhe_horison3_gen'] = fhe3_gen.mean()
+        eval_result['fhe_horison5_gen'] = fhe5_gen.mean()
+        eval_result['fhe_horison8_gen'] = fhe8_gen.mean()
+        eval_result['metric_fhe'] = avg_fhe.mean()
+        eval_result['fhe_score'] = fhe_score.mean()
+    
+    # missing rate TODO: miss rate is designed for the whole scneario
+    max_displacement3 = np.max(ade_gen[:, :30], axis=1)
+    max_displacement5 = np.max(ade_gen[:, :50], axis=1)
+    max_displacement8 = np.max(ade_gen[:, :80], axis=1)
+    miss3 = np.where(max_displacement3 > MISS_THRESHHOLD[0], np.ones_like(max_displacement3), np.zeros_like(max_displacement3))
+    miss5 = np.where(max_displacement5 > MISS_THRESHHOLD[1], np.ones_like(max_displacement5), np.zeros_like(max_displacement5))
+    miss8 = np.where(max_displacement8 > MISS_THRESHHOLD[2], np.ones_like(max_displacement8), np.zeros_like(max_displacement8))
+    avg_miss = np.where(miss3 + miss5 + miss8 >= 1, np.ones_like(miss3), np.zeros_like(miss3))
+    eval_result["miss_rate3"] = miss3.mean()
+    eval_result["miss_rate5"] = miss5.mean()
+    eval_result["miss_rate8"] = miss8.mean()
+    eval_result["total_miss_rate"] = avg_miss.mean()
     # compute error for forward results
     ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
     ade_y_error_key_points_for = prediction_key_points_by_forward[:, :, 1] - label_key_points[:, :, 1]
