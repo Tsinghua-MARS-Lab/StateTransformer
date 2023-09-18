@@ -170,7 +170,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
-            loss_items=loss_items
+            # loss_items=loss_items
         )
 
     @torch.no_grad()
@@ -268,15 +268,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
                         pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
 
-                if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
+                if idm_reference_global is not None and not self.model_args.forward_specified_key_points:
                     # replace last key point with IDM reference
-                    ego_state_global = idm_reference_global[selected_indices[-1]]
+                    ego_state_global = idm_reference_global[selected_indices[i]]
                     idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
                                                                                 ego_state_global.rear_axle.y]),
                                                                         ego_pose,
                                                                         ego_to_global=False)
                     print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
                     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
+                    pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
                 key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                 # replace embed at the next position
                 input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
@@ -500,6 +501,10 @@ def build_models(model_args):
     elif 'pretrain' in model_args.model_name:
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, config=config_p)
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
+        if model_args.key_points_diffusion_decoder_load_from is not None:
+                print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
+                state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
+                model.key_points_decoder.load_state_dict(state_dict)
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p, model_args=model_args)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
