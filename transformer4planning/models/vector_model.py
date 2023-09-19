@@ -39,6 +39,24 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.context_encoder = MTREncoder(vector_model_cfg.CONTEXT_ENCODER)
         self.context_num = 2
         
+        d_model = vector_model_cfg.CONTEXT_ENCODER.D_MODEL
+        self.in_proj_obj = nn.Sequential(
+            nn.Linear(self.context_encoder.num_out_channels, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model),
+        )
+        
+        self.in_proj_map = nn.Sequential(
+            nn.Linear(self.context_encoder.num_out_channels, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model),
+        )
+        
+        self.num_future_frames = 80
+        self.build_dense_future_prediction_layers(
+            hidden_dim=d_model, num_future_frames=self.num_future_frames
+        )
+        
         # load intention points
         intention_points_file = vector_model_cfg.MOTION_DECODER.INTENTION_POINTS_FILE
         with open(intention_points_file, 'rb') as f:
@@ -213,6 +231,20 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         obj_feature = batch_dict['obj_feature']
         map_feature = batch_dict['map_feature']
+        
+        obj_mask = batch_dict['obj_mask']
+        num_center_objects, num_objects, n_timestamp, _ = obj_feature.shape
+        num_polylines = map_feature.shape[1]
+        map_mask = batch_dict['map_mask']
+        obj_feature_valid = self.in_proj_obj(obj_feature[obj_mask])
+        obj_feature = obj_feature.new_zeros(num_center_objects, num_objects, n_timestamp, obj_feature_valid.shape[-1])
+        obj_feature[obj_mask] = obj_feature_valid
+
+        map_feature_valid = self.in_proj_map(map_feature[map_mask])
+        map_feature = map_feature.new_zeros(num_center_objects, num_polylines, n_timestamp, map_feature_valid.shape[-1])
+        map_feature[map_mask] = map_feature_valid
+        
+        
         state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
         state_embeds = state_embeds.max(dim=1)[0]
         
@@ -287,9 +319,100 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             "future_key_points": future_key_points,
             "future_key_points_gt_mask": future_key_points_gt_mask,
             "selected_indices": selected_indices,
+            'obj_feature': obj_feature,
+            'obj_mask': obj_mask,
+            'obj_pos': batch_dict['obj_pos'],
+            'map_feature': map_feature
         }
         
         return input_embeds, info_dict
+    
+    def build_dense_future_prediction_layers(self, hidden_dim, num_future_frames):
+        self.obj_pos_encoding_layer = build_mlps(
+            c_in=2, mlp_channels=[hidden_dim, hidden_dim, hidden_dim], ret_before_act=True, without_norm=True
+        )
+        self.dense_future_head = build_mlps(
+            c_in=hidden_dim * 2,
+            mlp_channels=[hidden_dim, hidden_dim, num_future_frames * 7], ret_before_act=True
+        )
+
+        self.future_traj_mlps = build_mlps(
+            c_in=4 * self.num_future_frames, mlp_channels=[hidden_dim, hidden_dim, hidden_dim], ret_before_act=True, without_norm=True
+        )
+        self.traj_fusion_mlps = build_mlps(
+            c_in=hidden_dim * 2, mlp_channels=[hidden_dim, hidden_dim, hidden_dim], ret_before_act=True, without_norm=True
+        )
+        
+    def apply_dense_future_prediction(self, obj_feature, obj_mask, obj_pos):
+        
+        # num_center_objects, num_objects, n_timestamp, _ = obj_feature.shape
+        # obj_feature_valid = self.in_proj_obj(obj_feature[obj_mask])
+        # obj_feature = obj_feature.new_zeros(num_center_objects, num_objects, n_timestamp, obj_feature_valid.shape[-1])
+        # obj_feature[obj_mask] = obj_feature_valid
+
+        
+        obj_feature = obj_feature.max(dim=2)[0]
+        obj_mask = (obj_mask.sum(dim=-1) > 0)
+        num_center_objects, num_objects,  _ = obj_feature.shape
+
+        # dense future prediction
+        obj_pos_valid = obj_pos[obj_mask][..., 0:2]
+        obj_feature_valid = obj_feature[obj_mask]
+        obj_pos_feature_valid = self.obj_pos_encoding_layer(obj_pos_valid)
+        obj_fused_feature_valid = torch.cat((obj_pos_feature_valid, obj_feature_valid), dim=-1)
+
+        pred_dense_trajs_valid = self.dense_future_head(obj_fused_feature_valid)
+        pred_dense_trajs_valid = pred_dense_trajs_valid.view(pred_dense_trajs_valid.shape[0], self.num_future_frames, 7)
+
+        temp_center = pred_dense_trajs_valid[:, :, 0:2] + obj_pos_valid[:, None, 0:2]
+        pred_dense_trajs_valid = torch.cat((temp_center, pred_dense_trajs_valid[:, :, 2:]), dim=-1)
+
+        # future feature encoding and fuse to past obj_feature
+        obj_future_input_valid = pred_dense_trajs_valid[:, :, [0, 1, -2, -1]].flatten(start_dim=1, end_dim=2)  # (num_valid_objects, C)
+        obj_future_feature_valid = self.future_traj_mlps(obj_future_input_valid)
+
+        obj_full_trajs_feature = torch.cat((obj_feature_valid, obj_future_feature_valid), dim=-1)
+        obj_feature_valid = self.traj_fusion_mlps(obj_full_trajs_feature)
+
+        ret_obj_feature = torch.zeros_like(obj_feature)
+        ret_obj_feature[obj_mask] = obj_feature_valid
+
+        ret_pred_dense_future_trajs = obj_feature.new_zeros(num_center_objects, num_objects, self.num_future_frames, 7) # pred_dense_trajs
+        ret_pred_dense_future_trajs[obj_mask] = pred_dense_trajs_valid
+
+        return ret_obj_feature, ret_pred_dense_future_trajs
+    
+    def get_dense_future_prediction_loss(self, pred_dense_trajs, obj_trajs_future_state, obj_trajs_future_mask):
+        assert pred_dense_trajs.shape[-1] == 7
+        assert obj_trajs_future_state.shape[-1] == 4
+
+        pred_dense_trajs_gmm, pred_dense_trajs_vel = pred_dense_trajs[:, :, :, 0:5], pred_dense_trajs[:, :, :, 5:7]
+
+        loss_reg_vel = F.l1_loss(pred_dense_trajs_vel, obj_trajs_future_state[:, :, :, 2:4], reduction='none')
+        loss_reg_vel = (loss_reg_vel * obj_trajs_future_mask[:, :, :, None]).sum(dim=-1).sum(dim=-1)
+
+        num_center_objects, num_objects, num_timestamps, _ = pred_dense_trajs.shape
+        fake_scores = pred_dense_trajs.new_zeros((num_center_objects, num_objects)).view(-1, 1)  # (num_center_objects * num_objects, 1)
+
+        temp_pred_trajs = pred_dense_trajs_gmm.contiguous().view(num_center_objects * num_objects, 1, num_timestamps, 5)
+        temp_gt_idx = torch.zeros(num_center_objects * num_objects).cuda().long()  # (num_center_objects * num_objects)
+        temp_gt_trajs = obj_trajs_future_state[:, :, :, 0:2].contiguous().view(num_center_objects * num_objects, num_timestamps, 2)
+        temp_gt_trajs_mask = obj_trajs_future_mask.view(num_center_objects * num_objects, num_timestamps)
+        loss_reg_gmm, _ = nll_loss_gmm_direct(
+            pred_scores=fake_scores, pred_trajs=temp_pred_trajs, gt_trajs=temp_gt_trajs, gt_valid_mask=temp_gt_trajs_mask,
+            pre_nearest_mode_idxs=temp_gt_idx,
+            timestamp_loss_weight=None, use_square_gmm=False,
+        )
+        loss_reg_gmm = loss_reg_gmm.view(num_center_objects, num_objects)
+
+        loss_reg = loss_reg_vel + loss_reg_gmm
+
+        obj_valid_mask = obj_trajs_future_mask.sum(dim=-1) > 0
+
+        loss_reg = (loss_reg * obj_valid_mask.float()).sum(dim=-1) / torch.clamp_min(obj_valid_mask.sum(dim=-1), min=1.0)
+        loss_reg = loss_reg.mean()
+
+        return loss_reg
         
     def forward(
             self,
@@ -322,6 +445,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         future_key_points = info_dict['future_key_points']
         future_key_points_gt_mask = info_dict['future_key_points_gt_mask']
         
+        ret_obj_feature, ret_pred_dense_future_trajs = self.apply_dense_future_prediction(info_dict['obj_feature'], info_dict['obj_mask'], info_dict['obj_pos'])
+        loss_pred_future = self.get_dense_future_prediction_loss(ret_pred_dense_future_trajs, input_dict['obj_trajs_future_state'], input_dict['obj_trajs_future_mask'])
+        
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         
         # add anchor embedding
@@ -335,7 +461,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             anchor_embedding = self.action_m_embed(torch.cat([anchor_GT_logits, torch.zeros((batch_size, 2), device=device)], dim = 1)).unsqueeze(1)
             gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
             
-            # anchor_embedding = anchor_embedding*gt_anchor_mask.unsqueeze(-1)
+            anchor_embedding = anchor_embedding*gt_anchor_mask.unsqueeze(-1)
             input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
             
         else:
@@ -441,7 +567,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                               pred_anchor_logits=pred_anchor_logits, # (bs, anchor_len, 64 * 2)
                               gt_anchor_logits = anchor_GT_logits, #(bs, 2)
                               center_obj_anchor_pts=center_obj_anchor_pts, # (bs, 64, 2)
+                              loss_pred_future=loss_pred_future,
                               )
+
+        loss += loss_pred_future
 
         if not return_dict:
             output = (pred_traj_logits,) + transformer_outputs[1:]
@@ -648,7 +777,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                   gt_anchor_mask=None,
                   pred_anchor_logits=None,
                   gt_anchor_logits=None,
-                  center_obj_anchor_pts=None
+                  center_obj_anchor_pts=None,
+                  loss_pred_future=None
                   ):
         """_summary_
 
@@ -760,7 +890,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         if self.debug and loss.device.index == 4:
             self.tot_iter_num += 1
             if self.tot_iter_num % 100 ==0 and self.use_anchor and self.ar_future_interval == 0:
-                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, ' tot loss ', loss)
+                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, ' pred_future ', loss_pred_future, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.use_anchor and self.ar_future_interval > 0:
                 print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss_anchor_logits ", loss_anchor_logits, 
                       " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
