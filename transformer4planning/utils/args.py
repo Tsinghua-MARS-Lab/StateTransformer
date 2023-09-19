@@ -154,6 +154,12 @@ class ModelArguments:
     use_centerline: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
+    split_embed: Optional[bool] = field(
+        default=True, metadata={"help": "Whether to use different embedding layers for action, anchor and key points in WOMD"}
+    )
+    action_dim: Optional[int] = field(
+        default=10, metadata={"help": "Number of action data input dimension."}
+    )
 
 @dataclass
 class DataTrainingArguments:
