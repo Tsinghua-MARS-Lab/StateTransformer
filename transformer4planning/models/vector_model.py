@@ -79,6 +79,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
         self.action_m_embed = nn.Sequential(nn.Linear(10, llm_config.n_embd), nn.Tanh())
+        # self.action_m_embed = nn.Sequential(nn.Linear(4, llm_config.n_embd), nn.Tanh())
         self.kps_m_embed = nn.Sequential(nn.Linear(4, llm_config.n_embd), nn.Tanh())
         self.anchor_m_embed = nn.Sequential(nn.Linear(2, llm_config.n_embd), nn.Tanh())
         self.llm_n_embd = llm_config.n_embd
@@ -258,6 +259,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
+        # action_embeds = self.action_m_embed(context_actions[..., :4])
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
 
@@ -756,12 +758,12 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             bs = gt_anchor_cls.shape[0]
             pred_anchor_logits = pred_anchor_logits.view(bs, self.anchor_num, 2)
             
-            loss_anchor_cls_pos = None
-            pred_anchor_cls_argmax = pred_anchor_cls.argmax(-1).view(-1)
-            pred_anchor_cls_pos = center_obj_anchor_pts[torch.arange(bs), pred_anchor_cls_argmax, :] # (bs, 2)
-            loss_anchor_cls_pos = self.logits_anchor_loss(pred_anchor_cls_pos, gt_anchor_logits)
-            loss_anchor_cls_pos = (loss_anchor_cls_pos * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
-            loss += loss_anchor_cls_pos
+            # loss_anchor_cls_pos = None
+            # pred_anchor_cls_argmax = pred_anchor_cls.argmax(-1).view(-1)
+            # pred_anchor_cls_pos = center_obj_anchor_pts[torch.arange(bs), pred_anchor_cls_argmax, :] # (bs, 2)
+            # loss_anchor_cls_pos = self.logits_anchor_loss(pred_anchor_cls_pos, gt_anchor_logits)
+            # loss_anchor_cls_pos = (loss_anchor_cls_pos * gt_anchor_mask).sum() / (gt_anchor_mask.sum() + 1e-7)
+            # loss += loss_anchor_cls_pos
             
             pred_pos_anchor_logits = pred_anchor_logits[torch.arange(bs), gt_anchor_cls, :] # (bs, 2)            
             loss_anchor_logits = self.logits_anchor_loss(pred_pos_anchor_logits, gt_anchor_logits)
