@@ -78,12 +78,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.loss_fn = model_args.loss_fn
         self.ar_future_interval = model_args.ar_future_interval
         self.task = model_args.task
+        
         if self.model_args.split_embed:
             self.action_m_embed = nn.Sequential(nn.Linear(self.model_args.action_dim, llm_config.n_embd), nn.Tanh())
             self.kps_m_embed = nn.Sequential(nn.Linear(4, llm_config.n_embd), nn.Tanh())
             self.anchor_m_embed = nn.Sequential(nn.Linear(2, llm_config.n_embd), nn.Tanh())
         else:
             self.action_m_embed = nn.Sequential(nn.Linear(self.model_args.action_dim, llm_config.n_embd), nn.Tanh())
+
         self.llm_n_embd = llm_config.n_embd
 
         self.k = int(self.model_args.k)
@@ -264,7 +266,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
         
         # action context
-        context_actions = input_dict['center_objects_past'][..., :4]
+        context_actions = input_dict['center_objects_past']
         if self.model_args.x_random_walk > 0 and self.training:
             x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
@@ -457,20 +459,20 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         # add anchor embedding
         if self.use_anchor:
-            gt_anchor_mask = trajectory_label_mask[:, -1, :]
+            gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+            
             center_obj_types = input_dict['center_objects_type']
             center_obj_anchor_pts = [self.intention_points[center_obj_types[i]].unsqueeze(0) for i in range(batch_size)]
             center_obj_anchor_pts = torch.cat(center_obj_anchor_pts, dim=0) # (bs, 64, 2)
             dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_anchor_pts, dim=2)
             anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+
             anchor_GT_logits = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] * gt_anchor_mask # (bs, 2)
             if self.model_args.split_embed:
                 anchor_embedding = self.anchor_m_embed(anchor_GT_logits).unsqueeze(1)
             else:
                 anchor_embedding = self.action_m_embed(torch.cat([anchor_GT_logits, torch.zeros((batch_size, 2), device=device)], dim = 1)).unsqueeze(1)
-             # (bs, 1)
-            
-            # anchor_embedding = anchor_embedding*gt_anchor_mask.unsqueeze(-1)
+
             input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
             
         else:
@@ -508,6 +510,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
                 future_key_points_aug[:, :, 2:] = 0
 
             future_key_embeds = self.kps_m_embed(future_key_points_aug) if self.model_args.split_embed else self.action_m_embed(future_key_points_aug)
+
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
 
@@ -617,6 +620,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         if self.use_anchor:
             dummy_anchor_embedding = self.anchor_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1) if self.model_args.split_embed else self.action_m_embed(torch.zeros((batch_size, 4), device=device)).unsqueeze(1) # (bs, 1, n_embed)
+
             input_embeds = torch.cat([input_embeds, dummy_anchor_embedding], dim=1)
             
             center_obj_types = input_dict['center_objects_type']
@@ -639,6 +643,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             future_key_points_dummpy = trajectory_label_dummy[:, selected_indices, :]
             assert future_key_points_dummpy.shape[1] > 0, 'future points not enough to sample'
             future_key_embeds_dummy = self.kps_m_embed(future_key_points_dummpy) if self.model_args.split_embed else self.action_m_embed(future_key_points_dummpy)
+
             input_embeds = torch.cat([input_embeds, future_key_embeds_dummy,
                                     torch.zeros((batch_size, pred_length, self.llm_n_embd), device=device)], dim=1)
             key_points_num = future_key_points_dummpy.shape[1]
@@ -672,6 +677,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             
             pred_kps_logit_topk = torch.cat((pred_key_points_during_generate, torch.zeros((batch_size, out_num_mode, 1, 2), device=device)), dim=-1) # (bs, out_num_mode, 1, 4)
             input_embeds_kpts = self.kps_m_embed(pred_kps_logit_topk) if self.model_args.split_embed else self.action_m_embed(pred_kps_logit_topk)  # (b, out_num_mode, 1, n_embed)
+
             
         elif self.decoder_type == "diffusion":
             diff_pred_key_points_during_generate, diff_input_embeds_kpts, diff_kpts_scores, diff_kpts_idx, diff_dist2GT = self.search_by_diffusion(input_embeds, center_obj_anchor_pts, info_dict, 
@@ -944,7 +950,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_anchor_embed = transformer_outputs_hidden_state[:, tot_scenario_contenxt_len - 1, :] # (bs, n_embd)
             pred_anchor_cls = self.anchor_cls_decoder(pred_anchor_embed).argmax(1) # (bs, )
             pred_anchor_logits = center_obj_anchor_pts[torch.arange(batch_size), pred_anchor_cls, : ] # (bs, 2)
-            
+
             correct_anchor_embedding = self.anchor_m_embed(pred_anchor_logits).unsqueeze(1) if self.model_args.split_embed else self.action_m_embed(torch.cat([pred_anchor_logits, torch.zeros((batch_size, 2), device=device)], dim = 1)).unsqueeze(1) # (bs, 1, n_embed)
             input_embeds = torch.cat([input_embeds, correct_anchor_embedding], dim=1)
         
@@ -987,6 +993,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_key_point[:, 0, :self.pred_dim] = key_points_logit[:, 0, :]
 
             key_point_embed = self.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1) if self.model_args.split_embed else self.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+
             # replace embed at the next position
             input_embeds[:, tot_scenario_contenxt_anchor_len + i, :] = key_point_embed[:, 0, :]
             input_embeds_kpts[:, 0, i, :] = key_point_embed[:, 0, :]
@@ -1073,6 +1080,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
             # get kps topk embeds
             pred_kps_logit_topk_embed = self.kps_m_embed(pred_kps_logit_topk) if self.model_args.split_embed else self.action_m_embed(pred_kps_logit_topk)  # b, num_beam, n_embed
+
             
             k_input_embeds[:, :, tot_scenario_contenxt_len + i, :] = pred_kps_logit_topk_embed
             k_kpts_scores[:, :, i] = topk_score
@@ -1151,7 +1159,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         pred_kps_logit_topk = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, out_num_mode, 2), device=device)), dim=-1) # (bs, out_num_mode, 4)
         
-        pred_kps_logit_topk_embed = self.kps_m_embed(pred_kps_logit_topk) if self.model_args.split_embed else self.action_m_embed(pred_kps_logit_topk)  # (b, out_num_mode, n_embed)
+        pred_kps_logit_topk_embed = self.anchor_m_embed(pred_kps_logit_topk[..., :2]) if self.model_args.split_embed else self.action_m_embed(pred_kps_logit_topk)  # (b, out_num_mode, n_embed)
         
         # wrarp anchor res
         k_kpts_scores = torch.zeros((batch_size, out_num_mode, 1), device=device)
@@ -1245,7 +1253,8 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         else:
             # pred_key_points_during_generate[:, :, :, :2] = anchor_diffu_logits.unsqueeze(2) 
             pred_key_points_during_generate[:, :, :, :2] = key_points_logits 
-        input_embeds_kpts = self.kps_m_embed(pred_key_points_during_generate) if self.model_args.split_embed else self.action_m_embed(pred_key_points_during_generate)
+        input_embeds_kpts = self.anchor_m_embed(pred_key_points_during_generate[:, :, :, :2]) if self.model_args.split_embed else self.action_m_embed(pred_key_points_during_generate)
+
         kpts_scores = kpts_scores.unsqueeze(-1)
         kpts_idx = anchor_diffu_cls.unsqueeze(-1) # (bs, out_num_mode, 1)
         
@@ -1264,6 +1273,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         trajectory_label_mask = info_dict['trajectory_label_mask']
         
         dummy_anchor_embedding = self.anchor_m_embed(torch.zeros((batch_size, 2), device=device)) if self.model_args.split_embed else self.action_m_embed(torch.zeros((batch_size, 4), device=device)).unsqueeze(1) # (bs, 1, n_embed)
+
         input_embeds = torch.cat([input_embeds, dummy_anchor_embedding], dim=1)
         
         transformer_output = self.transformer(
