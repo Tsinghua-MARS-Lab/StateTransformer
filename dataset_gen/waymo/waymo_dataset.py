@@ -375,7 +375,8 @@ class WaymoDataset(DatasetTemplate):
         # ret_obj_valid_mask[np.arange(len(center_indices)), center_indices, :] = 0
         ret_obj_trajs[ret_obj_valid_mask == 0] = 0
         
-        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6, 7, 8]]
+        # ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6, 7, 8]]
+        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :]
         ret_center_past_trajs_mask = obj_trajs[np.arange(len(center_indices)), center_indices, :, -1]
         ret_center_past_trajs[ret_center_past_trajs_mask == 0] = 0
 
