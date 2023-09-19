@@ -157,6 +157,9 @@ class ModelArguments:
     use_raster: Optional[bool] = field(
         default=False
     )
+    use_anchor:  Optional[bool] = field(
+        default=True
+    )
 
 @dataclass
 class DataTrainingArguments:

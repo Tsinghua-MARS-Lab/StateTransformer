@@ -14,8 +14,8 @@ DATA_CONFIG:
     }
 
     SAMPLE_INTERVAL: {
-        'train': 1, 
-        'test': 1
+        'train': 5, 
+        'test': 5
     }
 
     INFO_FILTER_DICT: 

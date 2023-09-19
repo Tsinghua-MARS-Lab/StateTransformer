@@ -10,7 +10,7 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformer4planning.models.encoder.nuplan_raster_encoder import *
 from transformer4planning.models.utils import nll_loss_gmm_direct
 from transformer4planning.libs.mlp import DecoderResCat
-from transformer4planning.models.encoder.mtr_encoder import MTREncoder, MTREncoderWithType
+from transformer4planning.models.encoder.mtr_encoder import MTREncoder
 from transformer4planning.models.encoder.nuplan_raster_encoder import WaymoRasterizeEncoder
 # from transformer4planning.models.encoder.mtr_encoder_legacy import MTREncoder
 from transformer4planning.utils.mtr_utils import batch_nms
@@ -37,7 +37,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         self.transformer = GPT2Model(llm_config)
         
         # encoder
-        self.type_embed = True
+        self.type_embed = False
         if self.model_args.use_raster:
             self.context_encoder = WaymoRasterizeEncoder(cnn_kwargs=dict(
                     d_embed=llm_config.n_embd // 2,
@@ -105,7 +105,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             if self.k > 1:
                 self.next_token_scorer_decoder = DecoderResCat(llm_config.n_inner, llm_config.n_embd, out_features=self.k)
         
-        self.use_anchor = False
+        self.use_anchor = self.model_args.use_anchor
         
         if self.use_anchor:
             self.anchor_num = 64
@@ -116,7 +116,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         else:
             self.anchor_len = 0
 
-        self.use_nms = True
+        self.use_nms = False
         
         if self.use_nms:
             self.out_num_mode = 64
@@ -232,10 +232,9 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         else:
             obj_embeds = batch_dict['obj_feature']
             map_embeds = batch_dict['map_feature']
-            state_embeds = batch_dict["global_feature"]
-            # state_embeds = torch.cat((map_embeds, obj_embeds), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
-            
-            if not self.type_embed:
+            if self.type_embed: state_embeds = batch_dict["global_feature"]
+            else:
+                state_embeds = torch.cat((map_embeds, obj_embeds), dim=1)
                 state_embeds = state_embeds.max(dim=1)[0]
 
                 obj_embeds = obj_embeds.max(dim=1)[0] # (bs, num_obj, num_timestamp, 256)
@@ -621,12 +620,14 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             pred_gt_dist = torch.norm((pred_key_points_during_generate - future_key_points[:, None, :, :self.pred_dim]), dim=-1).squeeze(-1)
             anchor_GT_cls = pred_gt_dist.argmin(dim = 1) # (bs, ) 
             gt_anchor_mask = future_key_points_gt_mask[:, -1, :] # (bs, 1)
-
-        hard_match_num = ((anchor_kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
-        soft_match_vec = (anchor_kpts_idx[:, 0] == anchor_GT_cls)
-        for m_i in range(1, 6):
-            soft_match_vec |= (anchor_kpts_idx[:, m_i] == anchor_GT_cls)
-        soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
+            hard_match_num = torch.tensor(0, device=anchor_GT_cls.device)
+            soft_match_num = torch.tensor(0, device=anchor_GT_cls.device)
+        else:
+            hard_match_num = ((anchor_kpts_idx[:, 0] == anchor_GT_cls) * gt_anchor_mask[:, 0]).sum()
+            soft_match_vec = (anchor_kpts_idx[:, 0] == anchor_GT_cls)
+            for m_i in range(1, 6):
+                soft_match_vec |= (anchor_kpts_idx[:, m_i] == anchor_GT_cls)
+            soft_match_num = (soft_match_vec * gt_anchor_mask[:, 0]).sum()
             
         out_res = {'key_points_logits': all_kps_logits, 'scores': all_traj_scores, 'anchor_hard_match_num': hard_match_num, 'anchor_soft_match_num': soft_match_num, 'tot_num': gt_anchor_mask.sum().item()}
         
@@ -780,7 +781,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
             if self.tot_iter_num % 100 ==0 and self.use_anchor and self.ar_future_interval == 0:
                 print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.use_anchor and self.ar_future_interval > 0:
-                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
+                print("loss traj ", loss_traj, " loss anchor cls ", loss_anchor, " loss kpts logits ", loss_keypoints, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k > 1:
                 print("loss traj ", loss_traj, " loss kpts logits ", min_loss_kp, " loss kpts cls ", loss_kp_cls, ' tot loss ', loss)
             elif self.tot_iter_num % 100 ==0 and self.k == 1:
@@ -1033,7 +1034,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         anchor_kpts_input_embeds[:, :, 0, :] = pred_kps_logit_topk_embed
         
         anchor_kpts_logits = torch.zeros((batch_size, out_num_mode, self.anchor_len+key_point_num, 4), device=device) # (bs, out_num_mode, 1+key_point_num, 4)
-        anchor_kpts_logits[:, :, 0, :] = pred_kps_logit_topk
+        anchor_kpts_logits[:, :, 0, :] = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, out_num_mode, 2), device=device)), dim=2)
         
         for i in range(key_point_num):
             
