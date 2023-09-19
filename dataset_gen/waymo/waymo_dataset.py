@@ -37,6 +37,8 @@ class WaymoDataset(DatasetTemplate):
         self.do_norm = False
         self.norm_scale = 10
 
+        self.full_action = True
+
     def get_all_infos(self, info_path):
         self.logger.info(f'Start to load infos from {info_path}')
         with open(info_path, 'rb') as f:
@@ -375,7 +377,8 @@ class WaymoDataset(DatasetTemplate):
         # ret_obj_valid_mask[np.arange(len(center_indices)), center_indices, :] = 0
         ret_obj_trajs[ret_obj_valid_mask == 0] = 0
         
-        ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6, 7, 8]]
+        if self.full_action: ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :]
+        else: ret_center_past_trajs = obj_trajs[np.arange(len(center_indices)), center_indices, :, :][:, :, [0, 1, 2, 6, 7, 8]]
         ret_center_past_trajs_mask = obj_trajs[np.arange(len(center_indices)), center_indices, :, -1]
         ret_center_past_trajs[ret_center_past_trajs_mask == 0] = 0
 
