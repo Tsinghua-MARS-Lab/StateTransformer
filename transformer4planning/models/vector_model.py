@@ -714,7 +714,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         
         all_traj_logits = []
         all_kps_logits = []
-        n_mode = input_embeds_kpts.shape[1]
+        n_mode = pred_key_points_during_generate.shape[1]
         
         all_kps_logits = pred_key_points_during_generate  # (bs, n_mode, kps_num, 4/2)
         
@@ -828,7 +828,18 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
         #     timestamp_loss_weight=None, use_square_gmm=False,
         # )
         
-        # loss += loss_reg_gmm.mean()
+            # batch_size = pred_traj_logits.shape[0]
+            # fake_scores = pred_traj_logits.new_zeros((batch_size, self.anchor_num)) # (bs, num_mode)
+            # temp_gt_idx = torch.zeros((batch_size), dtype=torch.long) # (bs)
+            
+            # loss_reg_gmm, center_gt_positive_idx = nll_loss_gmm_direct(
+            #         pred_scores=fake_scores, pred_trajs=pred_traj_logits.unsqueeze(1),
+            #         gt_trajs=gt_traj[:, :, 0:2], gt_valid_mask=gt_traj_mask.squeeze(-1),
+            #         pre_nearest_mode_idxs=temp_gt_idx,
+            #         timestamp_loss_weight=None, use_square_gmm=False,
+            # )
+            # loss_traj = loss_reg_gmm.mean()
+            # loss += loss_traj
 
         # loss kps
         if self.ar_future_interval > 0:
@@ -1107,7 +1118,7 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
     
     def anchor_topK_search(self, input_embeds, tot_scenario_contenxt_len, out_num_mode=6, center_obj_anchor_pts=None, key_point_num=5,
                                 debug_GT_cls=None, debug_GT_logits=None, debug_GT_logits_mask=None,
-                                ref_pred_anchor=None, ref_pred_anchor_score=None):
+                                ref_pred_anchor=None, ref_pred_anchor_score=None, output_all=False):
         '''
         input_embeds: (bs, tot_scenario_context_length + num_kps + num_future_frame, n_embed)
         
@@ -1137,6 +1148,10 @@ class GPTNonAutoRegressiveModelVector(GPT2PreTrainedModel):
 
         pred_kps_score = self.anchor_cls_decoder(future_key_point_hidden_state).softmax(-1) # (bs, 1, 64)
         pred_kps_logit = center_obj_anchor_pts # (bs, 64, 2)
+        
+        if output_all:
+            k_kpts_index = torch.arange(self.anchor_num, device=device)[None, :].repeat(batch_size, 1)
+            return pred_kps_logit[:, :, None, :self.pred_dim], None, pred_kps_score[:, 0, :].unsqueeze(-1), k_kpts_index.unsqueeze(-1)
 
         topk_score, topk_indx = torch.topk(pred_kps_score[:, 0, :], dim=-1, k =out_num_mode) # (bs, num_beam)
     

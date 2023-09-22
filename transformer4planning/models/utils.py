@@ -132,10 +132,10 @@ def nll_loss_gmm_direct(pred_scores, pred_trajs, gt_trajs, gt_valid_mask, pre_ne
         gt_valid_mask (batch_size, num_timestamps):
         timestamp_loss_weight (num_timestamps):
     """
-    if use_square_gmm:
-        assert pred_trajs.shape[-1] == 3 
-    else:
-        assert pred_trajs.shape[-1] == 5
+    # if use_square_gmm:
+    #     assert pred_trajs.shape[-1] == 3 
+    # else:
+    #     assert pred_trajs.shape[-1] == 5
 
     batch_size = pred_scores.shape[0]
 
@@ -173,6 +173,7 @@ def nll_loss_gmm_direct(pred_scores, pred_trajs, gt_trajs, gt_valid_mask, pre_ne
     reg_gmm_exp = (0.5 * 1 / (1 - rho**2)) * ((dx**2) / (std1**2) + (dy**2) / (std2**2) - 2 * rho * dx * dy / (std1 * std2))  # (batch_size, num_timestamps)
 
     reg_loss = ((reg_gmm_log_coefficient + reg_gmm_exp) * gt_valid_mask).sum(dim=-1)
+    # reg_loss = ((reg_gmm_log_coefficient + reg_gmm_exp) * gt_valid_mask).sum(dim=-1) / (gt_valid_mask.sum(dim=-1) + 1e-6)
 
     return reg_loss, nearest_mode_idxs
 
