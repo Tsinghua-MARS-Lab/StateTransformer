@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from transformers.trainer_utils import EvalLoopOutput
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers.trainer_pt_utils import  nested_detach
-from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
+from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback, TrainerCallback
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
 from transformers import EvalPrediction
@@ -109,6 +109,40 @@ def compute_metrics(prediction: EvalPrediction):
 
     return eval_result
 
+class EMA_callback(TrainerCallback):
+    def __init__(self, decay: float = 0.9999):
+        super().__init__()
+        self.decay = decay
+        self.ema_state_dict: Dict[str, torch.Tensor] = {}
+        self.original_state_dict = {}
+        self._ema_state_dict_ready = False
+        
+    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # Only keep track of EMA weights in rank zero.
+        if not self._ema_state_dict_ready and state.is_local_process_zero:
+            self.ema_state_dict = kwargs['model'].state_dict()
+
+        self._ema_state_dict_ready = True
+
+    def on_epoch_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # Update EMA weights
+        
+        if state.is_local_process_zero and self._ema_state_dict_ready:
+            with torch.no_grad():
+                for key, value in kwargs['model'].state_dict().items():
+                    ema_value = self.ema_state_dict[key]
+                    ema_value.copy_(self.decay * ema_value + (1. - self.decay) * value, non_blocking=True)
+        
+            save_dir = os.path.join(args.output_dir, 'ema_res')
+            os.makedirs(save_dir, exist_ok=True)
+            torch.save(self.ema_state_dict, os.path.join(save_dir, f'checpoint_iter_{state.global_step}.pth'))
+        
+    # def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+    #     save_dir = os.path.join(args.output_dir, 'ema_res')
+    #     os.makedirs(save_dir, exist_ok=True)
+    #     torch.save(self.ema_state_dict, os.path.join(save_dir, f'checpoint_iter_{state.global_step}.pth'))
+
+    
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -811,7 +845,10 @@ class PlanningTrainer(Trainer):
         model_path = self.model.model_args.model_pretrain_name_or_path
         model_name = model_path.split('/')[-3]+'___' + model_path.split('/')[-1]
 
-        eval_output_dir = model_path + '/eval_output/'
+        if os.path.isdir(model_path):
+            eval_output_dir = model_path + '/eval_output/'
+        else:
+            eval_output_dir = os.path.dirname(model_path) + '/'
         os.makedirs(eval_output_dir, exist_ok=True)
         
         cur_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')

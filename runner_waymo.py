@@ -34,7 +34,7 @@ from transformers import (
 )
 from transformer4planning.models.model import build_models
 from transformers.trainer_utils import get_last_checkpoint
-from transformer4planning.trainer import PlanningTrainer, CustomCallback
+from transformer4planning.trainer import PlanningTrainer, CustomCallback, EMA_callback
 from transformer4planning.utils import (
     ModelArguments, 
     DataTrainingArguments, 
@@ -233,6 +233,7 @@ def main():
         data_collator=collate_fn
     )
     
+    # trainer.add_callback(EMA_callback)
     trainer.pop_callback(DefaultFlowCallback)
 
     # Training

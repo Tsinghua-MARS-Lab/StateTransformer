@@ -495,8 +495,15 @@ def build_models(model_args):
         model = ModelCls(config_p, model_args=model_args)
         print('Scratch ' + tag + ' Initialized!')
     elif 'pretrain' in model_args.model_name:
-        model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, config=config_p)
+        if os.path.isdir(model_args.model_pretrain_name_or_path):
+            model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, config=config_p)
+        else:            
+            state_dict = torch.load(model_args.model_pretrain_name_or_path)
+            model = ModelCls(config_p, model_args=model_args)
+            model.load_state_dict(state_dict)
+            
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
+                
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p, model_args=model_args)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
