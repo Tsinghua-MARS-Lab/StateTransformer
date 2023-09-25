@@ -53,6 +53,11 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                     pretrain=cnn_kwargs.get("pretrain", False))
 
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if self.model_args.use_centerline:
+            self.centerline_embed = nn.Sequential(
+                nn.Linear(action_kwargs.get("centerline_dim", 120) * 3, action_kwargs.get("d_embed")),
+                nn.ReLU(),
+            )
         self.ar_future_interval = model_args.ar_future_interval
         self.model_args = model_args
         
@@ -71,6 +76,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         context_actions = kwargs.get("context_actions", None)
         trajectory_label = kwargs.get("trajectory_label", None)
         scenario_type = kwargs.get("scenario_type", None)
+        centerline = kwargs.get("centerline", None)
 
         assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
@@ -112,6 +118,11 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
+
+        if self.model_args.use_centerline:
+            assert centerline is not None, "centerline is None for use_centerline"
+            centerline_embeds = self.centerline_embed(centerline.reshape(batch_size, -1)).unsequeeze(1)
+            input_embeds = torch.cat([centerline_embeds, input_embeds], dim=1)
 
         # add keypoints encoded embedding
         if self.ar_future_interval == 0:

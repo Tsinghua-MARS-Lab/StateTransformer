@@ -2,6 +2,14 @@ import time
 import tqdm
 import datetime
 import pickle
+import copy
+import torch
+import torch.nn as nn
+import os
+import numpy as np
+import pandas as pd
+import copy
+import os
 from torch.utils.data import DataLoader
 from transformers.trainer_utils import EvalLoopOutput
 from transformers.utils import is_sagemaker_mp_enabled
@@ -12,20 +20,33 @@ from transformers.trainer import Trainer
 from transformers import EvalPrediction
 from transformer4planning.utils import mtr_utils
 from typing import List, Optional, Dict, Any, Tuple, Union
+from transformer4planning.utils.nuplan_utils import compute_scores
 from datasets import Dataset
-import copy
-import torch
-import torch.nn as nn
-import os
-import numpy as np
-import pandas as pd
-import copy
+from transformer4planning.utils.nuplan_utils import normalize_angle
+
 
 FDE_THRESHHOLD = 8 # keep same with nuplan simulation
 ADE_THRESHHOLD = 8 # keep same with nuplan simulation
 HEADING_ERROR_THRESHHOLD = 0.8 # keep same with nuplan simulation
 MISS_RATE_THRESHHOLD = 0.3
 MISS_THRESHHOLD = [6, 8, 16]
+DISPLACEMENT_WEIGHT = 1
+HEADING_WEIGHT = 2
+
+VALIDATION_LIST = os.listdir("/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/val")
+def convert_name_to_id(file_names):
+    index_to_return = list()
+    for file in file_names:
+        if file + ".db" in VALIDATION_LIST:
+            index = VALIDATION_LIST.index(file + ".db")
+            index_to_return.append(index)
+    return index_to_return
+
+def batch_angle_normalize(headings):
+    for i in range(headings.shape[0]):
+        for j in range(headings.shape[1]):
+            headings[i, j] = normalize_angle(headings[i, j])
+    return headings
 
 # Custom compute_metrics function
 def compute_metrics(prediction: EvalPrediction):
@@ -36,6 +57,8 @@ def compute_metrics(prediction: EvalPrediction):
     # TODO: Add classification metrics (clf_metrics) for scoring
     # TODO: Add visualization for prediction results with save_raster method
     eval_result = {}
+    item_to_save = {}
+
     predictions = prediction.predictions
     labels = prediction.label_ids  # nparray: sample_num, 80, 4
     prediction_horizon = labels.shape[1]
@@ -48,6 +71,10 @@ def compute_metrics(prediction: EvalPrediction):
 
     prediction_by_generation = predictions['prediction_generation']  # sample_num, 85, 2/4
     prediction_by_forward = predictions['prediction_forward']  # sample_num, 85, 2/4
+    frame_id = predictions['frame_id']
+    file_id = predictions['file_index']
+    item_to_save["file_id"] = file_id
+    item_to_save["frame_id"] = frame_id
 
     # fetch trajectory and key points predictions
     # TODO: adaptive with no key points predictions
@@ -74,6 +101,10 @@ def compute_metrics(prediction: EvalPrediction):
     avg_ade = (ade3_gen + ade5_gen + ade8_gen)/3
     ade_score = np.ones_like(avg_ade) - avg_ade/ADE_THRESHHOLD
     ade_score = np.where(ade_score < 0, np.zeros_like(ade_score), ade_score)
+    item_to_save["ade_score"] = ade_score
+    item_to_save['ade_horison3_gen'] = ade3_gen
+    item_to_save['ade_horison5_gen'] = ade5_gen
+    item_to_save['ade_horison8_gen'] = ade8_gen
     eval_result['ade_horison3_gen'] = ade3_gen.mean()
     eval_result['ade_horison5_gen'] = ade5_gen.mean()
     eval_result['ade_horison8_gen'] = ade8_gen.mean()
@@ -87,6 +118,10 @@ def compute_metrics(prediction: EvalPrediction):
     avg_fde = (fde3_gen + fde5_gen + fde8_gen)/3
     fde_score = np.ones_like(avg_fde) - avg_fde/FDE_THRESHHOLD
     fde_score = np.where(fde_score < 0, np.zeros_like(fde_score), fde_score)
+    item_to_save["fde_score"] = fde_score
+    item_to_save['fde_horison3_gen'] = fde3_gen
+    item_to_save['fde_horison5_gen'] = fde5_gen
+    item_to_save['fde_horison8_gen'] = fde8_gen
     eval_result['fde_horison3_gen'] = fde3_gen.mean()
     eval_result['fde_horison5_gen'] = fde5_gen.mean()
     eval_result['fde_horison8_gen'] = fde8_gen.mean()
@@ -100,13 +135,17 @@ def compute_metrics(prediction: EvalPrediction):
     # heading error
     if prediction_trajectory_by_generation.shape[-1] == 4:
         # average heading error comutation
-        heading_error_gen = abs(prediction_trajectory_by_generation[:, :, -1] - labels[:, :, -1])
+        heading_error_gen = abs(batch_angle_normalize(prediction_trajectory_by_generation[:, :, -1] - labels[:, :, -1]))
         ahe3_gen = np.mean(copy.deepcopy(heading_error_gen[:, :30]), axis=1)
         ahe5_gen = np.mean(copy.deepcopy(heading_error_gen[:, :50]), axis=1)
         ahe8_gen = np.mean(copy.deepcopy(heading_error_gen[:, :80]), axis=1)
         avg_ahe = (ahe3_gen + ahe5_gen + ahe8_gen)/3
         ahe_score = np.ones_like(avg_ahe) - avg_ahe/HEADING_ERROR_THRESHHOLD
         ahe_score = np.where(ahe_score < 0, np.zeros_like(ahe_score), ahe_score)
+        item_to_save['ahe_score'] = ahe_score
+        item_to_save['ahe_horison3_gen'] = ahe3_gen
+        item_to_save['ahe_horison5_gen'] = ahe5_gen
+        item_to_save['ahe_horison8_gen'] = ahe8_gen
         eval_result['ahe_horison3_gen'] = ahe3_gen.mean()
         eval_result['ahe_horison5_gen'] = ahe5_gen.mean()
         eval_result['ahe_horison8_gen'] = ahe8_gen.mean()
@@ -120,6 +159,10 @@ def compute_metrics(prediction: EvalPrediction):
         avg_fhe = (fhe3_gen + fhe5_gen + fhe8_gen)/3
         fhe_score = np.ones_like(avg_fhe) - avg_fhe/HEADING_ERROR_THRESHHOLD
         fhe_score = np.where(fhe_score < 0, np.zeros_like(fhe_score), fhe_score)
+        item_to_save['fhe_score'] = fhe_score
+        item_to_save['fhe_horison3_gen'] = fhe3_gen
+        item_to_save['fhe_horison5_gen'] = fhe5_gen
+        item_to_save['fhe_horison8_gen'] = fhe8_gen
         eval_result['fhe_horison3_gen'] = fhe3_gen.mean()
         eval_result['fhe_horison5_gen'] = fhe5_gen.mean()
         eval_result['fhe_horison8_gen'] = fhe8_gen.mean()
@@ -134,6 +177,7 @@ def compute_metrics(prediction: EvalPrediction):
     miss5 = np.where(max_displacement5 > MISS_THRESHHOLD[1], np.ones_like(max_displacement5), np.zeros_like(max_displacement5))
     miss8 = np.where(max_displacement8 > MISS_THRESHHOLD[2], np.ones_like(max_displacement8), np.zeros_like(max_displacement8))
     avg_miss = np.where(miss3 + miss5 + miss8 >= 1, np.ones_like(miss3), np.zeros_like(miss3))
+    item_to_save["miss_score"] = avg_miss
     eval_result["miss_rate3"] = miss3.mean()
     eval_result["miss_rate5"] = miss5.mean()
     eval_result["miss_rate8"] = miss8.mean()
@@ -161,6 +205,12 @@ def compute_metrics(prediction: EvalPrediction):
         heading_error_for = abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
         eval_result['heading_error'] = heading_error_for.mean()
 
+    # with open("v14k_result.pkl", "wb") as f:
+    #     pickle.dump(item_to_save, f)
+    score, miss_score = compute_scores(item_to_save)
+    eval_result["average_score"] = score
+    eval_result["miss_score"] = miss_score
+    
     return eval_result
 
 
@@ -330,10 +380,13 @@ class PlanningTrainer(Trainer):
                 prediction_generation = torch.cat([prediction_generation, prediction_generation[0].unsqueeze(0)], dim=0)
                 labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
             print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
-
+        file_id = convert_name_to_id(inputs["file_name"])
         logits = {
             "prediction_forward": logits,
             "prediction_generation": prediction_generation,
+            "frame_id": inputs["frame_id"],
+            "file_index":torch.tensor(file_id, device=logits.device)
+            
         }
         # if prediction_loss_only:
         #     return (loss, None, None)

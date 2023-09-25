@@ -206,6 +206,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         additional_token_num = 0
         additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        additional_token_num += 1 if self.model_args.use_centerline else 0
         kp_start_index = additional_token_num + context_length * 2 if context_length is not None else additional_token_num + input_length
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.decoder_type == "mlp" and self.ar_future_interval > 0:
@@ -391,7 +392,6 @@ def query_current_lane(map_api, target_point):
         'distance_to_lane': dist_to_nearest_lane
     }
 
-
 def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
     import numpy as np
     points_of_lane = []
@@ -419,6 +419,29 @@ def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
     return minimal_point
     # return minimal_point if min_dist < 10 else org_point
 
+def interplate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
+    if mode == "normal":
+        return pred_traj
+    elif mode == "interplate" or mode == "hybrid":
+        # generating yaw angle from relative_traj
+        dx = pred_traj[:, 4::5, 0] - pred_traj[:, :-4:5, 0]
+        dy = pred_traj[:, 4::5, 1] - pred_traj[:, :-4:5, 1]
+        distances = torch.sqrt(dx ** 2 + dy ** 2)
+        relative_yaw_angles = torch.where(distances > 0.1, torch.arctan2(dy, dx), 0)
+        # accumulate yaw angle
+        # relative_yaw_angles = yaw_angles.cumsum()
+        relative_yaw_angles_full = relative_yaw_angles.repeat_interleave(5, dim=1)
+        if mode == "interplate":
+            pred_traj[:, :, -1] = relative_yaw_angles_full
+        else:
+            pred_traj[:, :, -1] = torch.where(torch.abs(pred_traj[:, :, -1]) > yaw_change_upper_threshold, relative_yaw_angles_full, pred_traj[:, :, -1])
+        # heading = pred_traj[:, 0, -1]
+        # for i in range(pred_traj.shape[1]):
+        #     if i > 1 and euclidean_distance(pred_traj[i - 1, :2], pred_traj[i, :2]) > 0.1:
+        #         delta_heading = get_angle_of_a_line(pred_traj[i - 1, :2], pred_traj[i, :2])
+        #         heading = normalize_angle(heading + min(delta_heading, yaw_change_upper_threshold))
+        #     pred_traj[i, -1] = heading
+    return pred_traj
 
 def build_models(model_args):
     if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
