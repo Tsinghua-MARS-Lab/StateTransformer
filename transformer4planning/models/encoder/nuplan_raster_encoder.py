@@ -121,7 +121,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         if self.model_args.use_centerline:
             assert centerline is not None, "centerline is None for use_centerline"
-            centerline_embeds = self.centerline_embed(centerline.reshape(batch_size, -1)).unsequeeze(1)
+            centerline_embeds = self.centerline_embed(centerline.reshape(batch_size, -1)).unsqueeze(1)
             input_embeds = torch.cat([centerline_embeds, input_embeds], dim=1)
 
         # add keypoints encoded embedding
