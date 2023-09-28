@@ -11,7 +11,7 @@ DEFAULT_TOKEN_CONFIG = dict(
     sample_frequency=4
 )
 
-def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True):
+def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True, use_centerline=False):
     """
     input raster can be either high resolution raster or low resolution raster
     expected input size: [bacthsize, channel, h, w], and channel is consisted of goal(1d)+roadtype(20d)+agenttype*time(8*9d)
@@ -20,13 +20,14 @@ def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True):
     agent_type = 8
     road_type = 20
     traffic_light_type = 4
+    route_type = 3 if use_centerline else 1
 
-    goal_raster = raster[:, :2, :, :].reshape(b, 2, h, w)  # updated as route raster
-    road_ratser = raster[:, 2:2+road_type, :, :]
-    traffic_raster = raster[:, 2+road_type:2+road_type+traffic_light_type, :, :]
-    result = torch.zeros((b, framenum, agent_type + road_type + traffic_light_type + 2, h, w), device=raster.device)
+    goal_raster = raster[:, :route_type, :, :].reshape(b, route_type, h, w)  # updated as route raster
+    road_ratser = raster[:, route_type : route_type+road_type, :, :]
+    traffic_raster = raster[:, route_type + road_type : route_type + road_type + traffic_light_type, :, :]
+    result = torch.zeros((b, framenum, agent_type + road_type + traffic_light_type + route_type, h, w), device=raster.device)
     for i in range(framenum):
-        agent_raster = raster[:, 2 + road_type + traffic_light_type + i::framenum, :, :]
+        agent_raster = raster[:, route_type + road_type + traffic_light_type + i::framenum, :, :]
         if traffic:
             raster_i = torch.cat([goal_raster, road_ratser, traffic_raster, agent_raster], dim = 1)  # expected format (b, 1+20+8, h, w)
         else:
