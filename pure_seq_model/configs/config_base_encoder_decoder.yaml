@@ -1,5 +1,5 @@
 DATA_CONFIG:
-    DATASET: WaymoDatasetV1NoVel
+    DATASET: WaymoDatasetBaseEncoderDecoder
     
     dataset_info:
       data_root: '/data/waymo_open_dataset/mtr_processed_data/v1'
@@ -12,8 +12,8 @@ DATA_CONFIG:
           'val': 'processed_scenarios_val_infos.pkl'
       }
       cache_dir: {
-          'train': 'v1_no_vel_train_cache',
-          'val': 'v1_no_vel_val_cache'
+          'train': 'base_encoder_decoder_train_cache',
+          'val': 'base_encoder_decoder_val_cache'
       }
 
       object_type: ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
@@ -24,11 +24,13 @@ DATA_CONFIG:
       }
 
     time_info:
-      time_set_num: 8
-      time_set_interval: 10
+      feature_time_step: 5
+      feature_time_interval: 2
 
-      time_sample_num: 5
-      time_sample_interval: 2
+      target_time_step: 16
+      target_time_interval: 5
+
+      time_interval_time: 0.1
 
       total_time_step: 80
 
@@ -37,9 +39,9 @@ DATA_CONFIG:
       polyline_subsample_interval: 4
 
       max_polyline_num: {
-        lane: 512,
-        road_line: 128,
-        road_edge: 128,
+        lane: 256,
+        road_line: 64,
+        road_edge: 64,
         map_others: 64
       }
       feature_dim: {
@@ -56,35 +58,48 @@ DATA_CONFIG:
       max_heading_diff: 0.3
 
 MODEL:
-    model_name: PureSeqModelV1NoVel
+    model_name: BaseEncoderDecoderModel
 
     model_parameter:
       # map encoder
-      in_polyline_dim: 64
+      in_polyline_dim: 128
       in_polyline_layer: 3
       in_polyline_pre_layer: 1
-      between_polyline_dim: 256
-      between_polyline_layer: 3
-      between_polyline_pre_layer: 1
 
-      # seq model
-      seq_embedding_dim: 256
-      seq_inter_dim: 1024
-      seq_head: 16
-      seq_layer: 6
+      # encoder parameter
+      encoder_embedding_dim: 128
+      encoder_inter_dim: 512
+      encoder_head: 16
+      encoder_layer: 4
 
+      # decoder parameter
+      decoder_embedding_dim: 128
+      decoder_inter_dim: 512
+      decoder_head: 16
+      decoder_layer: 4
+
+      # loss parameter
       loss_weight: {
         x: 1.0,
         y: 1.0,
-        heading: 100.0,
+        heading: 40.0,
       }
+      loss_type: 'L2'
+      loss_anchor_for_choice: True
+      regression_weight: 1.0
+      classification_weight: 1.0
 
       normalization_para: {
         xy: 50.0,
         heading: 1.0,
+        vel: 10.0,
+        shape: 5.0
       }
 
-      loss_type: 'L2'
+      # anchor parameter
+      anchor_dim: 3
+      anchor_speed_list: [3.0, 7.0, 12.0]
+      anchor_angle_list: [-3.0, -1.5, -1.1, -0.6, 0, 0.6, 1.1, 1.5, 3.0]
 
     data_dim:
       # Dim should match dataset, so following parameters are not free parameter. They are used only for convenience.
@@ -93,11 +108,10 @@ MODEL:
       road_edge: 8
       map_others: 9
 
-      ego: 30
-      agent: 55
+      target: 12
+      agent: 12
 
-      ego_target: 15
-      agent_target: 15
+      label: 3
 
       points_in_polyline: 20
 
@@ -110,7 +124,7 @@ OPTIMIZATION:
     WEIGHT_DECAY: 0.01
 
     SCHEDULER: lambdaLR
-    DECAY_STEP_LIST: [3, 6, 9, 12, 15, 18, 21, 24, 27]
+    DECAY_STEP_LIST: [2, 4, 6, 8, 10, 12, 14, 16, 18]
     LR_DECAY: 0.75
     LR_CLIP: 0.000001
 

@@ -1,5 +1,5 @@
 DATA_CONFIG:
-    DATASET: WaymoDatasetV1NoVel
+    DATASET: WaymoDatasetV2
     
     dataset_info:
       data_root: '/data/waymo_open_dataset/mtr_processed_data/v1'
@@ -12,18 +12,20 @@ DATA_CONFIG:
           'val': 'processed_scenarios_val_infos.pkl'
       }
       cache_dir: {
-          'train': 'v1_no_vel_train_cache',
-          'val': 'v1_no_vel_val_cache'
+          'train': 'v2_train_cache',
+          'val': 'v2_val_cache'
       }
 
       object_type: ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST']
 
       sample_interval: {
           'train': 1, 
-          'val': 1
+          'val': 10
       }
 
     time_info:
+      time_period_per_data: 0.1
+
       time_set_num: 8
       time_set_interval: 10
 
@@ -55,8 +57,18 @@ DATA_CONFIG:
       max_xy_diff: 5.0
       max_heading_diff: 0.3
 
+    anchor_param:
+      speed: [3.0, 7.0, 12.0]
+      angle: [-0.3, -0.1, 0, 0.1, 0.3]
+
+    anchor_loss_weight: {
+      x: 1.0,
+      y: 1.0,
+      heading: 10.0,
+    }
+
 MODEL:
-    model_name: PureSeqModelV1NoVel
+    model_name: PureSeqModelV2
 
     model_parameter:
       # map encoder
@@ -73,18 +85,27 @@ MODEL:
       seq_head: 16
       seq_layer: 6
 
+      # loss calculation
       loss_weight: {
         x: 1.0,
         y: 1.0,
-        heading: 100.0,
+        heading: 10.0,
       }
+      regression_weight: 1.0
+      classification_weight: 5.0
+      loss_type: 'L2'
 
+      # normalization
       normalization_para: {
         xy: 50.0,
         heading: 1.0,
       }
 
-      loss_type: 'L2'
+      # traj generation
+      traj_num: 6
+      traj_trial_num: 32
+      traj_init_min_dis: 1.0
+      traj_iteration: 3
 
     data_dim:
       # Dim should match dataset, so following parameters are not free parameter. They are used only for convenience.
@@ -95,6 +116,10 @@ MODEL:
 
       ego: 30
       agent: 55
+
+      ego_anchor: 15
+      agent_anchor: 15
+      anchor_num: 16
 
       ego_target: 15
       agent_target: 15

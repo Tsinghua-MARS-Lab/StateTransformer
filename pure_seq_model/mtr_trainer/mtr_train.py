@@ -120,7 +120,6 @@ def main():
             args.tcp_port, args.local_rank, backend='nccl'
         )
         # total_gpus = 1
-
         dist_train = True
 
     if args.batch_size is None:

@@ -11,11 +11,17 @@ from mtr_trainer.mtr_utils import common_utils
 
 from dataset.waymo_dataset_v1_aug import WaymoDatasetV1Aug
 from dataset.waymo_dataset_v1_no_vel import WaymoDatasetV1NoVel
+from dataset.waymo_dataset_v2 import WaymoDatasetV2
+from dataset.waymo_dataset_base_encoder_decoder import WaymoDatasetBaseEncoderDecoder
+from dataset.waymo_dataset_wayformer import WaymoDatasetWayformer
 
 
 __all__ = {
     'WaymoDatasetV1Aug': WaymoDatasetV1Aug,
     'WaymoDatasetV1NoVel': WaymoDatasetV1NoVel,
+    'WaymoDatasetV2': WaymoDatasetV2,
+    'WaymoDatasetBaseEncoderDecoder': WaymoDatasetBaseEncoderDecoder,
+    'WaymoDatasetWayformer': WaymoDatasetWayformer,
 }
 
 
