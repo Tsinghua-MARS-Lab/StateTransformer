@@ -31,7 +31,7 @@ def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **
         batch[i]["agent_ids"] = agent_ids
     padded_tensors = dict()
     for key in expected_padding_keys:
-        tensors = [ydata[key] for data in batch]
+        tensors = [data[key] for data in batch]
         padded_tensors[key] = torch.nn.utils.rnn.pad_sequence(tensors, batch_first=True, padding_value=-1)
         for i, _ in enumerate(batch):
             batch[i][key] = padded_tensors[key][i]
@@ -447,10 +447,9 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         result_to_return["scenario_id"] = sample["scenario_id"]
     except:
         pass
-    try:
+    if centerline is not None:
         result_to_return["centerline"] = centerline
-    except:
-        pass
+
     result_to_return["route_ids"] = sample['route_ids']
 
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)

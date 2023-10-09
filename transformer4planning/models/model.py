@@ -206,7 +206,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         additional_token_num = 0
         additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-        additional_token_num += 1 if self.model_args.use_centerline else 0
+        # additional_token_num += 1 if self.model_args.use_centerline else 0
         kp_start_index = additional_token_num + context_length * 2 if context_length is not None else additional_token_num + input_length
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.decoder_type == "mlp" and self.ar_future_interval > 0:
@@ -330,6 +330,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                  trajectory_label,
                                                                  info_dict
                                                               )
+            if self.model_args.predict_yaw:
+                traj_logits = interplate_yaw(traj_logits, mode=self.model_args.predict_yaw_way)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
 
@@ -503,7 +505,8 @@ def build_models(model_args):
                                                     key_point_num=model_args.key_points_num,
                                                     input_feature_seq_lenth=model_args.diffusion_condition_sequence_lenth,
                                                     specified_key_points=model_args.specified_key_points,
-                                                    forward_specified_key_points=model_args.forward_specified_key_points
+                                                    forward_specified_key_points=model_args.forward_specified_key_points,
+                                                    feat_dim=model_args.key_points_diffusion_decoder_feat_dim,
                                                     )
             model = T4PTrainDiffWrapper(diffusion_model, num_key_points=model_args.key_points_num, model_args=model_args)
             if model_args.key_points_diffusion_decoder_load_from is not None:

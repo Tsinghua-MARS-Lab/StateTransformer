@@ -13,6 +13,7 @@ import torch
 from tqdm import tqdm
 import copy
 import json
+import multiprocessing as mp
 import datasets
 import numpy as np
 import evaluate
@@ -75,6 +76,8 @@ def load_dataset(root, split='train', dataset_scale=1, select=False):
     except:
         pass
     dataset.set_format(type='torch')
+    if "centerline" in dataset.column_names:
+        dataset = dataset.filter(lambda example: np.sum(np.array(example["centerline"])) != 0, num_proc=mp.cpu_count())
     if select:
         samples = int(len(dataset) * float(dataset_scale))
         dataset = dataset.select(range(samples))
