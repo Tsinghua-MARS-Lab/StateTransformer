@@ -154,8 +154,7 @@ class ModelArguments:
     use_centerline: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
-    # 
-    predict_yaw_way: Optional[str] = field(
+    postprocess_yaw: Optional[str] = field(
         default="normal", metadata={"help": "choose from hybrid, interplate or normal"}
     )
 
