@@ -20,21 +20,23 @@ def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True, 
     agent_type = 8
     road_type = 20
     traffic_light_type = 4
-    route_type = 3 if use_centerline else 1
+    route_type = 3 if use_centerline else 2
 
     goal_raster = raster[:, :route_type, :, :].reshape(b, route_type, h, w)  # updated as route raster
     road_ratser = raster[:, route_type : route_type+road_type, :, :]
     traffic_raster = raster[:, route_type + road_type : route_type + road_type + traffic_light_type, :, :]
-    result = torch.zeros((b, framenum, agent_type + road_type + traffic_light_type + route_type, h, w), device=raster.device)
+    if traffic:
+        result = torch.zeros((b, framenum, agent_type + road_type + traffic_light_type + route_type, h, w), device=raster.device)
+    else:
+        result = torch.zeros((b, framenum, agent_type + road_type + route_type, h, w), device=raster.device)
     for i in range(framenum):
         agent_raster = raster[:, route_type + road_type + traffic_light_type + i::framenum, :, :]
         if traffic:
             raster_i = torch.cat([goal_raster, road_ratser, traffic_raster, agent_raster], dim = 1)  # expected format (b, 1+20+8, h, w)
         else:
-            assert False, 'not supported anymore'
             raster_i = torch.cat([goal_raster, road_ratser, agent_raster], dim = 1)
         result[:, i, :, :, :] = raster_i
-    # return format (batchsize, history_frame_number, channels_per_frame, h, w)
+
     return result
 
 def cat_raster_seq_for_waymo(raster, framenum=11):

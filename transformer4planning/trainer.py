@@ -176,12 +176,12 @@ def compute_metrics(prediction: EvalPrediction):
     miss3 = np.where(max_displacement3 > MISS_THRESHHOLD[0], np.ones_like(max_displacement3), np.zeros_like(max_displacement3))
     miss5 = np.where(max_displacement5 > MISS_THRESHHOLD[1], np.ones_like(max_displacement5), np.zeros_like(max_displacement5))
     miss8 = np.where(max_displacement8 > MISS_THRESHHOLD[2], np.ones_like(max_displacement8), np.zeros_like(max_displacement8))
-    avg_miss = np.where(miss3 + miss5 + miss8 >= 1, np.ones_like(miss3), np.zeros_like(miss3))
-    item_to_save["miss_score"] = avg_miss
+    miss = np.where(miss3 + miss5 + miss8 >= 1, np.ones_like(miss3), np.zeros_like(miss3))
+    item_to_save["miss_score"] = miss
     eval_result["miss_rate3"] = miss3.mean()
     eval_result["miss_rate5"] = miss5.mean()
     eval_result["miss_rate8"] = miss8.mean()
-    eval_result["total_miss_rate"] = avg_miss.mean()
+    eval_result["total_miss_rate"] = miss.mean()
     # compute error for forward results
     ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
     ade_y_error_key_points_for = prediction_key_points_by_forward[:, :, 1] - label_key_points[:, :, 1]
@@ -205,8 +205,6 @@ def compute_metrics(prediction: EvalPrediction):
         heading_error_for = abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
         eval_result['heading_error'] = heading_error_for.mean()
 
-    # with open("v14k_result.pkl", "wb") as f:
-    #     pickle.dump(item_to_save, f)
     score, miss_score = compute_scores(item_to_save)
     eval_result["average_score"] = score
     eval_result["miss_score"] = miss_score

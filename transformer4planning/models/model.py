@@ -331,7 +331,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                  info_dict
                                                               )
             if self.model_args.predict_yaw:
-                traj_logits = interplate_yaw(traj_logits, mode=self.model_args.predict_yaw_way)
+                traj_logits = interplate_yaw(traj_logits, mode=self.model_args.postprocess_yaw)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
 
