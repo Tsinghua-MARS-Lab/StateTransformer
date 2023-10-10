@@ -84,13 +84,13 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         context_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
 
         # add noise to context actions
-        context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
+        context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
         
         # raster observation encoding & context action ecoding
         action_embeds = self.action_m_embed(context_actions)
         
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light)
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light)
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light, self.model_args.use_centerline)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.model_args.with_traffic_light, self.model_args.use_centerline)
         # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
         # context_length: 8, 40 frames / 5
         batch_size, context_length, c, h, w = high_res_seq.shape
@@ -119,21 +119,23 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
 
-        if self.model_args.use_centerline:
-            assert centerline is not None, "centerline is None for use_centerline"
-            centerline_embeds = self.centerline_embed(centerline.reshape(batch_size, -1)).unsqueeze(1)
-            input_embeds = torch.cat([centerline_embeds, input_embeds], dim=1)
+        # if self.model_args.use_centerline:
+        #     assert centerline is not None, "centerline is None for use_centerline"
+        #     centerline_embeds = self.centerline_embed(centerline.reshape(batch_size, -1)).unsqueeze(1)
+        #     input_embeds = torch.cat([centerline_embeds, input_embeds], dim=1)
 
         # add keypoints encoded embedding
         if self.ar_future_interval == 0:
             input_embeds = torch.cat([input_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            future_key_points = None
+            selected_indices = None
         elif self.ar_future_interval > 0:
             future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
-            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+            # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
-            future_key_points_aug = self.augmentation.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
+            future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, True)
             if not self.model_args.predict_yaw:
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
