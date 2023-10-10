@@ -95,30 +95,26 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     map = sample["map"]
     split = sample["split"]
     frame_id = sample["frame_id"]
-    try:
-        road_ids = sample["road_ids"].tolist()
-    except:
-        road_ids = sample["road_ids"]
+    road_ids = sample["road_ids"]
+    if not isinstance(road_id, list):
+        road_ids = road_ids.tolist()
     agent_ids = sample["agent_ids"]  # list of strings
-    try:
-        traffic_light_ids = sample["traffic_ids"].tolist()
-    except:
-        traffic_light_ids = sample["traffic_ids"]
-    try:
-        traffic_light_states = sample["traffic_status"].tolist()
-    except:
-        traffic_light_states = sample["traffic_status"]
-    try:
-        route_ids = sample["route_ids"].tolist()
-    except:
-        route_ids = sample["route_ids"]
-    try:
+    traffic_light_ids = sample["traffic_ids"]
+    if not isinstance(traffic_light_ids, list):
+        traffic_light_ids = traffic_light_ids.tolist()
+    traffic_light_states = sample["traffic_status"].tolist()
+    if not isinstance(traffic_light_states, list):
+        traffic_light_states = traffic_light_states.tolist()
+    route_ids = sample["route_ids"].tolist()
+    if not isinstance(route_ids, list):
+        route_ids = route_ids.tolist()
+    centerline = None
+    if "centerline" in sample.keys():
         if isinstance(sample["centerline"], torch.Tensor):
             centerline = np.array(sample["centerline"])
         else:
             centerline = sample["centerline"]
-    except:
-        centerline = None
+
     if map == 'sg-one-north':
         y_inverse = -1
     else:
