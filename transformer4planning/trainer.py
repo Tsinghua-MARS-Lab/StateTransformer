@@ -98,8 +98,8 @@ def compute_metrics(prediction: EvalPrediction):
     ade3_gen = np.mean(copy.deepcopy(ade_gen[:, :30]), axis=1)
     ade5_gen = np.mean(copy.deepcopy(ade_gen[:, :50]), axis=1)
     ade8_gen = np.mean(copy.deepcopy(ade_gen[:, :80]), axis=1)
-    avg_ade = (ade3_gen + ade5_gen + ade8_gen)/3
-    ade_score = np.ones_like(avg_ade) - avg_ade/ADE_THRESHHOLD
+    avg_ade_gen = (ade3_gen + ade5_gen + ade8_gen)/3
+    ade_score = np.ones_like(avg_ade_gen) - avg_ade_gen/ADE_THRESHHOLD
     ade_score = np.where(ade_score < 0, np.zeros_like(ade_score), ade_score)
     item_to_save["ade_score"] = ade_score
     item_to_save['ade_horison3_gen'] = ade3_gen
@@ -108,15 +108,15 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['ade_horison3_gen'] = ade3_gen.mean()
     eval_result['ade_horison5_gen'] = ade5_gen.mean()
     eval_result['ade_horison8_gen'] = ade8_gen.mean()
-    eval_result['metric_ade'] = avg_ade.mean()
+    eval_result['metric_ade'] = avg_ade_gen.mean()
     eval_result['ade_score'] = ade_score.mean()
 
     # FDE metrics computation
     fde3_gen = copy.deepcopy(ade_gen[:, 29])
     fde5_gen = copy.deepcopy(ade_gen[:, 49])
     fde8_gen = np.sqrt(fde_x_error_gen ** 2 + fde_y_error_gen ** 2)
-    avg_fde = (fde3_gen + fde5_gen + fde8_gen)/3
-    fde_score = np.ones_like(avg_fde) - avg_fde/FDE_THRESHHOLD
+    avg_fde_gen = (fde3_gen + fde5_gen + fde8_gen)/3
+    fde_score = np.ones_like(avg_fde_gen) - avg_fde_gen/FDE_THRESHHOLD
     fde_score = np.where(fde_score < 0, np.zeros_like(fde_score), fde_score)
     item_to_save["fde_score"] = fde_score
     item_to_save['fde_horison3_gen'] = fde3_gen
@@ -125,7 +125,7 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['fde_horison3_gen'] = fde3_gen.mean()
     eval_result['fde_horison5_gen'] = fde5_gen.mean()
     eval_result['fde_horison8_gen'] = fde8_gen.mean()
-    eval_result['metric_fde'] = avg_fde.mean()
+    eval_result['metric_fde'] = avg_fde_gen.mean()
     eval_result['fde_score'] = fde_score.mean()
     ade_key_points_gen = np.sqrt(ade_x_error_key_points_gen ** 2 + ade_y_error_key_points_gen ** 2).mean()
     eval_result['ade_keypoints_gen'] = ade_key_points_gen
