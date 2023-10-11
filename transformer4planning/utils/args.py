@@ -154,6 +154,9 @@ class ModelArguments:
     use_centerline: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
+    postprocess_yaw: Optional[str] = field(
+        default="normal", metadata={"help": "choose from hybrid, interplate or normal"}
+    )
 
 @dataclass
 class DataTrainingArguments:

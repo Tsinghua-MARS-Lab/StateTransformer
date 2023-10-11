@@ -41,7 +41,7 @@ class BaseDiffusionModel(nn.Module):
         elif feat_dim == 1024:
             connect_dim = 1600
         else:
-            connect_dim = feat_dim * 1.5
+            connect_dim = int(feat_dim * 1.5)
             
         self.state_encoder = nn.Sequential(
             DecoderResCat(hidden_size, in_features, connect_dim),
@@ -97,7 +97,7 @@ class KeypointDiffusionModel(BaseDiffusionModel):
                 out_features=4,
                 layer_num=7,
                 feat_dim=1024,
-                input_feature_seq_lenth=16,
+                input_feature_seq_lenth=40,
                 key_point_num=5,
                 specified_key_points=True, 
                 forward_specified_key_points=False):
@@ -368,6 +368,7 @@ class KeyPointDiffusionDecoder(nn.Module):
                                                 config.n_embd, 
                                                 out_features=self.out_features * self.model_args.k,
                                                 key_point_num=self.model_args.key_points_num,
+                                                feat_dim=self.model_args.key_points_diffusion_decoder_feat_dim,
                                                 input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
                                                 specified_key_points=self.model_args.specified_key_points,
                                                 forward_specified_key_points=self.model_args.forward_specified_key_points
@@ -405,12 +406,12 @@ class KeyPointDiffusionDecoder(nn.Module):
         if self.training:
             future_key_points = future_key_points if self.model_args.predict_yaw else future_key_points[..., :2]
             key_points_logits = future_key_points
-            kp_loss = self.model(future_key_points_hidden_state, future_key_points)  # b, s, 4/2
+            kp_loss = self.model(future_key_points_hidden_state[:, -1, :], future_key_points)  # b, s, 4/2
 
             return kp_loss, key_points_logits
         else:
             if self.k == 1:
-                key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
+                key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)
                 kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
                         self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
             else:
@@ -443,9 +444,9 @@ class KeyPointDiffusionDecoder(nn.Module):
                     else scenario_type_len + input_length
         future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         if self.k == 1:
-            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
+            key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)
         else:
-            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
+            key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = False, mc_num = self.model_args.mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
                     reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)]

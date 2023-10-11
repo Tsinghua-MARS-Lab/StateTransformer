@@ -170,7 +170,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
-            loss_items=loss_items
+            # loss_items=loss_items
         )
 
     @torch.no_grad()
@@ -206,6 +206,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         additional_token_num = 0
         additional_token_num += self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        # additional_token_num += 1 if self.model_args.use_centerline else 0
         kp_start_index = additional_token_num + context_length * 2 if context_length is not None else additional_token_num + input_length
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.decoder_type == "mlp" and self.ar_future_interval > 0:
@@ -268,15 +269,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
                         pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
 
-                if idm_reference_global is not None and i == key_points_num - 1 and not self.model_args.forward_specified_key_points:
+                if idm_reference_global is not None and not self.model_args.forward_specified_key_points:
                     # replace last key point with IDM reference
-                    ego_state_global = idm_reference_global[selected_indices[-1]]
+                    ego_state_global = idm_reference_global[selected_indices[i]]
                     idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
                                                                                 ego_state_global.rear_axle.y]),
                                                                         ego_pose,
                                                                         ego_to_global=False)
-                    print('replace last key point with IDM reference, index: ', selected_indices[-1], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
+                    print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
                     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
+                    pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
                 key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                 # replace embed at the next position
                 input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
@@ -328,6 +330,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                  trajectory_label,
                                                                  info_dict
                                                               )
+            if self.model_args.predict_yaw:
+                traj_logits = interplate_yaw(traj_logits, mode=self.model_args.postprocess_yaw)
         else:
             traj_logits = trajectory_label_dummy[..., :2]
 
@@ -390,7 +394,6 @@ def query_current_lane(map_api, target_point):
         'distance_to_lane': dist_to_nearest_lane
     }
 
-
 def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
     import numpy as np
     points_of_lane = []
@@ -418,6 +421,29 @@ def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
     return minimal_point
     # return minimal_point if min_dist < 10 else org_point
 
+def interplate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
+    if mode == "normal":
+        return pred_traj
+    elif mode == "interplate" or mode == "hybrid":
+        # generating yaw angle from relative_traj
+        dx = pred_traj[:, 4::5, 0] - pred_traj[:, :-4:5, 0]
+        dy = pred_traj[:, 4::5, 1] - pred_traj[:, :-4:5, 1]
+        distances = torch.sqrt(dx ** 2 + dy ** 2)
+        relative_yaw_angles = torch.where(distances > 0.1, torch.arctan2(dy, dx), 0)
+        # accumulate yaw angle
+        # relative_yaw_angles = yaw_angles.cumsum()
+        relative_yaw_angles_full = relative_yaw_angles.repeat_interleave(5, dim=1)
+        if mode == "interplate":
+            pred_traj[:, :, -1] = relative_yaw_angles_full
+        else:
+            pred_traj[:, :, -1] = torch.where(torch.abs(pred_traj[:, :, -1]) > yaw_change_upper_threshold, relative_yaw_angles_full, pred_traj[:, :, -1])
+        # heading = pred_traj[:, 0, -1]
+        # for i in range(pred_traj.shape[1]):
+        #     if i > 1 and euclidean_distance(pred_traj[i - 1, :2], pred_traj[i, :2]) > 0.1:
+        #         delta_heading = get_angle_of_a_line(pred_traj[i - 1, :2], pred_traj[i, :2])
+        #         heading = normalize_angle(heading + min(delta_heading, yaw_change_upper_threshold))
+        #     pred_traj[i, -1] = heading
+    return pred_traj
 
 def build_models(model_args):
     if 'vector' in model_args.model_name and 'gpt' in model_args.model_name:
@@ -479,7 +505,8 @@ def build_models(model_args):
                                                     key_point_num=model_args.key_points_num,
                                                     input_feature_seq_lenth=model_args.diffusion_condition_sequence_lenth,
                                                     specified_key_points=model_args.specified_key_points,
-                                                    forward_specified_key_points=model_args.forward_specified_key_points
+                                                    forward_specified_key_points=model_args.forward_specified_key_points,
+                                                    feat_dim=model_args.key_points_diffusion_decoder_feat_dim,
                                                     )
             model = T4PTrainDiffWrapper(diffusion_model, num_key_points=model_args.key_points_num, model_args=model_args)
             if model_args.key_points_diffusion_decoder_load_from is not None:
@@ -500,6 +527,10 @@ def build_models(model_args):
     elif 'pretrain' in model_args.model_name:
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, config=config_p)
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
+        if model_args.key_points_diffusion_decoder_load_from is not None:
+                print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
+                state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
+                model.key_points_decoder.load_state_dict(state_dict)
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p, model_args=model_args)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
