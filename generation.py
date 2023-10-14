@@ -94,7 +94,7 @@ def main(args):
                     continue
                 # if loaded_dic["type"] not in filter_scenario:
                 #     continue
-                loaded_dic["agent"]["ego"]["type"] = 7 # Fix Ego Type to 7
+                loaded_dic["agent"]["ego"]["type"] = 7  # Fix Ego Type to 7
                 if args.auto_regressive:
                     observation_dic = get_observation_for_autoregression_basedon_previous_coor(
                         observation_kwargs, loaded_dic, 40, 201, nsm_result=None
@@ -254,35 +254,16 @@ def main(args):
                      each_path[0] != '.']
     all_file_path = sorted(all_file_path)
 
-    if args.use_nsm:
-        nsm_file_names = nsm_labels['file_names']
-        file_indices = []
-        for idx, each_file in enumerate(all_file_names):
-            if each_file in nsm_file_names:
-                # check file is valid?
-                if each_file not in nsm_labels:
-                    print('Error, file name in names but not in dic?', idx, each_file)
-                    continue
-                if len(nsm_labels[each_file]['goal_actions_weights_per_frame']) == 0:
-                    print('Error, empty goal actions', idx, each_file)
-                    continue
-                if len(nsm_labels[each_file]['current_actions_weights_per_frame']) == 0:
-                    print('Error, empty current actions', idx, each_file)
-                    continue
-                file_indices.append(idx)
-        print(f'loaded {len(file_indices)} from {len(nsm_file_names)} as {file_indices}')
-    else:
-        # file_indices = list(range(data_loader.total_file_num))
-        total_file_num = len(os.listdir(data_path['NUPLAN_DB_FILES']))
-        if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
-            args.ending_file_num = total_file_num
-        file_indices = list(range(args.starting_file_num, args.ending_file_num))
-        total_file_num = args.ending_file_num - args.starting_file_num
+    # file_indices = list(range(data_loader.total_file_num))
+    total_file_num = len(os.listdir(data_path['NUPLAN_DB_FILES']))
+    if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
+        args.ending_file_num = total_file_num
+    file_indices = list(range(args.starting_file_num, args.ending_file_num))
+    total_file_num = args.ending_file_num - args.starting_file_num
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:
             filter_dic = pickle.load(f)
-        assert not args.use_nsm, NotImplementedError
         # filter file indices for faster loops while genrating dataset
         file_indices_filtered = []
         for idx, each_file_index in enumerate(file_indices):
@@ -424,7 +405,6 @@ if __name__ == '__main__':
     parser.add_argument('--cache_folder', type=str, default='/localdata_hdd/nuplan_nsm')
 
     parser.add_argument('--num_proc', type=int, default=1)
-    parser.add_argument('--use_nsm', default=False, action='store_true')
     parser.add_argument('--balance_rate', type=float, default=1.0,
                         help="balance sample rate of simple scenarios in nsm case")
     parser.add_argument('--sample_interval', type=int, default=200)

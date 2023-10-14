@@ -6,7 +6,7 @@ python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_wa
         --model_pretrain_name_or_path /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results/checkpoint-330000 \
         --output_dir /data/madanjiao/model_res/vector_gpt_small_k1_KP0_anchored_ep100_gpu7_vheicle_masked_anchorLogits/training_results  \
         --run_name gpt_mse_FI1_PI1_k1_test \
-        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --ar_future_interval 0 --specified_key_points True --forward_specified_key_points False \
+        --per_device_eval_batch_size 16 --dataloader_num_workers 10 --use_key_points None \
         --dataloader_drop_last True \
         --d_model 256 --dataset_scale 1 \
         --task waymo \
@@ -21,7 +21,7 @@ python -m torch.distributed.run --nproc_per_node=1 --master_port=29501 runner_wa
 #         --saved_dataset_folder  /data_3/madanjiao/nuplan/online_demo/mini_demo/index \
 #         --output_dir /data_3/madanjiao/model_res/vector_gpt_small_k6_forwardKP5_ep100/training_results  \
 #         --run_name gpt_mse_FI1_PI1_k1_test \
-#         --per_device_eval_batch_size 16 --dataloader_num_workers 10 --ar_future_interval 5 --specified_key_points True --forward_specified_key_points True \
+#         --per_device_eval_batch_size 16 --dataloader_num_workers 10 \
 #         --dataloader_drop_last True \
 #         --d_embed 256 --d_model 256 --d_inner 1024 --n_layers 4 --n_heads 4 \
 #         --activation_function silu --dataset_scale 1 \

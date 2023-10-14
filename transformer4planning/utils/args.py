@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 from transformers.training_args import TrainingArguments
 
+
 @dataclass
 class ModelArguments:
     """
@@ -38,7 +39,7 @@ class ModelArguments:
         default="mse",
     )
     task: Optional[str] = field(
-        default="nuplan" # only for mmtransformer
+        default="nuplan"  # only for mmtransformer
     )
     with_traffic_light: Optional[bool] = field(
         default=True
@@ -70,9 +71,22 @@ class ModelArguments:
     predict_yaw: Optional[bool] = field(
         default=False
     )
-    ar_future_interval: Optional[int] = field(
-        default=20,
-        metadata={"help": "default is 0, don't use auturegression. [WARNING] only supports nonauto-gpt now."},
+    trajectory_loss_rescale: Optional[float] = field(
+        default=1.0
+    )
+    visualize_prediction_to_path: Optional[str] = field(
+        default=None
+    )
+    ######## about key points ########
+    use_key_points: Optional[str] = field(
+        default='specified_backward',
+        metadata={"help": "no: not using key points,"
+                          "universal: using universal key points, with interval of 20 frames."
+                          "specified_forward: using specified key points, with exponentially growing frame indices."
+                          "specified_backward: using specified key points, with exponentially growing frame indices."}
+    )
+    pred_key_points_only: Optional[bool] = field(
+        default=False
     )
     arf_x_random_walk: Optional[float] = field(
         default=0.0
@@ -80,21 +94,11 @@ class ModelArguments:
     arf_y_random_walk: Optional[float] = field(
         default=0.0
     )
-    trajectory_loss_rescale: Optional[float] = field(
-        default=1.0
+    kp_decoder_type: Optional[str] = field(
+        default='mlp',
+        metadata={"help": "choose from [mlp, diffusion]"}
     )
-    visualize_prediction_to_path: Optional[str] = field(
-        default=None
-    )
-    pred_key_points_only: Optional[bool] = field(
-        default=False
-    )
-    specified_key_points: Optional[bool] = field(
-        default=True
-    )
-    forward_specified_key_points: Optional[bool] = field(
-        default=False
-    )
+    ######## end of key points args ########
     token_scenario_tag: Optional[bool] = field(
         default=False
     )
@@ -112,10 +116,6 @@ class ModelArguments:
         default='raster',
         metadata={"help": "choose from [raster, vector]"}
     )
-    decoder_type: Optional[str] = field(
-        default='mlp',
-        metadata={"help": "choose from [mlp, diffusion]"}
-    )
     past_sample_interval: Optional[int] = field(
         default=5
     )
@@ -130,7 +130,7 @@ class ModelArguments:
     )
     # begin of diffusion decoder args
     mc_num: Optional[int] = field(
-        default = 200, metadata = {"help": "The number of sampled KP trajs the diffusionKPdecoder is going to generate. After generating this many KP trajs, they go through the EM algorithm and give a group of final KP trajs of number k. This arg only works when we use diffusionKPdecoder and set k > 1."}
+        default=200, metadata={"help": "The number of sampled KP trajs the diffusionKPdecoder is going to generate. After generating this many KP trajs, they go through the EM algorithm and give a group of final KP trajs of number k. This arg only works when we use diffusionKPdecoder and set k > 1."}
     )
     key_points_diffusion_decoder_feat_dim: Optional[int] = field(
         default=256, metadata={"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
@@ -157,6 +157,11 @@ class ModelArguments:
     postprocess_yaw: Optional[str] = field(
         default="normal", metadata={"help": "choose from hybrid, interplate or normal"}
     )
+    augment_current_pose_rate: Optional[float] = field(
+        # currently this only works for raster preprocess, and aug_x, aug_y are default to 1.0
+        default=0.0, metadata={"help": "The rate of augmenting current pose in the preprocess"}
+    )
+
 
 @dataclass
 class DataTrainingArguments:
@@ -198,16 +203,16 @@ class DataTrainingArguments:
         },
     )
     dataset_scale: Optional[float] = field(
-        default=1, metadata={"help":"The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
+        default=1, metadata={"help": "The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
     dagger: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to save dagger results"}
+        default=False, metadata={"help": "Whether to save dagger results"}
     )
     nuplan_map_path: Optional[str] = field(
-        default=None, metadata={"help":"The root path of map file, to init map api used in nuplan package"}
+        default=None, metadata={"help": "The root path of map file, to init map api used in nuplan package"}
     )
     use_full_training_set: Optional[bool] = field(
-        default=False, metadata={"help":"Whether to use the full training index from train_alltype"}
+        default=False, metadata={"help": "Whether to use the full training index from train_alltype"}
     )
 
 
@@ -228,6 +233,7 @@ class ConfigArguments:
     load_data_config_from_path: Optional[str] = field(
         default=None, metadata={"help": "load data config to a json file if not None"}
     )
+
 
 @dataclass
 class PlanningTrainingArguments(TrainingArguments):

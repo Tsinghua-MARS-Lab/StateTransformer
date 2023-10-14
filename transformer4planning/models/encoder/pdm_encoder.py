@@ -73,7 +73,7 @@ class PDMEncoder(TrajectoryEncoder):
             planner_embed = torch.cat([scenario_tag_embeds, planner_embed], dim=1)
         
         # use trajectory label to build keypoints
-        if self.ar_future_interval > 0:
+        if self.use_key_points is not None:
             future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
