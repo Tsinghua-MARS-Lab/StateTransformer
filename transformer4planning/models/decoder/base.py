@@ -16,6 +16,10 @@ class TrajectoryDecoder(nn.Module):
             self.loss_fct = nn.MSELoss(reduction="mean")
         elif 'l1' in self.model_args.loss_fn:
             self.loss_fct = nn.SmoothL1Loss()
+        else:
+            print(self.model_args.loss_fn)
+            assert False, "loss fn not supported"
+
     
     def compute_traj_loss(self, 
                           hidden_output,
@@ -42,9 +46,15 @@ class TrajectoryDecoder(nn.Module):
                 traj_loss = (self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
                     trajectory_label_mask.sum() + 1e-7)
             elif self.model_args.task == "nuplan":
+                aug_current = 1 - info_dict['aug_current']
+                # expand aug_current to match traj_logits shape
+                aug_current = aug_current.unsqueeze(-1).unsqueeze(-1).expand_as(traj_logits)
+                # set traj_logits equal to label where aug_current is 0
+                traj_logits = traj_logits * aug_current + label.to(device) * (1 - aug_current) if self.model_args.predict_yaw else \
+                    traj_logits[..., :2] * aug_current + label[..., :2].to(device) * (1 - aug_current)
+
                 traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.model_args.predict_yaw else \
-                            self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))   
-            # Modification here: both waymo&nuplan use the same loss scale and loss fn
+                            self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
             traj_loss *= self.model_args.trajectory_loss_rescale
         else:
             traj_logits = torch.zeros_like(label[..., :2])
@@ -58,19 +68,21 @@ class KeyPointMLPDeocder(nn.Module):
         self.model_args = model_args
         self.k = model_args.k
         out_features = 4 if self.model_args.predict_yaw else 2
-        self.model = DecoderResCat(config.n_inner, 
-                                    config.n_embd, 
-                                    out_features=out_features * self.k)
+        self.model = DecoderResCat(config.n_inner,
+                                   config.n_embd,
+                                   out_features=out_features * self.k)
         if 'mse' in self.model_args.loss_fn:
             self.loss_fct = nn.MSELoss(reduction="mean")
         elif 'l1' in self.model_args.loss_fn:
             self.loss_fct = nn.SmoothL1Loss()
-    
+        else:
+            print(self.model_args.loss_fn)
+            assert False, "loss fn not supported"
+
     def compute_keypoint_loss(self,
-                        hidden_output,
-                        info_dict:Dict=None,
-                        device=None
-                        ):
+                              hidden_output,
+                              info_dict: Dict = None,
+                              device=None):
         """
         pred the next key point conditioned on all the previous points are ground truth, and then compute the correspond loss
         param:
@@ -94,7 +106,6 @@ class KeyPointMLPDeocder(nn.Module):
             assert self.model_args.task == "nuplan", "k=1 case only support nuplan task"
             kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
                             self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
-
         else:
             assert self.model_args.task == "waymo", "k>1 case only support waymo task"
             b, s, _ = future_key_points.shape

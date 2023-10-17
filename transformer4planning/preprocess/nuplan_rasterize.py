@@ -1,6 +1,6 @@
 import numpy as np
 import pickle
-import math
+import math, random
 import cv2
 import shapely
 import os
@@ -96,7 +96,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     split = sample["split"]
     frame_id = sample["frame_id"]
     road_ids = sample["road_ids"]
-    if not isinstance(road_id, list):
+    if not isinstance(road_ids, list):
         road_ids = road_ids.tolist()
     agent_ids = sample["agent_ids"]  # list of strings
     traffic_light_ids = sample["traffic_ids"]
@@ -185,8 +185,21 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     sample_frames = sample_frames_in_past + sample_frames_in_future
     # sample_frames = list(range(scenario_start_frame, frame_id + 1, frame_sample_interval))
 
+    # augment current position
+    aug_current = 0
+    aug_rate = kwargs.get('augment_current_pose_rate', 0)
+    if "train" in split and aug_rate > 0 and random.random() < aug_rate:
+        aug_x = 1
+        aug_y = 1
+        aug_yaw = 0.1
+        agent_dic["ego"]["pose"][:frame_id//frequency_change_rate, 0] += (random.random() * 2 - 1) * aug_x
+        agent_dic["ego"]["pose"][:frame_id//frequency_change_rate, 1] += (random.random() * 2 - 1) * aug_y
+        agent_dic["ego"]["pose"][frame_id//frequency_change_rate, -1] += (random.random() * 2 * np.pi - np.pi) * aug_yaw
+        aug_current = 1
+
     # initialize rasters
     origin_ego_pose = agent_dic["ego"]["pose"][frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
+
     # num_frame = torch.div(frame_id, frequency_change_rate, rounding_mode='floor')
     # origin_ego_pose = agent_dic["ego"]["pose"][num_frame].copy()  # hard-coded resample rate 2
     if np.isinf(origin_ego_pose[0]) or np.isinf(origin_ego_pose[1]):
@@ -434,20 +447,26 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["split"] = sample['split']
     result_to_return["frame_id"] = sample['frame_id']
     result_to_return["scenario_type"] = 'Unknown'
-    try:
-        result_to_return["scenario_type"] = sample["scenario_type"]
-    except:
-        # to be compatible with older version dataset without scenario_type
-        pass
-    try:
-        result_to_return["scenario_id"] = sample["scenario_id"]
-    except:
-        pass
+    if 'scenario_type' in sample:
+        result_to_return["scenario_type"] = sample['scenario_type']
+    if 'scenario_id' in sample:
+        result_to_return["scenario_id"] = sample['scenario_id']
+    if 't0_frame_id' in sample:
+        result_to_return["t0_frame_id"] = sample['t0_frame_id']
+    # try:
+    #     result_to_return["scenario_type"] = sample["scenario_type"]
+    # except:
+    #     # to be compatible with older version dataset without scenario_type
+    #     pass
+    # try:
+    #     result_to_return["scenario_id"] = sample["scenario_id"]
+    # except:
+    #     pass
     if centerline is not None:
         result_to_return["centerline"] = centerline
 
     result_to_return["route_ids"] = sample['route_ids']
-
+    result_to_return["aug_current"] = aug_current
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)
 
     del agent_dic
@@ -488,7 +507,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
         with open(os.path.join(data_path, "map", f"{map}.pkl"), "rb") as f:
             road_dic = pickle.load(f)
     else:
-        print(f"Error: cannot load map {map} from {data_path}")
+        print(f"Error Raster Preprocess: cannot load map {map} from {data_path}")
         return None
 
     # load agent and traffic dictionaries
@@ -497,7 +516,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
             data_dic = pickle.load(f)
             agent_dic = data_dic["agent_dic"]
     else:
-        print(f"Error: cannot load {filename} from {data_path}")
+        print(f"Error Raster Preprocess: cannot load {filename} from {data_path}")
         return None
 
     # calculate frames to sample

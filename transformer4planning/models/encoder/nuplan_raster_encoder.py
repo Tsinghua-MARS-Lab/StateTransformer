@@ -51,15 +51,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                     in_channels=cnn_kwargs.get("in_channels", None), 
                                                     resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                     pretrain=cnn_kwargs.get("pretrain", False))
-
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        if self.model_args.use_centerline:
-            self.centerline_embed = nn.Sequential(
-                nn.Linear(action_kwargs.get("centerline_dim", 120) * 3, action_kwargs.get("d_embed")),
-                nn.ReLU(),
-            )
-        self.ar_future_interval = model_args.ar_future_interval
-        self.model_args = model_args
         
     def forward(self, **kwargs):
         """
@@ -76,7 +68,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         context_actions = kwargs.get("context_actions", None)
         trajectory_label = kwargs.get("trajectory_label", None)
         scenario_type = kwargs.get("scenario_type", None)
-        centerline = kwargs.get("centerline", None)
+        aug_current = kwargs.get("aug_current", None)
 
         assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
@@ -85,7 +77,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         # add noise to context actions
         context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
-        
         # raster observation encoding & context action ecoding
         action_embeds = self.action_m_embed(context_actions)
         
@@ -119,23 +110,18 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
             input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
 
-        # if self.model_args.use_centerline:
-        #     assert centerline is not None, "centerline is None for use_centerline"
-        #     centerline_embeds = self.centerline_embed(centerline.reshape(batch_size, -1)).unsqueeze(1)
-        #     input_embeds = torch.cat([centerline_embeds, input_embeds], dim=1)
-
         # add keypoints encoded embedding
-        if self.ar_future_interval == 0:
+        if self.use_key_points == 'no':
             input_embeds = torch.cat([input_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             future_key_points = None
-            selected_indices = None
-        elif self.ar_future_interval > 0:
+            selected_indices = []
+        else:
             future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
-            future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, True)
+            future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk)
             if not self.model_args.predict_yaw:
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
@@ -143,15 +129,14 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             future_key_embeds = self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-        else:
-            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
-        
+
         info_dict = {
             "future_key_points": future_key_points,
             "selected_indices": selected_indices,
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
             "context_length": context_length,
+            "aug_current": aug_current,
         }
 
         return input_embeds, info_dict

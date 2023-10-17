@@ -21,12 +21,6 @@ def main(args):
         'NUPLAN_DB_FILES': os.path.join(args.dataset_root, "nuplan-v1.1", args.data_path),
     }
     road_path = args.road_dic_path
-    if args.use_nsm:
-        nsm_labels = None
-        with open(args.nsm_label_path, 'rb') as f:
-            # Load the object from the pickle file
-            nsm_labels = pickle.load(f)
-            print(f'NSM Labels loaded with {len(list(nsm_labels.keys()))} keys')
     
     if args.city is not None:
         with open(args.vehicle_pickle_path, 'rb') as f:
@@ -66,6 +60,7 @@ def main(args):
         with open(args.scenario_filter_yaml_path) as file:
             loaded_yaml = yaml.full_load(file)
             scenarios_to_keep = loaded_yaml["scenario_tokens"]
+            print('filtering with val14: ', len(scenarios_to_keep))
     else:
         scenarios_to_keep = None
 
@@ -94,7 +89,7 @@ def main(args):
                     continue
                 # if loaded_dic["type"] not in filter_scenario:
                 #     continue
-                loaded_dic["agent"]["ego"]["type"] = 7 # Fix Ego Type to 7
+                loaded_dic["agent"]["ego"]["type"] = 7  # Fix Ego Type to 7
                 if args.auto_regressive:
                     observation_dic = get_observation_for_autoregression_basedon_previous_coor(
                         observation_kwargs, loaded_dic, 40, 201, nsm_result=None
@@ -120,7 +115,8 @@ def main(args):
                           data_path=data_path, db=None, gt_relation_path=None,
                           road_dic_path=None,
                           running_mode=running_mode,
-                          filter_scenario=filter_scenario)
+                          filter_scenario=filter_scenario,
+                          keep_future_steps=args.keep_future_steps)
 
             while not dl.end:
                 loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval,
@@ -128,39 +124,76 @@ def main(args):
                                             scenarios_to_keep=scenarios_to_keep)
                 if loaded_dic is None:
                     continue
-                if loaded_dic["skip"]:
-                    continue
-                if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
-                    continue
-                if len(loaded_dic["route"]) == 0:
-                    continue
-                data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
-                # legitimacy check
-                data_to_return_filtered = {}
-                error = False
-                for each_key in data_to_return:
-                    if each_key is None:
-                        print("WARNING: None key in data_to_return")
-                        error = True
-                    if data_to_return[each_key] is not None:
-                        # check if none in list
-                        if isinstance(data_to_return[each_key], type([])):
-                            filtered_list = []
-                            for each_element in data_to_return[each_key]:
-                                if each_element is None:
-                                    print("WARNING: None element in ", each_key)
-                                    error = True
+                if args.keep_future_steps:
+                    # loaded_dic is a list
+                    for each_loaded_dic in loaded_dic:
+                        if each_loaded_dic["skip"]:
+                            continue
+                        if each_loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
+                            continue
+                        if len(each_loaded_dic["route"]) == 0:
+                            continue
+                        data_to_return = get_scenario_data_index(observation_kwargs, each_loaded_dic)
+                        # legitimacy check
+                        data_to_return_filtered = {}
+                        error = False
+                        for each_key in data_to_return:
+                            if each_key is None:
+                                print("WARNING: None key in data_to_return")
+                                error = True
+                            if data_to_return[each_key] is not None:
+                                # check if none in list
+                                if isinstance(data_to_return[each_key], type([])):
+                                    filtered_list = []
+                                    for each_element in data_to_return[each_key]:
+                                        if each_element is None:
+                                            print("WARNING: None element in ", each_key)
+                                            error = True
+                                        else:
+                                            filtered_list.append(each_element)
+                                    data_to_return_filtered[each_key] = filtered_list
                                 else:
-                                    filtered_list.append(each_element)
-                            data_to_return_filtered[each_key] = filtered_list
+                                    data_to_return_filtered[each_key] = data_to_return[each_key]
+                            else:
+                                error = True
+                                print("WARNING: None data in ", each_key)
+                        if error:
+                            continue
+                        yield data_to_return_filtered
+                else:
+                    if loaded_dic["skip"]:
+                        continue
+                    if loaded_dic["agent"]["ego"]["pose"][0][0] == -1:
+                        continue
+                    if len(loaded_dic["route"]) == 0:
+                        continue
+                    data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
+                    # legitimacy check
+                    data_to_return_filtered = {}
+                    error = False
+                    for each_key in data_to_return:
+                        if each_key is None:
+                            print("WARNING: None key in data_to_return")
+                            error = True
+                        if data_to_return[each_key] is not None:
+                            # check if none in list
+                            if isinstance(data_to_return[each_key], type([])):
+                                filtered_list = []
+                                for each_element in data_to_return[each_key]:
+                                    if each_element is None:
+                                        print("WARNING: None element in ", each_key)
+                                        error = True
+                                    else:
+                                        filtered_list.append(each_element)
+                                data_to_return_filtered[each_key] = filtered_list
+                            else:
+                                data_to_return_filtered[each_key] = data_to_return[each_key]
                         else:
-                            data_to_return_filtered[each_key] = data_to_return[each_key]
-                    else:
-                        error = True
-                        print("WARNING: None data in ", each_key)
-                if error:
-                    continue
-                yield data_to_return_filtered
+                            error = True
+                            print("WARNING: None data in ", each_key)
+                    if error:
+                        continue
+                    yield data_to_return_filtered
             del dl
 
     def yield_data_dic(shards):
@@ -254,35 +287,16 @@ def main(args):
                      each_path[0] != '.']
     all_file_path = sorted(all_file_path)
 
-    if args.use_nsm:
-        nsm_file_names = nsm_labels['file_names']
-        file_indices = []
-        for idx, each_file in enumerate(all_file_names):
-            if each_file in nsm_file_names:
-                # check file is valid?
-                if each_file not in nsm_labels:
-                    print('Error, file name in names but not in dic?', idx, each_file)
-                    continue
-                if len(nsm_labels[each_file]['goal_actions_weights_per_frame']) == 0:
-                    print('Error, empty goal actions', idx, each_file)
-                    continue
-                if len(nsm_labels[each_file]['current_actions_weights_per_frame']) == 0:
-                    print('Error, empty current actions', idx, each_file)
-                    continue
-                file_indices.append(idx)
-        print(f'loaded {len(file_indices)} from {len(nsm_file_names)} as {file_indices}')
-    else:
-        # file_indices = list(range(data_loader.total_file_num))
-        total_file_num = len(os.listdir(data_path['NUPLAN_DB_FILES']))
-        if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
-            args.ending_file_num = total_file_num
-        file_indices = list(range(args.starting_file_num, args.ending_file_num))
-        total_file_num = args.ending_file_num - args.starting_file_num
+    # file_indices = list(range(data_loader.total_file_num))
+    total_file_num = len(os.listdir(data_path['NUPLAN_DB_FILES']))
+    if args.ending_file_num == -1 or args.ending_file_num > total_file_num:
+        args.ending_file_num = total_file_num
+    file_indices = list(range(args.starting_file_num, args.ending_file_num))
+    total_file_num = args.ending_file_num - args.starting_file_num
     # load filter pickle file
     if args.filter_pickle_path is not None:
         with open(args.filter_pickle_path, 'rb') as f:
             filter_dic = pickle.load(f)
-        assert not args.use_nsm, NotImplementedError
         # filter file indices for faster loops while genrating dataset
         file_indices_filtered = []
         for idx, each_file_index in enumerate(file_indices):
@@ -350,6 +364,8 @@ def main(args):
                                                                    "map": Value("string"),
                                                                    "timestamp": Value("int64"),
                                                                    "scenario_type": Value("string"),
+                                                                   "t0_frame_id": Value("int64"),
+                                                                   "scenario_id": Value("string"),
                                                                    }),)
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,
@@ -424,7 +440,6 @@ if __name__ == '__main__':
     parser.add_argument('--cache_folder', type=str, default='/localdata_hdd/nuplan_nsm')
 
     parser.add_argument('--num_proc', type=int, default=1)
-    parser.add_argument('--use_nsm', default=False, action='store_true')
     parser.add_argument('--balance_rate', type=float, default=1.0,
                         help="balance sample rate of simple scenarios in nsm case")
     parser.add_argument('--sample_interval', type=int, default=200)
@@ -446,5 +461,6 @@ if __name__ == '__main__':
     parser.add_argument('--save_map', default=False, action='store_true')
     parser.add_argument('--scenario_filter_yaml_path', type=str, default=None)
     parser.add_argument('--filter_by_scenario_type', default=False, action='store_true')
+    parser.add_argument('--keep_future_steps', default=False, action='store_true')  # use with scenario_filter_yaml_path for val14
     args_p = parser.parse_args()
     main(args_p)

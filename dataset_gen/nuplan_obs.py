@@ -587,38 +587,6 @@ def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=
             data_to_return["agent_ids"].add(key)
     data_to_return["agent_ids"] = list(data_to_return["agent_ids"])
     # other infomation record
-    for key in ["frame_id", "file_name", "map", "timestamp", "scenario_type", "scenario_id"]:
+    for key in ["frame_id", "file_name", "map", "timestamp", "scenario_type", "scenario_id", "t0_frame_id"]:
         data_to_return[key] = data_dic[key]
     return data_to_return
-
-if __name__ == '__main__':
-    import pickle
-    with open("/home/shiduozhang/gt_labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle", "rb")  as f:
-        nsm = pickle.load(f)
-    with open("data_dic.pkl", "rb") as f:
-        data_dic = pickle.load(f)
-    filename = data_dic["scenario"]
-    nsm_data = nsm[filename]
-    total_frames = data_dic["agent"]["ego"]["pose"].shape[0]
-    observation_encode_kwargs = dict(
-            visible_dis=30,
-            max_dis=80,
-            scale=1.0,
-            stride=5,
-            raster_scale=1.0,
-            past_frame_num=40,
-            future_frame_num=160,
-            high_res_raster_shape=[224, 224],  # for high resolution image, we cover 50 meters for delicated short-term actions
-            high_res_raster_scale=4.0,
-            low_res_raster_shape=[224, 224],  # for low resolution image, we cover 300 meters enough for 8 seconds straight line actions
-            low_res_raster_scale=0.77,
-            frame_sample_interval=5,
-            action_label_scale=100
-        )
-    # result = get_observation_for_autoregression_nsm(observation_encode_kwargs, data_dic, 88, total_frames, None)
-    # with open("dataset_example.pkl", "wb") as f:
-    #     pickle.dump(result, f)
-    result = get_observation_for_nsm(observation_encode_kwargs, data_dic, 1100, total_frames, None)
-    with open("nonauto_example.pkl", "wb") as f:
-        pickle.dump(result, f)
-
