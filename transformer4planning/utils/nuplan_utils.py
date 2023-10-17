@@ -155,36 +155,42 @@ MISS_THRESHHOLD = [6, 8, 16]
 DISPLACEMENT_WEIGHT = 1
 HEADING_WEIGHT = 2
 
-VALIDATION_LIST = os.listdir("/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/val")
+# VALIDATION_LIST = os.listdir("/public/MARS/datasets/nuPlan/nuplan-v1.1/data/cache/val")
+
 
 def compute_average_score(horizon_3, horizon_5, horizon_8, threshold):
     avg_value =  np.mean((np.array(horizon_3) + np.array(horizon_5) + np.array(horizon_8))) / 3
     score = max(1 - avg_value/threshold, 0)
     return score    
-    
-def compute_scenario_score(scenario:List):
+
+
+def compute_scenario_score(eval_results: List, scenario_id: int):
+    """
+    :param scenario: list of item (eval result dictionary)
+    :return:
+    """
     ade3, ade5, ade8 = list(), list(), list()
     fde3, fde5, fde8 = list(), list(), list()
     ahe3, ahe5, ahe8 = list(), list(), list()
     fhe3, fhe5, fhe8 = list(), list(), list()
     ismiss = list()
     frames = list()
-    for i, item in enumerate(scenario):
-        ade3.append(item["ade_horison3_gen"])
-        ade5.append(item["ade_horison5_gen"])
-        ade8.append(item["ade_horison8_gen"])
+    for i, item in enumerate(eval_results):
+        ade3.append(item["ade_horizon3_gen"])
+        ade5.append(item["ade_horizon5_gen"])
+        ade8.append(item["ade_horizon8_gen"])
         # FDE
-        fde3.append(item["fde_horison3_gen"])
-        fde5.append(item["fde_horison5_gen"])
-        fde8.append(item["fde_horison8_gen"])
+        fde3.append(item["fde_horizon3_gen"])
+        fde5.append(item["fde_horizon5_gen"])
+        fde8.append(item["fde_horizon8_gen"])
         # AHE
-        ahe3.append(item["ahe_horison3_gen"])
-        ahe5.append(item["ahe_horison5_gen"])
-        ahe8.append(item["ahe_horison8_gen"])
+        ahe3.append(item["ahe_horizon3_gen"])
+        ahe5.append(item["ahe_horizon5_gen"])
+        ahe8.append(item["ahe_horizon8_gen"])
         # FHE
-        fhe3.append(item["fhe_horison3_gen"])
-        fhe5.append(item["fhe_horison5_gen"])
-        fhe8.append(item["fhe_horison8_gen"])
+        fhe3.append(item["fhe_horizon3_gen"])
+        fhe5.append(item["fhe_horizon5_gen"])
+        fhe8.append(item["fhe_horizon8_gen"])
         # miss
         ismiss.append(item["miss_score"])
         # frame_id
@@ -194,20 +200,21 @@ def compute_scenario_score(scenario:List):
     ahe_score = compute_average_score(ahe3, ahe5, ahe8, HEADING_ERROR_THRESHHOLD)
     fhe_score = compute_average_score(fhe3, fhe5, fhe8, HEADING_ERROR_THRESHHOLD)
     miss = sum(ismiss)
-    if miss >=5:
+    if miss >= 5:
         miss_score = 0
     else:
         miss_score = 1
     score =(ade_score + fde_score + ahe_score * 2 + fhe_score * 2) / 6
     
     data_to_return = dict(
-        file_name = VALIDATION_LIST[int(scenario[0]["file_id"])],
-        ahe_score = ahe_score,
-        ade_score = ade_score,
-        fhe_score = fhe_score,
-        fde_score = fde_score,
-        miss_score = miss_score,
-        score = miss_score * score,
+        # file_name = VALIDATION_LIST[int(scenario[0]["file_id"])],
+        scenario_ids=scenario_id,
+        ahe_score=ahe_score,
+        ade_score=ade_score,
+        fhe_score=fhe_score,
+        fde_score=fde_score,
+        miss_score=miss_score,
+        score=miss_score * score,
     )
     return data_to_return
     
@@ -215,38 +222,47 @@ def compute_scenario_score(scenario:List):
 def compute_scores(data):
     scenarios = dict()
     data_frame = pd.DataFrame(data)
-    print(len(data_frame))
     for i in range(len(data_frame)):
+        # group eval results by scenario
         item = data_frame.iloc[i]
-        item["frame_id"] = int(item["frame_id"])
-        if int(item["file_id"]) not in scenarios.keys():
-            scenarios[int(item["file_id"])] = list()    
-        scenarios[item["file_id"]].append(item.to_dict())
-    for key, value in scenarios.items():
-        scenarios[key] =  sorted(value, key=lambda x: x['frame_id'], reverse=False)
-    print("scenario spiltted")
-    scenarios_to_compute = list()
-    for key, value in scenarios.items():
-        if len(value) % 15 == 0:
-            for i in range(len(value)//15):
-                scenarios_to_compute.append(value[15 * i:15 * (i + 1)])
-        else:
-            start_id = value[0]["frame_id"]
-            new_scenario = list()
-            for i in range(len(value)):
-                frame_id = value[i]["frame_id"]
-                if frame_id - start_id <= 280:
-                    new_scenario.append(value[i])
-                else:
-                    scenarios_to_compute.append(new_scenario)
-                    new_scenario = [value[i]]
-                    start_id = frame_id
-    print(len(scenarios_to_compute))
+        item['scenario_ids'] = int(item['scenario_ids'])
+        if int(item['scenario_ids']) not in scenarios.keys():
+            scenarios[int(item['scenario_ids'])] = list()
+        scenarios[int(item['scenario_ids'])].append(item.to_dict())
+
+    # print(len(data_frame))
+    # for i in range(len(data_frame)):
+    #     item = data_frame.iloc[i]
+    #     item["frame_id"] = int(item["frame_id"])
+    #     if int(item["file_id"]) not in scenarios.keys():
+    #         scenarios[int(item["file_id"])] = list()
+    #     scenarios[item["file_id"]].append(item.to_dict())
+    # for key, value in scenarios.items():
+    #     scenarios[key] =  sorted(value, key=lambda x: x['frame_id'], reverse=False)
+    # print("scenario spiltted")
+    # scenarios_to_compute = list()
+    # for key, value in scenarios.items():
+    #     if len(value) % 15 == 0:
+    #         for i in range(len(value)//15):
+    #             scenarios_to_compute.append(value[15 * i:15 * (i + 1)])
+    #     else:
+    #         start_id = value[0]["frame_id"]
+    #         new_scenario = list()
+    #         for i in range(len(value)):
+    #             frame_id = value[i]["frame_id"]
+    #             if frame_id - start_id <= 280:
+    #                 new_scenario.append(value[i])
+    #             else:
+    #                 scenarios_to_compute.append(new_scenario)
+    #                 new_scenario = [value[i]]
+    #                 start_id = frame_id
+
     scores = list()
     results = list()
     miss_scores = list()
-    for scenario in scenarios_to_compute:
-        result_dic = compute_scenario_score(scenario) 
+    for scenario_id in scenarios:
+        eval_results = scenarios[scenario_id]
+        result_dic = compute_scenario_score(eval_results, scenario_id)
         score = result_dic["score"]
         miss_score = result_dic["miss_score"]
         results.append(result_dic)

@@ -90,7 +90,7 @@ class PDMEncoder(TrajectoryEncoder):
         else:
             planner_embed = torch.cat([planner_embed, 
                                        torch.zeros((batch_size, pred_length, planner_embed.shape[-1]), device=device)], dim=1)
-            future_key_points, selected_indices = None, None
+            future_key_points, selected_indices = None, []
         
         info_dict = {
             "future_key_points": future_key_points,

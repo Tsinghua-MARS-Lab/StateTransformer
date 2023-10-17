@@ -78,12 +78,11 @@ class KeyPointMLPDeocder(nn.Module):
         else:
             print(self.model_args.loss_fn)
             assert False, "loss fn not supported"
-    
+
     def compute_keypoint_loss(self,
-                        hidden_output,
-                        info_dict:Dict=None,
-                        device=None
-                        ):
+                              hidden_output,
+                              info_dict: Dict = None,
+                              device=None):
         """
         pred the next key point conditioned on all the previous points are ground truth, and then compute the correspond loss
         param:
@@ -107,7 +106,6 @@ class KeyPointMLPDeocder(nn.Module):
             assert self.model_args.task == "nuplan", "k=1 case only support nuplan task"
             kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
                             self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
-
         else:
             assert self.model_args.task == "waymo", "k>1 case only support waymo task"
             b, s, _ = future_key_points.shape

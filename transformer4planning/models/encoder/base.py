@@ -14,6 +14,7 @@ class TrajectoryEncoder(nn.Module):
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tokenizer.vocab_size, tokenizer_kwargs.get("d_embed", None))
         self.augmentation = DataAugmentation()
+        self.selected_indices = []
 
     def forward(self, **kwargs):  
         """
@@ -35,19 +36,19 @@ class TrajectoryEncoder(nn.Module):
         if 'specified' in self.use_key_points:
             # 80, 40, 20, 10, 5
             if self.use_key_points == 'specified_forward':
-                selected_indices = [4, 9, 19, 39, 79]
+                self.selected_indices = [4, 9, 19, 39, 79]
             elif self.use_key_points == 'specified_backward':
-                selected_indices = [79, 39, 19, 9, 4]
+                self.selected_indices = [79, 39, 19, 9, 4]
             else:
                 assert False, "specified key points should be either specified_forward or specified_backward"
-            future_key_points = trajectory_label[:, selected_indices, :]
-            indices = torch.tensor(selected_indices, device=device, dtype=float) / 80.0
+            future_key_points = trajectory_label[:, self.selected_indices, :]
+            indices = torch.tensor(self.selected_indices, device=device, dtype=float) / 80.0
         elif 'universal' in self.use_key_points:
             ar_future_interval = 20
             future_key_points = trajectory_label[:, ar_future_interval - 1::ar_future_interval, :]
             indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
-            selected_indices = None
+            self.selected_indices = []
         else:
             assert False, "key points should be either specified or universal"
         
-        return future_key_points, selected_indices, indices
+        return future_key_points, self.selected_indices, indices

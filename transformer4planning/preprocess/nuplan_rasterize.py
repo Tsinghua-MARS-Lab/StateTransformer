@@ -447,21 +447,26 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["split"] = sample['split']
     result_to_return["frame_id"] = sample['frame_id']
     result_to_return["scenario_type"] = 'Unknown'
-    try:
-        result_to_return["scenario_type"] = sample["scenario_type"]
-    except:
-        # to be compatible with older version dataset without scenario_type
-        pass
-    try:
-        result_to_return["scenario_id"] = sample["scenario_id"]
-    except:
-        pass
+    if 'scenario_type' in sample:
+        result_to_return["scenario_type"] = sample['scenario_type']
+    if 'scenario_id' in sample:
+        result_to_return["scenario_id"] = sample['scenario_id']
+    if 't0_frame_id' in sample:
+        result_to_return["t0_frame_id"] = sample['t0_frame_id']
+    # try:
+    #     result_to_return["scenario_type"] = sample["scenario_type"]
+    # except:
+    #     # to be compatible with older version dataset without scenario_type
+    #     pass
+    # try:
+    #     result_to_return["scenario_id"] = sample["scenario_id"]
+    # except:
+    #     pass
     if centerline is not None:
         result_to_return["centerline"] = centerline
 
     result_to_return["route_ids"] = sample['route_ids']
     result_to_return["aug_current"] = aug_current
-
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)
 
     del agent_dic
@@ -502,7 +507,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
         with open(os.path.join(data_path, "map", f"{map}.pkl"), "rb") as f:
             road_dic = pickle.load(f)
     else:
-        print(f"Error: cannot load map {map} from {data_path}")
+        print(f"Error Raster Preprocess: cannot load map {map} from {data_path}")
         return None
 
     # load agent and traffic dictionaries
@@ -511,7 +516,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
             data_dic = pickle.load(f)
             agent_dic = data_dic["agent_dic"]
     else:
-        print(f"Error: cannot load {filename} from {data_path}")
+        print(f"Error Raster Preprocess: cannot load {filename} from {data_path}")
         return None
 
     # calculate frames to sample

@@ -115,7 +115,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             input_embeds = torch.cat([input_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             future_key_points = None
-            selected_indices = None
+            selected_indices = []
         else:
             future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
