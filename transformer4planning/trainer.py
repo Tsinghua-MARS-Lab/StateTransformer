@@ -109,6 +109,37 @@ def compute_metrics(prediction: EvalPrediction):
 
     return eval_result
 
+def compute_metrics_waymo(prediction: EvalPrediction):
+    from dataset_gen.waymo.waymo_eval import waymo_evaluation
+    from transformer4planning.utils.mtr_utils import tensor_to_str
+    pred_dicts = prediction.predictions['prediction_generation']
+    type_idx_str = {
+            1: 'TYPE_VEHICLE',
+            2: 'TYPE_PEDESTRIAN',
+            3: 'TYPE_CYCLIST',
+        }
+    
+    pred_dict_list = []
+    for idx in range(len(pred_dicts["object_type"])):
+        single_pred_dict = {}
+        for key in pred_dicts.keys():
+            if key == "scenario_id":
+                single_pred_dict[key] = tensor_to_str(torch.from_numpy(pred_dicts[key][idx]).unsqueeze(0))[0]
+            elif key == "object_type":
+                single_pred_dict[key] = type_idx_str[pred_dicts[key][idx]]
+            elif key == "pred_scores":
+                single_pred_dict[key] = pred_dicts[key][idx].reshape(-1)
+            else:
+                single_pred_dict[key] = pred_dicts[key][idx]
+                
+        pred_dict_list.append(single_pred_dict)
+
+    _, _, final_avg_results = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
+    result = {}
+    for key in final_avg_results.keys():
+        result[key] = final_avg_results[key]* 3 + 2
+    return result
+
 
 class CustomCallback(DefaultFlowCallback):
     """
@@ -206,7 +237,8 @@ class PlanningTrainer(Trainer):
                 ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
             else:
                 ignore_keys = []
-
+                
+        ignore_keys = ['past_key_values', 'loss_items']
         # labels may be popped when computing the loss (label smoothing for instance) so we grab them first.
         if has_labels or loss_without_labels:
             labels = nested_detach(tuple(inputs.get(name) for name in self.label_names))
@@ -260,7 +292,7 @@ class PlanningTrainer(Trainer):
         if self.model.ar_future_interval > 0:
             prediction_generation = self.model.generate(**inputs)
         else:
-            prediction_generation = None
+            prediction_generation = self.model.generate_waymo(**inputs)
 
         logits = nested_detach(logits)
         if len(logits) >= 1:
@@ -270,11 +302,19 @@ class PlanningTrainer(Trainer):
             # must top to the eval batch size, or will cause error and stuck the whole pipeline
             incorrect_batch_size = logits.shape[0]
             short = self.args.per_device_eval_batch_size - incorrect_batch_size
-            for i in range(short):
-                logits = torch.cat([logits, logits[0].unsqueeze(0)], dim=0)
-                prediction_generation = torch.cat([prediction_generation, prediction_generation[0].unsqueeze(0)], dim=0)
-                labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
-            print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
+            if short > 0 :
+                for i in range(short):
+                    logits = torch.cat([logits, logits[0].unsqueeze(0)], dim=0)
+                    prediction_generation = torch.cat([prediction_generation, prediction_generation[0].unsqueeze(0)], dim=0)
+                    labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
+            else:
+                logits = logits[:self.args.per_device_eval_batch_size]
+                prediction_gen = {}
+                for key in prediction_generation.keys():
+                    prediction_gen[key] = prediction_generation[key][:self.args.per_device_eval_batch_size]
+                prediction_generation = prediction_gen
+                labels = labels[:self.args.per_device_eval_batch_size]
+            # print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
 
         logits = {
             "prediction_forward": logits,

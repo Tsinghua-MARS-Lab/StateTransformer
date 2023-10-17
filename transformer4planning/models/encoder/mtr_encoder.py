@@ -4,12 +4,15 @@
 # All Rights Reserved
 import torch
 import torch.nn as nn
-
+import pickle
 
 from transformer4planning.libs.mtr.transformer import (transformer_encoder_layer, position_encoding_utils)
 from transformer4planning.libs.mtr import polyline_encoder
 from transformer4planning.utils import mtr_utils
 from transformer4planning.libs.mtr.ops.knn import knn_utils
+from typing import Dict
+from transformer4planning.models.encoder.base import TrajectoryEncoder
+from transformer4planning.utils.mtr_utils import nll_loss_gmm_direct, build_mlps
 
 
 class MTREncoder(nn.Module):
@@ -168,6 +171,8 @@ class MTREncoder(nn.Module):
         obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)        
         map_polylines_feature = self.map_polyline_encoder(map_polylines, map_polylines_mask)  # (num_center_objects, num_polylines, C)
 
+        # return batch_dict
+
         # apply self-attn
         # obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
         obj_valid_mask = obj_trajs_mask
@@ -202,11 +207,9 @@ class MTREncoder(nn.Module):
         batch_dict['map_mask'] = map_valid_mask
         batch_dict['obj_pos'] = obj_trajs_last_pos
         batch_dict['map_pos'] = map_polylines_center
+        
 
         return batch_dict
-    
-from typing import Dict
-from transformer4planning.models.encoder.base import TrajectoryEncoder
 
 class WaymoVectorizeEncoder(TrajectoryEncoder):
     def __init__(self, 
@@ -217,158 +220,264 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                  ):
         super().__init__(model_args, tokenizer_kwargs)
         self.model_args = model_args
-        self.token_scenario_tag = model_args.token_scenario_tag
         self.ar_future_interval = model_args.ar_future_interval
-        self.context_encoder = SimpleEncoder(mtr_config.CONTEXT_ENCODER)
-        self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
- 
-    def from_marginal_to_joint(self, hidden_state, info_dict, update_info_dict=False):
-        device = hidden_state.device
-        agents_num_per_scenario = info_dict["agents_num_per_scenario"]
-        max_agents_num = max(agents_num_per_scenario)
-        scenario_num = len(agents_num_per_scenario)
-        feature_length, hidden_dim = hidden_state.shape[-2:]
-        hidden_state_joint = torch.zeros((scenario_num, max_agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
-        input_embeds_mask = torch.zeros((scenario_num, max_agents_num * feature_length), dtype=torch.bool, device=device)
-        agent_index_global = 0
-        for i in range(scenario_num):
-            agents_num = agents_num_per_scenario[i]
-            scenario_embeds = torch.zeros((agents_num * feature_length, hidden_dim), dtype=torch.float32, device=device)
-            for j in range(agents_num):
-                scenario_embeds[j::agents_num, :] = hidden_state[agent_index_global]
-                agent_index_global += 1
+        mtr_encoder_config = mtr_config.MODEL.CONTEXT_ENCODER
+        self.context_encoder = MTREncoder(mtr_encoder_config)
+        self.action_m_embed = nn.Sequential(nn.Linear(10, action_kwargs.get("d_embed")), nn.Tanh())
+        self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        self.anchor_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
 
-            hidden_state_joint[i, :agents_num * feature_length, :] = scenario_embeds
-            input_embeds_mask[i, :agents_num * feature_length] = 1
+        self.in_proj_obj = nn.Sequential(
+            nn.Linear(self.context_encoder.num_out_channels, mtr_encoder_config.D_MODEL),
+            nn.ReLU(),
+            nn.Linear(mtr_encoder_config.D_MODEL, mtr_encoder_config.D_MODEL),
+        )
         
-        if update_info_dict:
-            info_dict.update({
-                "input_embeds_mask": input_embeds_mask,
-            })
-        
-        return hidden_state_joint
-
-    def forward(self, **kwargs):
-        agent_trajs = kwargs.get('agent_trajs')
-        batch_size = agent_trajs.shape[0]
-        device = agent_trajs.device
-        track_index_to_predict = kwargs.get("track_index_to_predict")
-        current_time_index = kwargs.get("current_time_index")[0]
-
-        state_embeds = self.context_encoder(
-            agent_trajs[:, :, :current_time_index + 1, :],
-            map_polylines=kwargs.get("map_polylines"),
-            map_polylines_mask=kwargs.get("map_polylines_mask"),
+        self.in_proj_map = nn.Sequential(
+            nn.Linear(self.context_encoder.num_out_channels, mtr_encoder_config.D_MODEL),
+            nn.ReLU(),
+            nn.Linear(mtr_encoder_config.D_MODEL, mtr_encoder_config.D_MODEL),
         )
 
-        ego_trajs = [traj[track_index_to_predict[i], :, :] for i, traj in enumerate(agent_trajs)]
-        ego_trajs = torch.stack(ego_trajs, dim=0).to(device).squeeze(1)
-
-        trajectory_label = ego_trajs[:, current_time_index + 1:, [0, 1, 2, 6]]
-        pred_length = trajectory_label.shape[1]
-        trajectory_label_mask = ego_trajs[:, current_time_index + 1:, -1].unsqueeze(-1)
-        context_actions = ego_trajs[:, :current_time_index + 1, [0, 1, 2, 6]]
-
-        # add noise to context actions
-        context_actions = self.augmentation.trajectory_augmentation(context_actions, self.model_args.x_random_walk, self.model_args.y_random_walk)
+        self.load_intention_anchors("/home/ldr/workspace/transformer4planning/data/waymo/cluster_64_center_dict.pkl", 
+                                    ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST'])
+        self.build_dense_future_prediction_layers(mtr_encoder_config.D_MODEL, 80)
+    
+    def load_intention_anchors(self, file_path, agent_types):
+        with open(file_path, 'rb') as f:
+            intention_points_dict = pickle.load(f)
         
-        action_embeds = self.action_m_embed(context_actions)
-        context_length = context_actions.shape[1]
+        self.intention_points = {}
+        for cur_type in agent_types:
+            cur_intention_points = intention_points_dict[cur_type]
+            cur_intention_points = torch.from_numpy(cur_intention_points).float().view(-1, 2).cuda()
+            self.intention_points[cur_type] = cur_intention_points
 
-        n_embed = action_embeds.shape[-1]
+    def build_dense_future_prediction_layers(self, hidden_dim, num_future_frames):
+        self.obj_pos_encoding_layer = build_mlps(
+            c_in=2, mlp_channels=[hidden_dim, hidden_dim, hidden_dim], ret_before_act=True, without_norm=True
+        )
+        self.dense_future_head = build_mlps(
+            c_in=hidden_dim * 2,
+            mlp_channels=[hidden_dim, hidden_dim, num_future_frames * 7], ret_before_act=True
+        )
+
+        self.future_traj_mlps = build_mlps(
+            c_in=4 * num_future_frames, mlp_channels=[hidden_dim, hidden_dim, hidden_dim], ret_before_act=True, without_norm=True
+        )
+        self.traj_fusion_mlps = build_mlps(
+            c_in=hidden_dim * 2, mlp_channels=[hidden_dim, hidden_dim, hidden_dim], ret_before_act=True, without_norm=True
+        )
+
+    def apply_dense_future_prediction(self, obj_feature, obj_mask, obj_pos):
+        
+        # num_center_objects, num_objects, n_timestamp, _ = obj_feature.shape
+        # obj_feature_valid = self.in_proj_obj(obj_feature[obj_mask])
+        # obj_feature = obj_feature.new_zeros(num_center_objects, num_objects, n_timestamp, obj_feature_valid.shape[-1])
+        # obj_feature[obj_mask] = obj_feature_valid
+
+        
+        obj_feature = obj_feature.max(dim=2)[0]
+        obj_mask = (obj_mask.sum(dim=-1) > 0)
+        num_center_objects, num_objects,  _ = obj_feature.shape
+        num_future_frames = 80
+
+        # dense future prediction
+        obj_pos_valid = obj_pos[obj_mask][..., 0:2]
+        obj_feature_valid = obj_feature[obj_mask]
+        obj_pos_feature_valid = self.obj_pos_encoding_layer(obj_pos_valid)
+        obj_fused_feature_valid = torch.cat((obj_pos_feature_valid, obj_feature_valid), dim=-1)
+
+        pred_dense_trajs_valid = self.dense_future_head(obj_fused_feature_valid)
+        pred_dense_trajs_valid = pred_dense_trajs_valid.view(pred_dense_trajs_valid.shape[0], num_future_frames, 7)
+
+        temp_center = pred_dense_trajs_valid[:, :, 0:2] + obj_pos_valid[:, None, 0:2]
+        pred_dense_trajs_valid = torch.cat((temp_center, pred_dense_trajs_valid[:, :, 2:]), dim=-1)
+
+        # future feature encoding and fuse to past obj_feature
+        obj_future_input_valid = pred_dense_trajs_valid[:, :, [0, 1, -2, -1]].flatten(start_dim=1, end_dim=2)  # (num_valid_objects, C)
+        obj_future_feature_valid = self.future_traj_mlps(obj_future_input_valid)
+
+        obj_full_trajs_feature = torch.cat((obj_feature_valid, obj_future_feature_valid), dim=-1)
+        obj_feature_valid = self.traj_fusion_mlps(obj_full_trajs_feature)
+
+        ret_obj_feature = torch.zeros_like(obj_feature)
+        ret_obj_feature[obj_mask] = obj_feature_valid
+
+        ret_pred_dense_future_trajs = obj_feature.new_zeros(num_center_objects, num_objects, num_future_frames, 7) # pred_dense_trajs
+        ret_pred_dense_future_trajs[obj_mask] = pred_dense_trajs_valid
+
+        return ret_obj_feature, ret_pred_dense_future_trajs
+    
+    def get_dense_future_prediction_loss(self, pred_dense_trajs, obj_trajs_future_state, obj_trajs_future_mask):
+        assert pred_dense_trajs.shape[-1] == 7
+        assert obj_trajs_future_state.shape[-1] == 4
+
+        pred_dense_trajs_gmm, pred_dense_trajs_vel = pred_dense_trajs[:, :, :, 0:5], pred_dense_trajs[:, :, :, 5:7]
+
+        loss_reg_vel = nn.functional.l1_loss(pred_dense_trajs_vel, obj_trajs_future_state[:, :, :, 2:4], reduction='none')
+        loss_reg_vel = (loss_reg_vel * obj_trajs_future_mask[:, :, :, None]).sum(dim=-1).sum(dim=-1)
+
+        num_center_objects, num_objects, num_timestamps, _ = pred_dense_trajs.shape
+        fake_scores = pred_dense_trajs.new_zeros((num_center_objects, num_objects)).view(-1, 1)  # (num_center_objects * num_objects, 1)
+
+        temp_pred_trajs = pred_dense_trajs_gmm.contiguous().view(num_center_objects * num_objects, 1, num_timestamps, 5)
+        temp_gt_idx = torch.zeros(num_center_objects * num_objects).cuda().long()  # (num_center_objects * num_objects)
+        temp_gt_trajs = obj_trajs_future_state[:, :, :, 0:2].contiguous().view(num_center_objects * num_objects, num_timestamps, 2)
+        temp_gt_trajs_mask = obj_trajs_future_mask.view(num_center_objects * num_objects, num_timestamps)
+        loss_reg_gmm, _ = nll_loss_gmm_direct(
+            pred_scores=fake_scores, pred_trajs=temp_pred_trajs, gt_trajs=temp_gt_trajs, gt_valid_mask=temp_gt_trajs_mask,
+            pre_nearest_mode_idxs=temp_gt_idx,
+            timestamp_loss_weight=None, use_square_gmm=False,
+        )
+        loss_reg_gmm = loss_reg_gmm.view(num_center_objects, num_objects)
+
+        loss_reg = loss_reg_vel + loss_reg_gmm
+
+        obj_valid_mask = obj_trajs_future_mask.sum(dim=-1) > 0
+
+        loss_reg = (loss_reg * obj_valid_mask.float()).sum(dim=-1) / torch.clamp_min(obj_valid_mask.sum(dim=-1), min=1.0)
+        loss_reg = loss_reg.mean()
+
+        return loss_reg
+
+    def forward(self, **kwargs):
+        input_dict = kwargs
+        batch_size = input_dict['obj_trajs'].shape[0]
+        device = input_dict['obj_trajs'].device
+
+        batch_dict = self.context_encoder({'input_dict': input_dict})
+
+        # prepare O (observation)
+        obj_feature = batch_dict['obj_feature']
+        map_feature = batch_dict['map_feature']
+        
+        obj_mask = batch_dict['obj_mask']
+        num_center_objects, num_objects, n_timestamp, _ = obj_feature.shape
+        num_polylines = map_feature.shape[1]
+        map_mask = batch_dict['map_mask']
+
+        obj_feature_valid = self.in_proj_obj(obj_feature[obj_mask])
+        obj_feature = obj_feature.new_zeros(num_center_objects, num_objects, n_timestamp, obj_feature_valid.shape[-1])
+        obj_feature[obj_mask] = obj_feature_valid
+
+        map_feature_valid = self.in_proj_map(map_feature[map_mask])
+        map_feature = map_feature.new_zeros(num_center_objects, num_polylines, n_timestamp, map_feature_valid.shape[-1])
+        map_feature[map_mask] = map_feature_valid
+        
+        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        state_embeds = state_embeds.max(dim=1)[0]
+        
+        # traj
+        trajectory_label = input_dict['trajectory_label']
+        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
+        
+        # action context
+        context_actions = input_dict['center_objects_past']
+        if self.model_args.x_random_walk > 0 and self.training:
+            x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
+            context_actions[:, :, 0] += x_noise[:, :, 0]
+        if self.model_args.y_random_walk > 0 and self.training:
+            y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
+            context_actions[:, :, 1] += y_noise[:, :, 1]
+
+        action_embeds = self.action_m_embed(context_actions)
+        context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
+
+        # create OAOAOA..
         input_embeds = torch.zeros(
-            (batch_size, context_length * 2, n_embed),
+            (batch_size, context_length * 2, action_embeds.shape[-1]),
             dtype=torch.float32,
             device=device
         )
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+        
+        # future trajectory
+        pred_length = trajectory_label.shape[1]
 
-        future_embeds_shape = (batch_size, pred_length, n_embed)
-        # add keypoints encoded embedding
+        # future traj data
+        if self.model_args.specified_key_points:
+            # 80, 40, 20, 10, 5
+            if self.model_args.forward_specified_key_points:
+                selected_indices = [4, 9, 19, 39, 79]
+            else:
+                selected_indices = [79, 39, 19, 9, 4]
+            future_key_points = trajectory_label[:, selected_indices, :]
+            future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
+        else:
+            selected_indices = [i for i in range(self.ar_future_interval - 1, pred_length, self.ar_future_interval)]
+            future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+            future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
+                
+        info_dict = {
+            "trajectory_label": trajectory_label,
+            "trajectory_label_mask": trajectory_label_mask,
+            "context_length": context_length,
+            "future_key_points": future_key_points,
+            "future_key_points_gt_mask": future_key_points_gt_mask,
+        }
+
+        # dense prediction
+        _, ret_pred_dense_future_trajs = self.apply_dense_future_prediction(obj_feature, obj_mask, batch_dict['obj_pos'])
+        loss_pred_future = self.get_dense_future_prediction_loss(ret_pred_dense_future_trajs, input_dict['obj_trajs_future_state'], input_dict['obj_trajs_future_mask'])
+     
+        info_dict["loss_pred_future"] = loss_pred_future
+
+        # prepare anchors
+        gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+        type_idx_str = {
+            1: 'TYPE_VEHICLE',
+            2: 'TYPE_PEDESTRIAN',
+            3: 'TYPE_CYCLIST',
+        }
+        center_obj_types = input_dict['center_objects_type']
+        center_obj_anchor_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
+        center_obj_anchor_pts = torch.cat(center_obj_anchor_pts, dim=0) # (bs, 64, 2)
+        dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_anchor_pts, dim=2)
+        anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+
+        anchor_GT_logits = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] * gt_anchor_mask # (bs, 2)
+        anchor_embedding = self.anchor_m_embed(anchor_GT_logits).unsqueeze(1)
+        input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
+
+        info_dict["gt_anchor_cls"] = anchor_GT_cls
+        info_dict["gt_anchor_mask"] = gt_anchor_mask
+        info_dict["gt_anchor_logits"] = anchor_GT_logits
+        info_dict["center_obj_anchor_pts"] = center_obj_anchor_pts
+
+        # prepare keypoints
+        n_embed = action_embeds.shape[-1]
+        # add future traj embedding
         if self.ar_future_interval == 0:
+            # to keep input and output at the same dimension
             input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((future_embeds_shape), device=device)], dim=1)
-
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)    
         elif self.ar_future_interval > 0:
-            # use autoregressive future interval
-            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
-            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
-            expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
-            # argument future trajectory
-            future_key_points_aug = self.augmentation.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
+            future_key_points_aug = future_key_points.clone()
+            if self.model_args.arf_x_random_walk > 0 and self.training:
+                x_noise = torch.rand(future_key_points.shape, device=device) * self.model_args.arf_x_random_walk * 2 - self.model_args.arf_x_random_walk
+                # add progressive scale, the future points the larger noise
+                if self.model_args.specified_key_points:
+                    indices = torch.tensor(selected_indices, device=device, dtype=float) / 80.0
+                else:
+                    indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
+                expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+                x_noise = x_noise * expanded_indices
+                future_key_points_aug[:, :, 0] += x_noise[:, :, 0]
+            if self.model_args.arf_y_random_walk > 0 and self.training:
+                y_noise = torch.rand(future_key_points.shape, device=device) * self.model_args.arf_y_random_walk * 2 - self.model_args.arf_y_random_walk
+                expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+                y_noise = y_noise * expanded_indices
+                future_key_points_aug[:, :, 1] += y_noise[:, :, 1]
+
             if not self.model_args.predict_yaw:
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
 
-            future_key_embeds = self.action_m_embed(future_key_points_aug)
+            future_key_embeds = self.kps_m_embed(future_key_points_aug)
+
             input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros(future_embeds_shape, device=device)], dim=1)
-        else:
-            raise ValueError("ar_future_interval should be non-negative", self.ar_future_interval)
-
-        if selected_indices is not None:
-            future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
-        else:
-            future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-        
-        info_dict = {
-            "trajectory_label": trajectory_label,
-            "trajectory_label_mask": trajectory_label_mask,
-            "pred_length": pred_length,
-            "context_length": context_length,
-            "future_key_points": future_key_points,
-            "future_key_points_gt_mask": future_key_points_gt_mask,
-            "selected_indices": selected_indices,
-        }
-
-        if self.model_args.interaction:
-            info_dict.update({
-                "agents_num_per_scenario": kwargs.get("agents_num_per_scenario"),
-            })
-            input_embeds = self.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=True)
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
         return input_embeds, info_dict
-    
-class SimpleEncoder(MTREncoder):
-    def __init__(self, config):
-        super().__init__(config)
-        self.output_dim = config.D_MODEL
-        self.map_polyline_encoder = nn.Sequential(nn.Linear(2, 128, bias=False), nn.ReLU(),
-                                                  nn.Linear(128, 256, bias=False), nn.ReLU(),
-                                                  nn.Linear(256, self.output_dim, bias=True), nn.ReLU(),)
-
-    def forward(self, past_trajs, map_polylines, map_polylines_mask):
-        num_center_objects, num_objects, num_timestamps, _ = past_trajs.shape
-        agent_trajs_mask = past_trajs[..., -1] > 0
-        map_polylines_mask = map_polylines_mask[..., 0] > 0
-        # apply polyline encoder
-        obj_polylines_feature = self.agent_polyline_encoder(past_trajs, agent_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)   
-        map_polylines_feature = self.map_polyline_encoder(map_polylines)  # (num_center_objects, num_polylines, C)
-        map_polylines_feature, _ = torch.max(map_polylines_feature, dim=1, keepdim=True)
-        map_polylines_feature = map_polylines_feature.repeat(1, num_timestamps, 1)
-
-        agents_attention_mask = agent_trajs_mask.view(num_center_objects, -1)
-        map_attention_mask = torch.ones((num_center_objects, num_timestamps), device=past_trajs.device, dtype=torch.bool)
-
-        n_out_embed = obj_polylines_feature.shape[-1]
-        global_token_feature = torch.cat((obj_polylines_feature.view(num_center_objects, num_objects*num_timestamps, n_out_embed), map_polylines_feature), dim=1) 
-        global_token_mask = torch.cat((agents_attention_mask, map_attention_mask), dim=1)
-
-        obj_trajs_pos = past_trajs[..., :3]
-        map_polylines_center = torch.zeros((num_center_objects, num_timestamps, 3), device=past_trajs.device)
-        global_token_pos = torch.cat((obj_trajs_pos.contiguous().view(num_center_objects, num_objects*num_timestamps, -1), map_polylines_center), dim=1)
-
-        if self.use_local_attn:
-            global_token_feature = self.apply_local_attn(
-                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos,
-                num_of_neighbors=self.model_cfg.NUM_OF_ATTN_NEIGHBORS
-            )
-        else:
-            global_token_feature = self.apply_global_attn(
-                x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos
-            )
-
-        global_token_feature_max, _ = torch.max(global_token_feature.view(num_center_objects, -1, num_timestamps, self.output_dim), dim=1)
-
-        return global_token_feature_max.squeeze(1)

@@ -149,7 +149,7 @@ class ModelArguments:
         default=False
     )
     mtr_config_path: Optional[str] = field(
-        default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+        default="/home/ldr/workspace/transformer4planning/config/config_gpt2_small.yaml"
     )
     use_centerline: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use centerline in the pdm model"}

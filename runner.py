@@ -175,9 +175,9 @@ def main():
     # loop all datasets
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
-    if model_args.task == "nuplan" or model_args.task == "waymo": # nuplan and waymo datasets are stored in index format
+    if model_args.task == "nuplan": # nuplan datasets are stored in index format
         index_root = os.path.join(data_args.saved_dataset_folder, 'index')
-    elif model_args.task == "train_diffusion_decoder":
+    elif model_args.task == "train_diffusion_decoder" or model_args.task == "waymo":
         index_root = data_args.saved_dataset_folder
     root_folders = os.listdir(index_root)
 
@@ -281,13 +281,12 @@ def main():
                                  map_api=map_api,
                                  use_centerline=model_args.use_centerline)
     elif model_args.task == "waymo":
-        from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
+        from transformer4planning.preprocess.waymo_vectorize_mtr import waymo_collate_func
         if model_args.encoder_type == "vector":
-            collate_fn = partial(waymo_collate_func, 
-                                 data_path=data_args.saved_dataset_folder, 
-                                 interaction=model_args.interaction)
+            collate_fn = partial(waymo_collate_func)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
+        from transformer4planning.trainer import compute_metrics_waymo
     elif model_args.task == "train_diffusion_decoder":
         from torch.utils.data._utils.collate import default_collate
         def feat_collate_func(batch, predict_yaw):
@@ -313,7 +312,7 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
         data_collator=collate_fn,
-        compute_metrics=compute_metrics
+        compute_metrics=compute_metrics_waymo if model_args.task == "waymo" else compute_metrics
     )
     trainer.pop_callback(DefaultFlowCallback)
     

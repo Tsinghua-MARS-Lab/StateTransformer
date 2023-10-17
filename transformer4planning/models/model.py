@@ -5,7 +5,7 @@ from typing import Tuple, Optional, Dict
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformer4planning.libs.mlp import DecoderResCat
-from transformer4planning.utils import nuplan_utils 
+from transformer4planning.utils import nuplan_utils, mtr_utils
 from transformer4planning.models.decoder.base import TrajectoryDecoder
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from dataclasses import dataclass
@@ -84,7 +84,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # load pretrained diffusion keypoint decoder
         #TODO: add diffusion decoder trained from scratch
         if self.model_args.task == "waymo":
-            raise NotImplementedError("waymo task has not been tested yet")
+            from transformer4planning.models.decoder.anchor_decoder import AnchorDecoder
+            self.anchor_decoder = AnchorDecoder(self.model_args, self.config)
         self.traj_decoder = TrajectoryDecoder(self.model_args, self.config)
         self.decoder_type = self.model_args.decoder_type
         if self.decoder_type == "diffusion":
@@ -130,12 +131,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
-
-        attention_mask = info_dict["input_embeds_mask"] if self.model_args.interaction else None
         
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
-            attention_mask=attention_mask,
+            attention_mask=None,
             return_dict=return_dict,
             # **kwargs
         )
@@ -149,6 +148,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                     trajectory_label, 
                                                                     info_dict)
         loss += traj_loss
+
+        if self.model_args.task == "waymo":
+            loss_anchor, loss_anchor_logits = self.anchor_decoder.compute_anchor_loss(transformer_outputs_hidden_state, info_dict)
+            loss += loss_anchor
+            loss += loss_anchor_logits
+            loss += info_dict["loss_pred_future"]
+
         kp_loss = None
         if self.ar_future_interval > 0:
             kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state,
@@ -159,6 +165,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             traj_loss=traj_loss,
             kp_loss=kp_loss
         )
+        
         if not return_dict:
             output = (traj_logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
@@ -217,9 +224,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             assert future_key_points.shape[1] > 0, 'future points not enough to sample'
             future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
             key_points_num = future_key_points.shape[1]
-
-            if self.model_args.interaction:
-                input_embeds = self.from_joint_to_marginal(input_embeds, info_dict)
             
             input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
             pred_key_points_during_generate = []
@@ -305,22 +309,14 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = key_point_embed[:, :, :]
         else:
             key_points_logits = None
-        # predict the whole trajectory
-        if self.model_args.interaction:
-            input_embeds = self.encoder.from_marginal_to_joint(input_embeds, info_dict, update_info_dict=False)
-            attention_mask = info_dict["input_embeds_mask"]
-        else:
-            attention_mask = None
+
         # generate remaining trajectory
         transformer_output = self.transformer(
             inputs_embeds=input_embeds,
-            attention_mask=attention_mask,
+            attention_mask=None,
             position_ids=None,
         )
         transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-
-        if self.model_args.interaction:
-            transformer_outputs_hidden_state = self.from_joint_to_marginal(transformer_outputs_hidden_state, info_dict)
 
         # expected shape for pred trajectory is (b, pred_length, 4)
         if self.traj_decoder is not None:
@@ -335,6 +331,108 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             return torch.cat([key_points_logits, traj_logits], dim=1)
         else: # predict trajectory directly
             return traj_logits
+        
+    @torch.no_grad()
+    def generate_waymo(self, **kwargs):
+        input_embeds, info_dict = self.encoder(is_training=False, **kwargs)
+        batch_size, _, embed_dim = input_embeds.shape
+        device = input_embeds.device
+
+        context_length = info_dict["context_length"] * 2
+
+        dummy_anchor_embedding = self.encoder.anchor_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
+
+        input_embeds[:, context_length:context_length+1, :] = dummy_anchor_embedding
+        input_embeds[:, context_length+1:, :] = torch.zeros((batch_size, input_embeds.shape[-2] - (context_length + 1), embed_dim), device=device)
+
+        input_embeds_current = input_embeds[:, :context_length+1, :]
+        attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=device)
+        position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+        transformer_output = self.transformer(
+            inputs_embeds=input_embeds_current,
+            attention_mask=attention_mask,
+            position_ids=position_ids
+        )
+        transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+        future_key_point_hidden_state = transformer_outputs_hidden_state[:, [context_length], :] # (bs, 1, n_embed)
+
+        pred_kps_score = self.anchor_decoder.anchor_cls_decoder(future_key_point_hidden_state).softmax(-1) # (bs, 1, 64)
+        pred_kps_logit = info_dict["center_obj_anchor_pts"] # (bs, 64, 2)
+
+        out_num_mode = 6
+
+        topk_score, topk_indx = torch.topk(pred_kps_score[:, 0, :], dim=-1, k =out_num_mode) # (bs, num_beam)
+    
+        pred_kps_logit_topk = pred_kps_logit[torch.arange(batch_size)[:, None].repeat(1, out_num_mode).view(-1), topk_indx.view(-1), :].view(batch_size, out_num_mode, 2) # (bs, out_num_mode, 2)
+        
+        pred_kps_logit_topk = torch.cat((pred_kps_logit_topk, torch.zeros((batch_size, out_num_mode, 2), device=device)), dim=-1) # (bs, out_num_mode, 4)
+        
+        pred_kps_logit_topk_embed = self.encoder.anchor_m_embed(pred_kps_logit_topk[..., :2])  # (b, out_num_mode, n_embed)
+        
+        # wrarp anchor res
+        k_kpts_scores = torch.zeros((batch_size, out_num_mode, 1), device=device)
+        k_kpts_scores[:, :, 0] = topk_score
+        
+        k_kpts_index = torch.zeros((batch_size, out_num_mode, 1), device=device)
+        k_kpts_index[:, :, 0] = topk_indx
+
+        all_traj_logits = []
+        for m_i in range(out_num_mode):
+            input_embeds[:, context_length:context_length+self.anchor_decoder.anchor_len, :] = pred_kps_logit_topk_embed.unsqueeze(2)[:, m_i, :, :] # (bs, num_kpts, n_embdes)
+            transformer_output = self.transformer(
+                inputs_embeds=input_embeds,
+                attention_mask=None,
+                position_ids=None,
+            )
+            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            
+            # get traj_logits
+            traj_hidden_state = transformer_outputs_hidden_state[:, -80-1:-1, :]
+            traj_logits = self.traj_decoder.model(traj_hidden_state)[:, :, :2] # (bs, pred_len, 2)
+            all_traj_logits.append(traj_logits[:, None, :, :])
+            
+        all_traj_logits = torch.cat(all_traj_logits, dim=1) # (bs, n_mode, pred_len, 2)
+
+        pred_trajs = all_traj_logits
+        pred_scores = k_kpts_scores
+        pred_kps = pred_kps_logit_topk.unsqueeze(2)
+            
+        center_objects_world = kwargs['center_objects_world'].type_as(pred_trajs)
+
+        num_center_objects, num_modes, num_timestamps, num_feat = pred_trajs.shape
+
+        pred_trajs_world = mtr_utils.rotate_points_along_z(
+            points=pred_trajs.view(num_center_objects, num_modes * num_timestamps, num_feat),
+            angle=center_objects_world[:, 6].view(num_center_objects)
+        ).view(num_center_objects, num_modes, num_timestamps, num_feat)
+        pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+        
+        num_center_objects, num_modes, num_kps, num_kps_feat = pred_kps.shape
+        pred_kps_world = mtr_utils.rotate_points_along_z(
+            points=pred_kps.view(num_center_objects, num_modes * num_kps, num_kps_feat),
+            angle=center_objects_world[:, 6].view(num_center_objects)
+        ).view(num_center_objects, num_modes, num_kps, num_kps_feat)
+        pred_kps_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+
+        gt_kps_world = mtr_utils.rotate_points_along_z(
+            points=info_dict["gt_anchor_logits"].unsqueeze(1),
+            angle=center_objects_world[:, 6].view(num_center_objects)
+        ).squeeze(1)
+        gt_kps_world[:, 0:2] += center_objects_world[:, 0:2]
+
+        pred_dict = {
+            'scenario_id': mtr_utils.str_to_tensor(kwargs['scenario_id']).to(device),
+            'pred_trajs': pred_trajs_world[:, :, :, 0:2],
+            'pred_scores': pred_scores,
+            'object_id': torch.tensor(kwargs['center_objects_id']).to(device),
+            'object_type': torch.tensor(kwargs['center_objects_type']).to(device),
+            'gt_trajs': kwargs['center_gt_trajs_src'],
+            'track_index_to_predict': kwargs['track_index_to_predict'],
+            "pred_kps": pred_kps_world,
+            "gt_kps": gt_kps_world,
+        }
+
+        return pred_dict
 
 def query_current_lane(map_api, target_point):
     """

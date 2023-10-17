@@ -145,7 +145,6 @@ def transform_preds_to_waymo_format(pred_dicts, top_k_for_eval=-1, eval_second=8
             sort_idxs = cur_pred['pred_scores'].argsort()[::-1]
             cur_pred['pred_scores'] = cur_pred['pred_scores'][sort_idxs]
             cur_pred['pred_trajs'] = cur_pred['pred_trajs'][sort_idxs]
-
             cur_pred['pred_scores'] = cur_pred['pred_scores'] / cur_pred['pred_scores'].sum()
 
             batch_pred_trajs[scene_idx, obj_idx] = cur_pred['pred_trajs'][:topK, np.newaxis, 4::sampled_interval, :][:, :, :num_frame_to_eval, :]
@@ -247,7 +246,7 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
     result_dict.update(object_type_cnt_dict)
     result_dict['-----Note that this evaluation may have marginal differences with the official Waymo evaluation server-----'] = 0
 
-    return result_dict, result_format_str
+    return result_dict, result_format_str, final_avg_results
 
 def waymo_evaluation_seperate(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
 
