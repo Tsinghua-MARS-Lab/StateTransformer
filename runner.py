@@ -13,6 +13,7 @@ import torch
 from tqdm import tqdm
 import copy
 import json
+import multiprocessing as mp
 import datasets
 import numpy as np
 import evaluate
@@ -75,6 +76,8 @@ def load_dataset(root, split='train', dataset_scale=1, select=False):
     except:
         pass
     dataset.set_format(type='torch')
+    if "centerline" in dataset.column_names:
+        dataset = dataset.filter(lambda example: np.sum(np.array(example["centerline"])) != 0, num_proc=mp.cpu_count())
     if select:
         samples = int(len(dataset) * float(dataset_scale))
         dataset = dataset.select(range(samples))
@@ -236,7 +239,7 @@ def main():
     if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
         model.clf_metrics = clf_metrics
     elif model_args.next_token_scorer:
-        assert model_args.k > 1 and model_args.ar_future_interval > 0, "ar_future_interval must be greater than 0 and k must be greater than 1"
+        assert model_args.k > 1 and model_args.use_key_points, "must use key points and k must be greater than 1"
         model.clf_metrics = clf_metrics
 
     if training_args.do_train:
@@ -395,7 +398,7 @@ def main():
                         input[each_key] = input[each_key].to("cuda")
 
                 eval_batch_size = training_args.per_device_eval_batch_size
-                if model_args.autoregressive or model_args.ar_future_interval > 0:
+                if model_args.autoregressive or model_args.use_key_points is not None:
                     # Todo: add autoregressive predict
                     traj_pred = model.generate(**input)
                 else:

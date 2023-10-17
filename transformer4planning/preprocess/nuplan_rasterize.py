@@ -1,13 +1,13 @@
 import numpy as np
 import pickle
-import math
+import math, random
 import cv2
 import shapely
 import os
 import torch
 from functools import partial
 from torch.utils.data._utils.collate import default_collate
-from transformer4planning.utils.nuplan_utils import generate_contour_pts
+from transformer4planning.utils.nuplan_utils import generate_contour_pts, normalize_angle
 from transformer4planning.utils.common_utils import save_raster
 
 def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
@@ -69,7 +69,6 @@ def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **
         result[key] = default_collate(list_of_dvalues)
     return result
 
-# @formatter:off
 def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           frame_rate=20, past_seconds=2, future_seconds=8,
                           high_res_scale=4, low_res_scale=0.77,
@@ -96,22 +95,32 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     map = sample["map"]
     split = sample["split"]
     frame_id = sample["frame_id"]
-    road_ids = sample["road_ids"].tolist()
+    road_ids = sample["road_ids"]
+    if not isinstance(road_ids, list):
+        road_ids = road_ids.tolist()
     agent_ids = sample["agent_ids"]  # list of strings
-    try:
-        traffic_light_ids = sample["traffic_ids"].tolist()
-    except:
-        traffic_light_ids = sample["traffic_ids"]
-    try:
-        traffic_light_states = sample["traffic_status"].tolist()
-    except:
-        traffic_light_states = sample["traffic_status"]
+    traffic_light_ids = sample["traffic_ids"]
+    if not isinstance(traffic_light_ids, list):
+        traffic_light_ids = traffic_light_ids.tolist()
+    traffic_light_states = sample["traffic_status"].tolist()
+    if not isinstance(traffic_light_states, list):
+        traffic_light_states = traffic_light_states.tolist()
     route_ids = sample["route_ids"].tolist()
+    if not isinstance(route_ids, list):
+        route_ids = route_ids.tolist()
+    centerline = None
+    if "centerline" in sample.keys():
+        if isinstance(sample["centerline"], torch.Tensor):
+            centerline = np.array(sample["centerline"])
+        else:
+            centerline = sample["centerline"]
 
     if map == 'sg-one-north':
         y_inverse = -1
     else:
         y_inverse = 1
+
+    use_centerline = kwargs.get("use_centerline", False)
 
     # clean traffic ids, for legacy reasons, there might be -1 in the list
     traffic_light_ids = [x for x in traffic_light_ids if x != -1]
@@ -176,18 +185,34 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     sample_frames = sample_frames_in_past + sample_frames_in_future
     # sample_frames = list(range(scenario_start_frame, frame_id + 1, frame_sample_interval))
 
+    # augment current position
+    aug_current = 0
+    aug_rate = kwargs.get('augment_current_pose_rate', 0)
+    if "train" in split and aug_rate > 0 and random.random() < aug_rate:
+        aug_x = 1
+        aug_y = 1
+        aug_yaw = 0.1
+        agent_dic["ego"]["pose"][:frame_id//frequency_change_rate, 0] += (random.random() * 2 - 1) * aug_x
+        agent_dic["ego"]["pose"][:frame_id//frequency_change_rate, 1] += (random.random() * 2 - 1) * aug_y
+        agent_dic["ego"]["pose"][frame_id//frequency_change_rate, -1] += (random.random() * 2 * np.pi - np.pi) * aug_yaw
+        aug_current = 1
+
     # initialize rasters
     origin_ego_pose = agent_dic["ego"]["pose"][frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
+
     # num_frame = torch.div(frame_id, frequency_change_rate, rounding_mode='floor')
     # origin_ego_pose = agent_dic["ego"]["pose"][num_frame].copy()  # hard-coded resample rate 2
     if np.isinf(origin_ego_pose[0]) or np.isinf(origin_ego_pose[1]):
         assert False, f"Error: ego pose is inf {origin_ego_pose}, not enough precision while generating dictionary"
     # channels:
-    # 0-1: route raster
-    # 2-21: road raster
-    # 22-25: traffic raster
-    # 26-90: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
-    total_raster_channels = 2 + road_types + traffic_types + agent_types * len(sample_frames_in_past)
+    # 0-2: route raster, centerline
+    # 3-22: road raster
+    # 23-26: traffic raster
+    # 27-91: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
+    
+    route_channel = 3 if use_centerline else 2
+    
+    total_raster_channels = route_channel + road_types + traffic_types + agent_types * len(sample_frames_in_past)
 
     rasters_high_res = np.zeros([raster_shape[0],
                                  raster_shape[1],
@@ -244,6 +269,27 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                 cv2.line(rasters_low_res_channels[1], tuple(low_res_route[j, :2]),
                          tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
 
+    # centerline encoding
+    if use_centerline:
+        pts = zip(centerline[:, 0], centerline[:, 1])
+        line = shapely.geometry.LineString(pts)
+        simplified_xyz_line = line.simplify(1)
+        simplified_x, simplified_y = simplified_xyz_line.xy
+        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
+        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:, 1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
+        simplified_xyz[:, 1] *= -1
+        simplified_xyz[:, 0] *= y_inverse
+        high_res_centerline = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
+        low_res_centerline = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
+        for j in range(simplified_xyz.shape[0] - 1):
+            cv2.line(rasters_high_res_channels[2],
+                        tuple(high_res_centerline[j, :2]),
+                        tuple(high_res_centerline[j + 1, :2]), (255, 255, 255), 2)
+            cv2.line(rasters_low_res_channels[2],
+                        tuple(low_res_centerline[j, :2]),
+                        tuple(low_res_centerline[j + 1, :2]), (255, 255, 255), 2)
+
     # road raster
     for road_id in road_ids:
         if int(road_id) == -1:
@@ -264,13 +310,13 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         high_res_road = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
         low_res_road = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
         if road_type in [5, 17, 18, 19]:
-            cv2.fillPoly(rasters_high_res_channels[road_type + 2], np.int32([high_res_road[:, :2]]), (255, 255, 255))
-            cv2.fillPoly(rasters_low_res_channels[road_type + 2], np.int32([low_res_road[:, :2]]), (255, 255, 255))
+            cv2.fillPoly(rasters_high_res_channels[road_type + route_channel], np.int32([high_res_road[:, :2]]), (255, 255, 255))
+            cv2.fillPoly(rasters_low_res_channels[road_type + route_channel], np.int32([low_res_road[:, :2]]), (255, 255, 255))
         else:
             for j in range(simplified_xyz.shape[0] - 1):
-                cv2.line(rasters_high_res_channels[road_type + 2], tuple(high_res_road[j, :2]),
+                cv2.line(rasters_high_res_channels[road_type + route_channel], tuple(high_res_road[j, :2]),
                         tuple(high_res_road[j + 1, :2]), (255, 255, 255), 2)
-                cv2.line(rasters_low_res_channels[road_type + 2], tuple(low_res_road[j, :2]),
+                cv2.line(rasters_low_res_channels[road_type + route_channel], tuple(low_res_road[j, :2]),
                         tuple(low_res_road[j + 1, :2]), (255, 255, 255), 2)
     # traffic channels drawing
     for idx, traffic_id in enumerate(traffic_light_ids):
@@ -294,10 +340,10 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         low_res_traffic = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
         # traffic state order is GREEN, RED, YELLOW, UNKNOWN
         for j in range(simplified_xyz.shape[0] - 1):
-            cv2.line(rasters_high_res_channels[2 + road_types + traffic_state],
+            cv2.line(rasters_high_res_channels[route_channel + road_types + traffic_state],
                      tuple(high_res_traffic[j, :2]),
                      tuple(high_res_traffic[j + 1, :2]), (255, 255, 255), 2)
-            cv2.line(rasters_low_res_channels[2 + road_types + traffic_state],
+            cv2.line(rasters_low_res_channels[route_channel + road_types + traffic_state],
                      tuple(low_res_traffic[j, :2]),
                      tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
     # agent raster
@@ -340,11 +386,11 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             # channel number of [index:0-frame_0, index:1-frame_10, index:2-frame_20, index:3-frame_30, index:4-frame_40]  for agent_type = 0
             # channel number of [index:5-frame_0, index:6-frame_10, index:7-frame_20, index:8-frame_30, index:9-frame_40]  for agent_type = 1
             # ...
-            cv2.drawContours(rasters_high_res_channels[2 + road_types + traffic_types + agent_type * len(sample_frames_in_past) + i],
+            cv2.drawContours(rasters_high_res_channels[route_channel + road_types + traffic_types + agent_type * len(sample_frames_in_past) + i],
                              [rect_pts_high_res], -1, (255, 255, 255), -1)
             # draw on low resolution
             rect_pts_low_res = (low_res_scale * rect_pts).astype(np.int64) + raster_shape[0]//2
-            cv2.drawContours(rasters_low_res_channels[2 + road_types + traffic_types + agent_type * len(sample_frames_in_past) + i],
+            cv2.drawContours(rasters_low_res_channels[route_channel + road_types + traffic_types + agent_type * len(sample_frames_in_past) + i],
                              [rect_pts_low_res], -1, (255, 255, 255), -1)
 
     # context action computation
@@ -357,6 +403,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     rotated_poses[:, 1] *= y_inverse
     for i in sample_frames_in_past:
         action = rotated_poses[i//frequency_change_rate]  # hard-coded frequency change
+        action[-1] = normalize_angle(action[-1])
         context_actions.append(action)
 
     # future trajectory
@@ -400,17 +447,26 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["split"] = sample['split']
     result_to_return["frame_id"] = sample['frame_id']
     result_to_return["scenario_type"] = 'Unknown'
-    try:
-        result_to_return["scenario_type"] = sample["scenario_type"]
-    except:
-        # to be compatible with older version dataset without scenario_type
-        pass
-    try:
-        result_to_return["scenario_id"] = sample["scenario_id"]
-    except:
-        pass
-    result_to_return["route_ids"] = sample['route_ids']
+    if 'scenario_type' in sample:
+        result_to_return["scenario_type"] = sample['scenario_type']
+    if 'scenario_id' in sample:
+        result_to_return["scenario_id"] = sample['scenario_id']
+    if 't0_frame_id' in sample:
+        result_to_return["t0_frame_id"] = sample['t0_frame_id']
+    # try:
+    #     result_to_return["scenario_type"] = sample["scenario_type"]
+    # except:
+    #     # to be compatible with older version dataset without scenario_type
+    #     pass
+    # try:
+    #     result_to_return["scenario_id"] = sample["scenario_id"]
+    # except:
+    #     pass
+    if centerline is not None:
+        result_to_return["centerline"] = centerline
 
+    result_to_return["route_ids"] = sample['route_ids']
+    result_to_return["aug_current"] = aug_current
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)
 
     del agent_dic
@@ -418,7 +474,6 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     return result_to_return
 
-# @formatter:on
 
 def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
                              frame_rate=20, past_seconds=2, future_seconds=8,
@@ -452,7 +507,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
         with open(os.path.join(data_path, "map", f"{map}.pkl"), "rb") as f:
             road_dic = pickle.load(f)
     else:
-        print(f"Error: cannot load map {map} from {data_path}")
+        print(f"Error Raster Preprocess: cannot load map {map} from {data_path}")
         return None
 
     # load agent and traffic dictionaries
@@ -461,7 +516,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
             data_dic = pickle.load(f)
             agent_dic = data_dic["agent_dic"]
     else:
-        print(f"Error: cannot load {filename} from {data_path}")
+        print(f"Error Raster Preprocess: cannot load {filename} from {data_path}")
         return None
 
     # calculate frames to sample

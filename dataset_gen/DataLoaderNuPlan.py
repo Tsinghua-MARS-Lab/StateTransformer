@@ -86,7 +86,7 @@ def get_default_scenario_from_token(log_db: NuPlanDB, token: str, token_timestam
 class NuPlanDL:
     def __init__(self, file_to_start=None, scenario_to_start=None, max_file_number=None,
                  gt_relation_path=None, cpus=10, db=None, data_path=None, road_dic_path=None, running_mode=None,
-                 filter_scenario=None):
+                 filter_scenario=None, keep_future_steps=False):
 
         NUPLAN_MAP_VERSION = 'nuplan-maps-v1.0'
         if data_path is None:
@@ -148,7 +148,6 @@ class NuPlanDL:
             print("Init with index out of max file number ", self.current_file_index, self.total_file_num)
         else:
             self.current_file_total_scenario = len(db.log_dbs[self.current_file_index].scenario_tag)
-            print(f"{self.current_file_total_scenario} scenarios are initialized!")
             self.end = False
 
         self.max_file_number = max_file_number
@@ -157,16 +156,12 @@ class NuPlanDL:
             self.current_scenario_index = scenario_to_start - 1
         else:
             self.current_scenario_index = SCENE_TO_START - 1
-
-        print("Data Loader Initialized NuPlan: ", self.file_names[0],
-              self.start_file_number, FILE_TO_START, self.current_file_index, file_to_start,
-              self.current_scenario_index, self.current_file_total_scenario, self.max_file_number, self.total_file_num)
+        self.cache_previous_token_time_step = None
+        self.keep_future_steps = keep_future_steps
 
     def load_new_file(self, first_file=False):
         if self.max_file_number is not None and self.current_file_index >= (
                 self.start_file_number + self.max_file_number):
-            print("Reached max number:", self.current_file_index, self.max_file_number, self.start_file_number,
-                  self.total_file_num)
             self.end = True
             return
         if self.current_file_index < self.total_file_num:
@@ -186,6 +181,14 @@ class NuPlanDL:
                  seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
                  map_name=None,
                  scenarios_to_keep=None,):
+        """
+        :param sample_interval:
+        :param agent_only:
+        :param seconds_in_future:
+        :param map_name:
+        :param scenarios_to_keep: past scenario tokens for val14 to generate val14 indices
+        :return:
+        """
         new_files_loaded = False
 
         self.current_scenario_index += sample_interval
@@ -206,6 +209,8 @@ class NuPlanDL:
             try:
                 lidar_token = self.current_dataset.log_dbs[self.current_file_index].scenario_tag[
                     self.current_scenario_index].lidar_pc_token
+                lidar_pc = self.current_dataset.log_dbs[self.current_file_index].scenario_tag[
+                    self.current_scenario_index].lidar_pc
                 break
             except:
                 print(
@@ -225,25 +230,74 @@ class NuPlanDL:
             return None, True
 
         sensor_data_source = SensorDataSource('lidar_pc', 'lidar', 'lidar_token', '')
-        lidar_token_timestamp = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(log_db.load_path,
-                                                                                                sensor_data_source,
-                                                                                                lidar_token)
+        # lidar_token_timestamp = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(log_db.load_path,
+        #                                                                                         sensor_data_source,
+        #                                                                                         lidar_token)
+        lidar_token_timestamp = lidar_pc.timestamp
 
-        scenario = get_default_scenario_from_token(log_db, lidar_token, lidar_token_timestamp)
-        # filter scenarios by type
         scenario_type = self.current_dataset.log_dbs[self.current_file_index].scenario_tag[self.current_scenario_index].type
         if self.filter_scenario is not None and scenario_type not in self.filter_scenario:
-            return None, False
+            return None, True
         if map_name is not None and log_db.map_name != map_name:
-            return None, False
-
+            return None, True
+        scenario = get_default_scenario_from_token(log_db, lidar_token, lidar_token_timestamp)
+        # filter scenarios by token id
         scenario_id = scenario.token
-        # filter scenarios by token id           
-        if scenarios_to_keep is not None and scenario_id not in scenarios_to_keep:
-            return None, False
-
         self.timestamp = lidar_token_timestamp
-        self.total_frames = scenario.get_number_of_iterations()
+        # total_frames are 150
+        total_frames = scenario.get_number_of_iterations()
+        current_frame_idx = round(20 * (lidar_token_timestamp - log_db.lidar_pc[0].timestamp) / 1e6)
+        if scenarios_to_keep is not None and scenario_id not in scenarios_to_keep:
+            return None, True
+        if scenarios_to_keep and self.keep_future_steps:
+            # return a list of dictionary instead of one
+            dic_list_to_returen = []
+            if total_frames < 150:
+                print('test total iterations: ', total_frames)
+            lidar_pc_in_loop = lidar_pc
+            for i in range(0, total_frames, 10):
+                # i is in 10hz from iterations
+                current_frame_idx_in_loop = round(20 * (lidar_pc_in_loop.timestamp - log_db.lidar_pc[0].timestamp) / 1e6)
+                if current_frame_idx_in_loop >= self.current_file_total_scenario:
+                    # will skip if the future is not enough for 15s
+                    self.current_file_index += 1
+                    self.load_new_file()
+                    new_files_loaded = True
+                if self.end:
+                    return None, new_files_loaded
+                # lidar_token_in_loop = self.current_dataset.log_dbs[self.current_file_index].scenario_tag[self.current_scenario_index + i * 2].lidar_pc_token
+                # time_stamp_in_loop_from = nuplan_scenario_queries.get_sensor_data_token_timestamp_from_db(log_db.load_path,
+                #                                                                                            sensor_data_source,
+                #                                                                                            lidar_token_in_loop)
+                scenario_in_loop = get_default_scenario_from_token(log_db, lidar_pc_in_loop.token, lidar_pc_in_loop.timestamp)
+                data_to_return = self.get_datadic(scenario=scenario_in_loop,
+                                                  scenario_id=scenario_id,
+                                                  agent_only=agent_only,
+                                                  seconds_in_future=seconds_in_future)
+                if data_to_return is None:
+                    continue
+                data_to_return['scenario_type'] = scenario_type
+                # goal_state = scenario.get_mission_goal()
+                goal_state = scenario_in_loop.get_expert_goal_state()
+                if goal_state is None:
+                    data_to_return['ego_goal'] = None
+                else:
+                    data_to_return['ego_goal'] = [goal_state.point.x, goal_state.point.y, 0, goal_state.heading]
+
+                data_to_return['dataset'] = 'NuPlan'
+                data_to_return['lidar_pc_tokens'] = lidar_pc_in_loop.lidar_token
+                data_to_return['frame_id'] = current_frame_idx_in_loop
+                data_to_return['timestamp'] = lidar_pc_in_loop.timestamp
+                data_to_return['file_name'] = log_db.log_name
+                data_to_return['map'] = log_db.map_name
+                data_to_return['scenario_id'] = scenario_in_loop.token
+                data_to_return['t0_frame_id'] = current_frame_idx  # this should never be None
+                dic_list_to_returen.append(data_to_return)
+                for _ in range(20):
+                    # step 1s
+                    lidar_pc_in_loop = lidar_pc_in_loop.next
+            return dic_list_to_returen, new_files_loaded
+
         data_to_return = self.get_datadic(scenario=scenario,
                                           scenario_id=scenario_id, 
                                           agent_only=agent_only,
@@ -262,11 +316,12 @@ class NuPlanDL:
 
         data_to_return['dataset'] = 'NuPlan'
         data_to_return['lidar_pc_tokens'] = log_db.lidar_pc
-        data_to_return['frame_id'] = round(20 * (self.timestamp - log_db.lidar_pc[0].timestamp)/1e6)
+        data_to_return['frame_id'] = current_frame_idx
         data_to_return['timestamp'] = lidar_token_timestamp
         data_to_return['file_name'] = log_db.log_name
         data_to_return['map'] = log_db.map_name
         data_to_return['scenario_id'] = scenario_id
+        data_to_return['t0_frame_id'] = -1
         return data_to_return, new_files_loaded
 
     def get_next_file(self, specify_file_index=None, map_name=None, agent_only=False, sample_interval=2):
@@ -1047,7 +1102,11 @@ class NuPlanDL:
 
         if not routes_per_file or self.current_dataset is None:
             # no db mode, fetch current scenario route ids
-            route_road_ids = scenario.get_route_roadblock_ids()
+            try:
+                route_road_ids = scenario.get_route_roadblock_ids()
+            except:
+                print("Invalid scenario, cannot get route!, skipping")
+                return None
             route_road_ids = list(set(route_road_ids))
             route_ids_processed = []
             for each_id in route_road_ids:

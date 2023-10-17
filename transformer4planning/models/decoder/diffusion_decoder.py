@@ -41,7 +41,7 @@ class BaseDiffusionModel(nn.Module):
         elif feat_dim == 1024:
             connect_dim = 1600
         else:
-            connect_dim = feat_dim * 1.5
+            connect_dim = int(feat_dim * 1.5)
             
         self.state_encoder = nn.Sequential(
             DecoderResCat(hidden_size, in_features, connect_dim),
@@ -97,13 +97,14 @@ class KeypointDiffusionModel(BaseDiffusionModel):
                 out_features=4,
                 layer_num=7,
                 feat_dim=1024,
-                input_feature_seq_lenth=16,
+                input_feature_seq_lenth=40,
                 key_point_num=5,
-                specified_key_points=True, 
-                forward_specified_key_points=False):
+                use_key_points='no',):
+                # specified_key_points=True, 
+                # forward_specified_key_points=False):
         super().__init__(hidden_size, in_features, out_features, layer_num, feat_dim)
-        if specified_key_points:
-            if forward_specified_key_points:
+        if 'specified' in use_key_points:
+            if 'forward' in use_key_points:
                 key_points_position_embedding = torch.flip(exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0), [-2])
             else:
                 key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
@@ -363,31 +364,27 @@ class KeyPointDiffusionDecoder(nn.Module):
         self.model_args = model_args
         self.out_features = 4 if model_args.predict_yaw else 2
         self.k = model_args.k
-        self.ar_future_interval = model_args.ar_future_interval
-        diffusion_model = KeypointDiffusionModel(config.n_inner, 
-                                                config.n_embd, 
-                                                out_features=self.out_features * self.model_args.k,
-                                                key_point_num=self.model_args.key_points_num,
-                                                input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
-                                                specified_key_points=self.model_args.specified_key_points,
-                                                forward_specified_key_points=self.model_args.forward_specified_key_points
-                                                )
+        self.use_key_points = model_args.use_key_points
+        diffusion_model = KeypointDiffusionModel(config.n_inner,
+                                                 config.n_embd,
+                                                 out_features=self.out_features * self.model_args.k,
+                                                 key_point_num=self.model_args.key_points_num,
+                                                 feat_dim=self.model_args.key_points_diffusion_decoder_feat_dim,
+                                                 input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
+                                                 use_key_points=model_args.use_key_points,)
 
-        self.model = DiffusionWrapper(diffusion_model, 
-                                    num_key_points=self.model_args.key_points_num)
+        self.model = DiffusionWrapper(diffusion_model, num_key_points=self.model_args.key_points_num)
         if 'mse' in self.model_args.loss_fn:
             self.loss_fct = nn.MSELoss(reduction="mean")
         elif 'l1' in self.model_args.loss_fn:
             self.loss_fct = nn.SmoothL1Loss()
-        
-    
+        else:
+            raise NotImplementedError
+
     def compute_keypoint_loss(self, 
                         hidden_output,
                         info_dict:Dict=None,
                         device=None):
-        """
-        
-        """
         if device is None:
             device = hidden_output.device
         context_length = info_dict.get("context_length", None)
@@ -405,12 +402,12 @@ class KeyPointDiffusionDecoder(nn.Module):
         if self.training:
             future_key_points = future_key_points if self.model_args.predict_yaw else future_key_points[..., :2]
             key_points_logits = future_key_points
-            kp_loss = self.model(future_key_points_hidden_state, future_key_points)  # b, s, 4/2
+            kp_loss = self.model(future_key_points_hidden_state[:, -1, :], future_key_points)  # b, s, 4/2
 
             return kp_loss, key_points_logits
         else:
             if self.k == 1:
-                key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
+                key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)
                 kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
                         self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
             else:
@@ -432,8 +429,8 @@ class KeyPointDiffusionDecoder(nn.Module):
                     scores: batch_size * self.k. assert torch.sum(scores, dim=1) == 1, ''
                     
         '''
-        assert self.ar_future_interval > 0, ''
-        assert not self.training, ''
+        assert self.use_key_points != 'no'
+        assert not self.training
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
         context_length = info_dict.get("context_length", None)
@@ -443,9 +440,9 @@ class KeyPointDiffusionDecoder(nn.Module):
                     else scenario_type_len + input_length
         future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         if self.k == 1:
-            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
+            key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)
         else:
-            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
+            key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = False, mc_num = self.model_args.mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
                     reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)]
