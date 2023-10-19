@@ -11,12 +11,12 @@ python -m torch.distributed.run --nproc_per_node=8 --master_port=1234 runner.py 
         --weight_decay 0.01 --logging_steps 100 --save_strategy steps \
         --save_steps 1000 --dataloader_num_workers 10 \
         --save_total_limit 50 --use_key_points no \
-        --dataloader_drop_last True --do_train --encoder_type vector \
+        --dataloader_drop_last True --encoder_type vector \
         --d_model 256 --dataset_scale 1 \
         --task waymo --with_traffic_light True --k 1 \
         --remove_unused_columns False --future_sample_interval 1 \
         --past_sample_interval 1 \
-        --overwrite_output_dir --loss_fn mse --do_eval --evaluation_strategy steps --eval_steps 1000 --per_device_eval_batch_size 16
+        --overwrite_output_dir --loss_fn mse --do_eval --evaluation_strategy steps --eval_steps 1000 --per_device_eval_batch_size 16 --model_pretrain_name_or_path /localdata_ssd/liderun/tmp/t4p_waymo_cyclist/training_results/checkpoint-70000
 
 # export CUDA_VISIBLE_DEVICES=0; \
 # python -m torch.distributed.run --nproc_per_node=1 --master_port=29510 runner_waymo.py \

@@ -4,7 +4,6 @@ import numpy as np
 from typing import Tuple, Optional, Dict
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
-from transformer4planning.libs.mlp import DecoderResCat
 from transformer4planning.utils import nuplan_utils, mtr_utils
 from transformer4planning.models.decoder.base import TrajectoryDecoder
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
@@ -118,18 +117,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         position_ids = attention_mask.long().cumsum(-1) - 1
         position_ids.masked_fill_(attention_mask == 0, 1)
         return position_ids
-
-    def from_joint_to_marginal(self, hidden_state, info_dict):
-        agents_num_per_scenario = info_dict["agents_num_per_scenario"]
-        scenario_num, _, _ = hidden_state.shape
-        assert len(agents_num_per_scenario) == scenario_num
-        hidden_state_marginal = []
-        for i in range(scenario_num):
-            agents_num = agents_num_per_scenario[i]
-            for j in range(agents_num):
-                hidden_state_marginal.append(hidden_state[i, j::agents_num, :])
-        hidden_state_marginal = torch.stack(hidden_state_marginal)
-        return hidden_state_marginal
 
     def forward(
             self,

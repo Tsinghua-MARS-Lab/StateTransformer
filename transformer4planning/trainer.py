@@ -278,7 +278,7 @@ def compute_metrics_waymo(prediction: EvalPrediction):
     _, _, final_avg_results = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
     result = {}
     for key in final_avg_results.keys():
-        result[key] = final_avg_results[key]* 3 + 2
+        result[key] = final_avg_results[key] * 3 + 2
     return result
 
 
@@ -413,11 +413,6 @@ class PlanningTrainer(Trainer):
                     # if self.args.past_index >= 0:
                     #     self._past = outputs[self.args.past_index - 1]
 
-        if self.model.ar_future_interval > 0:
-            prediction_generation = self.model.generate(**inputs)
-        else:
-            prediction_generation = self.model.generate_waymo(**inputs)
-
         logits = nested_detach(logits)
         if len(logits) >= 1:
             logits = logits[0]
@@ -425,6 +420,8 @@ class PlanningTrainer(Trainer):
 
         if self.model.use_key_points != 'no':
             prediction_generation = self.model.generate(**inputs)
+        elif self.model.model_args.task == "waymo":
+            prediction_generation = self.model.generate_waymo(**inputs)
         else:
             # not using key points, eval with forward prediction results
             prediction_generation = logits
@@ -436,7 +433,12 @@ class PlanningTrainer(Trainer):
             if short > 0 :
                 for i in range(short):
                     logits = torch.cat([logits, logits[0].unsqueeze(0)], dim=0)
-                    prediction_generation = torch.cat([prediction_generation, prediction_generation[0].unsqueeze(0)], dim=0)
+                    if self.model.model_args.task == "nuplan": prediction_generation = torch.cat([prediction_generation, prediction_generation[0].unsqueeze(0)], dim=0)
+                    else:
+                        prediction_gen = {}
+                        for key in prediction_generation.keys():
+                            prediction_gen[key] = torch.cat([prediction_generation[key], prediction_generation[key][0].unsqueeze(0)], dim=0)
+                        prediction_generation = prediction_gen
                     labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
             else:
                 logits = logits[:self.args.per_device_eval_batch_size]
@@ -450,13 +452,22 @@ class PlanningTrainer(Trainer):
         logits = {
             "prediction_forward": logits,
             "prediction_generation": prediction_generation,
+        }
+
+        if self.model.model_args.task == "nuplan":
+            if 't0_frame_id' not in inputs or inputs['t0_frame_id'][0] == -1:
+                # val14 without 15s in the future
+                t0_frame_id = inputs["frame_id"]
+            else:
+                t0_frame_id = inputs['t0_frame_id']
+            scenario_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
+            logits.update({
             "frame_id": inputs["frame_id"],
             "scenario_ids": torch.tensor(scenario_ids, device=logits.device),
             "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
             "loss_items": loss_items if loss_items is not None else 0,
-        }
-        # if prediction_loss_only:
-        #     return (loss, None, None)
+            })
+
         return (loss, logits, labels)
 
     def save_raster(self, path_to_save,
@@ -580,94 +591,3 @@ class PlanningTrainer(Trainer):
         print('length of action and labels: ',
               inputs['context_actions'][sample_index].shape, inputs['trajectory_label'][sample_index].shape)
         print('debug images saved to: ', path_to_save, file_index)
-
-    def evaluate_waymo(
-        self,
-        eval_dataset: Optional[Dataset] = None,
-        ignore_keys: Optional[List[str]] = None,
-        metric_key_prefix: str = "eval",
-    ) -> Dict[str, float]:
-        self.model.eval()
-
-        dataloader = self.get_eval_dataloader(eval_dataset)
-        dataset = dataloader.dataset
-
-        if self.is_world_process_zero:
-            progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval', dynamic_ncols=True)
-
-        model_path = self.model.model_args.model_pretrain_name_or_path
-        model_name = model_path.split('/')[-3]+'___' + model_path.split('/')[-1]
-
-        eval_output_dir = model_path + '/eval_output/'
-        os.makedirs(eval_output_dir, exist_ok=True)
-        
-        cur_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-        log_file = eval_output_dir + ('%s_log_eval_%s.txt' % (model_name, cur_time))
-        logger = mtr_utils.create_logger(log_file, rank=0)
-
-        start_time = time.time()
-        logger_iter_interval = 1000
-
-        pred_dicts = []
-        
-        anchor_hard_match_num = 0
-        anchor_soft_match_num =0
-        tot_num = 0
-        for i, batch_dict in enumerate(dataloader):
-            with torch.no_grad():
-                batch_dict = self._prepare_inputs(batch_dict)
-                batch_pred_dicts = self.model.generate(**batch_dict)
-                # batch_pred_dicts = self.model(**batch_dict)
-                
-                anchor_hard_match_num += batch_pred_dicts['anchor_hard_match_num'].cpu().numpy()
-                anchor_soft_match_num += batch_pred_dicts['anchor_soft_match_num'].cpu().numpy()
-                tot_num += batch_pred_dicts['tot_num']
-                
-                if 'logits' not in batch_pred_dicts:
-                    continue
-
-                if 'vector' in self.model.model_args.model_name:
-                    final_pred_dicts = dataset.generate_prediction_dicts(batch_dict, batch_pred_dicts)
-                else:
-                    final_pred_dicts = dataset.generate_prediction_dicts({'input_dict': batch_dict}, batch_pred_dicts)
-
-                pred_dicts += final_pred_dicts
-
-            disp_dict = {}
-
-            if self.is_world_process_zero and (i % logger_iter_interval == 0 or i == 0 or i + 1== len(dataloader)):
-                past_time = progress_bar.format_dict['elapsed']
-                second_each_iter = past_time / max(i, 1.0)
-                remaining_time = second_each_iter * (len(dataloader) - i)
-                disp_str = ', '.join([f'{key}={val:.3f}' for key, val in disp_dict.items() if key != 'lr'])
-                batch_size = batch_dict.get('batch_size', None)
-                logger.info(f'eval: batch_iter={i}/{len(dataloader)}, batch_size={batch_size}, iter_cost={second_each_iter:.2f}s, '
-                            f'time_cost: {progress_bar.format_interval(past_time)}/{progress_bar.format_interval(remaining_time)}, '
-                            f'{disp_str}')
-            
-            if i > 100:    
-                break
-        
-        print('*'*20, ' anchor hard match ', anchor_hard_match_num, " anchor soft match ", anchor_soft_match_num, ' tot num ', tot_num, '*'*20)
-
-        if self.is_world_process_zero:
-            progress_bar.close()
-
-        logger.info('*************** Performance of EPOCH *****************' )
-        sec_per_example = (time.time() - start_time) / len(dataloader.dataset)
-        logger.info('Generate label finished(sec_per_example: %.4f second).' % sec_per_example)
-
-        ret_dict = {}
-
-        with open(eval_output_dir + "result_" + model_name + '_' + cur_time + '.pkl', 'wb') as f:
-            pickle.dump(pred_dicts, f)
-
-        result_str, result_dict = dataset.evaluation(
-            pred_dicts,
-        )
-
-        logger.info(result_str)
-        ret_dict.update(result_dict)
-
-        logger.info('Result is save to %s' % eval_output_dir)
-        logger.info('****************Evaluation done.*****************')        

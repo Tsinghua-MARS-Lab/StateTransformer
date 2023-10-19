@@ -159,7 +159,6 @@ class MTREncoder(nn.Module):
         obj_trajs_last_pos = input_dict['obj_trajs_last_pos'].cuda() 
         obj_trajs_pos = input_dict['obj_trajs_pos'].cuda() 
         map_polylines_center = input_dict['map_polylines_center'].cuda() 
-        track_index_to_predict = input_dict['track_index_to_predict']
 
         assert obj_trajs_mask.dtype == torch.bool and map_polylines_mask.dtype == torch.bool
 
@@ -171,10 +170,7 @@ class MTREncoder(nn.Module):
         obj_polylines_feature = self.agent_polyline_encoder(obj_trajs_in, obj_trajs_mask)  # (num_center_objects, num_objects, num_timestamp, C)        
         map_polylines_feature = self.map_polyline_encoder(map_polylines, map_polylines_mask)  # (num_center_objects, num_polylines, C)
 
-        # return batch_dict
-
         # apply self-attn
-        # obj_valid_mask = (obj_trajs_mask.sum(dim=-1) > 0)  # (num_center_objects, num_objects)
         obj_valid_mask = obj_trajs_mask
         map_valid_mask = (map_polylines_mask.sum(dim=-1) > 0)  # (num_center_objects, num_polylines)
         n_out_embed = obj_polylines_feature.shape[-1]
@@ -197,17 +193,11 @@ class MTREncoder(nn.Module):
         map_polylines_feature = global_token_feature[:, num_objects*num_timestamps:][:, :, None, :].repeat(1, 1, num_timestamps, 1)
         assert map_polylines_feature.shape[1] == num_polylines
 
-        # organize return features
-        center_objects_feature = obj_polylines_feature[torch.arange(num_center_objects), track_index_to_predict]
-
-        batch_dict['center_objects_feature'] = center_objects_feature
         batch_dict['obj_feature'] = obj_polylines_feature
         batch_dict['map_feature'] = map_polylines_feature
         batch_dict['obj_mask'] = obj_valid_mask
         batch_dict['map_mask'] = map_valid_mask
         batch_dict['obj_pos'] = obj_trajs_last_pos
-        batch_dict['map_pos'] = map_polylines_center
-        
 
         return batch_dict
 
@@ -220,7 +210,6 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                  ):
         super().__init__(model_args, tokenizer_kwargs)
         self.model_args = model_args
-        self.ar_future_interval = model_args.ar_future_interval
         mtr_encoder_config = mtr_config.MODEL.CONTEXT_ENCODER
         self.context_encoder = MTREncoder(mtr_encoder_config)
         self.action_m_embed = nn.Sequential(nn.Linear(10, action_kwargs.get("d_embed")), nn.Tanh())
@@ -396,26 +385,10 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         # future trajectory
         pred_length = trajectory_label.shape[1]
 
-        # future traj data
-        if self.model_args.specified_key_points:
-            # 80, 40, 20, 10, 5
-            if self.model_args.forward_specified_key_points:
-                selected_indices = [4, 9, 19, 39, 79]
-            else:
-                selected_indices = [79, 39, 19, 9, 4]
-            future_key_points = trajectory_label[:, selected_indices, :]
-            future_key_points_gt_mask = trajectory_label_mask[:, selected_indices, :]
-        else:
-            selected_indices = [i for i in range(self.ar_future_interval - 1, pred_length, self.ar_future_interval)]
-            future_key_points = trajectory_label[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-            future_key_points_gt_mask = trajectory_label_mask[:, self.ar_future_interval - 1::self.ar_future_interval, :]
-                
         info_dict = {
             "trajectory_label": trajectory_label,
             "trajectory_label_mask": trajectory_label_mask,
             "context_length": context_length,
-            "future_key_points": future_key_points,
-            "future_key_points_gt_mask": future_key_points_gt_mask,
         }
 
         # dense prediction
@@ -448,36 +421,6 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
 
         # prepare keypoints
         n_embed = action_embeds.shape[-1]
-        # add future traj embedding
-        if self.ar_future_interval == 0:
-            # to keep input and output at the same dimension
-            input_embeds = torch.cat([input_embeds,
+        input_embeds = torch.cat([input_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)    
-        elif self.ar_future_interval > 0:
-            future_key_points_aug = future_key_points.clone()
-            if self.model_args.arf_x_random_walk > 0 and self.training:
-                x_noise = torch.rand(future_key_points.shape, device=device) * self.model_args.arf_x_random_walk * 2 - self.model_args.arf_x_random_walk
-                # add progressive scale, the future points the larger noise
-                if self.model_args.specified_key_points:
-                    indices = torch.tensor(selected_indices, device=device, dtype=float) / 80.0
-                else:
-                    indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
-                expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
-                x_noise = x_noise * expanded_indices
-                future_key_points_aug[:, :, 0] += x_noise[:, :, 0]
-            if self.model_args.arf_y_random_walk > 0 and self.training:
-                y_noise = torch.rand(future_key_points.shape, device=device) * self.model_args.arf_y_random_walk * 2 - self.model_args.arf_y_random_walk
-                expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
-                y_noise = y_noise * expanded_indices
-                future_key_points_aug[:, :, 1] += y_noise[:, :, 1]
-
-            if not self.model_args.predict_yaw:
-                # keep the same information when generating future points
-                future_key_points_aug[:, :, 2:] = 0
-
-            future_key_embeds = self.kps_m_embed(future_key_points_aug)
-
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
-
         return input_embeds, info_dict

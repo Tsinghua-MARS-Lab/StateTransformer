@@ -12,7 +12,6 @@ import copy
 import torch
 from tqdm import tqdm
 import copy
-import json
 import multiprocessing as mp
 import datasets
 import numpy as np
@@ -178,9 +177,9 @@ def main():
     # loop all datasets
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
-    if model_args.task == "nuplan": # nuplan datasets are stored in index format
+    if model_args.task == "nuplan" or model_args.task == "waymo": # nuplan datasets are stored in index format
         index_root = os.path.join(data_args.saved_dataset_folder, 'index')
-    elif model_args.task == "train_diffusion_decoder" or model_args.task == "waymo":
+    elif model_args.task == "train_diffusion_decoder":
         index_root = data_args.saved_dataset_folder
     root_folders = os.listdir(index_root)
 
@@ -238,9 +237,6 @@ def main():
     )
     if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
         model.clf_metrics = clf_metrics
-    elif model_args.next_token_scorer:
-        assert model_args.k > 1 and model_args.use_key_points, "must use key points and k must be greater than 1"
-        model.clf_metrics = clf_metrics
 
     if training_args.do_train:
         import multiprocessing
@@ -284,9 +280,10 @@ def main():
                                  map_api=map_api,
                                  use_centerline=model_args.use_centerline)
     elif model_args.task == "waymo":
-        from transformer4planning.preprocess.waymo_vectorize_mtr import waymo_collate_func
+        from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":
-            collate_fn = partial(waymo_collate_func)
+            collate_fn = partial(waymo_collate_func,
+                                 dic_path=data_args.saved_dataset_folder)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
         from transformer4planning.trainer import compute_metrics_waymo

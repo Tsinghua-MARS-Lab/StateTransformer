@@ -51,18 +51,11 @@ class ModelArguments:
         default=1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
     )
-    next_token_scorer: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to use next token scorer for prediction."},
-    )
     x_random_walk: Optional[float] = field(
         default=0.0
     )
     y_random_walk: Optional[float] = field(
         default=0.0
-    )
-    tokenize_label: Optional[bool] = field(
-        default=True
     )
     raster_channels: Optional[int] = field(
         default=34,  # updated channels (added both block and lanes for route), change to 33 for older version
@@ -73,9 +66,6 @@ class ModelArguments:
     )
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
-    )
-    visualize_prediction_to_path: Optional[str] = field(
-        default=None
     )
     ######## about key points ########
     use_key_points: Optional[str] = field(
@@ -122,12 +112,6 @@ class ModelArguments:
     future_sample_interval: Optional[int] = field(
         default=2
     )
-    debug_raster_path: Optional[str] = field(
-        default=None
-    )
-    generate_with_offroad_correction: Optional[bool] = field(
-        default=False
-    )
     # begin of diffusion decoder args
     mc_num: Optional[int] = field(
         default=200, metadata={"help": "The number of sampled KP trajs the diffusionKPdecoder is going to generate. After generating this many KP trajs, they go through the EM algorithm and give a group of final KP trajs of number k. This arg only works when we use diffusionKPdecoder and set k > 1."}
@@ -145,9 +129,6 @@ class ModelArguments:
         default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
     # end of diffusion decoder args
-    interaction: Optional[bool] = field(
-        default=False
-    )
     mtr_config_path: Optional[str] = field(
         default="/home/ldr/workspace/transformer4planning/config/config_gpt2_small.yaml"
     )
