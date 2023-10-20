@@ -35,7 +35,7 @@ class PDMEncoder(TrajectoryEncoder):
                                each with shape of (batchsize, history_dim, 3)
          `planner centerline`: torch.Tensor, (batchsize, centerline_num, 3) and scenario type
         """
-        batch_size, input_length = kwargs.get("ego_position").shape[:2]
+        batch_size, context_length = kwargs.get("ego_position").shape[:2]
         ego_position = kwargs.get("ego_position").float() # shape (bsz, history_dim, 3)
         ego_velocity = kwargs.get("ego_velocity", torch.zeros_like(ego_position)).float() # shape (bsz, history_dim, 3)
         ego_acceleration = kwargs.get("ego_acceleration", torch.zeros_like(ego_velocity)).float() # shape (bsz, history_dim, 3)
@@ -62,7 +62,7 @@ class PDMEncoder(TrajectoryEncoder):
             planner_embed = torch.cat(
                 [state_encodings, centerline_encodings.unsqueeze(1)], dim=1
             )
-            input_length += 1
+            context_length += 1
         else:
             planner_embed = state_encodings
 
@@ -97,7 +97,7 @@ class PDMEncoder(TrajectoryEncoder):
             "selected_indices": selected_indices,
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
-            "input_length": input_length,
+            "context_length": context_length + self.scenario_type_len,
         }
         
         return planner_embed, info_dict

@@ -7,12 +7,15 @@ class TrajectoryEncoder(nn.Module):
     def __init__(self, model_args, tokenizer_kwargs):
         super().__init__()
         self.token_scenario_tag = model_args.token_scenario_tag
+        self.use_proposal = model_args.use_proposal
         self.use_key_points = model_args.use_key_points
         self.model_args = model_args
+        self.scenario_type_len = 0
         if self.token_scenario_tag:
             self.tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_kwargs.get("dirpath", None))
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tokenizer.vocab_size, tokenizer_kwargs.get("d_embed", None))
+            self.scenario_type_len += tokenizer_kwargs.get("max_token_len", 0)
         self.augmentation = DataAugmentation()
         self.selected_indices = []
 

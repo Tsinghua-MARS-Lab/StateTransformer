@@ -1,7 +1,3 @@
-# Motion Transformer (MTR): https://arxiv.org/abs/2209.13508
-# Published at NeurIPS 2022
-
-
 import numpy as np
 import torch
 import torch.nn as nn

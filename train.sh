@@ -10,10 +10,10 @@ python -m torch.distributed.run --nproc_per_node=8 --master_port=1234 runner.py 
         --per_device_train_batch_size 16 --warmup_steps 50 \
         --weight_decay 0.01 --logging_steps 100 --save_strategy steps \
         --save_steps 1000 --dataloader_num_workers 10 \
-        --save_total_limit 50 --use_key_points no \
+        --save_total_limit 50 --use_key_points no --use_proposal True --proposal_length 1 \
         --dataloader_drop_last True --do_train --encoder_type vector \
         --d_model 256 --dataset_scale 1 \
-        --task waymo --with_traffic_light True --k 1 \
+        --task waymo --with_traffic_light True --k 6 \
         --remove_unused_columns False --future_sample_interval 1 \
         --past_sample_interval 1 \
         --overwrite_output_dir --loss_fn mse --do_eval --evaluation_strategy steps --eval_steps 1000 --per_device_eval_batch_size 16

@@ -8,11 +8,10 @@ import pickle
 
 from transformer4planning.libs.mtr.transformer import (transformer_encoder_layer, position_encoding_utils)
 from transformer4planning.libs.mtr import polyline_encoder
-from transformer4planning.utils import mtr_utils
 from transformer4planning.libs.mtr.ops.knn import knn_utils
 from typing import Dict
 from transformer4planning.models.encoder.base import TrajectoryEncoder
-from transformer4planning.utils.mtr_utils import nll_loss_gmm_direct, build_mlps
+from transformer4planning.utils.waymo_utils import nll_loss_gmm_direct, build_mlps, get_batch_offsets
 
 
 class MTREncoder(nn.Module):
@@ -118,7 +117,7 @@ class MTREncoder(nn.Module):
         batch_idxs = batch_idxs_full[x_mask_stack]
 
         # knn
-        batch_offsets = mtr_utils.get_batch_offsets(batch_idxs=batch_idxs, bs=batch_size).int()  # (batch_size + 1)
+        batch_offsets = get_batch_offsets(batch_idxs=batch_idxs, bs=batch_size).int()  # (batch_size + 1)
         batch_cnt = batch_offsets[1:] - batch_offsets[:-1]
 
         index_pair = knn_utils.knn_batch_mlogk(
@@ -214,7 +213,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         self.context_encoder = MTREncoder(mtr_encoder_config)
         self.action_m_embed = nn.Sequential(nn.Linear(10, action_kwargs.get("d_embed")), nn.Tanh())
         self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        self.anchor_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
+        self.proposal_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
 
         self.in_proj_obj = nn.Sequential(
             nn.Linear(self.context_encoder.num_out_channels, mtr_encoder_config.D_MODEL),
@@ -228,11 +227,11 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             nn.Linear(mtr_encoder_config.D_MODEL, mtr_encoder_config.D_MODEL),
         )
 
-        self.load_intention_anchors("/home/ldr/workspace/transformer4planning/data/waymo/cluster_64_center_dict.pkl", 
+        self.load_intention_proposals("/home/ldr/workspace/transformer4planning/data/waymo/cluster_64_center_dict.pkl", 
                                     ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST'])
         self.build_dense_future_prediction_layers(mtr_encoder_config.D_MODEL, 80)
     
-    def load_intention_anchors(self, file_path, agent_types):
+    def load_intention_proposals(self, file_path, agent_types):
         with open(file_path, 'rb') as f:
             intention_points_dict = pickle.load(f)
         
@@ -384,40 +383,41 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         
         # future trajectory
         pred_length = trajectory_label.shape[1]
-
         info_dict = {
             "trajectory_label": trajectory_label,
             "trajectory_label_mask": trajectory_label_mask,
-            "context_length": context_length,
+            "pred_length": pred_length,
+            "context_length": context_length * 2  + self.scenario_type_len,
         }
 
         # dense prediction
-        _, ret_pred_dense_future_trajs = self.apply_dense_future_prediction(obj_feature, obj_mask, batch_dict['obj_pos'])
-        loss_pred_future = self.get_dense_future_prediction_loss(ret_pred_dense_future_trajs, input_dict['obj_trajs_future_state'], input_dict['obj_trajs_future_mask'])
-     
-        info_dict["loss_pred_future"] = loss_pred_future
+        if self.model_args.dense_pred:
+            _, ret_pred_dense_future_trajs = self.apply_dense_future_prediction(obj_feature, obj_mask, batch_dict['obj_pos'])
+            loss_pred_future = self.get_dense_future_prediction_loss(ret_pred_dense_future_trajs, input_dict['obj_trajs_future_state'], input_dict['obj_trajs_future_mask'])
+        
+            info_dict["dense_pred_loss"] = loss_pred_future
 
-        # prepare anchors
-        gt_anchor_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+        # prepare proposals
+        gt_proposal_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
         type_idx_str = {
             1: 'TYPE_VEHICLE',
             2: 'TYPE_PEDESTRIAN',
             3: 'TYPE_CYCLIST',
         }
         center_obj_types = input_dict['center_objects_type']
-        center_obj_anchor_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
-        center_obj_anchor_pts = torch.cat(center_obj_anchor_pts, dim=0) # (bs, 64, 2)
-        dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_anchor_pts, dim=2)
-        anchor_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+        center_obj_proposal_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
+        center_obj_proposal_pts = torch.cat(center_obj_proposal_pts, dim=0) # (bs, 64, 2)
+        dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_proposal_pts, dim=2)
+        proposal_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
 
-        anchor_GT_logits = center_obj_anchor_pts[torch.arange(batch_size), anchor_GT_cls, :] * gt_anchor_mask # (bs, 2)
-        anchor_embedding = self.anchor_m_embed(anchor_GT_logits).unsqueeze(1)
-        input_embeds = torch.cat([input_embeds, anchor_embedding], dim=1)
+        proposal_GT_logits = center_obj_proposal_pts[torch.arange(batch_size), proposal_GT_cls, :] * gt_proposal_mask # (bs, 2)
+        proposal_embedding = self.proposal_m_embed(proposal_GT_logits).unsqueeze(1)
+        input_embeds = torch.cat([input_embeds, proposal_embedding], dim=1)
 
-        info_dict["gt_anchor_cls"] = anchor_GT_cls
-        info_dict["gt_anchor_mask"] = gt_anchor_mask
-        info_dict["gt_anchor_logits"] = anchor_GT_logits
-        info_dict["center_obj_anchor_pts"] = center_obj_anchor_pts
+        info_dict["gt_proposal_cls"] = proposal_GT_cls
+        info_dict["gt_proposal_mask"] = gt_proposal_mask
+        info_dict["gt_proposal_logits"] = proposal_GT_logits
+        info_dict["center_obj_proposal_pts"] = center_obj_proposal_pts
 
         # prepare keypoints
         n_embed = action_embeds.shape[-1]

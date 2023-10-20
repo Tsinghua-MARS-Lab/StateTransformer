@@ -135,7 +135,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             "selected_indices": selected_indices,
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
-            "context_length": context_length,
+            "context_length": context_length * 2  + self.scenario_type_len,
             "aug_current": aug_current,
         }
 

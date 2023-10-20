@@ -19,7 +19,6 @@ from transformers.trainer_callback import TrainerState, TrainerControl, Interval
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
 from transformers import EvalPrediction
-from transformer4planning.utils import mtr_utils
 from typing import List, Optional, Dict, Any, Tuple, Union
 from transformer4planning.utils.nuplan_utils import compute_scores
 from datasets import Dataset
@@ -92,14 +91,14 @@ def compute_metrics(prediction: EvalPrediction):
     # fetch trajectory and key points predictions
     if prediction_by_forward.shape[1] > prediction_horizon:
         # first 5 are key points concatentate with trajectory
-        prediction_key_points_by_generation = prediction_by_generation[:, :-prediction_horizon, :]  # sample_num, 5, 2/4
+        prediction_key_points_by_generation = prediction_by_generation["key_points_logits"]  # sample_num, 5, 2/4
         prediction_key_points_by_forward = prediction_by_forward[:, :-prediction_horizon, :]  # sample_num, 5, 2/4
     else:
         assert prediction_by_forward.shape[1] == prediction_horizon, f'{prediction_key_points_by_generation.shape[1]} {prediction_horizon}'
         # only trajectory
-        prediction_key_points_by_generation = prediction_by_generation[:, selected_indices, :]  # sample_num, 5, 2/4
+        prediction_key_points_by_generation = prediction_by_generation["key_points_logits"] # sample_num, 5, 2/4
         prediction_key_points_by_forward = prediction_by_forward[:, selected_indices, :]  # sample_num, 5, 2/4
-    prediction_trajectory_by_generation = prediction_by_generation[:, -prediction_horizon:, :]  # sample_num, 80, 2/4
+    prediction_trajectory_by_generation = prediction_by_generation["traj_logits"] # sample_num, 80, 2/4
     prediction_trajectory_by_forward = prediction_by_forward[:, -prediction_horizon:, :]  # sample_num, 80, 2/4
 
     # calculate error for generation results
@@ -252,7 +251,7 @@ def compute_metrics(prediction: EvalPrediction):
 
 def compute_metrics_waymo(prediction: EvalPrediction):
     from dataset_gen.waymo.waymo_eval import waymo_evaluation
-    from transformer4planning.utils.mtr_utils import tensor_to_str
+    from transformer4planning.utils.waymo_utils import tensor_to_str
     pred_dicts = prediction.predictions['prediction_generation']
     type_idx_str = {
             1: 'TYPE_VEHICLE',
@@ -418,13 +417,7 @@ class PlanningTrainer(Trainer):
             logits = logits[0]
         logits = torch.as_tensor(logits)
 
-        if self.model.use_key_points != 'no':
-            prediction_generation = self.model.generate(**inputs)
-        elif self.model.model_args.task == "waymo":
-            prediction_generation = self.model.generate_waymo(**inputs)
-        else:
-            # not using key points, eval with forward prediction results
-            prediction_generation = logits
+        prediction_generation = self.model.generate(**inputs)
 
         if logits.shape[0] != self.args.per_device_eval_batch_size:
             # must top to the eval batch size, or will cause error and stuck the whole pipeline
@@ -433,12 +426,10 @@ class PlanningTrainer(Trainer):
             if short > 0 :
                 for i in range(short):
                     logits = torch.cat([logits, logits[0].unsqueeze(0)], dim=0)
-                    if self.model.model_args.task == "nuplan": prediction_generation = torch.cat([prediction_generation, prediction_generation[0].unsqueeze(0)], dim=0)
-                    else:
-                        prediction_gen = {}
-                        for key in prediction_generation.keys():
-                            prediction_gen[key] = torch.cat([prediction_generation[key], prediction_generation[key][0].unsqueeze(0)], dim=0)
-                        prediction_generation = prediction_gen
+                    prediction_gen = {}
+                    for key in prediction_generation.keys():
+                        prediction_gen[key] = torch.cat([prediction_generation[key], prediction_generation[key][0].unsqueeze(0)], dim=0)
+                    prediction_generation = prediction_gen
                     labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
             else:
                 logits = logits[:self.args.per_device_eval_batch_size]
