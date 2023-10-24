@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
-python -m torch.distributed.run --nproc_per_node=8 --master_port=1234 runner.py \
+python -m torch.distributed.run --nproc_per_node=8 --master_port=1235 runner.py \
         --model_name scratch-gpt-small --model_pretrain_name_or_path None \
         --saved_dataset_folder /localdata_ssd/liderun/t4p_waymo_cyclist \
         --output_dir /localdata_ssd/liderun/tmp/t4p_waymo_cyclist/training_results  \
         --logging_dir /localdata_ssd/liderun/tmp/t4p_waymo_cyclist/training_logs \
-        --run_name t4p_waymo_cyclist --num_train_epochs 100 \
+        --run_name t4p_waymo_cyclist --num_train_epochs 300 \
         --per_device_train_batch_size 16 --warmup_steps 50 \
         --weight_decay 0.01 --logging_steps 100 --save_strategy steps \
         --save_steps 1000 --dataloader_num_workers 10 \
-        --save_total_limit 50 --use_key_points no --use_proposal True --proposal_length 1 \
+        --save_total_limit 50 --use_key_points no --use_proposal True --proposal_length 1 --dense_pred True \
         --dataloader_drop_last True --do_train --encoder_type vector \
         --d_model 256 --dataset_scale 1 \
         --task waymo --with_traffic_light True --k 6 \

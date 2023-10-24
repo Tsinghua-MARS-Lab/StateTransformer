@@ -274,7 +274,8 @@ def compute_metrics_waymo(prediction: EvalPrediction):
                 
         pred_dict_list.append(single_pred_dict)
 
-    _, _, final_avg_results = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
+    _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
+    print(result_format_str)
     result = {}
     for key in final_avg_results.keys():
         result[key] = final_avg_results[key] * 3 + 2
@@ -424,7 +425,7 @@ class PlanningTrainer(Trainer):
             incorrect_batch_size = logits.shape[0]
             short = self.args.per_device_eval_batch_size - incorrect_batch_size
             if short > 0 :
-                for i in range(short):
+                for _ in range(short):
                     logits = torch.cat([logits, logits[0].unsqueeze(0)], dim=0)
                     prediction_gen = {}
                     for key in prediction_generation.keys():

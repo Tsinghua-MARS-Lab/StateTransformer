@@ -405,6 +405,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             3: 'TYPE_CYCLIST',
         }
         center_obj_types = input_dict['center_objects_type']
+        
         center_obj_proposal_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
         center_obj_proposal_pts = torch.cat(center_obj_proposal_pts, dim=0) # (bs, 64, 2)
         dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_proposal_pts, dim=2)

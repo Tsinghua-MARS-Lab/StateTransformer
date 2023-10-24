@@ -58,6 +58,5 @@ MODEL:
         activation_function: silu
 
     MOTION_DECODER:
-        
         INTENTION_POINTS_FILE: data/waymo/cluster_64_center_dict.pkl
         OBJECT_TYPE: *object_type

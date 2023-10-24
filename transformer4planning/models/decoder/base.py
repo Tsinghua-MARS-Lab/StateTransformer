@@ -13,10 +13,13 @@ class TrajectoryDecoder(nn.Module):
                                    config.n_embd, 
                                    out_features=out_features)
         
+        if self.model_args.task == "waymo": loss_reduction = "none"
+        else: loss_reduction = "mean"
+
         if 'mse' in self.model_args.loss_fn:
-            self.loss_fct = nn.MSELoss(reduction="mean")
+            self.loss_fct = nn.MSELoss(reduction=loss_reduction)
         elif 'l1' in self.model_args.loss_fn:
-            self.loss_fct = nn.SmoothL1Loss()
+            self.loss_fct = nn.SmoothL1Loss(reduction=loss_reduction)
         else:
             print(self.model_args.loss_fn)
             assert False, "loss fn not supported"
@@ -35,7 +38,7 @@ class TrajectoryDecoder(nn.Module):
             info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
         """
         pred_length = info_dict.get("pred_length", label.shape[1])
-        traj_hidden_state = hidden_output[:, -pred_length -1:-1, :]
+        traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
         if device is None:
             device = traj_hidden_state.device
         # compute trajectory loss conditioned on gt keypoints
@@ -123,10 +126,14 @@ class KeyPointMLPDeocder(nn.Module):
         self.model = DecoderResCat(config.n_inner,
                                    config.n_embd,
                                    out_features=out_features * self.k)
+        
+        if self.model_args.task == "waymo": loss_reduction = "none"
+        else: loss_reduction = "mean"
+
         if 'mse' in self.model_args.loss_fn:
-            self.loss_fct = nn.MSELoss(reduction="mean")
+            self.loss_fct = nn.MSELoss(reduction=loss_reduction)
         elif 'l1' in self.model_args.loss_fn:
-            self.loss_fct = nn.SmoothL1Loss()
+            self.loss_fct = nn.SmoothL1Loss(reduction=loss_reduction)
         else:
             print(self.model_args.loss_fn)
             assert False, "loss fn not supported"

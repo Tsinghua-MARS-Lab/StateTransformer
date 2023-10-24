@@ -206,7 +206,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 position_ids=position_ids
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            proposal_hidden_state = transformer_outputs_hidden_state[:, context_length:context_length+self.model_args.proposal_length, :] # (bs, proposal_length, n_embed)
+            proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+self.model_args.proposal_length, :] # (bs, proposal_length, n_embed)
 
             proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, proposal_length, 64)
             proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
