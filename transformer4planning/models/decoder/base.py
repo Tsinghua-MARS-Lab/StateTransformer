@@ -100,9 +100,9 @@ class ProposalDecoder(nn.Module):
         gt_proposal_logits= info_dict["gt_proposal_logits"]
 
         context_length = info_dict["context_length"]
-        pred_proposal_embed = hidden_output[:, context_length-1:context_length-1+self.model_args.proposal_length, :] # (bs, proposal_length, n_embed)
+        pred_proposal_embed = hidden_output[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
 
-        pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed) # (bs, proposal_length, 64)
+        pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed) # (bs, 1, 64)
         pred_proposal_logits = self.proposal_logits_decoder(pred_proposal_embed)
 
         loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
@@ -155,7 +155,9 @@ class KeyPointMLPDeocder(nn.Module):
 
         future_key_points = info_dict["future_key_points"]
         
-        kp_start_index = context_length + self.model_args.proposal_length - 1
+        kp_start_index = context_length - 1
+        if self.model_args.use_proposal:
+            kp_start_index += 1
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
         

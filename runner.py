@@ -43,7 +43,7 @@ from datasets import Dataset, Value
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-def load_dataset(root, split='train', dataset_scale=1, select=False):
+def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=False):
     datasets = []
     index_root_folders = os.path.join(root, split)
     indices = os.listdir(index_root_folders)
@@ -74,12 +74,20 @@ def load_dataset(root, split='train', dataset_scale=1, select=False):
             dataset = dataset.add_column(name='split', column=[split] * len(dataset))
     except:
         pass
+
     dataset.set_format(type='torch')
     if "centerline" in dataset.column_names:
         dataset = dataset.filter(lambda example: np.sum(np.array(example["centerline"])) != 0, num_proc=mp.cpu_count())
+
+    if agent_type != "all":
+        agent_type_list = agent_type.split()
+        agent_type_list = [int(t) for t in agent_type_list]
+        dataset = dataset.filter(lambda example: example["object_type"] in agent_type_list, num_proc=mp.cpu_count())
+
     if select:
         samples = int(len(dataset) * float(dataset_scale))
         dataset = dataset.select(range(samples))
+
     return dataset
 
 def main():
@@ -185,23 +193,23 @@ def main():
 
     if data_args.use_full_training_set:
         if 'train_alltype' in root_folders:
-            train_dataset = load_dataset(index_root, "train_alltype", data_args.dataset_scale, True)
+            train_dataset = load_dataset(index_root, "train_alltype", data_args.dataset_scale, data_args.agent_type, True)
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train_alltype".format(index_root))
     else:
         if 'train' in root_folders:
-            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, True)
+            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
     
     if training_args.do_eval and 'test' in root_folders:
-        test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, False)
+        test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
         print('Testset not found, using training set as test set')
         test_dataset = train_dataset
     
     if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
-        val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, False)
+        val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False)
     else:
         print('Validation set not found, using training set as val set')
         val_dataset = test_dataset

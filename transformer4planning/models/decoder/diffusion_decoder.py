@@ -391,7 +391,9 @@ class KeyPointDiffusionDecoder(nn.Module):
         
         future_key_points = info_dict["future_key_points"]
         # hidden state to predict future kp is different from mlp decoder
-        kp_end_index = context_length + self.model_args.proposal_length
+        kp_end_index = context_length
+        if self.model_args.use_proposal:
+            kp_end_index += 1
         future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         
         if self.training:
@@ -428,7 +430,9 @@ class KeyPointDiffusionDecoder(nn.Module):
         assert not self.training
         # hidden state to predict future kp is different from mlp decoder
         context_length = info_dict.get("context_length", None)
-        kp_end_index = context_length + self.model_args.proposal_length
+        kp_end_index = context_length
+        if self.model_args.use_proposal:
+            kp_end_index += 1
         future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         if self.k == 1:
             key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)

@@ -21,8 +21,8 @@ from .waymo_types import polyline_type
     
 def decode_tracks_from_proto(tracks):
     track_infos = {
-        'object_id': [],  # {0: unset, 1: vehicle, 2: pedestrian, 3: cyclist, 4: others}
-        'object_type': [],
+        'object_id': [], 
+        'object_type': [],  # {0: unset, 1: vehicle, 2: pedestrian, 3: cyclist, 4: others}
         'trajs': []
     }
     for cur_data in tracks:  # number of objects

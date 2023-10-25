@@ -95,7 +95,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # load pretrained diffusion keypoint decoder
         #TODO: add diffusion decoder trained from scratch
         if self.use_proposal:
-            assert self.model_args.proposal_length > 0
             from transformer4planning.models.decoder.base import ProposalDecoder
             self.proposal_decoder = ProposalDecoder(self.model_args, self.config)
 
@@ -195,9 +194,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         if self.use_proposal:        
             dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
-            input_embeds[:, context_length:context_length+self.model_args.proposal_length, :] = dummy_proposal_embedding
+            input_embeds[:, context_length:context_length+1, :] = dummy_proposal_embedding
 
-            context_embeds = input_embeds[:, :context_length+self.model_args.proposal_length, :]
+            context_embeds = input_embeds[:, :context_length+1, :]
             attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
             position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
             transformer_output = self.transformer(
@@ -206,9 +205,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 position_ids=position_ids
             )
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+self.model_args.proposal_length, :] # (bs, proposal_length, n_embed)
+            proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
 
-            proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, proposal_length, 64)
+            proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64)
             proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
 
             topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k) 
@@ -218,13 +217,14 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         traj_logits_k = []
         key_points_logits_k = []
         for mode in range(self.k):
-            if self.use_proposal: input_embeds[:, context_length:context_length+self.model_args.proposal_length, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
+            if self.use_proposal: input_embeds[:, context_length:context_length+1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
             if self.use_key_points != "no":
                 pred_length = info_dict["pred_length"]
                 selected_indices = info_dict["selected_indices"]
-                kp_start_index = context_length + self.model_args.proposal_length
-
-                        # pass the following infos during generate for one sample (non-batch) generate with KP checking
+                kp_start_index = context_length
+                if self.use_proposal:
+                    kp_start_index += 1
+                # pass the following infos during generate for one sample (non-batch) generate with KP checking
                 map_name = kwargs.get("map", None)
                 route_ids = kwargs.get("route_ids", None)
                 ego_pose = kwargs.get("ego_pose", None)

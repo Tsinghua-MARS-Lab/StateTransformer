@@ -80,9 +80,6 @@ class ModelArguments:
     use_proposal: Optional[bool] = field(
         default=False
     )
-    proposal_length: Optional[int] = field(
-        default=0
-    )
     ######## end of proposal args ########
 
     ######## begin of key points args ########
@@ -214,6 +211,13 @@ class DataTrainingArguments:
     )
     use_full_training_set: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use the full training index from train_alltype"}
+    )
+    agent_type: Optional[str] = field(
+        default="all", metadata={"help": "all: no filter on WOMD"
+                                        "1: vehicle on WOMD"
+                                        "2: pedestrian on WOMD"
+                                        "3: cyclist on WOMD"
+                                        "any combination of numbers will be decoded into list of int (1 2/2 3/1 3)"}
     )
 
 

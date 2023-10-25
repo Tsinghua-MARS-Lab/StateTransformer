@@ -58,11 +58,12 @@ def main(args):
                     
                     dicts_to_save[scenario.scenario_id] = info
 
-                for index in track_index_to_predict:
+                for i, index in enumerate(track_index_to_predict):
                     yield {
                             "file_name": file_name,
                             "scenario_id": scenario.scenario_id,
                             "track_index_to_predict": index,
+                            "object_type": object_type_to_predict[i]
                         }
                     
             if len(dicts_to_save.keys()) > 0:
@@ -103,8 +104,8 @@ if __name__ == '__main__':
     parser.add_argument('--mode', type=str, default="train")  
     parser.add_argument('--agent_type', type=int, nargs="+", default=[3])
     parser.add_argument('--save_dict', default=False, action='store_true')
-    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_testing/data_dict')
-    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_testing')
+    parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_tmp/data_dict')
+    parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_tmp')
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
 
     parser.add_argument('--num_proc', type=int, default=20)
