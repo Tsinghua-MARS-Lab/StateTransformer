@@ -388,15 +388,12 @@ class KeyPointDiffusionDecoder(nn.Module):
         if device is None:
             device = hidden_output.device
         context_length = info_dict.get("context_length", None)
-        assert context_length is not None, "context length can not be None"
-        if context_length is None: # pdm encoder
-           input_length = info_dict.get("input_length", None)
         
         future_key_points = info_dict["future_key_points"]
-        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
-        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
-                    else scenario_type_len + input_length
+        kp_end_index = context_length
+        if self.model_args.use_proposal:
+            kp_end_index += 1
         future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         
         if self.training:
@@ -421,7 +418,7 @@ class KeyPointDiffusionDecoder(nn.Module):
                             info_dict:Dict=None):
         '''
             Input:
-                hidden_output: batch_size * (scenario_type_len + context_length * 2 + pred_length) * n_embd
+                hidden_output: batch_size * (context_length * 2 + pred_length) * n_embd
                 info_dict: Dict
             Output:
                 tuple of key_points_logits and scores
@@ -431,13 +428,11 @@ class KeyPointDiffusionDecoder(nn.Module):
         '''
         assert self.use_key_points != 'no'
         assert not self.training
-        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
         context_length = info_dict.get("context_length", None)
-        if context_length is None: # pdm encoder
-           input_length = info_dict.get("input_length", None)
-        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
-                    else scenario_type_len + input_length
+        kp_end_index = context_length
+        if self.model_args.use_proposal:
+            kp_end_index += 1
         future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
         if self.k == 1:
             key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)
@@ -445,7 +440,7 @@ class KeyPointDiffusionDecoder(nn.Module):
             key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = False, mc_num = self.model_args.mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
-                    reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)]
+                    reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)],
                     cls = [cls for cls in scores.detach().unsqueeze(1)],
                 ),
                 num_mods_out = self.k,

@@ -9,7 +9,7 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 from transformer4planning.models.encoder.nuplan_raster_encoder import *
 from transformer4planning.libs.mlp import DecoderResCat
-from transformer4planning.models.encoder.mtr_encoder import MTREncoder
+from transformer4planning.transformer4planning.models.encoder.waymo_vector_encoder import MTREncoder
 
 
 class GPTAutoRegressiveModelVector(GPT2PreTrainedModel):
