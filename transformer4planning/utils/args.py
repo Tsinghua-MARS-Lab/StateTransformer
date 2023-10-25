@@ -116,7 +116,7 @@ class ModelArguments:
         default=5, metadata={"help": "Number of key points. Only used to initialize diffusion KP decoder."}
     )
     diffusion_condition_sequence_lenth: Optional[int] = field(
-        default=16, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
+        default=16, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: context_length * 2."}
     )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
@@ -126,12 +126,6 @@ class ModelArguments:
     ######## begin of nuplan args ########
     with_traffic_light: Optional[bool] = field(
         default=True
-    )
-    token_scenario_tag: Optional[bool] = field(
-        default=False
-    )
-    max_token_len: Optional[int] = field(
-        default=20
     )
     past_sample_interval: Optional[int] = field(
         default=5

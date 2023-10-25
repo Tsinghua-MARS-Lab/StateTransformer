@@ -33,10 +33,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.k = int(self.model_args.k)
         
         self.use_proposal = self.model_args.use_proposal
-        if self.use_proposal: assert self.model_args.task == "waymo"
+        if self.use_proposal: assert self.model_args.task == "waymo", "NotImplemented"
 
         self.use_key_points = self.model_args.use_key_points
-        if self.use_key_points != "no": assert self.model_args.task == "nuplan"
+        if self.use_key_points != "no": assert self.model_args.task == "nuplan", "NotImplemented"
         self.kp_decoder_type = self.model_args.kp_decoder_type
         
         self.model_parallel = False
@@ -49,10 +49,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         
     def build_encoder(self):
         if self.model_args.task == "nuplan":
-            tokenizer_kwargs = dict(
-                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tokenizer', 'gpt2-tokenizer'),
-                d_embed=self.config.n_embd,
-            )
             if "raster" in self.model_args.encoder_type:
                 from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
@@ -64,7 +60,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 action_kwargs = dict(
                     d_embed=self.config.n_embd
                 )
-                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, tokenizer_kwargs, self.model_args)
+                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, self.model_args)
             elif "vector" in self.model_args.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
@@ -72,7 +68,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     centerline_dim=120,
                     history_dim=20
                 )
-                self.encoder = PDMEncoder(pdm_kwargs, tokenizer_kwargs, self.model_args)
+                self.encoder = PDMEncoder(pdm_kwargs, self.model_args)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
         elif self.model_args.task == "waymo":
@@ -82,12 +78,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             action_kwargs = dict(
                 d_embed=self.config.n_embd
             )
-            tokenizer_kwargs = dict(
-                dirpath=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gpt2-tokenizer'),
-                d_embed=self.config.n_embd,
-                max_token_len=self.model_args.max_token_len,
-            ) if self.model_args.token_scenario_tag else None
-            self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, tokenizer_kwargs, self.model_args)
+            self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, self.model_args)
         else:
             raise NotImplementedError
 

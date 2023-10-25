@@ -278,7 +278,15 @@ def compute_metrics_waymo(prediction: EvalPrediction):
     print(result_format_str)
     result = {}
     for key in final_avg_results.keys():
-        result[key] = final_avg_results[key] * 3 + 2
+        result[key] = final_avg_results[key]
+
+    loss_items = prediction.predictions['loss_items']
+    # check loss items are dictionary
+    if isinstance(loss_items, dict):
+        for each_key in loss_items:
+            # get average loss for each key
+            result[each_key] = np.mean(loss_items[each_key])
+
     return result
 
 
@@ -444,6 +452,7 @@ class PlanningTrainer(Trainer):
         logits_dict = {
             "prediction_forward": logits,
             "prediction_generation": prediction_generation,
+            "loss_items": loss_items if loss_items is not None else 0,
         }
 
         if self.model.model_args.task == "nuplan":
@@ -457,7 +466,6 @@ class PlanningTrainer(Trainer):
             "frame_id": inputs["frame_id"],
             "scenario_ids": torch.tensor(scenario_ids, device=logits.device),
             "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
-            "loss_items": loss_items if loss_items is not None else 0,
             })
 
         return (loss, logits_dict, labels)

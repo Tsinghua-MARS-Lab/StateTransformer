@@ -204,10 +204,9 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
     def __init__(self, 
                  mtr_config,
                  action_kwargs:Dict,
-                 tokenizer_kwargs:Dict = None,
                  model_args = None
                  ):
-        super().__init__(model_args, tokenizer_kwargs)
+        super().__init__(model_args)
         self.model_args = model_args
         mtr_encoder_config = mtr_config.MODEL.CONTEXT_ENCODER
         self.context_encoder = MTREncoder(mtr_encoder_config)
@@ -387,7 +386,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             "trajectory_label": trajectory_label,
             "trajectory_label_mask": trajectory_label_mask,
             "pred_length": pred_length,
-            "context_length": context_length * 2  + self.scenario_type_len,
+            "context_length": context_length * 2,
         }
 
         # dense prediction

@@ -3,20 +3,20 @@
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run --nproc_per_node=8 --master_port=1235 runner.py \
         --model_name scratch-gpt-small --model_pretrain_name_or_path None \
-        --saved_dataset_folder /localdata_ssd/liderun/t4p_waymo_cyclist \
-        --output_dir /localdata_ssd/liderun/tmp/t4p_waymo_cyclist/training_results  \
-        --logging_dir /localdata_ssd/liderun/tmp/t4p_waymo_cyclist/training_logs \
-        --run_name t4p_waymo_cyclist --num_train_epochs 300 \
-        --per_device_train_batch_size 16 --warmup_steps 50 \
+        --saved_dataset_folder /localdata_ssd/liderun/t4p_waymo_full \
+        --output_dir /localdata_ssd/liderun/tmp/t4p_waymo/training_results  \
+        --logging_dir /localdata_ssd/liderun/tmp/t4p_waymo/training_logs \
+        --run_name t4p_waymo --num_train_epochs 300 \
+        --per_device_train_batch_size 8 --warmup_steps 50 \
         --weight_decay 0.01 --logging_steps 100 --save_strategy steps \
-        --save_steps 1000 --dataloader_num_workers 10 \
+        --save_steps 2000 --dataloader_num_workers 10 \
         --save_total_limit 50 --use_key_points no --use_proposal True --dense_pred True \
         --dataloader_drop_last True --do_train --encoder_type vector \
         --d_model 256 --dataset_scale 1 \
         --task waymo --with_traffic_light True --k 6 \
         --remove_unused_columns False --future_sample_interval 1 \
         --past_sample_interval 1 \
-        --overwrite_output_dir --loss_fn mse --do_eval --evaluation_strategy steps --eval_steps 1000 --per_device_eval_batch_size 16
+        --overwrite_output_dir --loss_fn mse --do_eval --evaluation_strategy steps --eval_steps 2000 --per_device_eval_batch_size 16
 
 # export CUDA_VISIBLE_DEVICES=0; \
 # python -m torch.distributed.run --nproc_per_node=1 --master_port=29510 runner_waymo.py \
