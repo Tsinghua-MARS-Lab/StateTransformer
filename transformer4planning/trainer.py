@@ -441,7 +441,7 @@ class PlanningTrainer(Trainer):
                 labels = labels[:self.args.per_device_eval_batch_size]
             # print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
 
-        logits = {
+        logits_dict = {
             "prediction_forward": logits,
             "prediction_generation": prediction_generation,
         }
@@ -453,14 +453,14 @@ class PlanningTrainer(Trainer):
             else:
                 t0_frame_id = inputs['t0_frame_id']
             scenario_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
-            logits.update({
+            logits_dict.update({
             "frame_id": inputs["frame_id"],
             "scenario_ids": torch.tensor(scenario_ids, device=logits.device),
             "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
             "loss_items": loss_items if loss_items is not None else 0,
             })
 
-        return (loss, logits, labels)
+        return (loss, logits_dict, labels)
 
     def save_raster(self, path_to_save,
                     inputs, sample_index,
