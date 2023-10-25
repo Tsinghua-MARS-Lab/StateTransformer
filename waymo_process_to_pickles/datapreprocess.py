@@ -170,7 +170,7 @@ def decode_dynamic_map_states_from_proto(dynamic_map_states):
         
         dynamic_map_infos['lane_id'].append(lane_id)
         dynamic_map_infos['state'].append(state)
-        dynamic_map_infos['stop_point'].append(stop_point.astype(np.float32))
+        dynamic_map_infos['stop_point'].append(stop_point)
 
     return dynamic_map_infos
 
