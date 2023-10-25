@@ -140,7 +140,7 @@ def decode_map_features_from_proto(map_features):
             # using 1.0.0, there exists unknown type data
             # raise ValueError
 
-        polylines.append(cur_polyline)
+        polylines.append(cur_polyline.astype(np.float32))
         cur_info['polyline_index'] = (point_cnt, point_cnt + len(cur_polyline))
         point_cnt += len(cur_polyline)
 
@@ -170,7 +170,7 @@ def decode_dynamic_map_states_from_proto(dynamic_map_states):
         
         dynamic_map_infos['lane_id'].append(lane_id)
         dynamic_map_infos['state'].append(state)
-        dynamic_map_infos['stop_point'].append(stop_point)
+        dynamic_map_infos['stop_point'].append(stop_point.astype(np.float32))
 
     return dynamic_map_infos
 
