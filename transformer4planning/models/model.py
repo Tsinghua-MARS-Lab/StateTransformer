@@ -43,6 +43,21 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.post_init()
         self.build_encoder()
         self.build_decoder()
+        if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            self.save_training_diffusion_dataset_dir = os.path.join(self.model_args.diffusion_dataset_save_dir,'train/')
+            self.save_testing_diffusion_dataset_dir  = os.path.join(self.model_args.diffusion_dataset_save_dir,'val/')
+            self.save_testtest_diffusion_dataset_dir = os.path.join(self.model_args.diffusion_dataset_save_dir,'test/')
+            if not os.path.exists(self.save_training_diffusion_dataset_dir):
+                os.makedirs(self.save_training_diffusion_dataset_dir)
+            if not os.path.exists(self.save_testing_diffusion_dataset_dir):
+                os.makedirs(self.save_testing_diffusion_dataset_dir)
+            if not os.path.exists(self.save_testtest_diffusion_dataset_dir):
+                os.makedirs(self.save_testtest_diffusion_dataset_dir)
+            self.current_idx = 0
+            self.gpu_device_count = torch.cuda.device_count()
+            # Notice that although we check and create two directories (train/ and test/) here, in the forward method we only save features in eval loops.
+            # This is because evaluation is way faster than training (since there are no backward propagation), and after saving features for evaluation, we just change our test set to training set and then run the evaluation loop again.
+            # The related code can be found in runner.py at around line 511.
         
     def build_encoder(self):
         if self.model_args.task == "nuplan":
@@ -101,7 +116,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 if self.model_args.key_points_diffusion_decoder_load_from is not None:
                     print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
                     state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
-                    self.key_points_decoder.load_state_dict(state_dict)
+                    self.key_points_decoder.model.load_state_dict(state_dict)
                     print("Pretrained keypoint decoder has been loaded!")
                 else:
                     print("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
@@ -147,6 +162,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             return_dict=return_dict,
             # **kwargs
         )
+        if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            current_device_idx = int(str(input_embeds.device)[-1])
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
         
@@ -159,8 +176,33 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         loss += traj_loss
         kp_loss = 0
         if self.use_key_points != 'no':
-            kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
-            # kp_loss will be 10x larger than traj_loss when converged
+            if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+                context_length = info_dict.get("context_length", None)
+                assert context_length is not None, "context length can not be None"
+                if context_length is None: # pdm encoder
+                    input_length = info_dict.get("input_length", None)
+                
+                future_key_points = info_dict["future_key_points"]
+                key_points_num = future_key_points.shape[-2]
+                scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+                # hidden state to predict future kp is different from mlp decoder
+                kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
+                            else scenario_type_len + input_length
+                save_id = (self.gpu_device_count * self.current_idx + current_device_idx)*key_points_num
+                for key_point_idx in range(key_points_num):
+                    current_save_id = save_id + key_point_idx
+                    torch.save(transformer_outputs_hidden_state[:,kp_end_index-1+key_point_idx:kp_end_index-1+key_point_idx+1,:].detach().cpu(), os.path.join(self.save_testing_diffusion_dataset_dir, f'future_key_points_hidden_state_{current_save_id}.pth'), )
+                    torch.save(info_dict['future_key_points'][...,key_point_idx:key_point_idx+1,:].detach().cpu(), os.path.join(self.save_testing_diffusion_dataset_dir, f'future_key_points_{current_save_id}.pth'), )
+                self.current_idx += 1
+            if self.model_args.kp_decoder_type == "diffusion":
+                assert not self.training, "please train diffusion decoder separately."
+                # return a dummy loss&kp_logits here. The real data for computing metrics will be computed in the generate function
+                kp_loss = torch.tensor(0.0).to(transformer_outputs_hidden_state.device)
+                kp_logits = info_dict["future_key_points"].to(transformer_outputs_hidden_state.device) if self.model_args.predict_yaw else \
+                            info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
+            else:
+                kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
+                # kp_loss will be 10x larger than traj_loss when converged
             loss += kp_loss
             traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
         loss_items = dict(
@@ -219,7 +261,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.use_key_points != 'no':
             assert selected_indices is not None and len(selected_indices) > 0, f'{selected_indices} selected_indices is None or empty'
-            if self.kp_decoder_type == "mlp":
+            if self.kp_decoder_type == "mlp" or self.kp_decoder_type == "diffusion": # this must be true.
                 trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
                 if 'specified' in self.use_key_points:
                     future_key_points = trajectory_label_dummy[:, selected_indices, :]
@@ -298,23 +340,26 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     else:
                         pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
                 key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
-            elif self.kp_decoder_type == "diffusion":
-                # TODO:confirm the attention mask here
-                transformer_output = self.transformer(
-                        inputs_embeds=input_embeds,
-                        attention_mask=None,
-                        position_ids=None,
-                    )
-                key_points_num = len(selected_indices)
-                transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-                key_points_logits, pred_logits = self.key_points_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
-                pred_key_point = torch.zeros((batch_size, key_points_num, 4), device=device)
-                if self.model_args.predict_yaw:
-                    pred_key_point = key_points_logits
-                else:
-                    pred_key_point[:, :, :2] = key_points_logits
-                key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, key_points_num, -1)
-                input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = key_point_embed[:, :, :]
+            
+            # since we now generate KP 1by1, the logits for kp_decoder_type=='diffusion' is the same as kp_decoder_type=='mlp'.
+            
+            # elif self.kp_decoder_type == "diffusion":
+            #     # TODO:confirm the attention mask here
+            #     transformer_output = self.transformer(
+            #             inputs_embeds=input_embeds,
+            #             attention_mask=None,
+            #             position_ids=None,
+            #         )
+            #     key_points_num = len(selected_indices)
+            #     transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+            #     key_points_logits, pred_logits = self.key_points_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
+            #     pred_key_point = torch.zeros((batch_size, key_points_num, 4), device=device)
+            #     if self.model_args.predict_yaw:
+            #         pred_key_point = key_points_logits
+            #     else:
+            #         pred_key_point[:, :, :2] = key_points_logits
+            #     key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, key_points_num, -1)
+            #     input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = key_point_embed[:, :, :]
         else:
             key_points_logits = None
         # predict the whole trajectory
@@ -509,8 +554,8 @@ def build_models(model_args):
             out_features = 4 if model_args.predict_yaw else 2
             diffusion_model = KeypointDiffusionModel(config_p.n_inner,
                                                      config_p.n_embd,
-                                                     out_features=model_args.k * out_features,
-                                                     key_point_num=model_args.key_points_num,
+                                                     out_features=out_features, # model_args.k * out_features,
+                                                     key_point_num=1, # model_args.key_points_num,
                                                      input_feature_seq_lenth=model_args.diffusion_condition_sequence_lenth,
                                                      use_key_points=model_args.use_key_points,
                                                      feat_dim=model_args.key_points_diffusion_decoder_feat_dim,)
@@ -536,7 +581,7 @@ def build_models(model_args):
         if model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
-                model.key_points_decoder.load_state_dict(state_dict)
+                model.key_points_decoder.model.load_state_dict(state_dict)
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p, model_args=model_args)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))

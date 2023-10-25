@@ -125,10 +125,16 @@ To choose different encoder, please set the attribute `--encoder_type`. The choi
 
 ### Train with differnet decoder(same backbone)
 To choose different decoder, please set the attribute `--decoder_type`. The choices are [`mlp`, `diffusion`]. 
+Note that only mlp decoders can be trained together with the backbone.
 
 ### Train only diffusion decoder, without backbone
-If you want to train diffusion decoder only, please set `--task` to `train_diffusion_decoder`. In this case, the model is initilized without a transformer backbone(Reduce the infence time to build backbone feature). 
-In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', preprocessed previously. 
+
+To train the diffusion decoder, you need first to train using an mlp decoder to obtain a pretrained backbone. After that, you need to generate the dataset for training the diffusion decoder: this is done using the same command for eval except that you need to set `--generate_diffusion_dataset_for_key_points_decoder` to True and `--diffusion_dataset_save_dir` to the dir to save the pth files for training diffusion decoders.
+
+After saving the pth files, you need to run `convert_diffusion_dataset.py` to convert them into arrow dataset which is consistent with the training format we are using here.
+
+Fianlly, please set `--task` to `train_diffusion_decoder`. In this case, the model is initilized without a transformer backbone(Reduce the infence time to build backbone feature). 
+In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', obtained previously by `convert_diffusion_dataset.py`. 
 
 ## To eval only:
 

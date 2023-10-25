@@ -368,12 +368,12 @@ class KeyPointDiffusionDecoder(nn.Module):
         diffusion_model = KeypointDiffusionModel(config.n_inner,
                                                  config.n_embd,
                                                  out_features=self.out_features * self.model_args.k,
-                                                 key_point_num=self.model_args.key_points_num,
+                                                 key_point_num=1,#self.model_args.key_points_num,
                                                  feat_dim=self.model_args.key_points_diffusion_decoder_feat_dim,
                                                  input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
                                                  use_key_points=model_args.use_key_points,)
 
-        self.model = DiffusionWrapper(diffusion_model, num_key_points=self.model_args.key_points_num)
+        self.model = DiffusionWrapper(diffusion_model, num_key_points=1,)# self.model_args.key_points_num)
         if 'mse' in self.model_args.loss_fn:
             self.loss_fct = nn.MSELoss(reduction="mean")
         elif 'l1' in self.model_args.loss_fn:
@@ -385,6 +385,7 @@ class KeyPointDiffusionDecoder(nn.Module):
                         hidden_output,
                         info_dict:Dict=None,
                         device=None):
+        assert False, "only support training diffusionKPdecoder separately"
         if device is None:
             device = hidden_output.device
         context_length = info_dict.get("context_length", None)
@@ -433,19 +434,20 @@ class KeyPointDiffusionDecoder(nn.Module):
         assert not self.training
         scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
-        context_length = info_dict.get("context_length", None)
-        if context_length is None: # pdm encoder
-           input_length = info_dict.get("input_length", None)
-        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
-                    else scenario_type_len + input_length
-        future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
+        # context_length = info_dict.get("context_length", None)
+        # if context_length is None: # pdm encoder
+        #    input_length = info_dict.get("input_length", None)
+        # kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
+        #             else scenario_type_len + input_length
+        # future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
+        future_key_points_hidden_state = hidden_output
         if self.k == 1:
-            key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)
+            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
         else:
-            key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = False, mc_num = self.model_args.mc_num)
+            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
-                    reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)]
+                    reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)],
                     cls = [cls for cls in scores.detach().unsqueeze(1)],
                 ),
                 num_mods_out = self.k,

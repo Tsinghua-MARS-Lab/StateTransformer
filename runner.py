@@ -320,6 +320,36 @@ def main():
     )
     trainer.pop_callback(DefaultFlowCallback)
     
+    if model_args.generate_diffusion_dataset_for_key_points_decoder:
+        # First we generate the testing set for our diffusion decoder.
+        print("We skip generating diff feats for eval set.")
+        result = trainer.evaluate()
+        logger.info(f"during eval set generation: {result}")
+        # try:
+        #     if model_args.autoregressive or True:
+        #         result = trainer.evaluate()
+        # except Exception as e:
+        #     # The code would throw an exception at the end of evaluation loop since we return None in evaluation step
+        #     # But this is not a big deal since we have just saved everything we need in the model's forward method.
+        #     print(e)
+        #     pass
+        
+        # Then we generate the training set for our diffusion decoder.
+        # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
+        trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-4] + 'train/'
+        # print("Now generating the other 40%.")
+        trainer.eval_dataset = train_dataset.select(range(int(len(train_dataset)*0),len(train_dataset)))
+        result = trainer.evaluate()
+        logger.info(f"during training set generation: {result}")
+        
+        
+        trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-6] + 'test/'
+        trainer.eval_dataset = test_dataset
+        result = trainer.evaluate()
+        logger.info(f"during testing set generation: {result}")
+        
+        assert False, 'The generation has been done.'
+    
     # Training
     if training_args.do_train:
         checkpoint = None

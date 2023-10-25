@@ -139,7 +139,7 @@ class ModelArguments:
         default=5, metadata={"help": "Number of key points. Only used to initialize diffusion KP decoder."}
     )
     diffusion_condition_sequence_lenth: Optional[int] = field(
-        default=16, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
+        default=1, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
     )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
@@ -160,6 +160,12 @@ class ModelArguments:
     augment_current_pose_rate: Optional[float] = field(
         # currently this only works for raster preprocess, and aug_x, aug_y are default to 1.0
         default=0.0, metadata={"help": "The rate of augmenting current pose in the preprocess"}
+    )
+    generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
+        default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
+    )
+    diffusion_dataset_save_dir: Optional[str] = field(
+        default = None, metadata = {"help":"where to save diffusion dataset."}
     )
 
 
