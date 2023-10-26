@@ -211,7 +211,7 @@ class DataTrainingArguments:
                                         "1: vehicle on WOMD"
                                         "2: pedestrian on WOMD"
                                         "3: cyclist on WOMD"
-                                        "any combination of numbers will be decoded into list of int (1 2/2 3/1 3)"}
+                                        "any combination of numbers will be decoded into list of int (1 2;2 3;1 3)"}
     )
 
 

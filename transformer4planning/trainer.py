@@ -250,8 +250,7 @@ def compute_metrics(prediction: EvalPrediction):
     return eval_result
 
 def compute_metrics_waymo(prediction: EvalPrediction):
-    from dataset_gen.waymo.waymo_eval import waymo_evaluation
-    from transformer4planning.utils.waymo_utils import tensor_to_str
+    from transformer4planning.utils.waymo_utils import tensor_to_str, waymo_evaluation
     pred_dicts = prediction.predictions['prediction_generation']
     type_idx_str = {
             1: 'TYPE_VEHICLE',
@@ -274,11 +273,10 @@ def compute_metrics_waymo(prediction: EvalPrediction):
                 
         pred_dict_list.append(single_pred_dict)
 
-    _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
-    print(result_format_str)
+    result_dict, result_format_str = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
+    print(result_dict, result_format_str)
+    exit()
     result = {}
-    for key in final_avg_results.keys():
-        result[key] = final_avg_results[key]
 
     loss_items = prediction.predictions['loss_items']
     # check loss items are dictionary
