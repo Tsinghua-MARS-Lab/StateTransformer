@@ -368,7 +368,7 @@ class KeyPointDiffusionDecoder(nn.Module):
         diffusion_model = KeypointDiffusionModel(config.n_inner,
                                                  config.n_embd,
                                                  out_features=self.out_features * self.model_args.k,
-                                                 key_point_num=1,#self.model_args.key_points_num,
+                                                 key_point_num=1,
                                                  feat_dim=self.model_args.key_points_diffusion_decoder_feat_dim,
                                                  input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
                                                  use_key_points=model_args.use_key_points,)
@@ -381,41 +381,7 @@ class KeyPointDiffusionDecoder(nn.Module):
         else:
             raise NotImplementedError
 
-    def compute_keypoint_loss(self, 
-                        hidden_output,
-                        info_dict:Dict=None,
-                        device=None):
-        assert False, "only support training diffusionKPdecoder separately"
-        if device is None:
-            device = hidden_output.device
-        context_length = info_dict.get("context_length", None)
-        assert context_length is not None, "context length can not be None"
-        if context_length is None: # pdm encoder
-           input_length = info_dict.get("input_length", None)
-        
-        future_key_points = info_dict["future_key_points"]
-        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
-        # hidden state to predict future kp is different from mlp decoder
-        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
-                    else scenario_type_len + input_length
-        future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
-        
-        if self.training:
-            future_key_points = future_key_points if self.model_args.predict_yaw else future_key_points[..., :2]
-            key_points_logits = future_key_points
-            kp_loss = self.model(future_key_points_hidden_state[:, -1, :], future_key_points)  # b, s, 4/2
-
-            return kp_loss, key_points_logits
-        else:
-            if self.k == 1:
-                key_points_logits, scores = self.model(future_key_points_hidden_state[:, -1, :], determin = True)
-                kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
-                        self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
-            else:
-                assert False, 'do not use this method when self.k > 1.'
-                # raise NotImplementedError("Only nuplan k=1 case is supported")
-        
-        return kp_loss, key_points_logits
+    # we do not implement compute_keypoint_loss for KeyPointDiffusionDecoder since it is expected to be trained separately, not with the backbone.
     
     def generate_keypoints(self, 
                             hidden_output,

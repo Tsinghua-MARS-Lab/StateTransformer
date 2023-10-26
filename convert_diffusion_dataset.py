@@ -1,6 +1,6 @@
 # This is used to train the Diffusion Key Point Decoder separately.
 # Need to generate the training set and testing set for DiffusionKeyPointDecoder using runner.py
-    #   by setting generate_diffusion_dataset_for_key_points_decoder = True and specify diffusion_dataset_save_dir first.
+    #   by setting generate_diffusion_dataset_for_key_points_decoder = True and specify diffusion_feature_save_dir first.
 # After training the Diffusion Key Point Decoder using this file, one can use the trained Diffusion Key Point Decoder as key_point_decoder for 
     # Model type TrajectoryGPTDiffusionKPDecoder by setting the model-name to be pretrain/scratch-diffusion_KP_decoder_gpt 
                                                     # and set the key_points_diffusion_decoder_load_from to be the best_model.pth file that is generated and saved by this runner_diffusionKPdecoder.py program.
@@ -19,7 +19,7 @@ def map_pdm_dataset(args):
                             map_version="nuplan-maps-v1.0",
                             map_name=map
                             )
-    datapath = args.pdm_dataroot
+    datapath = args.saved_dataset_folder
     def map_func(sample):
         return pdm_vectorize(sample, datapath, map_api, args.use_centerline)
     dataset = load_dataset(os.path.join(datapath, "index"), args.split)
@@ -90,10 +90,10 @@ if __name__ == '__main__':
                         type=str,
                         default="/public/MARS/datasets/nuPlan/nuplan-maps-v1.1"
                         )
-    parser.add_argument("--pdm_dataroot",
+    parser.add_argument("--saved_dataset_folder",
                         type=str,
                         default="/localdata_ssd/nuplan/online_float32_opt",
-                        help="default online dataset which pdm needs")
+                        help="default online dataset, same as that used in runner.py")
     parser.add_argument("--use_centerline",
                         type=bool,
                         default=False)

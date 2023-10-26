@@ -129,13 +129,130 @@ Note that only mlp decoders can be trained together with the backbone.
 
 ### Train only diffusion decoder, without backbone
 
-To train the diffusion decoder, you need first to train using an mlp decoder to obtain a pretrained backbone. After that, you need to generate the dataset for training the diffusion decoder: this is done using the same command for eval except that you need to set `--generate_diffusion_dataset_for_key_points_decoder` to True and `--diffusion_dataset_save_dir` to the dir to save the pth files for training diffusion decoders.
+To train the diffusion decoder, you need first to train using an mlp decoder to obtain a pretrained backbone. After that, you need to generate the dataset for training the diffusion decoder using `generate_diffusion_feature.py`: this is done using the same command for eval except that you need to set `--generate_diffusion_dataset_for_key_points_decoder` to True and `--diffusion_feature_save_dir` to the dir to save the pth files for training diffusion decoders.
+An example:
+`
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
+python -m torch.distributed.run \
+--nproc_per_node=8 generate_diffusion_feature.py \
+--do_train --do_eval\
+--model_name pretrain-gpt-mini --model_pretrain_name_or_path /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_results/checkpoint-20000/ \
+--saved_dataset_folder  /localdata_ssd/nuplan/online_dataset \
+--output_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/dummy_generating_results  \
+--logging_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/dummy_generating_logs \
+--run_name gpt_1.5B_mse_FI1_PI1_k1_genDiffFeat
+--save_steps 9999999 --dataloader_num_workers 10 \
+--dataloader_drop_last True \
+--dataset_scale 1 \
+--task nuplan \
+--k 1 \
+--future_sample_interval 2 \
+--past_sample_interval 5 \
+--evaluation_strategy steps \
+--overwrite_output_dir --loss_fn mse --max_eval_samples 10000\
+--next_token_scorer True \
+--ar_future_interval 20 \
+--pred_key_points_only False \
+--specified_key_points True \
+--forward_specified_key_points False \
+--diffusion_feature_save_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/diffusion_feature_pth_files/ \
+`
+After running these, you are supposed to get three folders under `diffusion_feature_save_dir` for `train`, `val` and `test` diffusion features respectively.
+
+```
+diffusion_feature_save_dir
+ |--train
+    --future_key_points_[0-9]*.pth
+    --future_key_points_hidden_state_[0-9]*.pth
+ |--val
+    --future_key_points_[0-9]*.pth
+    --future_key_points_hidden_state_[0-9]*.pth
+ |--test
+    --future_key_points_[0-9]*.pth
+    --future_key_points_hidden_state_[0-9]*.pth
+...
 
 After saving the pth files, you need to run `convert_diffusion_dataset.py` to convert them into arrow dataset which is consistent with the training format we are using here.
+`
+python3 convert_diffusion_dataset.py \
+    --save_dir /localdata_ssd/nuplan_diff_dataset/arrow_dataset \
+    --data_dir diffusion_feature_save_dir/train/ \
+    --num_proc 10 \
+    --dataset_name nuplan_diffusion_train \
+    --map_dir /localdata_hdd/nuplan/map/ \
+    --saved_datase_folder /localdata_ssd/nuplan/online_dataset/ \
+    --use_centerline False \
+    --split train \
+`
+After which you are expected to see such structures in save_dir:
+```
+save_dir
+    |--generator
+        |--*
+    |--train
+        *.arrow
+        dataset_info.json
+        state.json
+    *.lock
+```
 
 Fianlly, please set `--task` to `train_diffusion_decoder`. In this case, the model is initilized without a transformer backbone(Reduce the infence time to build backbone feature). 
 In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', obtained previously by `convert_diffusion_dataset.py`. 
+`
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
+nohup python3 -m torch.distributed.run \
+--master_port 12363 \
+--nproc_per_node=8 runner.py \
+--model_name pretrain-gpt-small --model_pretrain_name_or_path /public/MARS/t4p/checkpoints/Small_Oct9/Small_SKPY_PI2_x1_auXYd1_auCurrentd1_VAL_Oct9/training_results/checkpoint-324000/ \
+--saved_dataset_folder  /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/ \
+--output_dir /localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff__/output_dir/ \
+--logging_dir /localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff__/result_dir/ \
+--run_name small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff__ \
+--num_train_epochs 10 \
+--weight_decay 0.00001 --learning_rate 0.0001 --logging_steps 2 --save_strategy steps \
+--save_steps 500 --dataloader_num_workers 10 \
+--per_device_train_batch_size 2 \
+--save_total_limit 2  --predict_yaw True \
+--dataloader_drop_last True \
+--task train_diffusion_decoder \
+--remove_unused_columns False \
+--do_train \
+--loss_fn mse \
+--per_device_eval_batch_size 2 --max_eval_samples 99999999 \
+--max_train_samples 99999999 \
+--max_predict_samples 99999999 \
+--past_sample_interval 2 \
+--trajectory_loss_rescale 0.00001 \
+`
 
+After training the diffusion keypoint decoder separately, you may use such command to eval its performance:
+`
+export CUDA_VISIBLE_DEVICES=0; \
+nohup python3 -m torch.distributed.run \
+--master_port 12363 \
+--nproc_per_node=1 runner.py \
+--model_name pretrain-gpt-small-gen1by1 --model_pretrain_name_or_path /public/MARS/t4p/checkpoints/Small_Oct9/Small_SKPY_PI2_x1_auXYd1_auCurrentd1_VAL_Oct9/training_results/checkpoint-324000/ \
+--saved_dataset_folder  /localdata_ssd/nuplan/online_float32_opt \
+--output_dir /localdata_hdd2/nuplan_diff_save_dir/otpt_dir/Small_SKPY_PI2_x10_auXYd1_VAL_ckpt407k_sjztest_0100_wiDiffusion_______gen1by1_filtered_Oct9ckpt324k_val14_1k_/output_dir/ \
+--logging_dir /localdata_hdd2/nuplan_diff_save_dir/otpt_dir/Small_SKPY_PI2_x10_auXYd1_VAL_ckpt407k_sjztest_0100_wiDiffusion_______gen1by1_filtered_Oct9ckpt324k_val14_1k_/result_dir/ \
+--run_name Small_SKPY_PI2_x10_auXYd1_VAL_ckpt407k_sjztest_0100_wiDiffusion_______gen1by1_filtered_Oct9ckpt324k_val14_1k_ \
+--num_train_epochs 1 \
+--weight_decay 0.00 --learning_rate 0.00 --logging_steps 2 --save_strategy steps \
+--save_steps 20000 --dataloader_num_workers 10 \
+--per_device_train_batch_size 2 \
+--save_total_limit 2  --predict_yaw True \
+--dataloader_drop_last True \
+--task nuplan \
+--remove_unused_columns False \
+--do_eval \
+--evaluation_strategy epoch \
+--loss_fn mse \
+--per_device_eval_batch_size 2 --max_eval_samples 99999999 \
+--max_train_samples 99999999 \
+--max_predict_samples 99999999 \
+--past_sample_interval 2 \
+--kp_decoder_type diffusion --key_points_diffusion_decoder_feat_dim 256 --diffusion_condition_sequence_lenth 1 --key_points_diffusion_decoder_load_from /localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff__/output_dir/checkpoint-500/pytorch_model.bin \
+`
 ## To eval only:
 
 
