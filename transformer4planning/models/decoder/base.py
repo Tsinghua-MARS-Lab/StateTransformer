@@ -78,7 +78,22 @@ class KeyPointMLPDeocder(nn.Module):
         else:
             print(self.model_args.loss_fn)
             assert False, "loss fn not supported"
-
+        if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            self.save_training_diffusion_feature_dir = os.path.join(self.model_args.diffusion_feature_save_dir,'train/')
+            self.save_testing_diffusion_feature_dir  = os.path.join(self.model_args.diffusion_feature_save_dir,'val/')
+            self.save_test_diffusion_feature_dir = os.path.join(self.model_args.diffusion_feature_save_dir,'test/')
+            if not os.path.exists(self.save_training_diffusion_feature_dir):
+                os.makedirs(self.save_training_diffusion_feature_dir)
+            if not os.path.exists(self.save_testing_diffusion_feature_dir):
+                os.makedirs(self.save_testing_diffusion_feature_dir)
+            if not os.path.exists(self.save_test_diffusion_feature_dir):
+                os.makedirs(self.save_test_diffusion_feature_dir)
+            self.current_idx = 0
+            self.gpu_device_count = torch.cuda.device_count()
+            # Notice that although we check and create two directories (train/ and test/) here, in the forward method we only save features in eval loops.
+            # This is because evaluation is way faster than training (since there are no backward propagation), and after saving features for evaluation, we just change our test set to training set and then run the evaluation loop again.
+            # The related code can be found in runner.py at around line 511.
+            self.current_idx = 0
     def compute_keypoint_loss(self,
                               hidden_output,
                               info_dict: Dict = None,
@@ -127,3 +142,21 @@ class KeyPointMLPDeocder(nn.Module):
         batch_size = hidden_state.shape[0]
         key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
         return key_points_logit, None
+    def save_features(self,input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state):
+        current_device_idx = int(str(input_embeds.device)[-1])
+        context_length = info_dict.get("context_length", None)
+        assert context_length is not None, "context length can not be None"
+        if context_length is None: # pdm encoder
+            input_length = info_dict.get("input_length", None)
+        future_key_points = info_dict["future_key_points"]
+        key_points_num = future_key_points.shape[-2]
+        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        # hidden state to predict future kp is different from mlp decoder
+        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
+                    else scenario_type_len + input_length
+        save_id = (self.gpu_device_count * self.current_idx + current_device_idx)*key_points_num
+        for key_point_idx in range(key_points_num):
+            current_save_id = save_id + key_point_idx
+            torch.save(transformer_outputs_hidden_state[:,kp_end_index-1+key_point_idx:kp_end_index-1+key_point_idx+1,:].detach().cpu(), os.path.join(self.save_testing_diffusion_feature_dir, f'future_key_points_hidden_state_{current_save_id}.pth'), )
+            torch.save(info_dict['future_key_points'][...,key_point_idx:key_point_idx+1,:].detach().cpu(), os.path.join(self.save_testing_diffusion_feature_dir, f'future_key_points_{current_save_id}.pth'), )
+        self.current_idx += 1
