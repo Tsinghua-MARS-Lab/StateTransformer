@@ -6,7 +6,7 @@ from transformers import GPT2Tokenizer
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss, SmoothL1Loss
 from transformer4planning.models.GPT2.models import *
 from transformer4planning.models.decoders import DecoderResCat
-from transformer4planning.models.encoder.mtr_encoder import MTREncoder
+from transformer4planning.transformer4planning.models.encoder.waymo_vector_encoder import MTREncoder
 
 
 CYCLECLIST_39ind_centers = torch.tensor([[ 1.97710991e+00, 1.23980641e-02], 

@@ -381,14 +381,14 @@ class KeyPointDiffusionDecoder(nn.Module):
         else:
             raise NotImplementedError
 
-    # we do not implement compute_keypoint_loss for KeyPointDiffusionDecoder since it is expected to be trained separately, not with the backbone.
+
     
     def generate_keypoints(self, 
                             hidden_output,
                             info_dict:Dict=None):
         '''
             Input:
-                hidden_output: batch_size * (scenario_type_len + context_length * 2 + pred_length) * n_embd
+                hidden_output: batch_size * (context_length * 2 + pred_length) * n_embd
                 info_dict: Dict
             Output:
                 tuple of key_points_logits and scores
@@ -398,7 +398,6 @@ class KeyPointDiffusionDecoder(nn.Module):
         '''
         assert self.use_key_points != 'no'
         assert not self.training
-        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
         # context_length = info_dict.get("context_length", None)
         # if context_length is None: # pdm encoder

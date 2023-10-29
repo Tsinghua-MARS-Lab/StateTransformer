@@ -1,6 +1,6 @@
 DATA_CONFIG:
     DATASET: WaymoDataset
-    OBJECT_TYPE: &object_type ['TYPE_VEHICLE']
+    OBJECT_TYPE: &object_type ['TYPE_CYCLIST']
     
     DATA_ROOT: 'data/waymo'
     SPLIT_DIR: {
@@ -58,6 +58,5 @@ MODEL:
         activation_function: silu
 
     MOTION_DECODER:
-        
         INTENTION_POINTS_FILE: data/waymo/cluster_64_center_dict.pkl
         OBJECT_TYPE: *object_type

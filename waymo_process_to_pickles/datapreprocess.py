@@ -16,13 +16,13 @@ from concurrent import futures
 import glob
 from tqdm import tqdm
 from waymo_open_dataset.protos import scenario_pb2
-from .waymo_types import object_type, lane_type, road_line_type, road_edge_type, signal_state, polyline_type
+from .waymo_types import polyline_type
 
     
 def decode_tracks_from_proto(tracks):
     track_infos = {
-        'object_id': [],  # {0: unset, 1: vehicle, 2: pedestrian, 3: cyclist, 4: others}
-        'object_type': [],
+        'object_id': [], 
+        'object_type': [],  # {0: unset, 1: vehicle, 2: pedestrian, 3: cyclist, 4: others}
         'trajs': []
     }
     for cur_data in tracks:  # number of objects
@@ -31,7 +31,7 @@ def decode_tracks_from_proto(tracks):
         cur_traj = np.stack(cur_traj, axis=0)  # (num_timestamp, 10)
 
         track_infos['object_id'].append(cur_data.id)
-        track_infos['object_type'].append(object_type[cur_data.object_type])
+        track_infos['object_type'].append(cur_data.object_type)
         track_infos['trajs'].append(cur_traj)
 
     track_infos['trajs'] = np.stack(track_infos['trajs'], axis=0)  # (num_objects, num_timestamp, 9)
@@ -63,7 +63,7 @@ def decode_map_features_from_proto(map_features):
 
         if cur_data.lane.ByteSize() > 0:
             cur_info['speed_limit_mph'] = cur_data.lane.speed_limit_mph
-            cur_info['type'] = lane_type[cur_data.lane.type]  # 0: undefined, 1: freeway, 2: surface_street, 3: bike_lane
+            cur_info['type'] = cur_data.lane.type  # 0: undefined, 1: freeway, 2: surface_street, 3: bike_lane
 
             cur_info['interpolating'] = cur_data.lane.interpolating
             cur_info['entry_lanes'] = list(cur_data.lane.entry_lanes)
@@ -78,11 +78,11 @@ def decode_map_features_from_proto(map_features):
             cur_info['right_boundary'] = [{
                     'start_index': x.lane_start_index, 'end_index': x.lane_end_index,
                     'feature_id': x.boundary_feature_id,
-                    'boundary_type': road_line_type[x.boundary_type]  # roadline type
+                    'boundary_type': x.boundary_type  # roadline type
                 } for x in cur_data.lane.right_boundaries
             ]
 
-            global_type = polyline_type[cur_info['type']]
+            global_type = cur_info['type']
             cur_polyline = np.stack([np.array([point.x, point.y, point.z, global_type]) for point in cur_data.lane.polyline], axis=0)
             cur_polyline_dir = get_polyline_dir(cur_polyline[:, 0:3])
             cur_polyline = np.concatenate((cur_polyline[:, 0:3], cur_polyline_dir, cur_polyline[:, 3:]), axis=-1)
@@ -90,9 +90,9 @@ def decode_map_features_from_proto(map_features):
             map_infos['lane'].append(cur_info)
 
         elif cur_data.road_line.ByteSize() > 0:
-            cur_info['type'] = road_line_type[cur_data.road_line.type]
+            cur_info['type'] = cur_data.road_line.type
 
-            global_type = polyline_type[cur_info['type']]
+            global_type = cur_info['type']
             cur_polyline = np.stack([np.array([point.x, point.y, point.z, global_type]) for point in cur_data.road_line.polyline], axis=0)
             cur_polyline_dir = get_polyline_dir(cur_polyline[:, 0:3])
             cur_polyline = np.concatenate((cur_polyline[:, 0:3], cur_polyline_dir, cur_polyline[:, 3:]), axis=-1)
@@ -100,9 +100,9 @@ def decode_map_features_from_proto(map_features):
             map_infos['road_line'].append(cur_info)
 
         elif cur_data.road_edge.ByteSize() > 0:
-            cur_info['type'] = road_edge_type[cur_data.road_edge.type]
+            cur_info['type'] = cur_data.road_edge.type
 
-            global_type = polyline_type[cur_info['type']]
+            global_type = cur_info['type']
             cur_polyline = np.stack([np.array([point.x, point.y, point.z, global_type]) for point in cur_data.road_edge.polyline], axis=0)
             cur_polyline_dir = get_polyline_dir(cur_polyline[:, 0:3])
             cur_polyline = np.concatenate((cur_polyline[:, 0:3], cur_polyline_dir, cur_polyline[:, 3:]), axis=-1)
@@ -140,7 +140,7 @@ def decode_map_features_from_proto(map_features):
             # using 1.0.0, there exists unknown type data
             # raise ValueError
 
-        polylines.append(cur_polyline)
+        polylines.append(cur_polyline.astype(np.float32))
         cur_info['polyline_index'] = (point_cnt, point_cnt + len(cur_polyline))
         point_cnt += len(cur_polyline)
 
@@ -163,15 +163,16 @@ def decode_dynamic_map_states_from_proto(dynamic_map_states):
         lane_id, state, stop_point = [], [], []
         for cur_signal in cur_data.lane_states:  # (num_observed_signals)
             lane_id.append(cur_signal.lane)
-            state.append(signal_state[cur_signal.state])
+            state.append(cur_signal.state)
             stop_point.append([cur_signal.stop_point.x, cur_signal.stop_point.y, cur_signal.stop_point.z])
-
-        dynamic_map_infos['lane_id'].append(np.array([lane_id]))
-        dynamic_map_infos['state'].append(np.array([state]))
-        dynamic_map_infos['stop_point'].append(np.array([stop_point]))
+        
+        if len(lane_id) == 0: continue
+        
+        dynamic_map_infos['lane_id'].append(lane_id)
+        dynamic_map_infos['state'].append(state)
+        dynamic_map_infos['stop_point'].append(stop_point)
 
     return dynamic_map_infos
-
 
 def process_waymo_data_with_scenario_proto(data_file, output_path=None):
     dataset = tf.data.TFRecordDataset(data_file, compression_type='')
