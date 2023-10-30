@@ -100,7 +100,7 @@ python -m torch.distributed.run \
 --run_name gpt_1.5B_mse_FI1_PI1_k1 --num_train_epochs 100 \
 --per_device_train_batch_size 4 --warmup_steps 50 \
 --weight_decay 0.01 --logging_steps 2 --save_strategy steps \
---save_steps 1000 --dataloader_num_workers 10 \
+--dataloader_num_workers 10 \
 --save_total_limit 2 \
 --dataloader_drop_last True \
 --dataset_scale 1 \
@@ -140,7 +140,7 @@ python -m torch.distributed.run \
 --output_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/dummy_generating_results  \
 --logging_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/dummy_generating_logs \
 --run_name gpt_1.5B_mse_FI1_PI1_k1_genDiffFeat
---save_steps 9999999 --dataloader_num_workers 10 \
+--dataloader_num_workers 10 \
 --dataloader_drop_last True \
 --dataset_scale 1 \
 --task nuplan \
@@ -209,7 +209,7 @@ nohup python3 -m torch.distributed.run \
 --run_name small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff__ \
 --num_train_epochs 10 \
 --weight_decay 0.00001 --learning_rate 0.0001 --logging_steps 2 --save_strategy steps \
---save_steps 500 --dataloader_num_workers 10 \
+--dataloader_num_workers 10 \
 --per_device_train_batch_size 2 \
 --save_total_limit 2  --predict_yaw True \
 --dataloader_drop_last True \
@@ -237,7 +237,7 @@ nohup python3 -m torch.distributed.run \
 --run_name Small_SKPY_PI2_x10_auXYd1_VAL_ckpt407k_sjztest_0100_wiDiffusion_______gen1by1_filtered_Oct9ckpt324k_val14_1k_ \
 --num_train_epochs 1 \
 --weight_decay 0.00 --learning_rate 0.00 --logging_steps 2 --save_strategy steps \
---save_steps 20000 --dataloader_num_workers 10 \
+--dataloader_num_workers 10 \
 --per_device_train_batch_size 2 \
 --save_total_limit 2  --predict_yaw True \
 --dataloader_drop_last True \
