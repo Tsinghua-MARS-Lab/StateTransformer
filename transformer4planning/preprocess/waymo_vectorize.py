@@ -3,17 +3,9 @@ import os
 import torch
 import pickle
 from functools import partial
-from dataset_gen.waymo.common_util import merge_batch_by_padding_2nd_dim
+from transformer4planning.utils.waymo_utils import merge_batch_by_padding_2nd_dim
 
 def waymo_collate_func(batch, dic_path=None):
-    """
-    "nuplan_collate_fn" is designed for nuplan dataset online generation.
-    To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
-    as well as a dictionary of rasterization parameters.
-
-    The batch is the raw indexes data for one nuplan data item, each data in batch includes:
-    road_ids, route_ids, traffic_ids, agent_ids, file_name, frame_id, map and timestamp.
-    """
     map_func = partial(waymo_preprocess, data_path=dic_path)
 
     new_batch = list()
@@ -47,14 +39,11 @@ def waymo_collate_func(batch, dic_path=None):
     return result
 
 def waymo_preprocess(sample, data_path):
-    filename = sample["file_name"]
     scene_id = sample["scenario_id"]
-    track_index_to_predict = sample["track_index_to_predict"]
+    track_index_to_predict = sample["track_index_to_predict"].view(-1)
     split = sample["split"]
-    with open(os.path.join(data_path, f"{split}", filename), "rb") as f:
-        info_dict = pickle.load(f)
-
-    info = info_dict[scene_id]
+    with open(os.path.join(data_path, f"{split}", scene_id + ".pkl"), "rb") as f:
+        info = pickle.load(f)
 
     sdc_track_index = info["sdc_track_index"]
     current_time_index = info["current_time_index"]
@@ -62,7 +51,6 @@ def waymo_preprocess(sample, data_path):
 
     track_infos = info["track_infos"]
 
-    track_index_to_predict = np.array(info["tracks_to_predict"]["track_index"])
     obj_types = np.array(track_infos["object_type"])
     obj_ids = np.array(track_infos["object_id"])
     obj_trajs_full = track_infos["trajs"]  # (num_objects, num_timestamp, 10)

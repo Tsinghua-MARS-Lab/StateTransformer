@@ -250,8 +250,7 @@ def compute_metrics(prediction: EvalPrediction):
     return eval_result
 
 def compute_metrics_waymo(prediction: EvalPrediction):
-    from dataset_gen.waymo.waymo_eval import waymo_evaluation
-    from transformer4planning.utils.waymo_utils import tensor_to_str
+    from transformer4planning.utils.waymo_utils import tensor_to_str, waymo_evaluation
     pred_dicts = prediction.predictions['prediction_generation']
     type_idx_str = {
             1: 'TYPE_VEHICLE',
@@ -274,11 +273,26 @@ def compute_metrics_waymo(prediction: EvalPrediction):
                 
         pred_dict_list.append(single_pred_dict)
 
-    _, result_format_str, final_avg_results = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
+    result_dict, result_format_str = waymo_evaluation(pred_dicts=pred_dict_list, num_modes_for_eval=6, eval_second=8)
     print(result_format_str)
+
+    metric_names = ['minADE', 'minFDE', 'MissRate', 'OverlapRate', 'mAP']
+    agent_type = ['VEHICLE', 'PEDESTRIAN', 'CYCLIST']
+
     result = {}
-    for key in final_avg_results.keys():
-        result[key] = final_avg_results[key]
+    for m in metric_names:  
+        record_avg = True 
+        for a in agent_type:
+            key = f"{m} - {a}"
+            if result_dict[key] == -1:
+                if record_avg: record_avg = False
+            else:
+                assert result_dict[key] > 0
+                result[key] = result_dict[key]
+
+        if m != "OverlapRate" and record_avg:
+            result[m] = result_dict[m]
+
 
     loss_items = prediction.predictions['loss_items']
     # check loss items are dictionary

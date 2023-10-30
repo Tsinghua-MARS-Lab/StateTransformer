@@ -169,7 +169,7 @@ diffusion_feature_save_dir
  |--test
     --future_key_points_[0-9]*.pth
     --future_key_points_hidden_state_[0-9]*.pth
-...
+```
 
 After saving the pth files, you need to run `convert_diffusion_dataset.py` to convert them into arrow dataset which is consistent with the training format we are using here.
 `
@@ -309,7 +309,25 @@ python generation.py  --num_proc 96 --sample_interval 1 \
 ### Generate WOMD training data dictionary and index
 
 `
-python waymo_generation.py --train --save_dict
+python waymo_generation.py --mode train --save_dict --agent_type 1 2 3 
+`
+
+Here you got the original pickle data files. By default, we require the distribution of data and index files to be as follow.
+```
+WOMD_data_save_dir
+ |--index
+    --train
+    --val
+    --test
+ |--origin
+    --train
+    --val
+    --test
+```
+To accelerate the data loading part, we suggest to split the large pickle files into small ones per scenario by:
+
+`
+python split_scenario_waymo.py --delete_origin True
 `
 
 
