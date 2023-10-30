@@ -42,11 +42,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
     def __init__(self, 
                  cnn_kwargs:Dict, 
                  action_kwargs:Dict,
-                 tokenizer_kwargs:Dict = None,
                  model_args = None
                  ):
 
-        super().__init__(model_args, tokenizer_kwargs)
+        super().__init__(model_args)
         self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None), 
                                                     in_channels=cnn_kwargs.get("in_channels", None), 
                                                     resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
@@ -67,7 +66,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         low_res_raster = kwargs.get("low_res_raster", None)
         context_actions = kwargs.get("context_actions", None)
         trajectory_label = kwargs.get("trajectory_label", None)
-        scenario_type = kwargs.get("scenario_type", None)
         aug_current = kwargs.get("aug_current", None)
 
         assert trajectory_label is not None, "trajectory_label should not be None"
@@ -100,15 +98,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         )
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
-        
-        # scenario tag encoding
-        if self.token_scenario_tag:
-            assert scenario_type is not None, "scenario_type is None for token_scenario_tag"
-            assert scenario_type[0] != 'Unknown', f"scenario_type is Unknown for token_scenario_tag"
-            scenario_tag_ids = torch.tensor(self.tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
-            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
-            assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
-            input_embeds = torch.cat([scenario_tag_embeds, input_embeds], dim=1)
 
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
@@ -134,7 +123,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             "selected_indices": self.selected_indices,
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
-            "context_length": context_length,
+            "context_length": context_length * 2,
             "aug_current": aug_current,
         }
 

@@ -7,9 +7,8 @@ from transformer4planning.models.encoder.base import TrajectoryEncoder
 class PDMEncoder(TrajectoryEncoder):
     def __init__(self, 
                  pdm_kwargs:Dict,
-                 tokenizer_kwargs:Dict = None,
                  model_args = None):
-        super(PDMEncoder, self).__init__(model_args, tokenizer_kwargs)
+        super(PDMEncoder, self).__init__(model_args)
         # 3*3 means 3d pos, 3d vel & 3d acc concat
         self.state_embed = nn.Sequential(
             nn.Linear(
@@ -35,14 +34,13 @@ class PDMEncoder(TrajectoryEncoder):
                                each with shape of (batchsize, history_dim, 3)
          `planner centerline`: torch.Tensor, (batchsize, centerline_num, 3) and scenario type
         """
-        batch_size, input_length = kwargs.get("ego_position").shape[:2]
+        batch_size, context_length = kwargs.get("ego_position").shape[:2]
         ego_position = kwargs.get("ego_position").float() # shape (bsz, history_dim, 3)
         ego_velocity = kwargs.get("ego_velocity", torch.zeros_like(ego_position)).float() # shape (bsz, history_dim, 3)
         ego_acceleration = kwargs.get("ego_acceleration", torch.zeros_like(ego_velocity)).float() # shape (bsz, history_dim, 3)
         planner_centerline = kwargs.get("planner_centerline", None)
         if planner_centerline is not None:
             planner_centerline = planner_centerline.reshape(batch_size, -1).float() # (bsz, centerline_num, 3) -> (bsz, centerline_dim * 3)
-        scenario_type = kwargs.get("scenario_type")
         trajectory_label = kwargs.get("trajectory_label", None)
         pred_length = kwargs.get("pred_length", trajectory_label.shape[1])
         device = ego_position.device if ego_position is not None else None
@@ -62,16 +60,10 @@ class PDMEncoder(TrajectoryEncoder):
             planner_embed = torch.cat(
                 [state_encodings, centerline_encodings.unsqueeze(1)], dim=1
             )
-            input_length += 1
+            context_length += 1
         else:
             planner_embed = state_encodings
 
-        if self.token_scenario_tag:
-            scenario_tag_ids = torch.tensor(self.tokenizer(text=scenario_type, max_length=self.model_args.max_token_len, padding='max_length')["input_ids"])
-            scenario_tag_embeds = self.tag_embedding(scenario_tag_ids.to(device)).squeeze(1)
-            assert scenario_tag_embeds.shape[1] == self.model_args.max_token_len, f'{scenario_tag_embeds.shape} vs {self.model_args.max_token_len}'
-            planner_embed = torch.cat([scenario_tag_embeds, planner_embed], dim=1)
-        
         # use trajectory label to build keypoints
         if self.use_key_points is not None:
             future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
@@ -97,7 +89,7 @@ class PDMEncoder(TrajectoryEncoder):
             "selected_indices": selected_indices,
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
-            "input_length": input_length,
+            "context_length": context_length,
         }
         
         return planner_embed, info_dict

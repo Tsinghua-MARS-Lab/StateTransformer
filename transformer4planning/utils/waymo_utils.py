@@ -1,12 +1,236 @@
-# Motion Transformer (MTR): https://arxiv.org/abs/2209.13508
-# Published at NeurIPS 2022
-# Written by Shaoshuai Shi 
-# All Rights Reserved
-
-
 import numpy as np
+import torch
+import torch.nn as nn
+
+def check_numpy_to_torch(x):
+    if isinstance(x, np.ndarray):
+        return torch.from_numpy(x).float(), True
+    return x, False
+
+def rotate_points_along_z(points, angle):
+    """
+    Args:
+        points: (B, N, 3 + C)
+        angle: (B), angle along z-axis, angle increases x ==> y
+    Returns:
+
+    """
+    points, is_numpy = check_numpy_to_torch(points)
+    angle, _ = check_numpy_to_torch(angle)
+
+    cosa = torch.cos(angle)
+    sina = torch.sin(angle)
+    zeros = angle.new_zeros(points.shape[0])
+    if points.shape[-1] == 2:
+        rot_matrix = torch.stack((
+            cosa,  sina,
+            -sina, cosa
+        ), dim=1).view(-1, 2, 2).float()
+        points_rot = torch.matmul(points, rot_matrix)
+    else:
+        ones = angle.new_ones(points.shape[0])
+        rot_matrix = torch.stack((
+            cosa,  sina, zeros,
+            -sina, cosa, zeros,
+            zeros, zeros, ones
+        ), dim=1).view(-1, 3, 3).float()
+        points_rot = torch.matmul(points[:, :, 0:3], rot_matrix)
+        points_rot = torch.cat((points_rot, points[:, :, 3:]), dim=-1)
+    return points_rot.numpy() if is_numpy else points_rot
+
+def merge_batch_by_padding_2nd_dim(tensor_list, return_pad_mask=False):
+    assert len(tensor_list[0].shape) in [3, 4]
+    only_3d_tensor = False
+    if len(tensor_list[0].shape) == 3:
+        tensor_list = [x.unsqueeze(dim=-1) for x in tensor_list]
+        only_3d_tensor = True
+    maxt_feat0 = max([x.shape[1] for x in tensor_list])
+
+    _, _, num_feat1, num_feat2 = tensor_list[0].shape
+
+    ret_tensor_list = []
+    ret_mask_list = []
+    for k in range(len(tensor_list)):
+        cur_tensor = tensor_list[k]
+        assert cur_tensor.shape[2] == num_feat1 and cur_tensor.shape[3] == num_feat2
+
+        new_tensor = cur_tensor.new_zeros(cur_tensor.shape[0], maxt_feat0, num_feat1, num_feat2)
+        new_tensor[:, :cur_tensor.shape[1], :, :] = cur_tensor
+        ret_tensor_list.append(new_tensor)
+
+        new_mask_tensor = cur_tensor.new_zeros(cur_tensor.shape[0], maxt_feat0)
+        new_mask_tensor[:, :cur_tensor.shape[1]] = 1
+        ret_mask_list.append(new_mask_tensor.bool())
+
+    ret_tensor = torch.cat(ret_tensor_list, dim=0)  # (num_stacked_samples, num_feat0_maxt, num_feat1, num_feat2)
+    ret_mask = torch.cat(ret_mask_list, dim=0)
+
+    if only_3d_tensor:
+        ret_tensor = ret_tensor.squeeze(dim=-1)
+
+    if return_pad_mask:
+        return ret_tensor, ret_mask
+    return ret_tensor
+
+def get_batch_offsets(batch_idxs, bs):
+    '''
+    :param batch_idxs: (N), int
+    :param bs: int
+    :return: batch_offsets: (bs + 1)
+    '''
+    batch_offsets = torch.zeros(bs + 1).int().cuda()
+    for i in range(bs):
+        batch_offsets[i + 1] = batch_offsets[i] + (batch_idxs == i).sum()
+    assert batch_offsets[-1] == batch_idxs.shape[0]
+    return batch_offsets
+
+def nll_loss_gmm_direct(pred_scores, pred_trajs, gt_trajs, gt_valid_mask, pre_nearest_mode_idxs=None,
+                        timestamp_loss_weight=None, use_square_gmm=False, log_std_range=(-1.609, 5.0), rho_limit=0.5):
+    """
+    GMM Loss for Motion Transformer (MTR): https://arxiv.org/abs/2209.13508
+    Written by Shaoshuai Shi 
+
+    Args:
+        pred_scores (batch_size, num_modes):
+        pred_trajs (batch_size, num_modes, num_timestamps, 5 or 3)
+        gt_trajs (batch_size, num_timestamps, 2):
+        gt_valid_mask (batch_size, num_timestamps):
+        timestamp_loss_weight (num_timestamps):
+    """
+    if use_square_gmm:
+        assert pred_trajs.shape[-1] == 3 
+    else:
+        assert pred_trajs.shape[-1] == 5
+
+    batch_size = pred_scores.shape[0]
+
+    if pre_nearest_mode_idxs is not None:
+        nearest_mode_idxs = pre_nearest_mode_idxs
+    else:
+        distance = (pred_trajs[:, :, :, 0:2] - gt_trajs[:, None, :, :]).norm(dim=-1) 
+        distance = (distance * gt_valid_mask[:, None, :]).sum(dim=-1) 
+
+        nearest_mode_idxs = distance.argmin(dim=-1)
+    nearest_mode_bs_idxs = torch.arange(batch_size).type_as(nearest_mode_idxs)  # (batch_size, 2)
+
+    nearest_trajs = pred_trajs[nearest_mode_bs_idxs, nearest_mode_idxs]  # (batch_size, num_timestamps, 5)
+    res_trajs = gt_trajs - nearest_trajs[:, :, 0:2]  # (batch_size, num_timestamps, 2)
+    dx = res_trajs[:, :, 0]
+    dy = res_trajs[:, :, 1]
+
+    if use_square_gmm:
+        log_std1 = log_std2 = torch.clip(nearest_trajs[:, :, 2], min=log_std_range[0], max=log_std_range[1])
+        std1 = std2 = torch.exp(log_std1)   # (0.2m to 150m)
+        rho = torch.zeros_like(log_std1)
+    else:
+        log_std1 = torch.clip(nearest_trajs[:, :, 2], min=log_std_range[0], max=log_std_range[1])
+        log_std2 = torch.clip(nearest_trajs[:, :, 3], min=log_std_range[0], max=log_std_range[1])
+        std1 = torch.exp(log_std1)  # (0.2m to 150m)
+        std2 = torch.exp(log_std2)  # (0.2m to 150m)
+        rho = torch.clip(nearest_trajs[:, :, 4], min=-rho_limit, max=rho_limit)
+
+    gt_valid_mask = gt_valid_mask.type_as(pred_scores)
+    if timestamp_loss_weight is not None:
+        gt_valid_mask = gt_valid_mask * timestamp_loss_weight[None, :]
+
+    # -log(a^-1 * e^b) = log(a) - b
+    reg_gmm_log_coefficient = log_std1 + log_std2 + 0.5 * torch.log(1 - rho**2)  # (batch_size, num_timestamps)
+    reg_gmm_exp = (0.5 * 1 / (1 - rho**2)) * ((dx**2) / (std1**2) + (dy**2) / (std2**2) - 2 * rho * dx * dy / (std1 * std2))  # (batch_size, num_timestamps)
+
+    reg_loss = ((reg_gmm_log_coefficient + reg_gmm_exp) * gt_valid_mask).sum(dim=-1)
+
+    return reg_loss, nearest_mode_idxs
+
+def build_mlps(c_in, mlp_channels=None, ret_before_act=False, without_norm=False):
+    layers = []
+    num_layers = len(mlp_channels)
+
+    for k in range(num_layers):
+        if k + 1 == num_layers and ret_before_act:
+            layers.append(nn.Linear(c_in, mlp_channels[k], bias=True))
+        else:
+            if without_norm:
+                layers.extend([nn.Linear(c_in, mlp_channels[k], bias=True), nn.ReLU()]) 
+            else:
+                layers.extend([nn.Linear(c_in, mlp_channels[k], bias=False), nn.BatchNorm1d(mlp_channels[k]), nn.ReLU()])
+            c_in = mlp_channels[k]
+
+    return nn.Sequential(*layers)
+
+def _num_to_str(nums):
+    string_list = []
+    
+    for str in nums:
+        s = ""
+        for char in str:
+            if char == -100: continue
+            s += chr(char)
+        string_list.append(s)
+
+    return string_list
+
+def _str_to_num(string):
+    "Encodes `string` to a decodeable number and breaks it up by `batch_size`"
+    nums = [[ord(char) for char in str] for str in string]
+    length = [len(n) for n in nums]
+    max_length = max(length)
+    for i in range(len(nums)):
+        nums[i] += [-100] * (max_length - length[i])
+
+    return nums
+
+def str_to_tensor(string) -> torch.tensor:
+    """
+    Encodes `string` to a tensor of shape [1,N,batch_size] where 
+    `batch_size` is the number of characters and `n` is
+    (len(string)//batch_size) + 1
+    """
+    return torch.tensor(_str_to_num(string), dtype=torch.long)
+
+def tensor_to_str(x:torch.Tensor) -> str:
+    """
+    Decodes `x` to a string. `x` must have been encoded from
+    `str_to_tensor`
+    """
+    return _num_to_str(x.tolist())
+
+from pathlib import Path
+import yaml
+from easydict import EasyDict
+
+def merge_new_config(config, new_config):
+    if '_BASE_CONFIG_' in new_config:
+        with open(new_config['_BASE_CONFIG_'], 'r') as f:
+            try:
+                yaml_config = yaml.load(f, Loader=yaml.FullLoader)
+            except:
+                yaml_config = yaml.load(f)
+        config.update(EasyDict(yaml_config))
+
+    for key, val in new_config.items():
+        if not isinstance(val, dict):
+            config[key] = val
+            continue
+        if key not in config:
+            config[key] = EasyDict()
+        merge_new_config(config[key], val)
+
+    return config
+
+
+def cfg_from_yaml_file(cfg_file):
+    config = EasyDict()
+    with open(cfg_file, 'r') as f:
+        try:
+            new_config = yaml.load(f, Loader=yaml.FullLoader)
+        except:
+            new_config = yaml.load(f)
+
+        merge_new_config(config=config, new_config=new_config)
+
+    return config
+
 import tensorflow as tf
-import os
 
 from google.protobuf import text_format
 
@@ -83,18 +307,7 @@ def _default_metrics_config(eval_second, num_modes_for_eval=6):
     text_format.Parse(config_text, config)
     return config
 
-
 def transform_preds_to_waymo_format(pred_dicts, top_k_for_eval=-1, eval_second=8):
-    print(f'Total number for evaluation (intput): {len(pred_dicts)}')
-    temp_pred_dicts = []
-    for k in range(len(pred_dicts)):
-        if isinstance(pred_dicts[k], list):
-            temp_pred_dicts.extend(pred_dicts[k])
-        else:
-            temp_pred_dicts.append(pred_dicts[k])
-    pred_dicts = temp_pred_dicts
-    print(f'Total number for evaluation (after processed): {len(pred_dicts)}')
-
     scene2preds = {}
     num_max_objs_per_scene = 0
     for k in range(len(pred_dicts)):
@@ -145,7 +358,6 @@ def transform_preds_to_waymo_format(pred_dicts, top_k_for_eval=-1, eval_second=8
             sort_idxs = cur_pred['pred_scores'].argsort()[::-1]
             cur_pred['pred_scores'] = cur_pred['pred_scores'][sort_idxs]
             cur_pred['pred_trajs'] = cur_pred['pred_trajs'][sort_idxs]
-
             cur_pred['pred_scores'] = cur_pred['pred_scores'] / cur_pred['pred_scores'].sum()
 
             batch_pred_trajs[scene_idx, obj_idx] = cur_pred['pred_trajs'][:topK, np.newaxis, 4::sampled_interval, :][:, :, :num_frame_to_eval, :]
@@ -169,8 +381,6 @@ def transform_preds_to_waymo_format(pred_dicts, top_k_for_eval=-1, eval_second=8
         'pred_gt_indices_mask': pred_gt_idx_valid_mask
     }
     return batch_pred_scores, batch_pred_trajs, gt_infos, object_type_cnt_dict
-
-
 
 def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
 
@@ -215,7 +425,6 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
     for key in avg_results:
         avg_results[key] = avg_results[key][0] / avg_results[key][1]
 
-    result_dict['-------------------------------------------------------------'] = 0
     result_dict.update(avg_results)
 
     final_avg_results = {}
@@ -241,137 +450,7 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
 
     result_format_str = ' '.join([x.rjust(12) for items in result_format_list for x in items])
 
-    result_dict['--------------------------------------------------------------'] = 0
     result_dict.update(final_avg_results)
-    result_dict['---------------------------------------------------------------'] = 0
     result_dict.update(object_type_cnt_dict)
-    result_dict['-----Note that this evaluation may have marginal differences with the official Waymo evaluation server-----'] = 0
 
     return result_dict, result_format_str
-
-def waymo_evaluation_seperate(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
-
-    pred_score, pred_trajectory, gt_infos, object_type_cnt_dict = transform_preds_to_waymo_format(
-        pred_dicts, top_k_for_eval=top_k, eval_second=eval_second,
-    )
-    eval_config = _default_metrics_config(eval_second=eval_second, num_modes_for_eval=num_modes_for_eval)
-
-    pred_score = tf.convert_to_tensor(pred_score, np.float32)
-    pred_trajs = tf.convert_to_tensor(pred_trajectory, np.float32)
-    gt_trajs = tf.convert_to_tensor(gt_infos['gt_trajectory'], np.float32)
-    gt_is_valid = tf.convert_to_tensor(gt_infos['gt_is_valid'], np.bool)
-    pred_gt_indices = tf.convert_to_tensor(gt_infos['pred_gt_indices'], tf.int64)
-    pred_gt_indices_mask = tf.convert_to_tensor(gt_infos['pred_gt_indices_mask'], np.bool)
-    object_type = tf.convert_to_tensor(gt_infos['object_type'], tf.int64)
-
-    metric_names = config_util.get_breakdown_names_from_motion_config(eval_config)
-    
-    scenario_num = pred_score.shape[0]
-    
-    step = 1000
-    for s_i in range(0, scenario_num, step):
-        metric_results = py_metrics_ops.motion_metrics(
-            config=eval_config.SerializeToString(),
-            prediction_trajectory=pred_trajs[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, top_k, num_agents_per_group, num_pred_steps, )
-            prediction_score=pred_score[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, top_k)
-            ground_truth_trajectory=gt_trajs[s_i: s_i+step, ...],  # (batch_size, num_total_agents, num_gt_steps, 7)
-            ground_truth_is_valid=gt_is_valid[s_i: s_i+step, ...],  # (batch_size, num_total_agents, num_gt_steps)
-            prediction_ground_truth_indices=pred_gt_indices[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, num_agents_per_group)
-            prediction_ground_truth_indices_mask=pred_gt_indices_mask[s_i: s_i+step, ...],  # (batch_size, num_pred_groups, num_agents_per_group)
-            object_type=object_type[s_i: s_i+step, ...]  # (batch_size, num_total_agents)
-        )
-    
-        object_count = {}
-        object_count['VEHICLE'] = (object_type[s_i: s_i+step, ...]._numpy() ==1).sum()
-        object_count['PEDESTRIAN'] = (object_type[s_i: s_i+step, ...]._numpy() ==2).sum()
-        object_count['CYCLIST'] = (object_type[s_i: s_i+step, ...]._numpy() ==3).sum()
-        
-        result_dict = {}
-        avg_results = {}
-        for i, m in enumerate(['minADE', 'minFDE', 'MissRate', 'OverlapRate', 'mAP']):
-            avg_results.update({
-                f'{m} - VEHICLE': [0.0, 0], f'{m} - PEDESTRIAN': [0.0, 0], f'{m} - CYCLIST': [0.0, 0]
-            })
-            for j, n in enumerate(metric_names):
-                cur_name = n.split('_')[1]
-                avg_results[f'{m} - {cur_name}'][0] += float(metric_results[i][j])
-                avg_results[f'{m} - {cur_name}'][1] += 1
-                result_dict[f'{m} - {n}\t'] = float(metric_results[i][j])
-
-        for key in avg_results:
-            avg_results[key] = avg_results[key][0] / avg_results[key][1]
-
-        result_dict['-------------------------------------------------------------'] = 0
-        result_dict.update(avg_results)
-
-        final_avg_results = {}
-        result_format_list = [
-            ['Waymo', 'mAP', 'minADE', 'minFDE', 'MissRate', '\n'],
-            ['VEHICLE', None, None, None, None, '\n'],
-            ['PEDESTRIAN', None, None, None, None, '\n'],
-            ['CYCLIST', None, None, None, None, '\n'],
-            ['Avg', None, None, None, None, '\n'],
-        ]
-        name_to_row = {'VEHICLE': 1, 'PEDESTRIAN': 2, 'CYCLIST': 3, 'Avg': 4}
-        name_to_col = {'mAP': 1, 'minADE': 2, 'minFDE': 3, 'MissRate': 4}
-
-        for cur_metric_name in ['minADE', 'minFDE', 'MissRate', 'mAP']:
-            final_avg_results[cur_metric_name] = 0
-            for cur_name in ['VEHICLE', 'PEDESTRIAN', 'CYCLIST']:
-                final_avg_results[cur_metric_name] += avg_results[f'{cur_metric_name} - {cur_name}']
-
-                result_format_list[name_to_row[cur_name]][name_to_col[cur_metric_name]] = '%.4f,' % avg_results[f'{cur_metric_name} - {cur_name}']
-
-            final_avg_results[cur_metric_name] /= 3
-            result_format_list[4][name_to_col[cur_metric_name]] = '%.4f,' % final_avg_results[cur_metric_name]
-
-        result_format_str = ' '.join([x.rjust(12) for items in result_format_list for x in items])
-
-        result_dict['--------------------------------------------------------------'] = 0
-        result_dict.update(final_avg_results)
-        result_dict['---------------------------------------------------------------'] = 0
-        result_dict.update(object_type_cnt_dict)
-        result_dict['-----Note that this evaluation may have marginal differences with the official Waymo evaluation server-----'] = 0
-        
-        print("%d - %d -------------------------------------------------------------- block res, \n" % (s_i, s_i + step))
-        print('count ', object_count)
-        print(result_format_str)
-
-    return result_dict, result_format_str
-
-
-def main():
-    import pickle
-    import argparse
-    parser = argparse.ArgumentParser(description='arg parser')
-    parser.add_argument('--pred_infos', type=str, default=None, help='pickle file')
-    parser.add_argument('--top_k', type=int, default=-1, help='')
-    parser.add_argument('--eval_second', type=int, default=8, help='')
-    parser.add_argument('--num_modes_for_eval', type=int, default=6, help='')
-
-    args = parser.parse_args()
-    print(args)
-
-    assert args.eval_second in [3, 5, 8]
-    pred_infos = pickle.load(open(args.pred_infos, 'rb'))
-
-    result_format_str = ''
-    print('Start to evaluate the waymo format results...')
-
-    metric_results, result_format_str = waymo_evaluation(
-        pred_dicts=pred_infos, top_k=args.top_k, eval_second=args.eval_second,
-        num_modes_for_eval=args.num_modes_for_eval,
-    )
-
-    print(metric_results)
-    metric_result_str = '\n'
-    for key in metric_results:
-        metric_results[key] = metric_results[key]
-        metric_result_str += '%s: %.4f \n' % (key, metric_results[key])
-    print(metric_result_str)
-    print(result_format_str)
-
-
-if __name__ == '__main__':
-    main()
-

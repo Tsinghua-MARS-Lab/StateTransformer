@@ -35,25 +35,30 @@ class ModelArguments:
         default="silu",
         metadata={"help": "Activation function, to be selected in the list `[relu, silu, gelu, tanh, gelu_new]"},
     )
-    loss_fn: Optional[str] = field(
-        default="mse",
-    )
     task: Optional[str] = field(
-        default="nuplan"  # only for mmtransformer
+        default="nuplan"
     )
-    with_traffic_light: Optional[bool] = field(
-        default=True
+    encoder_type: Optional[str] = field(
+        default='raster',
+        metadata={"help": "choose from [raster, vector]"}
     )
-    autoregressive: Optional[bool] = field(
-        default=False
+    raster_channels: Optional[int] = field(
+        default=34,  # updated channels (added both block and lanes for route), change to 33 for older version
+        metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
+    )
+    resnet_type: Optional[str] = field(
+        default="resnet18",
+        metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
+    )
+    pretrain_encoder: Optional[bool] = field(
+        default=False,
     )
     k: Optional[int] = field(
         default=1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
     )
-    next_token_scorer: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to use next token scorer for prediction."},
+    autoregressive: Optional[bool] = field(
+        default=False
     )
     x_random_walk: Optional[float] = field(
         default=0.0
@@ -61,23 +66,23 @@ class ModelArguments:
     y_random_walk: Optional[float] = field(
         default=0.0
     )
-    tokenize_label: Optional[bool] = field(
-        default=True
-    )
-    raster_channels: Optional[int] = field(
-        default=34,  # updated channels (added both block and lanes for route), change to 33 for older version
-        metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
-    )
     predict_yaw: Optional[bool] = field(
         default=False
+    )
+    loss_fn: Optional[str] = field(
+        default="mse",
     )
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
     )
-    visualize_prediction_to_path: Optional[str] = field(
-        default=None
+
+    ######## begin of  proposal args ########
+    use_proposal: Optional[bool] = field(
+        default=False
     )
-    ######## about key points ########
+    ######## end of proposal args ########
+
+    ######## begin of key points args ########
     use_key_points: Optional[str] = field(
         default='specified_backward',
         metadata={"help": "no: not using key points,"
@@ -99,36 +104,8 @@ class ModelArguments:
         metadata={"help": "choose from [mlp, diffusion]"}
     )
     ######## end of key points args ########
-    token_scenario_tag: Optional[bool] = field(
-        default=False
-    )
-    max_token_len: Optional[int] = field(
-        default=20
-    )
-    resnet_type: Optional[str] = field(
-        default="resnet18",
-        metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
-    )
-    pretrain_encoder: Optional[bool] = field(
-        default=False,
-    )
-    encoder_type: Optional[str] = field(
-        default='raster',
-        metadata={"help": "choose from [raster, vector]"}
-    )
-    past_sample_interval: Optional[int] = field(
-        default=5
-    )
-    future_sample_interval: Optional[int] = field(
-        default=2
-    )
-    debug_raster_path: Optional[str] = field(
-        default=None
-    )
-    generate_with_offroad_correction: Optional[bool] = field(
-        default=False
-    )
-    # begin of diffusion decoder args
+
+    ######## begin of diffusion decoder args ########
     mc_num: Optional[int] = field(
         default=200, metadata={"help": "The number of sampled KP trajs the diffusionKPdecoder is going to generate. After generating this many KP trajs, they go through the EM algorithm and give a group of final KP trajs of number k. This arg only works when we use diffusionKPdecoder and set k > 1."}
     )
@@ -139,17 +116,23 @@ class ModelArguments:
         default=5, metadata={"help": "Number of key points. Only used to initialize diffusion KP decoder."}
     )
     diffusion_condition_sequence_lenth: Optional[int] = field(
-        default=16, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: scenario_type_len + context_length * 2."}
+        default=1, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: 1."}
+
     )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
-    # end of diffusion decoder args
-    interaction: Optional[bool] = field(
-        default=False
+    ######## end of diffusion decoder args ########
+
+    ######## begin of nuplan args ########
+    with_traffic_light: Optional[bool] = field(
+        default=True
     )
-    mtr_config_path: Optional[str] = field(
-        default="/home/ldr/workspace/transformer4planning/config/gpt.yaml"
+    past_sample_interval: Optional[int] = field(
+        default=5
+    )
+    future_sample_interval: Optional[int] = field(
+        default=2
     )
     use_centerline: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use centerline in the pdm model"}
@@ -161,6 +144,22 @@ class ModelArguments:
         # currently this only works for raster preprocess, and aug_x, aug_y are default to 1.0
         default=0.0, metadata={"help": "The rate of augmenting current pose in the preprocess"}
     )
+    generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
+        default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
+    )
+    diffusion_feature_save_dir: Optional[str] = field(
+        default = None, metadata = {"help":"where to save diffusion dataset."}
+    )
+    ######## end of nuplan args ########
+
+    ######## begin of WOMD args ########
+    mtr_config_path: Optional[str] = field(
+        default="/home/ldr/workspace/transformer4planning/config/config_gpt2_small.yaml"
+    )
+    dense_pred: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use dense prediction in MTR model"}
+    )
+    ######## end of WOMD args ########
 
 
 @dataclass
@@ -213,6 +212,13 @@ class DataTrainingArguments:
     )
     use_full_training_set: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use the full training index from train_alltype"}
+    )
+    agent_type: Optional[str] = field(
+        default="all", metadata={"help": "all: no filter on WOMD"
+                                        "1: vehicle on WOMD"
+                                        "2: pedestrian on WOMD"
+                                        "3: cyclist on WOMD"
+                                        "any combination of numbers will be decoded into list of int (1 2;2 3;1 3)"}
     )
 
 
