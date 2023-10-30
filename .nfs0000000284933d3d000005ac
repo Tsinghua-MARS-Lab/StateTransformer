@@ -1,1724 +1,0 @@
-[INFO] 2023-10-25 22:27:13,349 run: Running torch.distributed.run with args: ['/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/distributed/run.py', '--master_port', '12363', '--nproc_per_node=8', 'runner.py', '--model_name', 'pretrain-gpt-small', '--model_pretrain_name_or_path', '/public/MARS/t4p/checkpoints/Small_Oct9/Small_SKPY_PI2_x1_auXYd1_auCurrentd1_VAL_Oct9/training_results/checkpoint-324000/', '--saved_dataset_folder', '/localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features', '--output_dir', '/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/output_dir/', '--logging_dir', '/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/result_dir/', '--run_name', 'small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff', '--num_train_epochs', '10', '--weight_decay', '0.00001', '--learning_rate', '0.0001', '--logging_steps', '2', '--save_strategy', 'steps', '--save_steps', '20000', '--dataloader_num_workers', '10', '--per_device_train_batch_size', '2', '--save_total_limit', '2', '--predict_yaw', 'True', '--dataloader_drop_last', 'True', '--task', 'train_diffusion_decoder', '--remove_unused_columns', 'False', '--do_train', '--loss_fn', 'mse', '--per_device_eval_batch_size', '2', '--max_eval_samples', '99999999', '--max_train_samples', '99999999', '--max_predict_samples', '99999999', '--past_sample_interval', '2', '--trajectory_loss_rescale', '0.00001']
-[INFO] 2023-10-25 22:27:13,351 run: Using nproc_per_node=8.
-[INFO] 2023-10-25 22:27:13,351 api: Starting elastic_operator with launch configs:
-  entrypoint       : runner.py
-  min_nodes        : 1
-  max_nodes        : 1
-  nproc_per_node   : 8
-  run_id           : none
-  rdzv_backend     : static
-  rdzv_endpoint    : 127.0.0.1:12363
-  rdzv_configs     : {'rank': 0, 'timeout': 900}
-  max_restarts     : 3
-  monitor_interval : 5
-  log_dir          : None
-  metrics_cfg      : {}
-
-[INFO] 2023-10-25 22:27:13,353 local_elastic_agent: log directory set to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68
-[INFO] 2023-10-25 22:27:13,353 api: [default] starting workers for entrypoint: python3
-[INFO] 2023-10-25 22:27:13,353 api: [default] Rendezvous'ing worker group
-[INFO] 2023-10-25 22:27:13,353 static_tcp_rendezvous: Creating TCPStore as the c10d::Store implementation
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/distributed/elastic/utils/store.py:52: FutureWarning: This is an experimental API and will be changed in future.
-  warnings.warn(
-[INFO] 2023-10-25 22:27:13,358 api: [default] Rendezvous complete for workers. Result:
-  restart_count=0
-  master_addr=127.0.0.1
-  master_port=12363
-  group_rank=0
-  group_world_size=1
-  local_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  global_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-  global_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-
-[INFO] 2023-10-25 22:27:13,359 api: [default] Starting worker group
-[INFO] 2023-10-25 22:27:13,361 __init__: Setting worker0 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/0/error.json
-[INFO] 2023-10-25 22:27:13,361 __init__: Setting worker1 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/1/error.json
-[INFO] 2023-10-25 22:27:13,361 __init__: Setting worker2 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/2/error.json
-[INFO] 2023-10-25 22:27:13,361 __init__: Setting worker3 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/3/error.json
-[INFO] 2023-10-25 22:27:13,361 __init__: Setting worker4 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/4/error.json
-[INFO] 2023-10-25 22:27:13,361 __init__: Setting worker5 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/5/error.json
-[INFO] 2023-10-25 22:27:13,361 __init__: Setting worker6 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/6/error.json
-[INFO] 2023-10-25 22:27:13,362 __init__: Setting worker7 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_0/7/error.json
-2023-10-25 22:27:16.246180: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:16.246266: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:16.246355: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:16.246458: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:16.246556: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:16.248368: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:16.249234: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:16.262220: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 0, device: cuda:0, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:27:26 - INFO - __main__ - Training/evaluation parameters PlanningTrainingArguments(
-_n_gpu=1,
-adafactor=False,
-adam_beta1=0.9,
-adam_beta2=0.999,
-adam_epsilon=1e-08,
-auto_find_batch_size=False,
-bf16=False,
-bf16_full_eval=False,
-data_seed=None,
-dataloader_drop_last=True,
-dataloader_num_workers=10,
-dataloader_pin_memory=True,
-ddp_bucket_cap_mb=None,
-ddp_find_unused_parameters=None,
-ddp_timeout=1800,
-debug=[],
-deepspeed=None,
-disable_tqdm=False,
-do_eval=False,
-do_predict=False,
-do_train=True,
-eval_accumulation_steps=None,
-eval_delay=0,
-eval_interval=1,
-eval_steps=None,
-evaluation_strategy=no,
-fp16=False,
-fp16_backend=auto,
-fp16_full_eval=False,
-fp16_opt_level=O1,
-fsdp=[],
-fsdp_config={'fsdp_min_num_params': 0, 'xla': False, 'xla_fsdp_grad_ckpt': False},
-fsdp_min_num_params=0,
-fsdp_transformer_layer_cls_to_wrap=None,
-full_determinism=False,
-gradient_accumulation_steps=1,
-gradient_checkpointing=False,
-greater_is_better=None,
-group_by_length=False,
-half_precision_backend=auto,
-hub_model_id=None,
-hub_private_repo=False,
-hub_strategy=every_save,
-hub_token=<HUB_TOKEN>,
-ignore_data_skip=False,
-include_inputs_for_metrics=False,
-jit_mode_eval=False,
-label_names=['trajectory_label'],
-label_smoothing_factor=0.0,
-learning_rate=0.0001,
-length_column_name=length,
-load_best_model_at_end=False,
-local_rank=0,
-log_level=passive,
-log_level_replica=warning,
-log_on_each_node=True,
-logging_dir=/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/result_dir/,
-logging_first_step=False,
-logging_nan_inf_filter=True,
-logging_steps=2,
-logging_strategy=steps,
-lr_scheduler_type=linear,
-max_grad_norm=1.0,
-max_steps=-1,
-metric_for_best_model=None,
-mp_parameters=,
-no_cuda=False,
-num_train_epochs=10.0,
-optim=adamw_hf,
-optim_args=None,
-output_dir=/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/output_dir/,
-overwrite_output_dir=False,
-past_index=-1,
-per_device_eval_batch_size=2,
-per_device_train_batch_size=2,
-prediction_loss_only=False,
-push_to_hub=False,
-push_to_hub_model_id=None,
-push_to_hub_organization=None,
-push_to_hub_token=<PUSH_TO_HUB_TOKEN>,
-ray_scope=last,
-remove_unused_columns=False,
-report_to=['tensorboard', 'wandb'],
-resume_from_checkpoint=None,
-run_name=small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff,
-save_on_each_node=False,
-save_steps=20000,
-save_strategy=steps,
-save_total_limit=2,
-seed=42,
-sharded_ddp=[],
-skip_memory_metrics=True,
-tf32=None,
-torch_compile=False,
-torch_compile_backend=None,
-torch_compile_mode=None,
-torchdynamo=None,
-tpu_metrics_debug=False,
-tpu_num_cores=None,
-use_ipex=False,
-use_legacy_prediction_loop=False,
-use_mps_device=False,
-warmup_ratio=0.0,
-warmup_steps=0,
-weight_decay=1e-05,
-xpu_backend=None,
-)
-10/25/2023 22:27:26 - INFO - __main__ - Loading full set of datasets from /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    main()
-  File "runner.py", line 196, in main
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 1, device: cuda:1, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 7, device: cuda:7, n_gpu: 1distributed training: True, 16-bits training: False
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    main()
-  File "runner.py", line 196, in main
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-    main()
-  File "runner.py", line 196, in main
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 2, device: cuda:2, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 5, device: cuda:5, n_gpu: 1distributed training: True, 16-bits training: False
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    main()
-  File "runner.py", line 196, in main
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    main()
-  File "runner.py", line 196, in main
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 3, device: cuda:3, n_gpu: 1distributed training: True, 16-bits training: False
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    main()
-  File "runner.py", line 196, in main
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 6, device: cuda:6, n_gpu: 1distributed training: True, 16-bits training: False
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-10/25/2023 22:27:26 - WARNING - __main__ - Process rank: 4, device: cuda:4, n_gpu: 1distributed training: True, 16-bits training: False
-    main()
-  File "runner.py", line 196, in main
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    main()
-  File "runner.py", line 196, in main
-    raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-ValueError: No training dataset found in /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/t4f_features, must include at least one city in /train
-[ERROR] 2023-10-25 22:27:33,493 api: failed (exitcode: 1) local_rank: 0 (pid: 1452062) of binary: /home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/bin/python3
-[ERROR] 2023-10-25 22:27:33,493 local_elastic_agent: [default] Worker group failed
-[INFO] 2023-10-25 22:27:33,493 api: [default] Worker group FAILED. 3/3 attempts left; will restart worker group
-[INFO] 2023-10-25 22:27:33,493 api: [default] Stopping worker group
-[INFO] 2023-10-25 22:27:33,494 api: [default] Rendezvous'ing worker group
-[INFO] 2023-10-25 22:27:33,494 static_tcp_rendezvous: Creating TCPStore as the c10d::Store implementation
-[INFO] 2023-10-25 22:27:33,495 api: [default] Rendezvous complete for workers. Result:
-  restart_count=1
-  master_addr=127.0.0.1
-  master_port=12363
-  group_rank=0
-  group_world_size=1
-  local_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  global_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-  global_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-
-[INFO] 2023-10-25 22:27:33,495 api: [default] Starting worker group
-[INFO] 2023-10-25 22:27:33,497 __init__: Setting worker0 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/0/error.json
-[INFO] 2023-10-25 22:27:33,497 __init__: Setting worker1 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/1/error.json
-[INFO] 2023-10-25 22:27:33,497 __init__: Setting worker2 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/2/error.json
-[INFO] 2023-10-25 22:27:33,497 __init__: Setting worker3 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/3/error.json
-[INFO] 2023-10-25 22:27:33,498 __init__: Setting worker4 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/4/error.json
-[INFO] 2023-10-25 22:27:33,498 __init__: Setting worker5 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/5/error.json
-[INFO] 2023-10-25 22:27:33,498 __init__: Setting worker6 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/6/error.json
-[INFO] 2023-10-25 22:27:33,498 __init__: Setting worker7 reply file to: /tmp/torchelastic_1w_rcj5d/none_hm3_7n68/attempt_1/7/error.json
-2023-10-25 22:27:35.951898: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:36.019831: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:36.037498: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:36.046105: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:36.052490: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:36.063977: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:36.072275: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:27:36.080445: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-[INFO] 2023-10-25 22:29:06,157 run: Running torch.distributed.run with args: ['/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/distributed/run.py', '--master_port', '12363', '--nproc_per_node=8', 'runner.py', '--model_name', 'pretrain-gpt-small', '--model_pretrain_name_or_path', '/public/MARS/t4p/checkpoints/Small_Oct9/Small_SKPY_PI2_x1_auXYd1_auCurrentd1_VAL_Oct9/training_results/checkpoint-324000/', '--saved_dataset_folder', '/localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/', '--output_dir', '/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/output_dir/', '--logging_dir', '/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/result_dir/', '--run_name', 'small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff', '--num_train_epochs', '10', '--weight_decay', '0.00001', '--learning_rate', '0.0001', '--logging_steps', '2', '--save_strategy', 'steps', '--save_steps', '20000', '--dataloader_num_workers', '10', '--per_device_train_batch_size', '2', '--save_total_limit', '2', '--predict_yaw', 'True', '--dataloader_drop_last', 'True', '--task', 'train_diffusion_decoder', '--remove_unused_columns', 'False', '--do_train', '--loss_fn', 'mse', '--per_device_eval_batch_size', '2', '--max_eval_samples', '99999999', '--max_train_samples', '99999999', '--max_predict_samples', '99999999', '--past_sample_interval', '2', '--trajectory_loss_rescale', '0.00001']
-[INFO] 2023-10-25 22:29:06,160 run: Using nproc_per_node=8.
-[INFO] 2023-10-25 22:29:06,160 api: Starting elastic_operator with launch configs:
-  entrypoint       : runner.py
-  min_nodes        : 1
-  max_nodes        : 1
-  nproc_per_node   : 8
-  run_id           : none
-  rdzv_backend     : static
-  rdzv_endpoint    : 127.0.0.1:12363
-  rdzv_configs     : {'rank': 0, 'timeout': 900}
-  max_restarts     : 3
-  monitor_interval : 5
-  log_dir          : None
-  metrics_cfg      : {}
-
-[INFO] 2023-10-25 22:29:06,162 local_elastic_agent: log directory set to: /tmp/torchelastic_0qls_jgk/none_w_zuz724
-[INFO] 2023-10-25 22:29:06,162 api: [default] starting workers for entrypoint: python3
-[INFO] 2023-10-25 22:29:06,162 api: [default] Rendezvous'ing worker group
-[INFO] 2023-10-25 22:29:06,162 static_tcp_rendezvous: Creating TCPStore as the c10d::Store implementation
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/distributed/elastic/utils/store.py:52: FutureWarning: This is an experimental API and will be changed in future.
-  warnings.warn(
-[INFO] 2023-10-25 22:29:06,168 api: [default] Rendezvous complete for workers. Result:
-  restart_count=0
-  master_addr=127.0.0.1
-  master_port=12363
-  group_rank=0
-  group_world_size=1
-  local_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  global_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-  global_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-
-[INFO] 2023-10-25 22:29:06,168 api: [default] Starting worker group
-[INFO] 2023-10-25 22:29:06,171 __init__: Setting worker0 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/0/error.json
-[INFO] 2023-10-25 22:29:06,171 __init__: Setting worker1 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/1/error.json
-[INFO] 2023-10-25 22:29:06,171 __init__: Setting worker2 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/2/error.json
-[INFO] 2023-10-25 22:29:06,171 __init__: Setting worker3 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/3/error.json
-[INFO] 2023-10-25 22:29:06,171 __init__: Setting worker4 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/4/error.json
-[INFO] 2023-10-25 22:29:06,171 __init__: Setting worker5 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/5/error.json
-[INFO] 2023-10-25 22:29:06,171 __init__: Setting worker6 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/6/error.json
-[INFO] 2023-10-25 22:29:06,172 __init__: Setting worker7 reply file to: /tmp/torchelastic_0qls_jgk/none_w_zuz724/attempt_0/7/error.json
-2023-10-25 22:29:11.670672: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:29:11.672450: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:29:11.672515: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:29:11.672497: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:29:11.673581: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:29:11.673841: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:29:11.673935: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:29:11.673962: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 0, device: cuda:0, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:29:25 - INFO - __main__ - Training/evaluation parameters PlanningTrainingArguments(
-_n_gpu=1,
-adafactor=False,
-adam_beta1=0.9,
-adam_beta2=0.999,
-adam_epsilon=1e-08,
-auto_find_batch_size=False,
-bf16=False,
-bf16_full_eval=False,
-data_seed=None,
-dataloader_drop_last=True,
-dataloader_num_workers=10,
-dataloader_pin_memory=True,
-ddp_bucket_cap_mb=None,
-ddp_find_unused_parameters=None,
-ddp_timeout=1800,
-debug=[],
-deepspeed=None,
-disable_tqdm=False,
-do_eval=False,
-do_predict=False,
-do_train=True,
-eval_accumulation_steps=None,
-eval_delay=0,
-eval_interval=1,
-eval_steps=None,
-evaluation_strategy=no,
-fp16=False,
-fp16_backend=auto,
-fp16_full_eval=False,
-fp16_opt_level=O1,
-fsdp=[],
-fsdp_config={'fsdp_min_num_params': 0, 'xla': False, 'xla_fsdp_grad_ckpt': False},
-fsdp_min_num_params=0,
-fsdp_transformer_layer_cls_to_wrap=None,
-full_determinism=False,
-gradient_accumulation_steps=1,
-gradient_checkpointing=False,
-greater_is_better=None,
-group_by_length=False,
-half_precision_backend=auto,
-hub_model_id=None,
-hub_private_repo=False,
-hub_strategy=every_save,
-hub_token=<HUB_TOKEN>,
-ignore_data_skip=False,
-include_inputs_for_metrics=False,
-jit_mode_eval=False,
-label_names=['trajectory_label'],
-label_smoothing_factor=0.0,
-learning_rate=0.0001,
-length_column_name=length,
-load_best_model_at_end=False,
-local_rank=0,
-log_level=passive,
-log_level_replica=warning,
-log_on_each_node=True,
-logging_dir=/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/result_dir/,
-logging_first_step=False,
-logging_nan_inf_filter=True,
-logging_steps=2,
-logging_strategy=steps,
-lr_scheduler_type=linear,
-max_grad_norm=1.0,
-max_steps=-1,
-metric_for_best_model=None,
-mp_parameters=,
-no_cuda=False,
-num_train_epochs=10.0,
-optim=adamw_hf,
-optim_args=None,
-output_dir=/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/output_dir/,
-overwrite_output_dir=False,
-past_index=-1,
-per_device_eval_batch_size=2,
-per_device_train_batch_size=2,
-prediction_loss_only=False,
-push_to_hub=False,
-push_to_hub_model_id=None,
-push_to_hub_organization=None,
-push_to_hub_token=<PUSH_TO_HUB_TOKEN>,
-ray_scope=last,
-remove_unused_columns=False,
-report_to=['tensorboard', 'wandb'],
-resume_from_checkpoint=None,
-run_name=small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff,
-save_on_each_node=False,
-save_steps=20000,
-save_strategy=steps,
-save_total_limit=2,
-seed=42,
-sharded_ddp=[],
-skip_memory_metrics=True,
-tf32=None,
-torch_compile=False,
-torch_compile_backend=None,
-torch_compile_mode=None,
-torchdynamo=None,
-tpu_metrics_debug=False,
-tpu_num_cores=None,
-use_ipex=False,
-use_legacy_prediction_loop=False,
-use_mps_device=False,
-warmup_ratio=0.0,
-warmup_steps=0,
-weight_decay=1e-05,
-xpu_backend=None,
-)
-10/25/2023 22:29:25 - INFO - __main__ - Loading full set of datasets from /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 6, device: cuda:6, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 4, device: cuda:4, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 7, device: cuda:7, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 3, device: cuda:3, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 1, device: cuda:1, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 5, device: cuda:5, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:29:25 - WARNING - __main__ - Process rank: 2, device: cuda:2, n_gpu: 1distributed training: True, 16-bits training: False
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Testset not found, using training set as test setDataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
- Validation set not found, using training set as val set
-ValidationSet
- TrainingSet: Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})  
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-10/25/2023 22:29:25 - INFO - datasets.arrow_dataset - Caching indices mapping at /tmp/tmpgjk0e4rs/cache-1c80317fa3b1799d.arrow
-10/25/2023 22:29:25 - INFO - datasets.arrow_dataset - Caching indices mapping at /tmp/tmpgjk0e4rs/cache-bdd640fb06671ad1.arrow
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-10/25/2023 22:29:25 - INFO - datasets.arrow_dataset - Caching indices mapping at /tmp/tmpgjk0e4rs/cache-3eb13b9046685257.arrow
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-[INFO|trainer.py:1740] 2023-10-25 22:29:59,295 >> ***** Running training *****
-[INFO|trainer.py:1741] 2023-10-25 22:29:59,296 >>   Num examples = 11200
-[INFO|trainer.py:1742] 2023-10-25 22:29:59,296 >>   Num Epochs = 10
-[INFO|trainer.py:1743] 2023-10-25 22:29:59,296 >>   Instantaneous batch size per device = 2
-[INFO|trainer.py:1744] 2023-10-25 22:29:59,296 >>   Total train batch size (w. parallel, distributed & accumulation) = 16
-[INFO|trainer.py:1745] 2023-10-25 22:29:59,296 >>   Gradient Accumulation steps = 1
-[INFO|trainer.py:1746] 2023-10-25 22:29:59,296 >>   Total optimization steps = 7000
-[INFO|trainer.py:1747] 2023-10-25 22:29:59,297 >>   Number of trainable parameters = 13409380
-[INFO|integrations.py:709] 2023-10-25 22:29:59,335 >> Automatic Weights & Biases logging enabled, to disable set os.environ["WANDB_DISABLED"] = "true"
-wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
-wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: / Waiting for wandb.init()...wandb: - Waiting for wandb.init()...wandb: Tracking run with wandb version 0.15.8
-wandb: Run data is saved locally in /home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/wandb/run-20231025_223006-zaqzlpwo
-wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff
-wandb: ⭐️ View project at https://wandb.ai/jingzheshi/huggingface
-wandb: 🚀 View run at https://wandb.ai/jingzheshi/huggingface/runs/zaqzlpwo
-  0%|          | 0/7000 [00:00<?, ?it/s]Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    main()
-  File "runner.py", line 360, in main
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-    return inner_training_loop(
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-    tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-    loss = self.compute_loss(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-    outputs = model(**inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    output = self.module(*inputs[0], **kwargs[0])
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    Traceback (most recent call last):
-main()
-    return forward_call(*input, **kwargs)
-  File "runner.py", line 360, in main
-Traceback (most recent call last):
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-  File "runner.py", line 595, in <module>
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-    main()
-  File "runner.py", line 360, in main
-    value = super().forward(hidden_state, label=label, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-    main()
-  File "runner.py", line 360, in main
-  File "runner.py", line 595, in <module>
-    main()
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-    return self.train_forward(hidden_state, label)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-  File "runner.py", line 360, in main
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-    return self.train_loss(trajectory_label, hidden_state)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-    return inner_training_loop(
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-    return self.p_losses(x, state, t)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-    return inner_training_loop(
-    x_recon = self.model(x_noisy, t, state)
-      File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-return inner_training_loop(
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-    tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-    loss = self.compute_loss(model, inputs)
-    return inner_training_loop(
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-    tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-    outputs = model(**inputs)
-    seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-RuntimeError: The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1
-      File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-    output = self.module(*inputs[0], **kwargs[0])
-tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-    loss = self.compute_loss(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-    tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-    value = super().forward(hidden_state, label=label, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-    return self.train_forward(hidden_state, label)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-    return self.train_loss(trajectory_label, hidden_state)
-    loss = self.compute_loss(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-    return self.p_losses(x, state, t)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-    x_recon = self.model(x_noisy, t, state)
-    outputs = model(**inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-    loss = self.compute_loss(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-    seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-RuntimeError: The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1
-    output = self.module(*inputs[0], **kwargs[0])
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    outputs = model(**inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-    outputs = model(**inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-    output = self.module(*inputs[0], **kwargs[0])
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    value = super().forward(hidden_state, label=label, **kwargs)    
-return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-    return forward_call(*input, **kwargs)
-    return self.train_forward(hidden_state, label)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-    output = self.module(*inputs[0], **kwargs[0])
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-        value = super().forward(hidden_state, label=label, **kwargs)return self.train_loss(trajectory_label, hidden_state)
-
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-Traceback (most recent call last):
-  File "runner.py", line 595, in <module>
-    return self.train_forward(hidden_state, label)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-    return self.p_losses(x, state, t)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-    return self.train_loss(trajectory_label, hidden_state)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-    main()
-  File "runner.py", line 360, in main
-    return self.p_losses(x, state, t)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-Traceback (most recent call last):
-    x_recon = self.model(x_noisy, t, state)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-  File "runner.py", line 595, in <module>
-    value = super().forward(hidden_state, label=label, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-    x_recon = self.model(x_noisy, t, state)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return self.train_forward(hidden_state, label)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-    return self.train_loss(trajectory_label, hidden_state)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-        return self.p_losses(x, state, t)main()
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-
-      File "runner.py", line 360, in main
-return forward_call(*input, **kwargs)
-    seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-RuntimeError: The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1
-    x_recon = self.model(x_noisy, t, state)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
-    main()RuntimeError
-: The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1  File "runner.py", line 360, in main
-
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1633, in train
-    seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
-RuntimeError: The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1
-    return inner_training_loop(
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-    return inner_training_loop(
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-    return inner_training_loop(
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 1902, in _inner_training_loop
-    tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-    tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-    tr_loss_step = self.training_step(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2645, in training_step
-    loss = self.compute_loss(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-    loss = self.compute_loss(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-wandb: Waiting for W&B process to finish... (failed 1). Press Control-C to abort syncing.
-    outputs = model(**inputs)
-    outputs = model(**inputs)  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    loss = self.compute_loss(model, inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/trainer.py", line 2677, in compute_loss
-    return forward_call(*input, **kwargs)
-      File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-return forward_call(*input, **kwargs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-    output = self.module(*inputs[0], **kwargs[0])
-      File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-output = self.module(*inputs[0], **kwargs[0])
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-    value = super().forward(hidden_state, label=label, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-    value = super().forward(hidden_state, label=label, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-        return self.train_forward(hidden_state, label)return self.train_forward(hidden_state, label)
-
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-    outputs = model(**inputs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return self.train_loss(trajectory_label, hidden_state)
-      File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-return self.train_loss(trajectory_label, hidden_state)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-    return self.p_losses(x, state, t)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-    return self.p_losses(x, state, t)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-    x_recon = self.model(x_noisy, t, state)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    x_recon = self.model(x_noisy, t, state)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/parallel/distributed.py", line 799, in forward
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-    seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
-    RuntimeErrorseq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim: 
-The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1
-RuntimeError: The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1
-    output = self.module(*inputs[0], **kwargs[0])
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 355, in forward
-    value = super().forward(hidden_state, label=label, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 196, in forward
-    return self.train_forward(hidden_state, label)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 204, in train_forward
-    return self.train_loss(trajectory_label, hidden_state)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 209, in train_loss
-    return self.p_losses(x, state, t)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 214, in p_losses
-    x_recon = self.model(x_noisy, t, state)
-  File "/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
-    return forward_call(*input, **kwargs)
-  File "/home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/transformer4planning/models/decoder/diffusion_decoder.py", line 129, in forward
-    seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
-RuntimeError: The size of tensor a (2) must match the size of tensor b (17) at non-singleton dimension 1
-[INFO] 2023-10-25 22:32:07,649 run: Running torch.distributed.run with args: ['/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/distributed/run.py', '--master_port', '12363', '--nproc_per_node=8', 'runner.py', '--model_name', 'pretrain-gpt-small', '--model_pretrain_name_or_path', '/public/MARS/t4p/checkpoints/Small_Oct9/Small_SKPY_PI2_x1_auXYd1_auCurrentd1_VAL_Oct9/training_results/checkpoint-324000/', '--saved_dataset_folder', '/localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/', '--output_dir', '/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/output_dir/', '--logging_dir', '/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/result_dir/', '--run_name', 'small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff', '--num_train_epochs', '10', '--weight_decay', '0.00001', '--learning_rate', '0.0001', '--logging_steps', '2', '--save_strategy', 'steps', '--save_steps', '20000', '--dataloader_num_workers', '10', '--per_device_train_batch_size', '2', '--save_total_limit', '2', '--predict_yaw', 'True', '--dataloader_drop_last', 'True', '--task', 'train_diffusion_decoder', '--remove_unused_columns', 'False', '--do_train', '--loss_fn', 'mse', '--per_device_eval_batch_size', '2', '--max_eval_samples', '99999999', '--max_train_samples', '99999999', '--max_predict_samples', '99999999', '--past_sample_interval', '2', '--trajectory_loss_rescale', '0.00001']
-[INFO] 2023-10-25 22:32:07,651 run: Using nproc_per_node=8.
-[INFO] 2023-10-25 22:32:07,652 api: Starting elastic_operator with launch configs:
-  entrypoint       : runner.py
-  min_nodes        : 1
-  max_nodes        : 1
-  nproc_per_node   : 8
-  run_id           : none
-  rdzv_backend     : static
-  rdzv_endpoint    : 127.0.0.1:12363
-  rdzv_configs     : {'rank': 0, 'timeout': 900}
-  max_restarts     : 3
-  monitor_interval : 5
-  log_dir          : None
-  metrics_cfg      : {}
-
-[INFO] 2023-10-25 22:32:07,653 local_elastic_agent: log directory set to: /tmp/torchelastic_mofkn504/none_8bhszgmr
-[INFO] 2023-10-25 22:32:07,653 api: [default] starting workers for entrypoint: python3
-[INFO] 2023-10-25 22:32:07,653 api: [default] Rendezvous'ing worker group
-[INFO] 2023-10-25 22:32:07,653 static_tcp_rendezvous: Creating TCPStore as the c10d::Store implementation
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/torch/distributed/elastic/utils/store.py:52: FutureWarning: This is an experimental API and will be changed in future.
-  warnings.warn(
-[INFO] 2023-10-25 22:32:07,657 api: [default] Rendezvous complete for workers. Result:
-  restart_count=0
-  master_addr=127.0.0.1
-  master_port=12363
-  group_rank=0
-  group_world_size=1
-  local_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  global_ranks=[0, 1, 2, 3, 4, 5, 6, 7]
-  role_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-  global_world_sizes=[8, 8, 8, 8, 8, 8, 8, 8]
-
-[INFO] 2023-10-25 22:32:07,657 api: [default] Starting worker group
-[INFO] 2023-10-25 22:32:07,658 __init__: Setting worker0 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/0/error.json
-[INFO] 2023-10-25 22:32:07,658 __init__: Setting worker1 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/1/error.json
-[INFO] 2023-10-25 22:32:07,658 __init__: Setting worker2 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/2/error.json
-[INFO] 2023-10-25 22:32:07,658 __init__: Setting worker3 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/3/error.json
-[INFO] 2023-10-25 22:32:07,658 __init__: Setting worker4 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/4/error.json
-[INFO] 2023-10-25 22:32:07,658 __init__: Setting worker5 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/5/error.json
-[INFO] 2023-10-25 22:32:07,658 __init__: Setting worker6 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/6/error.json
-[INFO] 2023-10-25 22:32:07,659 __init__: Setting worker7 reply file to: /tmp/torchelastic_mofkn504/none_8bhszgmr/attempt_0/7/error.json
-2023-10-25 22:32:12.396049: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:32:12.396101: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:32:12.396116: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:32:12.396364: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:32:12.396407: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:32:12.396749: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:32:12.396816: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-2023-10-25 22:32:12.396987: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  AVX2 FMA
-To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 0, device: cuda:0, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:32:31 - INFO - __main__ - Training/evaluation parameters PlanningTrainingArguments(
-_n_gpu=1,
-adafactor=False,
-adam_beta1=0.9,
-adam_beta2=0.999,
-adam_epsilon=1e-08,
-auto_find_batch_size=False,
-bf16=False,
-bf16_full_eval=False,
-data_seed=None,
-dataloader_drop_last=True,
-dataloader_num_workers=10,
-dataloader_pin_memory=True,
-ddp_bucket_cap_mb=None,
-ddp_find_unused_parameters=None,
-ddp_timeout=1800,
-debug=[],
-deepspeed=None,
-disable_tqdm=False,
-do_eval=False,
-do_predict=False,
-do_train=True,
-eval_accumulation_steps=None,
-eval_delay=0,
-eval_interval=1,
-eval_steps=None,
-evaluation_strategy=no,
-fp16=False,
-fp16_backend=auto,
-fp16_full_eval=False,
-fp16_opt_level=O1,
-fsdp=[],
-fsdp_config={'fsdp_min_num_params': 0, 'xla': False, 'xla_fsdp_grad_ckpt': False},
-fsdp_min_num_params=0,
-fsdp_transformer_layer_cls_to_wrap=None,
-full_determinism=False,
-gradient_accumulation_steps=1,
-gradient_checkpointing=False,
-greater_is_better=None,
-group_by_length=False,
-half_precision_backend=auto,
-hub_model_id=None,
-hub_private_repo=False,
-hub_strategy=every_save,
-hub_token=<HUB_TOKEN>,
-ignore_data_skip=False,
-include_inputs_for_metrics=False,
-jit_mode_eval=False,
-label_names=['trajectory_label'],
-label_smoothing_factor=0.0,
-learning_rate=0.0001,
-length_column_name=length,
-load_best_model_at_end=False,
-local_rank=0,
-log_level=passive,
-log_level_replica=warning,
-log_on_each_node=True,
-logging_dir=/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/result_dir/,
-logging_first_step=False,
-logging_nan_inf_filter=True,
-logging_steps=2,
-logging_strategy=steps,
-lr_scheduler_type=linear,
-max_grad_norm=1.0,
-max_steps=-1,
-metric_for_best_model=None,
-mp_parameters=,
-no_cuda=False,
-num_train_epochs=10.0,
-optim=adamw_hf,
-optim_args=None,
-output_dir=/localdata_hdd2/nuplan_diff_save_dir/otpt_dir/small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff/output_dir/,
-overwrite_output_dir=False,
-past_index=-1,
-per_device_eval_batch_size=2,
-per_device_train_batch_size=2,
-prediction_loss_only=False,
-push_to_hub=False,
-push_to_hub_model_id=None,
-push_to_hub_organization=None,
-push_to_hub_token=<PUSH_TO_HUB_TOKEN>,
-ray_scope=last,
-remove_unused_columns=False,
-report_to=['tensorboard', 'wandb'],
-resume_from_checkpoint=None,
-run_name=small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff,
-save_on_each_node=False,
-save_steps=20000,
-save_strategy=steps,
-save_total_limit=2,
-seed=42,
-sharded_ddp=[],
-skip_memory_metrics=True,
-tf32=None,
-torch_compile=False,
-torch_compile_backend=None,
-torch_compile_mode=None,
-torchdynamo=None,
-tpu_metrics_debug=False,
-tpu_num_cores=None,
-use_ipex=False,
-use_legacy_prediction_loop=False,
-use_mps_device=False,
-warmup_ratio=0.0,
-warmup_steps=0,
-weight_decay=1e-05,
-xpu_backend=None,
-)
-10/25/2023 22:32:31 - INFO - __main__ - Loading full set of datasets from /localdata_ssd/nuplan_diff_save_dir/diff_dataset/arrow_dataset/
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 4, device: cuda:4, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 6, device: cuda:6, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 5, device: cuda:5, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 1, device: cuda:1, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 7, device: cuda:7, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 2, device: cuda:2, n_gpu: 1distributed training: True, 16-bits training: False
-10/25/2023 22:32:31 - WARNING - __main__ - Process rank: 3, device: cuda:3, n_gpu: 1distributed training: True, 16-bits training: False
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-10/25/2023 22:32:31 - INFO - datasets.arrow_dataset - Caching indices mapping at /tmp/tmpxdr1adbm/cache-1c80317fa3b1799d.arrow
-10/25/2023 22:32:31 - INFO - datasets.arrow_dataset - Caching indices mapping at /tmp/tmpxdr1adbm/cache-bdd640fb06671ad1.arrow
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-10/25/2023 22:32:31 - INFO - datasets.arrow_dataset - Caching indices mapping at /tmp/tmpxdr1adbm/cache-3eb13b9046685257.arrow
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-Testset not found, using training set as test set
-Validation set not found, using training set as val set
-TrainingSet:  Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-ValidationSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-}) 
-TestingSet Dataset({
-    features: ['label', 'hidden_state', 'split'],
-    num_rows: 11200
-})
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-We are now using diffusion model for decoder.
-When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.
-Only diffusion decoder will be trained singlely!
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-/home/shijz/anaconda3/envs/tf4pl_new04_copied_A100/lib/python3.8/site-packages/transformers/optimization.py:391: FutureWarning: This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this warning
-  warnings.warn(
-[INFO|trainer.py:1740] 2023-10-25 22:33:06,914 >> ***** Running training *****
-[INFO|trainer.py:1741] 2023-10-25 22:33:06,915 >>   Num examples = 11200
-[INFO|trainer.py:1742] 2023-10-25 22:33:06,915 >>   Num Epochs = 10
-[INFO|trainer.py:1743] 2023-10-25 22:33:06,915 >>   Instantaneous batch size per device = 2
-[INFO|trainer.py:1744] 2023-10-25 22:33:06,915 >>   Total train batch size (w. parallel, distributed & accumulation) = 16
-[INFO|trainer.py:1745] 2023-10-25 22:33:06,915 >>   Gradient Accumulation steps = 1
-[INFO|trainer.py:1746] 2023-10-25 22:33:06,915 >>   Total optimization steps = 7000
-[INFO|trainer.py:1747] 2023-10-25 22:33:06,916 >>   Number of trainable parameters = 13405540
-[INFO|integrations.py:709] 2023-10-25 22:33:06,942 >> Automatic Weights & Biases logging enabled, to disable set os.environ["WANDB_DISABLED"] = "true"
-wandb: Currently logged in as: jingzheshi. Use `wandb login --relogin` to force relogin
-wandb: - Waiting for wandb.init()...wandb: \ Waiting for wandb.init()...wandb: | Waiting for wandb.init()...wandb: Tracking run with wandb version 0.15.8
-wandb: Run data is saved locally in /home/shijz/projects/LM_diffusion_decoder/working_dir_7/transformer4planning/wandb/run-20231025_223312-lhgc2p6p
-wandb: Run `wandb offline` to turn off syncing.
-wandb: Syncing run small_skpy_pi2_x10_auxyd1_val_ckptoct9_324k_trainDiff
-wandb: ⭐️ View project at https://wandb.ai/jingzheshi/huggingface
-wandb: 🚀 View run at https://wandb.ai/jingzheshi/huggingface/runs/lhgc2p6p
-  0%|          | 0/7000 [00:00<?, ?it/s][W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-[W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-[W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-[W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-[W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-[W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-[W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-[W reducer.cpp:1158] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
-  0%|          | 1/7000 [00:04<8:29:49,  4.37s/it]  0%|          | 2/7000 [00:04<3:40:09,  1.89s/it]                                                  {'loss': 0.4977, 'learning_rate': 9.997142857142857e-05, 'epoch': 0.0}
-  0%|          | 2/7000 [00:04<3:40:09,  1.89s/it]  0%|          | 4/7000 [00:04<1:27:52,  1.33it/s]                                                  {'loss': 1.0986, 'learning_rate': 9.994285714285715e-05, 'epoch': 0.01}
-  0%|          | 4/7000 [00:04<1:27:52,  1.33it/s]  0%|          | 6/7000 [00:04<50:14,  2.32it/s]                                                  {'loss': 0.786, 'learning_rate': 9.991428571428572e-05, 'epoch': 0.01}
-  0%|          | 6/7000 [00:04<50:14,  2.32it/s]  0%|          | 8/7000 [00:04<33:15,  3.50it/s]                                                {'loss': 0.8742, 'learning_rate': 9.98857142857143e-05, 'epoch': 0.01}
-  0%|          | 8/7000 [00:04<33:15,  3.50it/s]  0%|          | 10/7000 [00:05<23:36,  4.93it/s]                                                 {'loss': 0.8975, 'learning_rate': 9.985714285714287e-05, 'epoch': 0.01}
-  0%|          | 10/7000 [00:05<23:36,  4.93it/s]  0%|          | 12/7000 [00:05<18:03,  6.45it/s]                                                 {'loss': 0.8645, 'learning_rate': 9.982857142857143e-05, 'epoch': 0.02}
-  0%|          | 12/7000 [00:05<18:03,  6.45it/s]  0%|          | 14/7000 [00:05<14:42,  7.92it/s]                                                 {'loss': 1.383, 'learning_rate': 9.98e-05, 'epoch': 0.02}
-  0%|          | 14/7000 [00:05<14:42,  7.92it/s]  0%|          | 16/7000 [00:05<12:30,  9.31it/s]                                                 {'loss': 1.2422, 'learning_rate': 9.977142857142857e-05, 'epoch': 0.02}
-  0%|          | 16/7000 [00:05<12:30,  9.31it/s]  0%|          | 18/7000 [00:05<11:05, 10.49it/s]                                                 {'loss': 1.2541, 'learning_rate': 9.974285714285715e-05, 'epoch': 0.03}
-  0%|          | 18/7000 [00:05<11:05, 10.49it/s]  0%|          | 20/7000 [00:05<10:24, 11.18it/s]                                                 {'loss': 0.5843, 'learning_rate': 9.971428571428571e-05, 'epoch': 0.03}
-  0%|          | 20/7000 [00:05<10:24, 11.18it/s]  0%|          | 22/7000 [00:05<10:35, 10.98it/s]                                                 {'loss': 1.0259, 'learning_rate': 9.96857142857143e-05, 'epoch': 0.03}
-  0%|          | 22/7000 [00:05<10:35, 10.98it/s]  0%|          | 24/7000 [00:06<11:28, 10.13it/s]                                                 {'loss': 0.8566, 'learning_rate': 9.965714285714286e-05, 'epoch': 0.03}
-  0%|          | 24/7000 [00:06<11:28, 10.13it/s]  0%|          | 26/7000 [00:06<10:31, 11.04it/s]                                                 {'loss': 1.701, 'learning_rate': 9.962857142857144e-05, 'epoch': 0.04}
-  0%|          | 26/7000 [00:06<10:31, 11.04it/s]  0%|          | 28/7000 [00:06<09:44, 11.94it/s]                                                 {'loss': 0.4701, 'learning_rate': 9.960000000000001e-05, 'epoch': 0.04}
-  0%|          | 28/7000 [00:06<09:44, 11.94it/s]  0%|          | 30/7000 [00:06<09:31, 12.19it/s]                                                 {'loss': 0.7513, 'learning_rate': 9.957142857142858e-05, 'epoch': 0.04}
-  0%|          | 30/7000 [00:06<09:31, 12.19it/s]  0%|          | 32/7000 [00:06<09:59, 11.63it/s]                                                 {'loss': 0.9473, 'learning_rate': 9.954285714285714e-05, 'epoch': 0.05}
-  0%|          | 32/7000 [00:06<09:59, 11.63it/s]  0%|          | 34/7000 [00:07<10:42, 10.84it/s]                                                 {'loss': 0.8822, 'learning_rate': 9.951428571428571e-05, 'epoch': 0.05}
-  0%|          | 34/7000 [00:07<10:42, 10.84it/s]  1%|          | 36/7000 [00:07<10:44, 10.81it/s]                                                 {'loss': 0.7913, 'learning_rate': 9.948571428571429e-05, 'epoch': 0.05}
-  1%|          | 36/7000 [00:07<10:44, 10.81it/s]  1%|          | 38/7000 [00:07<11:34, 10.02it/s]                                                 {'loss': 0.9823, 'learning_rate': 9.945714285714286e-05, 'epoch': 0.05}
-  1%|          | 38/7000 [00:07<11:34, 10.02it/s]  1%|          | 40/7000 [00:07<10:37, 10.92it/s]                                                 {'loss': 1.2996, 'learning_rate': 9.942857142857144e-05, 'epoch': 0.06}
-  1%|          | 40/7000 [00:07<10:37, 10.92it/s]  1%|          | 42/7000 [00:07<10:44, 10.79it/s]                                                 {'loss': 0.6908, 'learning_rate': 9.94e-05, 'epoch': 0.06}
-  1%|          | 42/7000 [00:07<10:44, 10.79it/s]  1%|          | 44/7000 [00:07<11:04, 10.48it/s]                                                 {'loss': 0.3898, 'learning_rate': 9.937142857142857e-05, 'epoch': 0.06}
-  1%|          | 44/7000 [00:07<11:04, 10.48it/s]  1%|          | 46/7000 [00:08<10:09, 11.41it/s]                                                 {'loss': 1.3387, 'learning_rate': 9.934285714285715e-05, 'epoch': 0.07}
-  1%|          | 46/7000 [00:08<10:09, 11.41it/s]  1%|          | 48/7000 [00:08<10:56, 10.58it/s]                                                 {'loss': 0.4875, 'learning_rate': 9.931428571428572e-05, 'epoch': 0.07}
-  1%|          | 48/7000 [00:08<10:56, 10.58it/s]  1%|          | 50/7000 [00:08<10:57, 10.58it/s]                                                 {'loss': 0.6677, 'learning_rate': 9.92857142857143e-05, 'epoch': 0.07}
-  1%|          | 50/7000 [00:08<10:57, 10.58it/s]  1%|          | 52/7000 [00:08<11:09, 10.38it/s]                                                 {'loss': 0.8315, 'learning_rate': 9.925714285714287e-05, 'epoch': 0.07}
-  1%|          | 52/7000 [00:08<11:09, 10.38it/s]  1%|          | 54/7000 [00:08<10:42, 10.82it/s]                                                 {'loss': 0.6459, 'learning_rate': 9.922857142857143e-05, 'epoch': 0.08}
-  1%|          | 54/7000 [00:08<10:42, 10.82it/s]  1%|          | 56/7000 [00:09<10:30, 11.01it/s]                                                 {'loss': 0.5514, 'learning_rate': 9.92e-05, 'epoch': 0.08}
-  1%|          | 56/7000 [00:09<10:30, 11.01it/s]  1%|          | 58/7000 [00:09<10:57, 10.57it/s]                                                 {'loss': 0.4407, 'learning_rate': 9.917142857142857e-05, 'epoch': 0.08}
-  1%|          | 58/7000 [00:09<10:57, 10.57it/s]  1%|          | 60/7000 [00:09<09:38, 11.99it/s]                                                 {'loss': 1.0131, 'learning_rate': 9.914285714285715e-05, 'epoch': 0.09}
-  1%|          | 60/7000 [00:09<09:38, 11.99it/s]  1%|          | 62/7000 [00:09<09:12, 12.57it/s]                                                 {'loss': 0.4176, 'learning_rate': 9.911428571428571e-05, 'epoch': 0.09}
-  1%|          | 62/7000 [00:09<09:12, 12.57it/s]  1%|          | 64/7000 [00:09<11:28, 10.07it/s]                                                 {'loss': 0.9104, 'learning_rate': 9.90857142857143e-05, 'epoch': 0.09}
-  1%|          | 64/7000 [00:09<11:28, 10.07it/s]  1%|          | 66/7000 [00:10<12:00,  9.63it/s]                                                 {'loss': 0.5448, 'learning_rate': 9.905714285714286e-05, 'epoch': 0.09}
-  1%|          | 66/7000 [00:10<12:00,  9.63it/s]  1%|          | 68/7000 [00:10<10:54, 10.59it/s]                                                 {'loss': 1.2751, 'learning_rate': 9.902857142857144e-05, 'epoch': 0.1}
-  1%|          | 68/7000 [00:10<10:54, 10.59it/s]  1%|          | 70/7000 [00:10<12:34,  9.18it/s]                                                 {'loss': 0.3638, 'learning_rate': 9.900000000000001e-05, 'epoch': 0.1}
-  1%|          | 70/7000 [00:10<12:34,  9.18it/s]  1%|          | 72/7000 [00:10<13:04,  8.84it/s]                                                 {'loss': 0.4362, 'learning_rate': 9.897142857142859e-05, 'epoch': 0.1}
-  1%|          | 72/7000 [00:10<13:04,  8.84it/s]  1%|          | 74/7000 [00:10<11:43,  9.84it/s]                                                 {'loss': 1.5977, 'learning_rate': 9.894285714285715e-05, 'epoch': 0.11}
-  1%|          | 74/7000 [00:10<11:43,  9.84it/s]  1%|          | 76/7000 [00:11<10:29, 11.00it/s]                                                 {'loss': 0.2006, 'learning_rate': 9.891428571428571e-05, 'epoch': 0.11}
-  1%|          | 76/7000 [00:11<10:29, 11.00it/s]  1%|          | 78/7000 [00:11<09:37, 11.98it/s]                                                 {'loss': 1.5546, 'learning_rate': 9.888571428571429e-05, 'epoch': 0.11}
-  1%|          | 78/7000 [00:11<09:37, 11.98it/s]  1%|          | 80/7000 [00:11<08:50, 13.06it/s]                                                 {'loss': 0.966, 'learning_rate': 9.885714285714286e-05, 'epoch': 0.11}
-  1%|          | 80/7000 [00:11<08:50, 13.06it/s]  1%|          | 82/7000 [00:11<08:23, 13.75it/s]                                                 {'loss': 0.4499, 'learning_rate': 9.882857142857144e-05, 'epoch': 0.12}
-  1%|          | 82/7000 [00:11<08:23, 13.75it/s]  1%|          | 84/7000 [00:11<07:58, 14.44it/s]                                                 {'loss': 0.7303, 'learning_rate': 9.88e-05, 'epoch': 0.12}
-  1%|          | 84/7000 [00:11<07:58, 14.44it/s]  1%|          | 86/7000 [00:11<07:55, 14.54it/s]                                                 {'loss': 0.8925, 'learning_rate': 9.877142857142858e-05, 'epoch': 0.12}
-  1%|          | 86/7000 [00:11<07:55, 14.54it/s]  1%|▏         | 88/7000 [00:11<07:58, 14.46it/s]                                                 {'loss': 0.723, 'learning_rate': 9.874285714285715e-05, 'epoch': 0.13}
-  1%|▏         | 88/7000 [00:11<07:58, 14.46it/s]  1%|▏         | 90/7000 [00:11<07:49, 14.71it/s]                                                 {'loss': 0.1129, 'learning_rate': 9.871428571428572e-05, 'epoch': 0.13}
-  1%|▏         | 90/7000 [00:11<07:49, 14.71it/s]  1%|▏         | 92/7000 [00:12<07:53, 14.59it/s]                                                 {'loss': 0.8241, 'learning_rate': 9.86857142857143e-05, 'epoch': 0.13}
-  1%|▏         | 92/7000 [00:12<07:53, 14.59it/s]  1%|▏         | 94/7000 [00:12<09:25, 12.22it/s]                                                 {'loss': 0.8633, 'learning_rate': 9.865714285714286e-05, 'epoch': 0.13}
-  1%|▏         | 94/7000 [00:12<09:25, 12.22it/s]  1%|▏         | 96/7000 [00:12<10:47, 10.65it/s]                                                 {'loss': 0.8803, 'learning_rate': 9.862857142857143e-05, 'epoch': 0.14}
-  1%|▏         | 96/7000 [00:12<10:47, 10.65it/s]  1%|▏         | 98/7000 [00:12<11:52,  9.69it/s]                                                 {'loss': 0.4802, 'learning_rate': 9.86e-05, 'epoch': 0.14}
-  1%|▏         | 98/7000 [00:12<11:52,  9.69it/s]  1%|▏         | 100/7000 [00:12<11:15, 10.21it/s]                                                  {'loss': 1.0539, 'learning_rate': 9.857142857142858e-05, 'epoch': 0.14}
-  1%|▏         | 100/7000 [00:12<11:15, 10.21it/s]  1%|▏         | 102/7000 [00:13<10:55, 10.52it/s]                                                  {'loss': 0.3016, 'learning_rate': 9.854285714285715e-05, 'epoch': 0.15}
-  1%|▏         | 102/7000 [00:13<10:55, 10.52it/s]  1%|▏         | 104/7000 [00:13<12:08,  9.47it/s]                                                  {'loss': 0.6546, 'learning_rate': 9.851428571428571e-05, 'epoch': 0.15}
-  1%|▏         | 104/7000 [00:13<12:08,  9.47it/s]  2%|▏         | 105/7000 [00:13<12:40,  9.07it/s]  2%|▏         | 106/7000 [00:13<13:39,  8.41it/s]                                                  {'loss': 0.4381, 'learning_rate': 9.848571428571429e-05, 'epoch': 0.15}
-  2%|▏         | 106/7000 [00:13<13:39,  8.41it/s]  2%|▏         | 107/7000 [00:13<13:34,  8.46it/s]                                                  {'loss': 1.3094, 'learning_rate': 9.845714285714286e-05, 'epoch': 0.15}
-  2%|▏         | 108/7000 [00:13<13:34,  8.46it/s]  2%|▏         | 109/7000 [00:13<12:09,  9.44it/s]                                                  {'loss': 0.8732, 'learning_rate': 9.842857142857144e-05, 'epoch': 0.16}
-  2%|▏         | 110/7000 [00:14<12:09,  9.44it/s]  2%|▏         | 111/7000 [00:14<12:36,  9.11it/s]  2%|▏         | 112/7000 [00:14<13:18,  8.62it/s]                                                  {'loss': 0.7739, 'learning_rate': 9.84e-05, 'epoch': 0.16}
-  2%|▏         | 112/7000 [00:14<13:18,  8.62it/s]  2%|▏         | 114/7000 [00:14<12:59,  8.84it/s]                                                  {'loss': 0.7608, 'learning_rate': 9.837142857142859e-05, 'epoch': 0.16}
-  2%|▏         | 114/7000 [00:14<12:59,  8.84it/s]  2%|▏         | 116/7000 [00:14<11:37,  9.87it/s]                                                  {'loss': 0.7351, 'learning_rate': 9.834285714285715e-05, 'epoch': 0.17}
-  2%|▏         | 116/7000 [00:14<11:37,  9.87it/s]  2%|▏         | 118/7000 [00:14<11:12, 10.24it/s]                                                  {'loss': 0.4382, 'learning_rate': 9.831428571428572e-05, 'epoch': 0.17}
-  2%|▏         | 118/7000 [00:14<11:12, 10.24it/s]  2%|▏         | 120/7000 [00:15<12:14,  9.37it/s]                                                  {'loss': 0.9556, 'learning_rate': 9.828571428571429e-05, 'epoch': 0.17}
-  2%|▏         | 120/7000 [00:15<12:14,  9.37it/s]  2%|▏         | 122/7000 [00:15<11:37,  9.86it/s]                                                  {'loss': 1.0246, 'learning_rate': 9.825714285714285e-05, 'epoch': 0.17}
-  2%|▏         | 122/7000 [00:15<11:37,  9.86it/s]  2%|▏         | 124/7000 [00:15<11:31,  9.94it/s]                                                  {'loss': 0.5904, 'learning_rate': 9.822857142857143e-05, 'epoch': 0.18}
-  2%|▏         | 124/7000 [00:15<11:31,  9.94it/s]  2%|▏         | 126/7000 [00:15<11:39,  9.82it/s]                                                  {'loss': 1.2221, 'learning_rate': 9.82e-05, 'epoch': 0.18}
-  2%|▏         | 126/7000 [00:15<11:39,  9.82it/s]  2%|▏         | 128/7000 [00:15<10:09, 11.28it/s]                                                  {'loss': 1.0508, 'learning_rate': 9.817142857142858e-05, 'epoch': 0.18}
-  2%|▏         | 128/7000 [00:15<10:09, 11.28it/s]  2%|▏         | 130/7000 [00:16<09:56, 11.51it/s]                                                  {'loss': 1.0063, 'learning_rate': 9.814285714285715e-05, 'epoch': 0.19}
-  2%|▏         | 130/7000 [00:16<09:56, 11.51it/s]  2%|▏         | 132/7000 [00:16<12:15,  9.34it/s]                                                  {'loss': 0.9417, 'learning_rate': 9.811428571428572e-05, 'epoch': 0.19}
-  2%|▏         | 132/7000 [00:16<12:15,  9.34it/s]  2%|▏         | 134/7000 [00:16<12:47,  8.95it/s]                                                  {'loss': 0.892, 'learning_rate': 9.80857142857143e-05, 'epoch': 0.19}
-  2%|▏         | 134/7000 [00:16<12:47,  8.95it/s]  2%|▏         | 136/7000 [00:16<10:57, 10.43it/s]                                                  {'loss': 0.3756, 'learning_rate': 9.805714285714286e-05, 'epoch': 0.19}
-  2%|▏         | 136/7000 [00:16<10:57, 10.43it/s]  2%|▏         | 138/7000 [00:16<11:43,  9.75it/s]                                                  {'loss': 0.6929, 'learning_rate': 9.802857142857143e-05, 'epoch': 0.2}
-  2%|▏         | 138/7000 [00:16<11:43,  9.75it/s]  2%|▏         | 140/7000 [00:17<13:11,  8.66it/s]                                                  {'loss': 0.9097, 'learning_rate': 9.8e-05, 'epoch': 0.2}
-  2%|▏         | 140/7000 [00:17<13:11,  8.66it/s]  2%|▏         | 142/7000 [00:17<11:55,  9.58it/s]                                                  {'loss': 0.8443, 'learning_rate': 9.797142857142858e-05, 'epoch': 0.2}
-  2%|▏         | 142/7000 [00:17<11:55,  9.58it/s]  2%|▏         | 144/7000 [00:17<10:29, 10.90it/s]                                                  {'loss': 0.3097, 'learning_rate': 9.794285714285714e-05, 'epoch': 0.21}
-  2%|▏         | 144/7000 [00:17<10:29, 10.90it/s]  2%|▏         | 146/7000 [00:17<09:34, 11.93it/s]                                                  {'loss': 0.6225, 'learning_rate': 9.791428571428571e-05, 'epoch': 0.21}
-  2%|▏         | 146/7000 [00:17<09:34, 11.93it/s]  2%|▏         | 148/7000 [00:17<08:53, 12.84it/s]                                                  {'loss': 0.6311, 'learning_rate': 9.788571428571429e-05, 'epoch': 0.21}
-  2%|▏         | 148/7000 [00:17<08:53, 12.84it/s]  2%|▏         | 150/7000 [00:17<08:25, 13.55it/s]                                                  {'loss': 0.4169, 'learning_rate': 9.785714285714286e-05, 'epoch': 0.21}
-  2%|▏         | 150/7000 [00:17<08:25, 13.55it/s]  2%|▏         | 152/7000 [00:18<08:06, 14.08it/s]                                                  {'loss': 0.4388, 'learning_rate': 9.782857142857144e-05, 'epoch': 0.22}
-  2%|▏         | 152/7000 [00:18<08:06, 14.08it/s]  2%|▏         | 154/7000 [00:18<07:55, 14.40it/s]                                                  {'loss': 0.6683, 'learning_rate': 9.78e-05, 'epoch': 0.22}
-  2%|▏         | 154/7000 [00:18<07:55, 14.40it/s]  2%|▏         | 156/7000 [00:18<07:53, 14.47it/s]                                                  {'loss': 1.0001, 'learning_rate': 9.777142857142859e-05, 'epoch': 0.22}
-  2%|▏         | 156/7000 [00:18<07:53, 14.47it/s]  2%|▏         | 158/7000 [00:18<07:48, 14.59it/s]                                                  {'loss': 0.8218, 'learning_rate': 9.774285714285715e-05, 'epoch': 0.23}
-  2%|▏         | 158/7000 [00:18<07:48, 14.59it/s]  2%|▏         | 160/7000 [00:18<07:55, 14.38it/s]                                                  {'loss': 0.616, 'learning_rate': 9.771428571428572e-05, 'epoch': 0.23}
-  2%|▏         | 160/7000 [00:18<07:55, 14.38it/s]  2%|▏         | 162/7000 [00:18<09:40, 11.77it/s]                                                  {'loss': 1.1197, 'learning_rate': 9.768571428571429e-05, 'epoch': 0.23}
-  2%|▏         | 162/7000 [00:18<09:40, 11.77it/s]  2%|▏         | 164/7000 [00:19<10:41, 10.65it/s]                                                  {'loss': 0.8164, 'learning_rate': 9.765714285714285e-05, 'epoch': 0.23}
-  2%|▏         | 164/7000 [00:19<10:41, 10.65it/s]  2%|▏         | 166/7000 [00:19<09:51, 11.55it/s]                                                  {'loss': 0.7395, 'learning_rate': 9.762857142857143e-05, 'epoch': 0.24}
-  2%|▏         | 166/7000 [00:19<09:51, 11.55it/s]  2%|▏         | 168/7000 [00:19<09:19, 12.21it/s]                                                  {'loss': 1.3056, 'learning_rate': 9.76e-05, 'epoch': 0.24}
-  2%|▏         | 168/7000 [00:19<09:19, 12.21it/s]  2%|▏         | 170/7000 [00:19<09:16, 12.27it/s]                                                  {'loss': 0.3579, 'learning_rate': 9.757142857142858e-05, 'epoch': 0.24}
-  2%|▏         | 170/7000 [00:19<09:16, 12.27it/s]  2%|▏         | 172/7000 [00:19<10:09, 11.20it/s]                                                  {'loss': 0.5372, 'learning_rate': 9.754285714285715e-05, 'epoch': 0.25}
-  2%|▏         | 172/7000 [00:19<10:09, 11.20it/s]  2%|▏         | 174/7000 [00:19<09:55, 11.46it/s]                                                  {'loss': 0.7617, 'learning_rate': 9.751428571428571e-05, 'epoch': 0.25}
-  2%|▏         | 174/7000 [00:19<09:55, 11.46it/s]  3%|▎         | 176/7000 [00:20<09:52, 11.53it/s]                                                  {'loss': 0.692, 'learning_rate': 9.74857142857143e-05, 'epoch': 0.25}
-  3%|▎         | 176/7000 [00:20<09:52, 11.53it/s]  3%|▎         | 178/7000 [00:20<10:54, 10.42it/s]                                                  {'loss': 0.9846, 'learning_rate': 9.745714285714286e-05, 'epoch': 0.25}
-  3%|▎         | 178/7000 [00:20<10:54, 10.42it/s]  3%|▎         | 180/7000 [00:20<10:26, 10.89it/s]                                                  {'loss': 0.9875, 'learning_rate': 9.742857142857143e-05, 'epoch': 0.26}
-  3%|▎         | 180/7000 [00:20<10:26, 10.89it/s]  3%|▎         | 182/7000 [00:20<09:51, 11.54it/s]                                                  {'loss': 0.56, 'learning_rate': 9.74e-05, 'epoch': 0.26}
-  3%|▎         | 182/7000 [00:20<09:51, 11.54it/s]  3%|▎         | 184/7000 [00:20<10:25, 10.89it/s]                                                  {'loss': 0.8963, 'learning_rate': 9.737142857142858e-05, 'epoch': 0.26}
-  3%|▎         | 184/7000 [00:20<10:25, 10.89it/s]  3%|▎         | 186/7000 [00:20<09:38, 11.78it/s]                                                  {'loss': 0.4345, 'learning_rate': 9.734285714285714e-05, 'epoch': 0.27}
-  3%|▎         | 186/7000 [00:20<09:38, 11.78it/s]  3%|▎         | 188/7000 [00:21<10:36, 10.70it/s]                                                  {'loss': 0.8242, 'learning_rate': 9.731428571428572e-05, 'epoch': 0.27}
-  3%|▎         | 188/7000 [00:21<10:36, 10.70it/s]  3%|▎         | 190/7000 [00:21<10:41, 10.62it/s]                                                  {'loss': 0.4412, 'learning_rate': 9.728571428571429e-05, 'epoch': 0.27}
-  3%|▎         | 190/7000 [00:21<10:41, 10.62it/s]  3%|▎         | 192/7000 [00:21<10:26, 10.87it/s]                                                  {'loss': 0.5503, 'learning_rate': 9.725714285714286e-05, 'epoch': 0.27}
-  3%|▎         | 192/7000 [00:21<10:26, 10.87it/s]  3%|▎         | 194/7000 [00:21<10:10, 11.16it/s]                                                  {'loss': 0.8726, 'learning_rate': 9.722857142857144e-05, 'epoch': 0.28}
-  3%|▎         | 194/7000 [00:21<10:10, 11.16it/s]  3%|▎         | 196/7000 [00:21<09:28, 11.97it/s]                                                  {'loss': 0.8776, 'learning_rate': 9.72e-05, 'epoch': 0.28}
-  3%|▎         | 196/7000 [00:21<09:28, 11.97it/s]  3%|▎         | 198/7000 [00:21<08:44, 12.96it/s]                                                  {'loss': 0.4243, 'learning_rate': 9.717142857142858e-05, 'epoch': 0.28}
-  3%|▎         | 198/7000 [00:21<08:44, 12.96it/s]  3%|▎         | 200/7000 [00:22<11:02, 10.26it/s]                                                  {'loss': 0.6956, 'learning_rate': 9.714285714285715e-05, 'epoch': 0.29}
-  3%|▎         | 200/7000 [00:22<11:02, 10.26it/s]  3%|▎         | 202/7000 [00:22<13:45,  8.23it/s]                                                  {'loss': 0.5137, 'learning_rate': 9.711428571428572e-05, 'epoch': 0.29}
-  3%|▎         | 202/7000 [00:22<13:45,  8.23it/s]  3%|▎         | 204/7000 [00:22<11:55,  9.50it/s]                                                  {'loss': 0.5621, 'learning_rate': 9.708571428571429e-05, 'epoch': 0.29}
-  3%|▎         | 204/7000 [00:22<11:55,  9.50it/s]  3%|▎         | 206/7000 [00:23<13:10,  8.60it/s]                                                  {'loss': 0.2794, 'learning_rate': 9.705714285714285e-05, 'epoch': 0.29}
-  3%|▎         | 206/7000 [00:23<13:10,  8.60it/s]  3%|▎         | 207/7000 [00:23<13:20,  8.48it/s]  3%|▎         | 208/7000 [00:23<13:59,  8.09it/s]                                                  {'loss': 0.5903, 'learning_rate': 9.702857142857143e-05, 'epoch': 0.3}
-  3%|▎         | 208/7000 [00:23<13:59,  8.09it/s]  3%|▎         | 209/7000 [00:23<13:32,  8.36it/s]                                                  {'loss': 0.3985, 'learning_rate': 9.7e-05, 'epoch': 0.3}
-  3%|▎         | 210/7000 [00:23<13:32,  8.36it/s]  3%|▎         | 211/7000 [00:23<11:16, 10.04it/s]                                                  {'loss': 1.0112, 'learning_rate': 9.697142857142858e-05, 'epoch': 0.3}
-  3%|▎         | 212/7000 [00:23<11:15, 10.04it/s]  3%|▎         | 213/7000 [00:23<09:53, 11.43it/s]                                                  {'loss': 0.9611, 'learning_rate': 9.694285714285715e-05, 'epoch': 0.31}
-  3%|▎         | 214/7000 [00:23<09:53, 11.43it/s]  3%|▎         | 215/7000 [00:23<09:02, 12.51it/s]                                                  {'loss': 0.861, 'learning_rate': 9.691428571428573e-05, 'epoch': 0.31}
-  3%|▎         | 216/7000 [00:23<09:02, 12.51it/s]  3%|▎         | 217/7000 [00:23<08:23, 13.47it/s]                                                  {'loss': 0.2374, 'learning_rate': 9.68857142857143e-05, 'epoch': 0.31}
-  3%|▎         | 218/7000 [00:23<08:23, 13.47it/s]  3%|▎         | 219/7000 [00:24<07:58, 14.18it/s]                                                  {'loss': 0.4863, 'learning_rate': 9.685714285714286e-05, 'epoch': 0.31}
-  3%|▎         | 220/7000 [00:24<07:58, 14.18it/s]  3%|▎         | 221/7000 [00:24<07:50, 14.40it/s]                                                  {'loss': 0.5619, 'learning_rate': 9.682857142857144e-05, 'epoch': 0.32}
-  3%|▎         | 222/7000 [00:24<07:50, 14.40it/s]  3%|▎         | 223/7000 [00:24<07:41, 14.70it/s]                                                  {'loss': 0.6524, 'learning_rate': 9.680000000000001e-05, 'epoch': 0.32}
-  3%|▎         | 224/7000 [00:24<07:41, 14.70it/s]  3%|▎         | 225/7000 [00:24<07:53, 14.32it/s]                                                  {'loss': 1.0072, 'learning_rate': 9.677142857142858e-05, 'epoch': 0.32}
-  3%|▎         | 226/7000 [00:24<07:53, 14.32it/s]  3%|▎         | 227/7000 [00:24<07:55, 14.26it/s]                                                  {'loss': 0.8344, 'learning_rate': 9.674285714285714e-05, 'epoch': 0.33}
-  3%|▎         | 228/7000 [00:24<07:55, 14.26it/s]  3%|▎         | 229/7000 [00:24<08:22, 13.47it/s]                                                  {'loss': 0.4217, 'learning_rate': 9.671428571428572e-05, 'epoch': 0.33}
-  3%|▎         | 230/7000 [00:24<08:22, 13.47it/s]  3%|▎         | 231/7000 [00:25<10:41, 10.55it/s]                                                  {'loss': 0.6626, 'learning_rate': 9.668571428571429e-05, 'epoch': 0.33}
-  3%|▎         | 232/7000 [00:25<10:41, 10.55it/s]  3%|▎         | 233/7000 [00:25<10:54, 10.35it/s]                                                  {'loss': 0.9562, 'learning_rate': 9.665714285714286e-05, 'epoch': 0.33}
-  3%|▎         | 234/7000 [00:25<10:53, 10.35it/s]  3%|▎         | 235/7000 [00:25<10:10, 11.08it/s]                                                  {'loss': 0.8528, 'learning_rate': 9.662857142857144e-05, 'epoch': 0.34}
-  3%|▎         | 236/7000 [00:25<10:10, 11.08it/s]  3%|▎         | 237/7000 [00:25<09:30, 11.86it/s]                                                  {'loss': 0.5697, 'learning_rate': 9.66e-05, 'epoch': 0.34}
-  3%|▎         | 238/7000 [00:25<09:30, 11.86it/s]  3%|▎         | 239/7000 [00:25<09:29, 11.87it/s]                                                  {'loss': 0.5911, 'learning_rate': 9.657142857142858e-05, 'epoch': 0.34}
-  3%|▎         | 240/7000 [00:25<09:29, 11.87it/s]  3%|▎         | 241/7000 [00:25<10:39, 10.57it/s]                                                  {'loss': 0.5614, 'learning_rate': 9.654285714285715e-05, 'epoch': 0.35}
-  3%|▎         | 242/7000 [00:26<10:39, 10.57it/s]  3%|▎         | 243/7000 [00:26<11:20,  9.92it/s]                                                  {'loss': 0.3712, 'learning_rate': 9.651428571428572e-05, 'epoch': 0.35}
-  3%|▎         | 244/7000 [00:26<11:20,  9.92it/s]  4%|▎         | 245/7000 [00:26<11:32,  9.75it/s]                                                  {'loss': 0.8421, 'learning_rate': 9.648571428571428e-05, 'epoch': 0.35}
-  4%|▎         | 246/7000 [00:26<11:32,  9.75it/s]  4%|▎         | 247/7000 [00:26<10:47, 10.44it/s]                                                  {'loss': 0.6562, 'learning_rate': 9.645714285714285e-05, 'epoch': 0.35}
-  4%|▎         | 248/7000 [00:26<10:46, 10.44it/s]  4%|▎         | 249/7000 [00:26<10:24, 10.81it/s]                                                  {'loss': 0.3811, 'learning_rate': 9.642857142857143e-05, 'epoch': 0.36}
-  4%|▎         | 250/7000 [00:26<10:24, 10.81it/s]  4%|▎         | 251/7000 [00:26<10:01, 11.23it/s]                                                  {'loss': 0.5035, 'learning_rate': 9.64e-05, 'epoch': 0.36}
-  4%|▎         | 252/7000 [00:26<10:01, 11.23it/s]  4%|▎         | 253/7000 [00:27<10:13, 11.00it/s]                                                  {'loss': 0.7449, 'learning_rate': 9.637142857142858e-05, 'epoch': 0.36}
-  4%|▎         | 254/7000 [00:27<10:13, 11.00it/s]  4%|▎         | 255/7000 [00:27<10:31, 10.67it/s]                                                  {'loss': 0.8585, 'learning_rate': 9.634285714285715e-05, 'epoch': 0.37}
-  4%|▎         | 256/7000 [00:27<10:31, 10.67it/s]  4%|▎         | 257/7000 [00:27<10:34, 10.63it/s]                                                  {'loss': 0.4918, 'learning_rate': 9.631428571428573e-05, 'epoch': 0.37}
-  4%|▎         | 258/7000 [00:27<10:34, 10.63it/s]  4%|▎         | 259/7000 [00:27<10:17, 10.92it/s]                                                  {'loss': 0.7742, 'learning_rate': 9.628571428571429e-05, 'epoch': 0.37}
-  4%|▎         | 260/7000 [00:27<10:17, 10.92it/s]  4%|▎         | 261/7000 [00:27<11:08, 10.08it/s]                                                  {'loss': 0.4122, 'learning_rate': 9.625714285714286e-05, 'epoch': 0.37}
-  4%|▎         | 262/7000 [00:27<11:08, 10.08it/s]  4%|▍         | 263/7000 [00:28<11:18,  9.93it/s]                                                  {'loss': 0.6845, 'learning_rate': 9.622857142857144e-05, 'epoch': 0.38}
-  4%|▍         | 264/7000 [00:28<11:18,  9.93it/s]  4%|▍         | 265/7000 [00:28<11:11, 10.04it/s]                                                  {'loss': 0.5276, 'learning_rate': 9.620000000000001e-05, 'epoch': 0.38}
-  4%|▍         | 266/7000 [00:28<11:11, 10.04it/s]  4%|▍         | 267/7000 [00:28<10:59, 10.21it/s]                                                  {'loss': 0.6339, 'learning_rate': 9.617142857142857e-05, 'epoch': 0.38}
-  4%|▍         | 268/7000 [00:28<10:59, 10.21it/s]  4%|▍         | 269/7000 [00:28<09:41, 11.58it/s]                                                  {'loss': 0.4756, 'learning_rate': 9.614285714285714e-05, 'epoch': 0.39}
-  4%|▍         | 270/7000 [00:28<09:41, 11.58it/s]  4%|▍         | 271/7000 [00:28<12:23,  9.05it/s]                                                  {'loss': 0.3808, 'learning_rate': 9.611428571428572e-05, 'epoch': 0.39}
-  4%|▍         | 272/7000 [00:29<12:23,  9.05it/s]  4%|▍         | 273/7000 [00:29<13:39,  8.21it/s]                                                  {'loss': 1.075, 'learning_rate': 9.608571428571429e-05, 'epoch': 0.39}
-  4%|▍         | 274/7000 [00:29<13:39,  8.21it/s]  4%|▍         | 275/7000 [00:29<11:36,  9.65it/s]                                                  {'loss': 0.2687, 'learning_rate': 9.605714285714286e-05, 'epoch': 0.39}
-  4%|▍         | 276/7000 [00:29<11:36,  9.65it/s]  4%|▍         | 277/7000 [00:29<13:17,  8.43it/s]  4%|▍         | 278/7000 [00:29<13:29,  8.31it/s]                                                  {'loss': 0.2426, 'learning_rate': 9.602857142857144e-05, 'epoch': 0.4}
-  4%|▍         | 278/7000 [00:29<13:29,  8.31it/s]  4%|▍         | 279/7000 [00:29<14:03,  7.97it/s]                                                  {'loss': 0.4726, 'learning_rate': 9.6e-05, 'epoch': 0.4}
-  4%|▍         | 280/7000 [00:29<14:03,  7.97it/s]  4%|▍         | 281/7000 [00:30<11:58,  9.35it/s]                                                  {'loss': 1.3204, 'learning_rate': 9.597142857142858e-05, 'epoch': 0.4}
-  4%|▍         | 282/7000 [00:30<11:58,  9.35it/s]  4%|▍         | 283/7000 [00:30<10:18, 10.86it/s]                                                  {'loss': 0.4937, 'learning_rate': 9.594285714285715e-05, 'epoch': 0.41}
-  4%|▍         | 284/7000 [00:30<10:18, 10.86it/s]  4%|▍         | 285/7000 [00:30<09:11, 12.19it/s]                                                  {'loss': 0.7021, 'learning_rate': 9.591428571428572e-05, 'epoch': 0.41}
-  4%|▍         | 286/7000 [00:30<09:10, 12.19it/s]  4%|▍         | 287/7000 [00:30<08:34, 13.06it/s]                                                  {'loss': 0.524, 'learning_rate': 9.588571428571428e-05, 'epoch': 0.41}
-  4%|▍         | 288/7000 [00:30<08:33, 13.06it/s]  4%|▍         | 289/7000 [00:30<08:01, 13.94it/s]                                                  {'loss': 1.384, 'learning_rate': 9.585714285714285e-05, 'epoch': 0.41}
-  4%|▍         | 290/7000 [00:30<08:01, 13.94it/s]  4%|▍         | 291/7000 [00:30<07:49, 14.30it/s]                                                  {'loss': 0.2599, 'learning_rate': 9.582857142857143e-05, 'epoch': 0.42}
-  4%|▍         | 292/7000 [00:30<07:49, 14.30it/s]  4%|▍         | 293/7000 [00:30<07:49, 14.29it/s]                                                  {'loss': 0.5088, 'learning_rate': 9.58e-05, 'epoch': 0.42}
-  4%|▍         | 294/7000 [00:30<07:49, 14.29it/s]  4%|▍         | 295/7000 [00:30<07:47, 14.34it/s]                                                  {'loss': 0.696, 'learning_rate': 9.577142857142858e-05, 'epoch': 0.42}
-  4%|▍         | 296/7000 [00:31<07:47, 14.34it/s]  4%|▍         | 297/7000 [00:31<07:49, 14.29it/s]                                                  {'loss': 0.6294, 'learning_rate': 9.574285714285714e-05, 'epoch': 0.43}
-  4%|▍         | 298/7000 [00:31<07:49, 14.29it/s]  4%|▍         | 299/7000 [00:31<08:14, 13.54it/s]                                                  {'loss': 0.7303, 'learning_rate': 9.571428571428573e-05, 'epoch': 0.43}
-  4%|▍         | 300/7000 [00:31<08:14, 13.54it/s]  4%|▍         | 301/7000 [00:31<10:10, 10.97it/s]                                                  {'loss': 0.5053, 'learning_rate': 9.568571428571429e-05, 'epoch': 0.43}
-  4%|▍         | 302/7000 [00:31<10:10, 10.97it/s]  4%|▍         | 303/7000 [00:31<10:14, 10.89it/s]                                                  {'loss': 0.2785, 'learning_rate': 9.565714285714286e-05, 'epoch': 0.43}
-  4%|▍         | 304/7000 [00:31<10:14, 10.89it/s]  4%|▍         | 305/7000 [00:31<09:39, 11.56it/s]                                                  {'loss': 0.3569, 'learning_rate': 9.562857142857144e-05, 'epoch': 0.44}
-  4%|▍         | 306/7000 [00:31<09:39, 11.56it/s]  4%|▍         | 307/7000 [00:32<09:07, 12.22it/s]                                                  {'loss': 0.6874, 'learning_rate': 9.56e-05, 'epoch': 0.44}
-  4%|▍         | 308/7000 [00:32<09:07, 12.22it/s]  4%|▍         | 309/7000 [00:32<08:57, 12.44it/s]                                                  {'loss': 0.7306, 'learning_rate': 9.557142857142857e-05, 'epoch': 0.44}
-  4%|▍         | 310/7000 [00:32<08:57, 12.44it/s]  4%|▍         | 311/7000 [00:32<10:25, 10.69it/s]                                                  {'loss': 0.4547, 'learning_rate': 9.554285714285714e-05, 'epoch': 0.45}
-  4%|▍         | 312/7000 [00:32<10:25, 10.69it/s]  4%|▍         | 313/7000 [00:32<11:36,  9.61it/s]                                                  {'loss': 0.7643, 'learning_rate': 9.551428571428572e-05, 'epoch': 0.45}
-  4%|▍         | 314/7000 [00:32<11:35,  9.61it/s]  4%|▍         | 315/7000 [00:32<11:24,  9.77it/s]                                                  {'loss': 0.963, 'learning_rate': 9.548571428571429e-05, 'epoch': 0.45}
-  5%|▍         | 316/7000 [00:32<11:24,  9.77it/s]  5%|▍         | 317/7000 [00:32<10:10, 10.95it/s]                                                  {'loss': 0.4631, 'learning_rate': 9.545714285714287e-05, 'epoch': 0.45}
-  5%|▍         | 318/7000 [00:33<10:10, 10.95it/s]  5%|▍         | 319/7000 [00:33<12:07,  9.18it/s]                                                  {'loss': 0.5899, 'learning_rate': 9.542857142857143e-05, 'epoch': 0.46}
-  5%|▍         | 320/7000 [00:33<12:07,  9.18it/s]  5%|▍         | 321/7000 [00:33<11:49,  9.42it/s]                                                  {'loss': 0.617, 'learning_rate': 9.54e-05, 'epoch': 0.46}
-  5%|▍         | 322/7000 [00:33<11:48,  9.42it/s]  5%|▍         | 323/7000 [00:33<11:14,  9.90it/s]                                                  {'loss': 0.7158, 'learning_rate': 9.537142857142858e-05, 'epoch': 0.46}
-  5%|▍         | 324/7000 [00:33<11:14,  9.90it/s]  5%|▍         | 325/7000 [00:33<11:09,  9.96it/s]                                                  {'loss': 0.5117, 'learning_rate': 9.534285714285715e-05, 'epoch': 0.47}
-  5%|▍         | 326/7000 [00:33<11:09,  9.96it/s]  5%|▍         | 327/7000 [00:34<10:22, 10.71it/s]                                                  {'loss': 0.4086, 'learning_rate': 9.531428571428573e-05, 'epoch': 0.47}
-  5%|▍         | 328/7000 [00:34<10:22, 10.71it/s]  5%|▍         | 329/7000 [00:34<10:32, 10.54it/s]                                                  {'loss': 0.1766, 'learning_rate': 9.52857142857143e-05, 'epoch': 0.47}
-  5%|▍         | 330/7000 [00:34<10:32, 10.54it/s]  5%|▍         | 331/7000 [00:34<09:54, 11.22it/s]                                                  {'loss': 0.5234, 'learning_rate': 9.525714285714286e-05, 'epoch': 0.47}
-  5%|▍         | 332/7000 [00:34<09:54, 11.22it/s]  5%|▍         | 333/7000 [00:34<09:48, 11.33it/s]                                                  {'loss': 0.4292, 'learning_rate': 9.522857142857143e-05, 'epoch': 0.48}
-  5%|▍         | 334/7000 [00:34<09:48, 11.33it/s]  5%|▍         | 335/7000 [00:34<10:22, 10.71it/s]                                                  {'loss': 0.4899, 'learning_rate': 9.52e-05, 'epoch': 0.48}
-  5%|▍         | 336/7000 [00:34<10:21, 10.71it/s]  5%|▍         | 337/7000 [00:34<09:12, 12.07it/s]                                                  {'loss': 0.8832, 'learning_rate': 9.517142857142858e-05, 'epoch': 0.48}
-  5%|▍         | 338/7000 [00:34<09:12, 12.07it/s]  5%|▍         | 339/7000 [00:35<10:12, 10.87it/s]                                                  {'loss': 0.4823, 'learning_rate': 9.514285714285714e-05, 'epoch': 0.49}
-  5%|▍         | 340/7000 [00:35<10:12, 10.87it/s]  5%|▍         | 341/7000 [00:35<12:40,  8.76it/s]                                                  {'loss': 0.5998, 'learning_rate': 9.511428571428572e-05, 'epoch': 0.49}
-  5%|▍         | 342/7000 [00:35<12:40,  8.76it/s]  5%|▍         | 343/7000 [00:35<10:51, 10.21it/s]                                                  {'loss': 0.419, 'learning_rate': 9.508571428571429e-05, 'epoch': 0.49}
-  5%|▍         | 344/7000 [00:35<10:51, 10.21it/s]  5%|▍         | 345/7000 [00:35<11:40,  9.51it/s]                                                  {'loss': 0.5382, 'learning_rate': 9.505714285714287e-05, 'epoch': 0.49}
-  5%|▍         | 346/7000 [00:35<11:39,  9.51it/s]  5%|▍         | 347/7000 [00:36<12:54,  8.60it/s]                                                  {'loss': 0.8554, 'learning_rate': 9.502857142857144e-05, 'epoch': 0.5}
-  5%|▍         | 348/7000 [00:36<12:53,  8.60it/s]  5%|▍         | 349/7000 [00:36<12:08,  9.13it/s]                                                  {'loss': 0.6827, 'learning_rate': 9.5e-05, 'epoch': 0.5}
-  5%|▌         | 350/7000 [00:36<12:08,  9.13it/s]  5%|▌         | 351/7000 [00:36<10:46, 10.29it/s]                                                  {'loss': 0.48, 'learning_rate': 9.497142857142857e-05, 'epoch': 0.5}
-  5%|▌         | 352/7000 [00:36<10:46, 10.29it/s]  5%|▌         | 353/7000 [00:36<09:37, 11.50it/s]                                                  {'loss': 0.5314, 'learning_rate': 9.494285714285714e-05, 'epoch': 0.51}
-  5%|▌         | 354/7000 [00:36<09:37, 11.50it/s]  5%|▌         | 355/7000 [00:36<08:55, 12.42it/s]                                                  {'loss': 0.3816, 'learning_rate': 9.491428571428572e-05, 'epoch': 0.51}
-  5%|▌         | 356/7000 [00:36<08:55, 12.42it/s]  5%|▌         | 357/7000 [00:36<08:25, 13.14it/s]                                                  {'loss': 1.0755, 'learning_rate': 9.488571428571429e-05, 'epoch': 0.51}
-  5%|▌         | 358/7000 [00:36<08:25, 13.14it/s]  5%|▌         | 359/7000 [00:36<08:04, 13.72it/s]                                                  {'loss': 0.3116, 'learning_rate': 9.485714285714287e-05, 'epoch': 0.51}
-  5%|▌         | 360/7000 [00:36<08:04, 13.72it/s]  5%|▌         | 361/7000 [00:37<07:54, 13.99it/s]                                                  {'loss': 0.355, 'learning_rate': 9.482857142857143e-05, 'epoch': 0.52}
-  5%|▌         | 362/7000 [00:37<07:54, 13.99it/s]  5%|▌         | 363/7000 [00:37<07:49, 14.14it/s]                                                  {'loss': 0.4097, 'learning_rate': 9.48e-05, 'epoch': 0.52}
-  5%|▌         | 364/7000 [00:37<07:49, 14.14it/s]  5%|▌         | 365/7000 [00:37<07:37, 14.51it/s]                                                  {'loss': 0.3712, 'learning_rate': 9.477142857142858e-05, 'epoch': 0.52}
-  5%|▌         | 366/7000 [00:37<07:37, 14.51it/s]  5%|▌         | 367/7000 [00:37<07:52, 14.03it/s]                                                  {'loss': 0.4526, 'learning_rate': 9.474285714285715e-05, 'epoch': 0.53}
-  5%|▌         | 368/7000 [00:37<07:52, 14.03it/s]  5%|▌         | 369/7000 [00:37<08:29, 13.02it/s]                                                  {'loss': 0.8372, 'learning_rate': 9.471428571428573e-05, 'epoch': 0.53}
-  5%|▌         | 370/7000 [00:37<08:29, 13.02it/s]  5%|▌         | 371/7000 [00:37<11:11,  9.88it/s]                                                  {'loss': 0.2299, 'learning_rate': 9.46857142857143e-05, 'epoch': 0.53}
-  5%|▌         | 372/7000 [00:38<11:11,  9.88it/s]  5%|▌         | 373/7000 [00:38<10:03, 10.98it/s]                                                  {'loss': 0.4857, 'learning_rate': 9.465714285714286e-05, 'epoch': 0.53}
-  5%|▌         | 374/7000 [00:38<10:03, 10.98it/s]  5%|▌         | 375/7000 [00:38<09:29, 11.63it/s]                                                  {'loss': 0.38, 'learning_rate': 9.462857142857143e-05, 'epoch': 0.54}
-  5%|▌         | 376/7000 [00:38<09:29, 11.63it/s]  5%|▌         | 377/7000 [00:38<09:19, 11.84it/s]                                                  {'loss': 0.5702, 'learning_rate': 9.46e-05, 'epoch': 0.54}
-  5%|▌         | 378/7000 [00:38<09:19, 11.84it/s]  5%|▌         | 379/7000 [00:38<09:56, 11.11it/s]                                                  {'loss': 0.3664, 'learning_rate': 9.457142857142858e-05, 'epoch': 0.54}
-  5%|▌         | 380/7000 [00:38<09:55, 11.11it/s]  5%|▌         | 381/7000 [00:38<10:03, 10.97it/s]                                                  {'loss': 0.5467, 'learning_rate': 9.454285714285714e-05, 'epoch': 0.55}
-  5%|▌         | 382/7000 [00:38<10:03, 10.97it/s]  5%|▌         | 383/7000 [00:39<11:01, 10.00it/s]                                                  {'loss': 0.9621, 'learning_rate': 9.451428571428572e-05, 'epoch': 0.55}
-  5%|▌         | 384/7000 [00:39<11:01, 10.00it/s]  6%|▌         | 385/7000 [00:39<10:27, 10.54it/s]                                                  {'loss': 0.6509, 'learning_rate': 9.448571428571429e-05, 'epoch': 0.55}
-  6%|▌         | 386/7000 [00:39<10:27, 10.54it/s]  6%|▌         | 387/7000 [00:39<09:34, 11.51it/s]                                                  {'loss': 0.3525, 'learning_rate': 9.445714285714287e-05, 'epoch': 0.55}
-  6%|▌         | 388/7000 [00:39<09:34, 11.51it/s]  6%|▌         | 389/7000 [00:39<09:48, 11.23it/s]                                                  {'loss': 0.2965, 'learning_rate': 9.442857142857144e-05, 'epoch': 0.56}
-  6%|▌         | 390/7000 [00:39<09:48, 11.23it/s]  6%|▌         | 391/7000 [00:39<10:20, 10.66it/s]                                                  {'loss': 0.3807, 'learning_rate': 9.44e-05, 'epoch': 0.56}
-  6%|▌         | 392/7000 [00:39<10:20, 10.66it/s]  6%|▌         | 393/7000 [00:39<10:42, 10.28it/s]                                                  {'loss': 0.4368, 'learning_rate': 9.437142857142857e-05, 'epoch': 0.56}
-  6%|▌         | 394/7000 [00:40<10:42, 10.28it/s]  6%|▌         | 395/7000 [00:40<11:09,  9.86it/s]                                                  {'loss': 0.3714, 'learning_rate': 9.434285714285714e-05, 'epoch': 0.57}
-  6%|▌         | 396/7000 [00:40<11:09,  9.86it/s]  6%|▌         | 397/7000 [00:40<10:41, 10.30it/s]                                                  {'loss': 0.6412, 'learning_rate': 9.431428571428572e-05, 'epoch': 0.57}
-  6%|▌         | 398/7000 [00:40<10:41, 10.30it/s]  6%|▌         | 399/7000 [00:40<10:01, 10.97it/s]                                                  {'loss': 0.9926, 'learning_rate': 9.428571428571429e-05, 'epoch': 0.57}
-  6%|▌         | 400/7000 [00:40<10:01, 10.97it/s]  6%|▌         | 401/7000 [00:40<09:36, 11.45it/s]                                                  {'loss': 0.7109, 'learning_rate': 9.425714285714287e-05, 'epoch': 0.57}
-  6%|▌         | 402/7000 [00:40<09:36, 11.45it/s]  6%|▌         | 403/7000 [00:40<10:05, 10.90it/s]                                                  {'loss': 0.4581, 'learning_rate': 9.422857142857143e-05, 'epoch': 0.58}
-  6%|▌         | 404/7000 [00:40<10:04, 10.90it/s]  6%|▌         | 405/7000 [00:41<09:45, 11.27it/s]                                                  {'loss': 0.834, 'learning_rate': 9.42e-05, 'epoch': 0.58}
-  6%|▌         | 406/7000 [00:41<09:45, 11.27it/s]  6%|▌         | 407/7000 [00:41<08:46, 12.53it/s]                                                  {'loss': 0.5116, 'learning_rate': 9.417142857142858e-05, 'epoch': 0.58}
-  6%|▌         | 408/7000 [00:41<08:45, 12.53it/s]  6%|▌         | 409/7000 [00:41<09:42, 11.31it/s]                                                  {'loss': 0.2087, 'learning_rate': 9.414285714285715e-05, 'epoch': 0.59}
-  6%|▌         | 410/7000 [00:41<09:42, 11.31it/s]  6%|▌         | 411/7000 [00:41<11:59,  9.16it/s]                                                  {'loss': 0.4982, 'learning_rate': 9.411428571428573e-05, 'epoch': 0.59}
-  6%|▌         | 412/7000 [00:41<11:59,  9.16it/s]  6%|▌         | 413/7000 [00:41<10:57, 10.02it/s]                                                  {'loss': 0.5247, 'learning_rate': 9.40857142857143e-05, 'epoch': 0.59}
-  6%|▌         | 414/7000 [00:41<10:57, 10.02it/s]  6%|▌         | 415/7000 [00:42<10:45, 10.21it/s]                                                  {'loss': 0.376, 'learning_rate': 9.405714285714286e-05, 'epoch': 0.59}
-  6%|▌         | 416/7000 [00:42<10:44, 10.21it/s]  6%|▌         | 417/7000 [00:42<12:18,  8.91it/s]  6%|▌         | 418/7000 [00:42<12:41,  8.65it/s]                                                  {'loss': 0.3338, 'learning_rate': 9.402857142857143e-05, 'epoch': 0.6}
-  6%|▌         | 418/7000 [00:42<12:41,  8.65it/s]  6%|▌         | 420/7000 [00:42<11:34,  9.48it/s]                                                  {'loss': 1.1707, 'learning_rate': 9.4e-05, 'epoch': 0.6}
-  6%|▌         | 420/7000 [00:42<11:34,  9.48it/s]  6%|▌         | 422/7000 [00:42<09:59, 10.97it/s]                                                  {'loss': 0.3053, 'learning_rate': 9.397142857142857e-05, 'epoch': 0.6}
-  6%|▌         | 422/7000 [00:42<09:59, 10.97it/s]  6%|▌         | 424/7000 [00:42<08:58, 12.21it/s]                                                  {'loss': 0.338, 'learning_rate': 9.394285714285714e-05, 'epoch': 0.61}
-  6%|▌         | 424/7000 [00:42<08:58, 12.21it/s]  6%|▌         | 426/7000 [00:43<08:22, 13.09it/s]                                                  {'loss': 0.521, 'learning_rate': 9.391428571428572e-05, 'epoch': 0.61}
-  6%|▌         | 426/7000 [00:43<08:22, 13.09it/s]  6%|▌         | 428/7000 [00:43<07:54, 13.84it/s]                                                  {'loss': 0.2979, 'learning_rate': 9.388571428571429e-05, 'epoch': 0.61}
-  6%|▌         | 428/7000 [00:43<07:54, 13.84it/s]  6%|▌         | 430/7000 [00:43<07:39, 14.31it/s]                                                  {'loss': 0.1738, 'learning_rate': 9.385714285714287e-05, 'epoch': 0.61}
-  6%|▌         | 430/7000 [00:43<07:39, 14.31it/s]  6%|▌         | 432/7000 [00:43<07:21, 14.88it/s]                                                  {'loss': 0.6556, 'learning_rate': 9.382857142857144e-05, 'epoch': 0.62}
-  6%|▌         | 432/7000 [00:43<07:21, 14.88it/s]  6%|▌         | 434/7000 [00:43<07:19, 14.93it/s]                                                  {'loss': 0.5502, 'learning_rate': 9.38e-05, 'epoch': 0.62}
-  6%|▌         | 434/7000 [00:43<07:19, 14.93it/s]  6%|▌         | 436/7000 [00:43<07:34, 14.45it/s]                                                  {'loss': 0.2347, 'learning_rate': 9.377142857142857e-05, 'epoch': 0.62}
-  6%|▌         | 436/7000 [00:43<07:34, 14.45it/s]  6%|▋         | 438/7000 [00:43<07:24, 14.76it/s]                                                  {'loss': 0.6019, 'learning_rate': 9.374285714285714e-05, 'epoch': 0.63}
-  6%|▋         | 438/7000 [00:43<07:24, 14.76it/s]  6%|▋         | 440/7000 [00:44<08:55, 12.25it/s]                                                  {'loss': 0.3837, 'learning_rate': 9.371428571428572e-05, 'epoch': 0.63}
-  6%|▋         | 440/7000 [00:44<08:55, 12.25it/s]  6%|▋         | 442/7000 [00:44<10:25, 10.48it/s]                                                  {'loss': 0.5768, 'learning_rate': 9.368571428571428e-05, 'epoch': 0.63}
-  6%|▋         | 442/7000 [00:44<10:25, 10.48it/s]  6%|▋         | 444/7000 [00:44<09:50, 11.10it/s]                                                  {'loss': 0.2375, 'learning_rate': 9.365714285714286e-05, 'epoch': 0.63}
-  6%|▋         | 444/7000 [00:44<09:50, 11.10it/s]  6%|▋         | 446/7000 [00:44<09:14, 11.81it/s]                                                  {'loss': 0.4229, 'learning_rate': 9.362857142857143e-05, 'epoch': 0.64}
-  6%|▋         | 446/7000 [00:44<09:14, 11.81it/s]  6%|▋         | 448/7000 [00:44<08:33, 12.75it/s]                                                  {'loss': 0.3478, 'learning_rate': 9.360000000000001e-05, 'epoch': 0.64}
-  6%|▋         | 448/7000 [00:44<08:33, 12.75it/s]  6%|▋         | 450/7000 [00:44<08:32, 12.77it/s]                                                  {'loss': 0.659, 'learning_rate': 9.357142857142858e-05, 'epoch': 0.64}
-  6%|▋         | 450/7000 [00:44<08:32, 12.77it/s]  6%|▋         | 452/7000 [00:45<10:56,  9.97it/s]                                                  {'loss': 0.227, 'learning_rate': 9.354285714285715e-05, 'epoch': 0.65}
-  6%|▋         | 452/7000 [00:45<10:56,  9.97it/s]  6%|▋         | 454/7000 [00:45<11:53,  9.18it/s]                                                  {'loss': 0.3769, 'learning_rate': 9.351428571428573e-05, 'epoch': 0.65}
-  6%|▋         | 454/7000 [00:45<11:53,  9.18it/s]  7%|▋         | 456/7000 [00:45<12:48,  8.51it/s]                                                  {'loss': 0.3167, 'learning_rate': 9.348571428571429e-05, 'epoch': 0.65}
-  7%|▋         | 456/7000 [00:45<12:48,  8.51it/s]  7%|▋         | 457/7000 [00:45<13:19,  8.19it/s]                                                  {'loss': 0.3046, 'learning_rate': 9.345714285714286e-05, 'epoch': 0.65}
-  7%|▋         | 458/7000 [00:45<13:19,  8.19it/s]  7%|▋         | 459/7000 [00:46<11:58,  9.11it/s]  7%|▋         | 460/7000 [00:46<12:14,  8.90it/s]                                                  {'loss': 0.3505, 'learning_rate': 9.342857142857143e-05, 'epoch': 0.66}
-  7%|▋         | 460/7000 [00:46<12:14,  8.90it/s]  7%|▋         | 461/7000 [00:46<13:20,  8.16it/s]                                                  {'loss': 0.2712, 'learning_rate': 9.340000000000001e-05, 'epoch': 0.66}
-  7%|▋         | 462/7000 [00:46<13:20,  8.16it/s]  7%|▋         | 463/7000 [00:46<12:25,  8.77it/s]                                                  {'loss': 0.5014, 'learning_rate': 9.337142857142857e-05, 'epoch': 0.66}
-  7%|▋         | 464/7000 [00:46<12:25,  8.77it/s]  7%|▋         | 465/7000 [00:46<10:32, 10.34it/s]                                                  {'loss': 0.3562, 'learning_rate': 9.334285714285714e-05, 'epoch': 0.67}
-  7%|▋         | 466/7000 [00:46<10:31, 10.34it/s]  7%|▋         | 467/7000 [00:46<09:58, 10.92it/s]                                                  {'loss': 0.5715, 'learning_rate': 9.331428571428572e-05, 'epoch': 0.67}
-  7%|▋         | 468/7000 [00:46<09:58, 10.92it/s]  7%|▋         | 469/7000 [00:46<09:08, 11.90it/s]                                                  {'loss': 0.6402, 'learning_rate': 9.328571428571429e-05, 'epoch': 0.67}
-  7%|▋         | 470/7000 [00:46<09:08, 11.90it/s]  7%|▋         | 471/7000 [00:47<08:31, 12.76it/s]                                                  {'loss': 0.7095, 'learning_rate': 9.325714285714287e-05, 'epoch': 0.67}
-  7%|▋         | 472/7000 [00:47<08:31, 12.76it/s]  7%|▋         | 473/7000 [00:47<08:51, 12.29it/s]                                                  {'loss': 0.5384, 'learning_rate': 9.322857142857144e-05, 'epoch': 0.68}
-  7%|▋         | 474/7000 [00:47<08:51, 12.29it/s]  7%|▋         | 475/7000 [00:47<09:32, 11.41it/s]                                                  {'loss': 0.4727, 'learning_rate': 9.320000000000002e-05, 'epoch': 0.68}
-  7%|▋         | 476/7000 [00:47<09:31, 11.41it/s]  7%|▋         | 477/7000 [00:47<08:28, 12.83it/s]                                                  {'loss': 0.4465, 'learning_rate': 9.317142857142858e-05, 'epoch': 0.68}
-  7%|▋         | 478/7000 [00:47<08:28, 12.83it/s]  7%|▋         | 479/7000 [00:47<09:26, 11.51it/s]                                                  {'loss': 0.8674, 'learning_rate': 9.314285714285715e-05, 'epoch': 0.69}
-  7%|▋         | 480/7000 [00:47<09:26, 11.51it/s]  7%|▋         | 481/7000 [00:48<11:43,  9.26it/s]                                                  {'loss': 1.2709, 'learning_rate': 9.311428571428572e-05, 'epoch': 0.69}
-  7%|▋         | 482/7000 [00:48<11:43,  9.26it/s]  7%|▋         | 483/7000 [00:48<11:54,  9.12it/s]                                                  {'loss': 0.4261, 'learning_rate': 9.308571428571428e-05, 'epoch': 0.69}
-  7%|▋         | 484/7000 [00:48<11:54,  9.12it/s]  7%|▋         | 485/7000 [00:48<10:23, 10.44it/s]                                                  {'loss': 0.436, 'learning_rate': 9.305714285714286e-05, 'epoch': 0.69}
-  7%|▋         | 486/7000 [00:48<10:23, 10.44it/s]  7%|▋         | 487/7000 [00:48<11:39,  9.31it/s]                                                  {'loss': 0.2932, 'learning_rate': 9.302857142857143e-05, 'epoch': 0.7}
-  7%|▋         | 488/7000 [00:48<11:39,  9.31it/s]  7%|▋         | 489/7000 [00:48<12:02,  9.01it/s]  7%|▋         | 490/7000 [00:49<11:54,  9.11it/s]                                                  {'loss': 0.5368, 'learning_rate': 9.300000000000001e-05, 'epoch': 0.7}
-  7%|▋         | 490/7000 [00:49<11:54,  9.11it/s]  7%|▋         | 492/7000 [00:49<11:02,  9.82it/s]                                                  {'loss': 0.5834, 'learning_rate': 9.297142857142858e-05, 'epoch': 0.7}
-  7%|▋         | 492/7000 [00:49<11:02,  9.82it/s]  7%|▋         | 494/7000 [00:49<09:37, 11.27it/s]                                                  {'loss': 0.4854, 'learning_rate': 9.294285714285714e-05, 'epoch': 0.71}
-  7%|▋         | 494/7000 [00:49<09:37, 11.27it/s]  7%|▋         | 496/7000 [00:49<08:54, 12.17it/s]                                                  {'loss': 0.5816, 'learning_rate': 9.291428571428572e-05, 'epoch': 0.71}
-  7%|▋         | 496/7000 [00:49<08:54, 12.17it/s]  7%|▋         | 498/7000 [00:49<08:21, 12.97it/s]                                                  {'loss': 0.5714, 'learning_rate': 9.288571428571429e-05, 'epoch': 0.71}
-  7%|▋         | 498/7000 [00:49<08:21, 12.97it/s]  7%|▋         | 500/7000 [00:49<07:51, 13.78it/s]                                                  {'loss': 0.3156, 'learning_rate': 9.285714285714286e-05, 'epoch': 0.71}
-  7%|▋         | 500/7000 [00:49<07:51, 13.78it/s]  7%|▋         | 502/7000 [00:49<07:33, 14.34it/s]                                                  {'loss': 0.6117, 'learning_rate': 9.282857142857143e-05, 'epoch': 0.72}
-  7%|▋         | 502/7000 [00:49<07:33, 14.34it/s]  7%|▋         | 504/7000 [00:49<07:18, 14.80it/s]                                                  {'loss': 0.2957, 'learning_rate': 9.28e-05, 'epoch': 0.72}
-  7%|▋         | 504/7000 [00:49<07:18, 14.80it/s]  7%|▋         | 506/7000 [00:50<07:21, 14.69it/s]                                                  {'loss': 0.4401, 'learning_rate': 9.277142857142857e-05, 'epoch': 0.72}
-  7%|▋         | 506/7000 [00:50<07:21, 14.69it/s]  7%|▋         | 508/7000 [00:50<07:19, 14.76it/s]                                                  {'loss': 0.3602, 'learning_rate': 9.274285714285714e-05, 'epoch': 0.73}
-  7%|▋         | 508/7000 [00:50<07:19, 14.76it/s]  7%|▋         | 510/7000 [00:50<08:02, 13.46it/s]                                                  {'loss': 0.3407, 'learning_rate': 9.271428571428572e-05, 'epoch': 0.73}
-  7%|▋         | 510/7000 [00:50<08:02, 13.46it/s]  7%|▋         | 512/7000 [00:50<08:12, 13.17it/s]                                                  {'loss': 0.3196, 'learning_rate': 9.268571428571429e-05, 'epoch': 0.73}
-  7%|▋         | 512/7000 [00:50<08:12, 13.17it/s]  7%|▋         | 514/7000 [00:50<09:24, 11.50it/s]                                                  {'loss': 0.5595, 'learning_rate': 9.265714285714287e-05, 'epoch': 0.73}
-  7%|▋         | 514/7000 [00:50<09:24, 11.50it/s]  7%|▋         | 516/7000 [00:50<08:58, 12.05it/s]                                                  {'loss': 0.2285, 'learning_rate': 9.262857142857143e-05, 'epoch': 0.74}
-  7%|▋         | 516/7000 [00:50<08:58, 12.05it/s]  7%|▋         | 518/7000 [00:51<08:23, 12.87it/s]                                                  {'loss': 0.4154, 'learning_rate': 9.260000000000001e-05, 'epoch': 0.74}
-  7%|▋         | 518/7000 [00:51<08:23, 12.87it/s]  7%|▋         | 520/7000 [00:51<08:25, 12.82it/s]                                                  {'loss': 0.2112, 'learning_rate': 9.257142857142858e-05, 'epoch': 0.74}
-  7%|▋         | 520/7000 [00:51<08:25, 12.82it/s]  7%|▋         | 522/7000 [00:51<08:24, 12.84it/s]                                                  {'loss': 0.5316, 'learning_rate': 9.254285714285715e-05, 'epoch': 0.75}
-  7%|▋         | 522/7000 [00:51<08:24, 12.84it/s]  7%|▋         | 524/7000 [00:51<09:38, 11.19it/s]                                                  {'loss': 0.3512, 'learning_rate': 9.251428571428572e-05, 'epoch': 0.75}
-  7%|▋         | 524/7000 [00:51<09:38, 11.19it/s]  8%|▊         | 526/7000 [00:51<10:40, 10.11it/s]                                                  {'loss': 0.301, 'learning_rate': 9.248571428571428e-05, 'epoch': 0.75}
-  8%|▊         | 526/7000 [00:51<10:40, 10.11it/s]  8%|▊         | 528/7000 [00:52<10:35, 10.18it/s]                                                  {'loss': 0.4325, 'learning_rate': 9.245714285714286e-05, 'epoch': 0.75}
-  8%|▊         | 528/7000 [00:52<10:35, 10.18it/s]  8%|▊         | 530/7000 [00:52<10:04, 10.70it/s]                                                  {'loss': 0.3955, 'learning_rate': 9.242857142857143e-05, 'epoch': 0.76}
-  8%|▊         | 530/7000 [00:52<10:04, 10.70it/s]  8%|▊         | 532/7000 [00:52<09:48, 11.00it/s]                                                  {'loss': 0.2706, 'learning_rate': 9.240000000000001e-05, 'epoch': 0.76}
-  8%|▊         | 532/7000 [00:52<09:48, 11.00it/s]  8%|▊         | 534/7000 [00:52<09:26, 11.41it/s]                                                  {'loss': 0.4024, 'learning_rate': 9.237142857142858e-05, 'epoch': 0.76}
-  8%|▊         | 534/7000 [00:52<09:26, 11.41it/s]  8%|▊         | 536/7000 [00:52<08:38, 12.46it/s]                                                  {'loss': 0.3251, 'learning_rate': 9.234285714285714e-05, 'epoch': 0.77}
-  8%|▊         | 536/7000 [00:52<08:38, 12.46it/s]  8%|▊         | 538/7000 [00:52<08:34, 12.55it/s]                                                  {'loss': 0.4088, 'learning_rate': 9.231428571428572e-05, 'epoch': 0.77}
-  8%|▊         | 538/7000 [00:52<08:34, 12.55it/s]  8%|▊         | 540/7000 [00:53<08:57, 12.02it/s]                                                  {'loss': 0.7929, 'learning_rate': 9.228571428571429e-05, 'epoch': 0.77}
-  8%|▊         | 540/7000 [00:53<08:57, 12.02it/s]  8%|▊         | 542/7000 [00:53<08:38, 12.44it/s]                                                  {'loss': 0.3453, 'learning_rate': 9.225714285714286e-05, 'epoch': 0.77}
-  8%|▊         | 542/7000 [00:53<08:38, 12.44it/s]  8%|▊         | 544/7000 [00:53<08:52, 12.12it/s]                                                  {'loss': 0.3911, 'learning_rate': 9.222857142857142e-05, 'epoch': 0.78}
-  8%|▊         | 544/7000 [00:53<08:52, 12.12it/s]  8%|▊         | 546/7000 [00:53<09:16, 11.59it/s]                                                  {'loss': 0.1534, 'learning_rate': 9.22e-05, 'epoch': 0.78}
-  8%|▊         | 546/7000 [00:53<09:16, 11.59it/s]  8%|▊         | 548/7000 [00:53<08:24, 12.78it/s]                                                  {'loss': 0.2638, 'learning_rate': 9.217142857142857e-05, 'epoch': 0.78}
-  8%|▊         | 548/7000 [00:53<08:24, 12.78it/s]  8%|▊         | 550/7000 [00:53<09:21, 11.49it/s]                                                  {'loss': 0.2747, 'learning_rate': 9.214285714285714e-05, 'epoch': 0.79}
-  8%|▊         | 550/7000 [00:53<09:21, 11.49it/s]  8%|▊         | 552/7000 [00:54<11:44,  9.15it/s]                                                  {'loss': 0.4723, 'learning_rate': 9.211428571428572e-05, 'epoch': 0.79}
-  8%|▊         | 552/7000 [00:54<11:44,  9.15it/s]  8%|▊         | 554/7000 [00:54<10:27, 10.27it/s]                                                  {'loss': 0.5093, 'learning_rate': 9.208571428571429e-05, 'epoch': 0.79}
-  8%|▊         | 554/7000 [00:54<10:27, 10.27it/s]  8%|▊         | 556/7000 [00:54<10:30, 10.22it/s]                                                  {'loss': 0.3966, 'learning_rate': 9.205714285714287e-05, 'epoch': 0.79}
-  8%|▊         | 556/7000 [00:54<10:30, 10.22it/s]  8%|▊         | 558/7000 [00:54<11:59,  8.96it/s]                                                  {'loss': 0.4016, 'learning_rate': 9.202857142857143e-05, 'epoch': 0.8}
-  8%|▊         | 558/7000 [00:54<11:59,  8.96it/s]  8%|▊         | 559/7000 [00:54<12:25,  8.64it/s]                                                  {'loss': 0.717, 'learning_rate': 9.200000000000001e-05, 'epoch': 0.8}
-  8%|▊         | 560/7000 [00:55<12:25,  8.64it/s]  8%|▊         | 561/7000 [00:55<11:17,  9.50it/s]                                                  {'loss': 0.7785, 'learning_rate': 9.197142857142858e-05, 'epoch': 0.8}
-  8%|▊         | 562/7000 [00:55<11:17,  9.50it/s]  8%|▊         | 563/7000 [00:55<09:50, 10.90it/s]                                                  {'loss': 0.4801, 'learning_rate': 9.194285714285715e-05, 'epoch': 0.81}
-  8%|▊         | 564/7000 [00:55<09:50, 10.90it/s]  8%|▊         | 565/7000 [00:55<08:46, 12.22it/s]                                                  {'loss': 0.3993, 'learning_rate': 9.191428571428571e-05, 'epoch': 0.81}
-  8%|▊         | 566/7000 [00:55<08:46, 12.22it/s]  8%|▊         | 567/7000 [00:55<08:10, 13.12it/s]                                                  {'loss': 0.3197, 'learning_rate': 9.188571428571428e-05, 'epoch': 0.81}
-  8%|▊         | 568/7000 [00:55<08:10, 13.12it/s]  8%|▊         | 569/7000 [00:55<07:44, 13.85it/s]                                                  {'loss': 0.2817, 'learning_rate': 9.185714285714286e-05, 'epoch': 0.81}
-  8%|▊         | 570/7000 [00:55<07:44, 13.85it/s]  8%|▊         | 571/7000 [00:55<07:30, 14.26it/s]                                                  {'loss': 0.3319, 'learning_rate': 9.182857142857143e-05, 'epoch': 0.82}
-  8%|▊         | 572/7000 [00:55<07:30, 14.26it/s]  8%|▊         | 573/7000 [00:55<07:21, 14.56it/s]                                                  {'loss': 0.1243, 'learning_rate': 9.180000000000001e-05, 'epoch': 0.82}
-  8%|▊         | 574/7000 [00:55<07:21, 14.56it/s]  8%|▊         | 575/7000 [00:56<07:21, 14.56it/s]                                                  {'loss': 0.8431, 'learning_rate': 9.177142857142858e-05, 'epoch': 0.82}
-  8%|▊         | 576/7000 [00:56<07:21, 14.56it/s]  8%|▊         | 577/7000 [00:56<07:32, 14.21it/s]                                                  {'loss': 0.2788, 'learning_rate': 9.174285714285716e-05, 'epoch': 0.83}
-  8%|▊         | 578/7000 [00:56<07:32, 14.21it/s]  8%|▊         | 579/7000 [00:56<07:31, 14.21it/s]                                                  {'loss': 0.9894, 'learning_rate': 9.171428571428572e-05, 'epoch': 0.83}
-  8%|▊         | 580/7000 [00:56<07:31, 14.21it/s]  8%|▊         | 581/7000 [00:56<08:40, 12.34it/s]                                                  {'loss': 0.3515, 'learning_rate': 9.168571428571429e-05, 'epoch': 0.83}
-  8%|▊         | 582/7000 [00:56<08:40, 12.34it/s]  8%|▊         | 583/7000 [00:56<08:49, 12.13it/s]                                                  {'loss': 0.5012, 'learning_rate': 9.165714285714287e-05, 'epoch': 0.83}
-  8%|▊         | 584/7000 [00:56<08:48, 12.13it/s]  8%|▊         | 585/7000 [00:56<08:28, 12.62it/s]                                                  {'loss': 0.5269, 'learning_rate': 9.162857142857144e-05, 'epoch': 0.84}
-  8%|▊         | 586/7000 [00:56<08:28, 12.62it/s]  8%|▊         | 587/7000 [00:56<08:20, 12.80it/s]                                                  {'loss': 0.4395, 'learning_rate': 9.16e-05, 'epoch': 0.84}
-  8%|▊         | 588/7000 [00:57<08:20, 12.80it/s]  8%|▊         | 589/7000 [00:57<08:06, 13.17it/s]                                                  {'loss': 0.2859, 'learning_rate': 9.157142857142857e-05, 'epoch': 0.84}
-  8%|▊         | 590/7000 [00:57<08:06, 13.17it/s]  8%|▊         | 591/7000 [00:57<08:52, 12.04it/s]                                                  {'loss': 0.2788, 'learning_rate': 9.154285714285715e-05, 'epoch': 0.85}
-  8%|▊         | 592/7000 [00:57<08:52, 12.04it/s]  8%|▊         | 593/7000 [00:57<09:04, 11.76it/s]                                                  {'loss': 0.917, 'learning_rate': 9.151428571428572e-05, 'epoch': 0.85}
-  8%|▊         | 594/7000 [00:57<09:04, 11.76it/s]  8%|▊         | 595/7000 [00:57<10:26, 10.22it/s]                                                  {'loss': 0.547, 'learning_rate': 9.148571428571428e-05, 'epoch': 0.85}
-  9%|▊         | 596/7000 [00:57<10:26, 10.22it/s]  9%|▊         | 597/7000 [00:57<10:51,  9.83it/s]                                                  {'loss': 0.9844, 'learning_rate': 9.145714285714287e-05, 'epoch': 0.85}
-  9%|▊         | 598/7000 [00:58<10:50,  9.83it/s]  9%|▊         | 599/7000 [00:58<09:58, 10.70it/s]                                                  {'loss': 0.2372, 'learning_rate': 9.142857142857143e-05, 'epoch': 0.86}
-  9%|▊         | 600/7000 [00:58<09:58, 10.70it/s]  9%|▊         | 601/7000 [00:58<10:39, 10.01it/s]                                                  {'loss': 0.3701, 'learning_rate': 9.140000000000001e-05, 'epoch': 0.86}
-  9%|▊         | 602/7000 [00:58<10:39, 10.01it/s]  9%|▊         | 603/7000 [00:58<10:30, 10.14it/s]                                                  {'loss': 0.303, 'learning_rate': 9.137142857142858e-05, 'epoch': 0.86}
-  9%|▊         | 604/7000 [00:58<10:30, 10.14it/s]  9%|▊         | 605/7000 [00:58<09:22, 11.37it/s]                                                  {'loss': 0.5195, 'learning_rate': 9.134285714285715e-05, 'epoch': 0.87}
-  9%|▊         | 606/7000 [00:58<09:22, 11.37it/s]  9%|▊         | 607/7000 [00:58<10:03, 10.59it/s]                                                  {'loss': 0.6312, 'learning_rate': 9.131428571428571e-05, 'epoch': 0.87}
-  9%|▊         | 608/7000 [00:58<10:03, 10.59it/s]  9%|▊         | 609/7000 [00:59<09:19, 11.43it/s]                                                  {'loss': 0.3544, 'learning_rate': 9.128571428571428e-05, 'epoch': 0.87}
-  9%|▊         | 610/7000 [00:59<09:19, 11.43it/s]  9%|▊         | 611/7000 [00:59<08:41, 12.26it/s]                                                  {'loss': 0.3908, 'learning_rate': 9.125714285714286e-05, 'epoch': 0.87}
-  9%|▊         | 612/7000 [00:59<08:41, 12.26it/s]  9%|▉         | 613/7000 [00:59<08:42, 12.23it/s]                                                  {'loss': 0.3909, 'learning_rate': 9.122857142857143e-05, 'epoch': 0.88}
-  9%|▉         | 614/7000 [00:59<08:42, 12.23it/s]  9%|▉         | 615/7000 [00:59<09:25, 11.29it/s]                                                  {'loss': 0.3953, 'learning_rate': 9.120000000000001e-05, 'epoch': 0.88}
-  9%|▉         | 616/7000 [00:59<09:25, 11.29it/s]  9%|▉         | 617/7000 [00:59<08:21, 12.72it/s]                                                  {'loss': 0.5761, 'learning_rate': 9.117142857142857e-05, 'epoch': 0.88}
-  9%|▉         | 618/7000 [00:59<08:21, 12.72it/s]  9%|▉         | 619/7000 [00:59<09:11, 11.57it/s]                                                  {'loss': 0.6962, 'learning_rate': 9.114285714285716e-05, 'epoch': 0.89}
-  9%|▉         | 620/7000 [01:00<09:11, 11.57it/s]  9%|▉         | 621/7000 [01:00<11:23,  9.33it/s]                                                  {'loss': 0.4512, 'learning_rate': 9.111428571428572e-05, 'epoch': 0.89}
-  9%|▉         | 622/7000 [01:00<11:23,  9.33it/s]  9%|▉         | 623/7000 [01:00<11:43,  9.07it/s]                                                  {'loss': 0.6928, 'learning_rate': 9.108571428571429e-05, 'epoch': 0.89}
-  9%|▉         | 624/7000 [01:00<11:43,  9.07it/s]  9%|▉         | 625/7000 [01:00<11:01,  9.64it/s]                                                  {'loss': 0.3977, 'learning_rate': 9.105714285714287e-05, 'epoch': 0.89}
-  9%|▉         | 626/7000 [01:00<11:00,  9.64it/s]  9%|▉         | 627/7000 [01:00<12:07,  8.76it/s]  9%|▉         | 628/7000 [01:01<12:17,  8.64it/s]                                                  {'loss': 0.1678, 'learning_rate': 9.102857142857144e-05, 'epoch': 0.9}
-  9%|▉         | 628/7000 [01:01<12:17,  8.64it/s]  9%|▉         | 629/7000 [01:01<12:31,  8.48it/s]                                                  {'loss': 0.4347, 'learning_rate': 9.1e-05, 'epoch': 0.9}
-  9%|▉         | 630/7000 [01:01<12:31,  8.48it/s]  9%|▉         | 631/7000 [01:01<10:35, 10.02it/s]                                                  {'loss': 0.3765, 'learning_rate': 9.097142857142857e-05, 'epoch': 0.9}
-  9%|▉         | 632/7000 [01:01<10:35, 10.02it/s]  9%|▉         | 633/7000 [01:01<09:09, 11.59it/s]                                                  {'loss': 0.4383, 'learning_rate': 9.094285714285715e-05, 'epoch': 0.91}
-  9%|▉         | 634/7000 [01:01<09:09, 11.59it/s]  9%|▉         | 635/7000 [01:01<08:20, 12.72it/s]                                                  {'loss': 0.5764, 'learning_rate': 9.091428571428572e-05, 'epoch': 0.91}
-  9%|▉         | 636/7000 [01:01<08:20, 12.72it/s]  9%|▉         | 637/7000 [01:01<07:48, 13.58it/s]                                                  {'loss': 0.4151, 'learning_rate': 9.088571428571428e-05, 'epoch': 0.91}
-  9%|▉         | 638/7000 [01:01<07:48, 13.58it/s]  9%|▉         | 639/7000 [01:01<07:29, 14.14it/s]                                                  {'loss': 0.4893, 'learning_rate': 9.085714285714286e-05, 'epoch': 0.91}
-  9%|▉         | 640/7000 [01:01<07:29, 14.14it/s]  9%|▉         | 641/7000 [01:01<07:15, 14.59it/s]                                                  {'loss': 0.3654, 'learning_rate': 9.082857142857143e-05, 'epoch': 0.92}
-  9%|▉         | 642/7000 [01:01<07:15, 14.59it/s]  9%|▉         | 643/7000 [01:02<07:14, 14.65it/s]                                                  {'loss': 0.315, 'learning_rate': 9.080000000000001e-05, 'epoch': 0.92}
-  9%|▉         | 644/7000 [01:02<07:13, 14.65it/s]  9%|▉         | 645/7000 [01:02<07:18, 14.49it/s]                                                  {'loss': 0.2659, 'learning_rate': 9.077142857142858e-05, 'epoch': 0.92}
-  9%|▉         | 646/7000 [01:02<07:18, 14.49it/s]  9%|▉         | 647/7000 [01:02<07:23, 14.31it/s]                                                  {'loss': 0.9439, 'learning_rate': 9.074285714285715e-05, 'epoch': 0.93}
-  9%|▉         | 648/7000 [01:02<07:23, 14.31it/s]  9%|▉         | 649/7000 [01:02<07:24, 14.30it/s]                                                  {'loss': 0.8096, 'learning_rate': 9.071428571428571e-05, 'epoch': 0.93}
-  9%|▉         | 650/7000 [01:02<07:24, 14.30it/s]  9%|▉         | 651/7000 [01:02<09:14, 11.45it/s]                                                  {'loss': 0.3291, 'learning_rate': 9.068571428571428e-05, 'epoch': 0.93}
-  9%|▉         | 652/7000 [01:02<09:14, 11.45it/s]  9%|▉         | 653/7000 [01:02<10:10, 10.40it/s]                                                  {'loss': 0.5054, 'learning_rate': 9.065714285714286e-05, 'epoch': 0.93}
-  9%|▉         | 654/7000 [01:03<10:10, 10.40it/s]  9%|▉         | 655/7000 [01:03<09:28, 11.16it/s]                                                  {'loss': 0.781, 'learning_rate': 9.062857142857143e-05, 'epoch': 0.94}
-  9%|▉         | 656/7000 [01:03<09:28, 11.16it/s]  9%|▉         | 657/7000 [01:03<08:53, 11.90it/s]                                                  {'loss': 0.2343, 'learning_rate': 9.06e-05, 'epoch': 0.94}
-  9%|▉         | 658/7000 [01:03<08:53, 11.90it/s]  9%|▉         | 659/7000 [01:03<08:28, 12.47it/s]                                                  {'loss': 0.6602, 'learning_rate': 9.057142857142857e-05, 'epoch': 0.94}
-  9%|▉         | 660/7000 [01:03<08:28, 12.47it/s]  9%|▉         | 661/7000 [01:03<09:58, 10.58it/s]                                                  {'loss': 0.2724, 'learning_rate': 9.054285714285715e-05, 'epoch': 0.95}
-  9%|▉         | 662/7000 [01:03<09:58, 10.58it/s]  9%|▉         | 663/7000 [01:03<09:28, 11.15it/s]                                                  {'loss': 0.1873, 'learning_rate': 9.051428571428572e-05, 'epoch': 0.95}
-  9%|▉         | 664/7000 [01:03<09:28, 11.15it/s] 10%|▉         | 665/7000 [01:04<10:24, 10.14it/s]                                                  {'loss': 0.5108, 'learning_rate': 9.048571428571429e-05, 'epoch': 0.95}
- 10%|▉         | 666/7000 [01:04<10:24, 10.14it/s] 10%|▉         | 667/7000 [01:04<11:28,  9.20it/s] 10%|▉         | 668/7000 [01:04<11:46,  8.96it/s]                                                  {'loss': 0.1641, 'learning_rate': 9.045714285714287e-05, 'epoch': 0.95}
- 10%|▉         | 668/7000 [01:04<11:46,  8.96it/s] 10%|▉         | 670/7000 [01:04<10:52,  9.69it/s]                                                  {'loss': 0.3766, 'learning_rate': 9.042857142857143e-05, 'epoch': 0.96}
- 10%|▉         | 670/7000 [01:04<10:52,  9.69it/s] 10%|▉         | 672/7000 [01:04<10:53,  9.68it/s]                                                  {'loss': 0.4314, 'learning_rate': 9.04e-05, 'epoch': 0.96}
- 10%|▉         | 672/7000 [01:04<10:53,  9.68it/s] 10%|▉         | 674/7000 [01:04<09:51, 10.70it/s]                                                  {'loss': 0.2736, 'learning_rate': 9.037142857142857e-05, 'epoch': 0.96}
- 10%|▉         | 674/7000 [01:04<09:51, 10.70it/s] 10%|▉         | 676/7000 [01:05<08:58, 11.75it/s]                                                  {'loss': 0.5771, 'learning_rate': 9.034285714285715e-05, 'epoch': 0.97}
- 10%|▉         | 676/7000 [01:05<08:58, 11.75it/s] 10%|▉         | 678/7000 [01:05<08:36, 12.24it/s]                                                  {'loss': 0.4221, 'learning_rate': 9.031428571428572e-05, 'epoch': 0.97}
- 10%|▉         | 678/7000 [01:05<08:36, 12.24it/s] 10%|▉         | 680/7000 [01:05<08:16, 12.72it/s]                                                  {'loss': 0.774, 'learning_rate': 9.028571428571428e-05, 'epoch': 0.97}
- 10%|▉         | 680/7000 [01:05<08:16, 12.72it/s] 10%|▉         | 682/7000 [01:05<08:09, 12.91it/s]                                                  {'loss': 0.7292, 'learning_rate': 9.025714285714286e-05, 'epoch': 0.97}
- 10%|▉         | 682/7000 [01:05<08:09, 12.91it/s] 10%|▉         | 684/7000 [01:05<08:16, 12.72it/s]                                                  {'loss': 0.5962, 'learning_rate': 9.022857142857143e-05, 'epoch': 0.98}
- 10%|▉         | 684/7000 [01:05<08:16, 12.72it/s] 10%|▉         | 686/7000 [01:05<09:19, 11.28it/s]                                                  {'loss': 0.3603, 'learning_rate': 9.020000000000001e-05, 'epoch': 0.98}
- 10%|▉         | 686/7000 [01:05<09:19, 11.28it/s] 10%|▉         | 688/7000 [01:06<08:14, 12.76it/s]                                                  {'loss': 0.4283, 'learning_rate': 9.017142857142858e-05, 'epoch': 0.98}
- 10%|▉         | 688/7000 [01:06<08:14, 12.76it/s] 10%|▉         | 690/7000 [01:06<08:32, 12.30it/s]                                                  {'loss': 0.4507, 'learning_rate': 9.014285714285716e-05, 'epoch': 0.99}
- 10%|▉         | 690/7000 [01:06<08:32, 12.30it/s] 10%|▉         | 692/7000 [01:06<11:02,  9.52it/s]                                                  {'loss': 0.3937, 'learning_rate': 9.011428571428571e-05, 'epoch': 0.99}
- 10%|▉         | 692/7000 [01:06<11:02,  9.52it/s] 10%|▉         | 694/7000 [01:06<10:25, 10.08it/s]                                                  {'loss': 0.4153, 'learning_rate': 9.008571428571429e-05, 'epoch': 0.99}
- 10%|▉         | 694/7000 [01:06<10:25, 10.08it/s] 10%|▉         | 696/7000 [01:06<10:35,  9.92it/s]                                                  {'loss': 0.8383, 'learning_rate': 9.005714285714286e-05, 'epoch': 0.99}
- 10%|▉         | 696/7000 [01:06<10:35,  9.92it/s] 10%|▉         | 698/7000 [01:07<11:44,  8.94it/s]                                                  {'loss': 0.4393, 'learning_rate': 9.002857142857143e-05, 'epoch': 1.0}
- 10%|▉         | 698/7000 [01:07<11:44,  8.94it/s] 10%|▉         | 699/7000 [01:07<12:17,  8.54it/s]                                                  {'loss': 0.1285, 'learning_rate': 9e-05, 'epoch': 1.0}
- 10%|█         | 700/7000 [01:07<12:17,  8.54it/s][W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
-[W pthreadpool-cpp.cc:90] Warning: Leaking Caffe2 thread-pool after fork. (function pthreadpool)
- 10%|█         | 701/7000 [01:08<27:22,  3.83it/s] 10%|█         | 702/7000 [01:08<25:13,  4.16it/s]                                                  {'loss': 0.3407, 'learning_rate': 8.997142857142857e-05, 'epoch': 1.0}
- 10%|█         | 702/7000 [01:08<25:13,  4.16it/s] 10%|█         | 703/7000 [01:08<24:05,  4.36it/s] 10%|█         | 704/7000 [01:08<21:47,  4.82it/s]                                                  {'loss': 0.5462, 'learning_rate': 8.994285714285715e-05, 'epoch': 1.01}
- 10%|█         | 704/7000 [01:08<21:47,  4.82it/s] 10%|█         | 705/7000 [01:09<20:36,  5.09it/s] 10%|█         | 706/7000 [01:09<19:33,  5.36it/s]                                                  {'loss': 0.592, 'learning_rate': 8.991428571428572e-05, 'epoch': 1.01}
- 10%|█         | 706/7000 [01:09<19:33,  5.36it/s] 10%|█         | 707/7000 [01:09<18:04,  5.80it/s] 10%|█         | 708/7000 [01:09<16:24,  6.39it/s]                                                  {'loss': 0.5108, 'learning_rate': 8.98857142857143e-05, 'epoch': 1.01}
- 10%|█         | 708/7000 [01:09<16:24,  6.39it/s] 10%|█         | 709/7000 [01:09<16:54,  6.20it/s] 10%|█         | 710/7000 [01:09<15:37,  6.71it/s]                                                  {'loss': 0.8035, 'learning_rate': 8.985714285714287e-05, 'epoch': 1.01}
- 10%|█         | 710/7000 [01:09<15:37,  6.71it/s] 10%|█         | 711/7000 [01:09<16:27,  6.37it/s]                                                  {'loss': 0.3058, 'learning_rate': 8.982857142857143e-05, 'epoch': 1.02}
- 10%|█         | 712/7000 [01:10<16:27,  6.37it/s] 10%|█         | 713/7000 [01:10<12:28,  8.40it/s]                                                  {'loss': 0.2052, 'learning_rate': 8.98e-05, 'epoch': 1.02}
- 10%|█         | 714/7000 [01:10<12:28,  8.40it/s] 10%|█         | 715/7000 [01:10<09:51, 10.62it/s]                                                  {'loss': 0.1755, 'learning_rate': 8.977142857142857e-05, 'epoch': 1.02}
- 10%|█         | 716/7000 [01:10<09:51, 10.62it/s] 10%|█         | 717/7000 [01:10<09:59, 10.48it/s]                                                  {'loss': 0.3349, 'learning_rate': 8.974285714285715e-05, 'epoch': 1.03}
- 10%|█         | 718/7000 [01:10<09:59, 10.48it/s] 10%|█         | 719/7000 [01:10<12:36,  8.30it/s]                                                  {'loss': 0.3207, 'learning_rate': 8.971428571428571e-05, 'epoch': 1.03}
- 10%|█         | 720/7000 [01:10<12:36,  8.30it/s] 10%|█         | 721/7000 [01:10<10:52,  9.63it/s]                                                  {'loss': 0.3431, 'learning_rate': 8.96857142857143e-05, 'epoch': 1.03}
- 10%|█         | 722/7000 [01:10<10:52,  9.63it/s] 10%|█         | 723/7000 [01:11<11:08,  9.39it/s]                                                  {'loss': 0.3245, 'learning_rate': 8.965714285714286e-05, 'epoch': 1.03}
- 10%|█         | 724/7000 [01:11<11:08,  9.39it/s] 10%|█         | 725/7000 [01:11<12:33,  8.32it/s] 10%|█         | 726/7000 [01:11<12:19,  8.48it/s]                                                  {'loss': 0.4383, 'learning_rate': 8.962857142857143e-05, 'epoch': 1.04}
- 10%|█         | 726/7000 [01:11<12:19,  8.48it/s] 10%|█         | 728/7000 [01:11<10:45,  9.71it/s]                                                  {'loss': 0.3467, 'learning_rate': 8.960000000000001e-05, 'epoch': 1.04}
- 10%|█         | 728/7000 [01:11<10:45,  9.71it/s] 10%|█         | 730/7000 [01:11<09:20, 11.18it/s]                                                  {'loss': 0.4907, 'learning_rate': 8.957142857142858e-05, 'epoch': 1.04}
- 10%|█         | 730/7000 [01:11<09:20, 11.18it/s] 10%|█         | 732/7000 [01:11<08:25, 12.39it/s]                                                  {'loss': 0.3, 'learning_rate': 8.954285714285716e-05, 'epoch': 1.05}
- 10%|█         | 732/7000 [01:11<08:25, 12.39it/s] 10%|█         | 734/7000 [01:12<07:56, 13.14it/s]                                                  {'loss': 0.287, 'learning_rate': 8.951428571428572e-05, 'epoch': 1.05}
- 10%|█         | 734/7000 [01:12<07:56, 13.14it/s] 11%|█         | 736/7000 [01:12<07:29, 13.93it/s]                                                  {'loss': 0.4363, 'learning_rate': 8.948571428571429e-05, 'epoch': 1.05}
- 11%|█         | 736/7000 [01:12<07:29, 13.93it/s] 11%|█         | 738/7000 [01:12<07:12, 14.49it/s]                                                  {'loss': 0.2916, 'learning_rate': 8.945714285714286e-05, 'epoch': 1.05}
- 11%|█         | 738/7000 [01:12<07:12, 14.49it/s] 11%|█         | 740/7000 [01:12<06:58, 14.95it/s]                                                  {'loss': 0.5058, 'learning_rate': 8.942857142857142e-05, 'epoch': 1.06}
- 11%|█         | 740/7000 [01:12<06:58, 14.95it/s] 11%|█         | 742/7000 [01:12<07:12, 14.48it/s]                                                  {'loss': 0.3237, 'learning_rate': 8.94e-05, 'epoch': 1.06}
- 11%|█         | 742/7000 [01:12<07:12, 14.48it/s] 11%|█         | 744/7000 [01:12<07:26, 14.00it/s]                                                  {'loss': 0.2908, 'learning_rate': 8.937142857142857e-05, 'epoch': 1.06}
- 11%|█         | 744/7000 [01:12<07:26, 14.00it/s] 11%|█         | 746/7000 [01:12<07:29, 13.92it/s]                                                  {'loss': 0.4152, 'learning_rate': 8.934285714285715e-05, 'epoch': 1.07}
- 11%|█         | 746/7000 [01:12<07:29, 13.92it/s] 11%|█         | 748/7000 [01:13<09:38, 10.81it/s]                                                  {'loss': 0.5, 'learning_rate': 8.931428571428572e-05, 'epoch': 1.07}
- 11%|█         | 748/7000 [01:13<09:38, 10.81it/s] 11%|█         | 750/7000 [01:13<09:00, 11.56it/s]                                                  {'loss': 0.3424, 'learning_rate': 8.92857142857143e-05, 'epoch': 1.07}
- 11%|█         | 750/7000 [01:13<09:00, 11.56it/s] 11%|█         | 752/7000 [01:13<08:34, 12.15it/s]                                                  {'loss': 0.2187, 'learning_rate': 8.925714285714287e-05, 'epoch': 1.07}
- 11%|█         | 752/7000 [01:13<08:34, 12.15it/s] 11%|█         | 754/7000 [01:13<08:11, 12.71it/s]                                                  {'loss': 0.2845, 'learning_rate': 8.922857142857143e-05, 'epoch': 1.08}
- 11%|█         | 754/7000 [01:13<08:11, 12.71it/s] 11%|█         | 756/7000 [01:13<08:31, 12.20it/s]                                                  {'loss': 0.0984, 'learning_rate': 8.92e-05, 'epoch': 1.08}
- 11%|█         | 756/7000 [01:13<08:31, 12.20it/s] 11%|█         | 758/7000 [01:13<08:53, 11.70it/s]                                                  {'loss': 0.217, 'learning_rate': 8.917142857142857e-05, 'epoch': 1.08}
- 11%|█         | 758/7000 [01:13<08:53, 11.70it/s] 11%|█         | 760/7000 [01:14<09:19, 11.16it/s]                                                  {'loss': 0.7124, 'learning_rate': 8.914285714285715e-05, 'epoch': 1.09}
- 11%|█         | 760/7000 [01:14<09:19, 11.16it/s] 11%|█         | 762/7000 [01:14<09:00, 11.53it/s]                                                  {'loss': 0.1816, 'learning_rate': 8.911428571428571e-05, 'epoch': 1.09}
- 11%|█         | 762/7000 [01:14<09:00, 11.53it/s] 11%|█         | 764/7000 [01:14<09:33, 10.88it/s]                                                  {'loss': 0.2203, 'learning_rate': 8.90857142857143e-05, 'epoch': 1.09}
- 11%|█         | 764/7000 [01:14<09:33, 10.88it/s] 11%|█         | 766/7000 [01:14<10:18, 10.08it/s]                                                  {'loss': 0.6095, 'learning_rate': 8.905714285714286e-05, 'epoch': 1.09}
- 11%|█         | 766/7000 [01:14<10:18, 10.08it/s] 11%|█         | 768/7000 [01:14<09:16, 11.19it/s]                                                  {'loss': 0.2956, 'learning_rate': 8.902857142857143e-05, 'epoch': 1.1}
- 11%|█         | 768/7000 [01:14<09:16, 11.19it/s] 11%|█         | 770/7000 [01:15<09:07, 11.37it/s]                                                  {'loss': 0.843, 'learning_rate': 8.900000000000001e-05, 'epoch': 1.1}
- 11%|█         | 770/7000 [01:15<09:07, 11.37it/s] 11%|█         | 772/7000 [01:15<08:30, 12.20it/s]                                                  {'loss': 0.1415, 'learning_rate': 8.897142857142858e-05, 'epoch': 1.1}
- 11%|█         | 772/7000 [01:15<08:30, 12.20it/s] 11%|█         | 774/7000 [01:15<09:15, 11.20it/s]                                                  {'loss': 0.6515, 'learning_rate': 8.894285714285716e-05, 'epoch': 1.11}
- 11%|█         | 774/7000 [01:15<09:15, 11.20it/s] 11%|█         | 776/7000 [01:15<08:43, 11.88it/s]                                                  {'loss': 0.1638, 'learning_rate': 8.891428571428572e-05, 'epoch': 1.11}
- 11%|█         | 776/7000 [01:15<08:43, 11.88it/s] 11%|█         | 778/7000 [01:15<08:40, 11.95it/s]                                                  {'loss': 0.1544, 'learning_rate': 8.888571428571429e-05, 'epoch': 1.11}
- 11%|█         | 778/7000 [01:15<08:40, 11.95it/s] 11%|█         | 780/7000 [01:15<09:17, 11.16it/s]                                                  {'loss': 0.5612, 'learning_rate': 8.885714285714286e-05, 'epoch': 1.11}
- 11%|█         | 780/7000 [01:15<09:17, 11.16it/s] 11%|█         | 782/7000 [01:16<08:21, 12.40it/s]                                                  {'loss': 0.4585, 'learning_rate': 8.882857142857142e-05, 'epoch': 1.12}
- 11%|█         | 782/7000 [01:16<08:21, 12.40it/s] 11%|█         | 784/7000 [01:16<09:04, 11.41it/s]                                                  {'loss': 0.2622, 'learning_rate': 8.88e-05, 'epoch': 1.12}
- 11%|█         | 784/7000 [01:16<09:04, 11.41it/s] 11%|█         | 786/7000 [01:16<11:42,  8.85it/s]                                                  {'loss': 0.2214, 'learning_rate': 8.877142857142857e-05, 'epoch': 1.12}
- 11%|█         | 786/7000 [01:16<11:42,  8.85it/s] 11%|█▏        | 788/7000 [01:16<10:20, 10.01it/s]                                                  {'loss': 0.305, 'learning_rate': 8.874285714285715e-05, 'epoch': 1.13}
- 11%|█▏        | 788/7000 [01:16<10:20, 10.01it/s] 11%|█▏        | 790/7000 [01:16<10:41,  9.68it/s]                                                  {'loss': 0.4551, 'learning_rate': 8.871428571428572e-05, 'epoch': 1.13}
- 11%|█▏        | 790/7000 [01:16<10:41,  9.68it/s] 11%|█▏        | 792/7000 [01:17<12:02,  8.59it/s]                                                  {'loss': 0.5939, 'learning_rate': 8.86857142857143e-05, 'epoch': 1.13}
- 11%|█▏        | 792/7000 [01:17<12:02,  8.59it/s] 11%|█▏        | 793/7000 [01:17<11:59,  8.63it/s]                                                  {'loss': 0.4363, 'learning_rate': 8.865714285714287e-05, 'epoch': 1.13}
- 11%|█▏        | 794/7000 [01:17<11:59,  8.63it/s] 11%|█▏        | 795/7000 [01:17<10:32,  9.81it/s]                                                  {'loss': 0.7177, 'learning_rate': 8.862857142857143e-05, 'epoch': 1.14}
- 11%|█▏        | 796/7000 [01:17<10:32,  9.81it/s] 11%|█▏        | 797/7000 [01:17<09:20, 11.07it/s]                                                  {'loss': 0.3417, 'learning_rate': 8.86e-05, 'epoch': 1.14}
- 11%|█▏        | 798/7000 [01:17<09:20, 11.07it/s] 11%|█▏        | 799/7000 [01:17<08:33, 12.06it/s]                                                  {'loss': 0.4123, 'learning_rate': 8.857142857142857e-05, 'epoch': 1.14}
- 11%|█▏        | 800/7000 [01:17<08:33, 12.06it/s] 11%|█▏        | 801/7000 [01:17<07:57, 12.98it/s]                                                  {'loss': 0.4686, 'learning_rate': 8.854285714285715e-05, 'epoch': 1.15}
- 11%|█▏        | 802/7000 [01:17<07:57, 12.98it/s] 11%|█▏        | 803/7000 [01:17<07:35, 13.59it/s]
