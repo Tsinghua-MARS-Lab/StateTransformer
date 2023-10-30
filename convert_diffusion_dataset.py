@@ -84,7 +84,7 @@ if __name__ == '__main__':
                         help="number of processes to use in generation")
     parser.add_argument("--dataset_name",
                         type=str,
-                        default="t4f_features",
+                        default="train",
                         help="the name of the generated dataset")
     parser.add_argument("--map_dir",
                         type=str,
