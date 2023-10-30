@@ -2,7 +2,6 @@ import os
 import pickle
 import multiprocessing
 import argparse
-from tqdm import tqdm
 from functools import partial
 
 def split_file(file_name, data_path=None, output_path=None, delete_origin=False):

@@ -5,7 +5,6 @@ import os
 import argparse
 import pickle
 import numpy as np
-import tensorflow as tf
 from waymo_open_dataset.protos import scenario_pb2
 
 polyline_type = {
