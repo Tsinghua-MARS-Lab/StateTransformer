@@ -135,7 +135,6 @@ An example:
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 python -m torch.distributed.run \
 --nproc_per_node=8 generate_diffusion_feature.py \
---do_train --do_eval\
 --model_name pretrain-gpt-mini --model_pretrain_name_or_path /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/training_results/checkpoint-20000/ \
 --saved_dataset_folder  /localdata_ssd/nuplan/online_dataset \
 --output_dir /localdata_hdd1/sunq/gpt_1.5B_mse_FI1_PI1_k1/dummy_generating_results  \
@@ -197,7 +196,7 @@ save_dir
 ```
 
 Fianlly, please set `--task` to `train_diffusion_decoder`. In this case, the model is initilized without a transformer backbone(Reduce the infence time to build backbone feature). 
-In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', obtained previously by `convert_diffusion_dataset.py`. 
+In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', obtained previously by `convert_diffusion_dataset.py`. In this case it should be consistent with `save_dir` in the previous step.
 `
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7; \
 nohup python3 -m torch.distributed.run \
