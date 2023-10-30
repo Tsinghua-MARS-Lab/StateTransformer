@@ -311,21 +311,3 @@ def pdm_vectorize(sample, data_path, map_api=None, map_radius=50,
         file_name=filename,
         frame_id=frame_id
     )
-
-if __name__ == "__main__":
-    import datasets
-    from transformer4planning.models.encoder.nuplan_raster_encoder import PDMEncoder 
-    map_api = dict()
-    for map in ['sg-one-north', 'us-ma-boston', 'us-nv-las-vegas-strip', 'us-pa-pittsburgh-hazelwood']:
-        map_api[map] = get_maps_api(map_root="/home/shiduozhang/nuplan/dataset/maps",
-                            map_version="nuplan-maps-v1.0",
-                            map_name=map
-                            )
-    dataset = datasets.load_from_disk("/media/shiduozhang/My Passport/nuplan/online_dataset/index/train/train-index_boston")
-    dataset = dataset.add_column('split', column=['train']*len(dataset))
-    sample = dataset[0]
-    feature = pdm_vectorize(sample, 
-                            data_path="/media/shiduozhang/My Passport/nuplan/online_dataset", 
-                            map_api=map_api)
-    pdm_encoder = PDMEncoder(history_dim=40, centerline_dim=120, hidden_dim=256)
-    feature = pdm_encoder(feature)

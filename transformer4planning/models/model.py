@@ -157,7 +157,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                      trajectory_label,
                                                                      info_dict)
         loss += traj_loss
-        kp_loss = 0
+        kp_loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
         if self.use_key_points != 'no':
             kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
             # kp_loss will be 10x larger than traj_loss when converged
@@ -218,7 +218,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         kp_start_index = additional_token_num + context_length * 2 if context_length is not None else additional_token_num + input_length
         # Loop for generation with mlp decoder. Generate key points in autoregressive way.
         if self.use_key_points != 'no':
-            assert selected_indices is not None and len(selected_indices) > 0, f'{selected_indices} selected_indices is None or empty'
+            assert selected_indices is not None and len(selected_indices) > 1, f'{selected_indices} selected_indices is None or empty'
             if self.kp_decoder_type == "mlp":
                 trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
                 if 'specified' in self.use_key_points:

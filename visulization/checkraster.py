@@ -101,15 +101,3 @@ def main(args):
         visulize_trajectory(args.path_to_save, trajectory, 0.77)
         visulize_trajectory(args.path_to_save, trajectory, 4)
         print("done!")
-
-
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_disk_path", default="/home/shiduozhang/nuplan/dataset/Example/vegas")  
-    parser.add_argument("--path_to_save", default="visulization/rasters/5hz-vegas-fix")
-    parser.add_argument("--vis_id",type=int, default=0)
-    parser.add_argument("--frame_id", type=int, default=80)
-    args = parser.parse_args()
-
-    main(args)

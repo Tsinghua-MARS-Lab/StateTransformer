@@ -48,10 +48,12 @@ def main(args):
     # obs = get_observation_for_nsm(observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
     # obs = get_observation_for_autoregression_basedon_previous_coor(observation_kwargs, loaded_dic, 40, 201, nsm_result=None)
     if args.filter_by_scenario_type:
-        filter_scenario = ["starting_straight_traffic_light_intersection_traversal","high_lateral_acceleration",
-        "changing_lane", "high_magnitude_speed", "low_magnitude_speed", "starting_left_turn",
-        "starting_right_turn", "stopping_with_lead", "following_lane_with_lead","near_multiple_vehicles",
-        "traversing_pickup_dropoff", "behind_long_vehicle", "waiting_for_pedestrian_to_cross", "stationary_in_traffic"]
+        filter_scenario = ["starting_straight_traffic_light_intersection_traversal", "high_lateral_acceleration",
+                           "changing_lane", "high_magnitude_speed", "low_magnitude_speed", "starting_left_turn",
+                           "starting_right_turn", "stopping_with_lead", "following_lane_with_lead",
+                           "near_multiple_vehicles",
+                           "traversing_pickup_dropoff", "behind_long_vehicle", "waiting_for_pedestrian_to_cross",
+                           "stationary_in_traffic"]
     else:
         filter_scenario = None
 
@@ -423,11 +425,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument("--running_mode", type=int, default=None)
-    # parser.add_argument("--data_path", type=dict, default={
-    #             'NUPLAN_DATA_ROOT': "/media/shiduozhang/My Passport/nuplan",
-    #             'NUPLAN_MAPS_ROOT': "/media/shiduozhang/My Passport/nuplan/maps",
-    #             'NUPLAN_DB_FILES': "/media/shiduozhang/My Passport/nuplan/train_boston",
-    #         })
     parser.add_argument("--data_path", type=str, default="train_singapore")
     parser.add_argument("--dataset_root", type=str, default="/localdata_hdd/nuplan/dataset")
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")

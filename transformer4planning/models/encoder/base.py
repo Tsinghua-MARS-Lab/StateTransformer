@@ -14,7 +14,7 @@ class TrajectoryEncoder(nn.Module):
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tag_embedding = nn.Embedding(self.tokenizer.vocab_size, tokenizer_kwargs.get("d_embed", None))
         self.augmentation = DataAugmentation()
-        self.selected_indices = []
+        self.selected_indices = []  # dummy value, give None or [] will cause error
 
     def forward(self, **kwargs):  
         """
@@ -47,7 +47,7 @@ class TrajectoryEncoder(nn.Module):
             ar_future_interval = 20
             future_key_points = trajectory_label[:, ar_future_interval - 1::ar_future_interval, :]
             indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
-            self.selected_indices = []
+            self.selected_indices = [15, 31, 47, 63, 79]
         else:
             assert False, "key points should be either specified or universal"
         

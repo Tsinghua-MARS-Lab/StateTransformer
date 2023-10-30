@@ -33,6 +33,7 @@ MISS_RATE_THRESHHOLD = 0.3
 MISS_THRESHHOLD = [6, 8, 16]
 DISPLACEMENT_WEIGHT = 1
 HEADING_WEIGHT = 2
+EVAL_LOG_SAVING_PATH = None
 
 def convert_names_to_ids(file_names, t0_frame_ids):
     unique_scenario_ids = list()
@@ -73,13 +74,12 @@ def compute_metrics(prediction: EvalPrediction):
     # TODO: merge key points selection and abstract with encoders/base.py select_key_points() to utiles
     # TODO: adoptive with different key point selection strategy
     selected_indices = predictions['selected_indices'][0]  # 5
-    label_key_points = labels[:, selected_indices, :]
 
     prediction_by_generation = predictions['prediction_generation']  # sample_num, 85, 2/4
     prediction_by_forward = predictions['prediction_forward']  # sample_num, 85, 2/4
     frame_id = predictions['frame_id']
-    scenario_ids = predictions['scenario_ids']
-    item_to_save["scenario_ids"] = scenario_ids
+    scenario15s_id = predictions['scenario15s_id']
+    item_to_save["scenario15s_id"] = scenario15s_id
     item_to_save["frame_id"] = frame_id
 
     loss_items = predictions['loss_items']
@@ -95,15 +95,14 @@ def compute_metrics(prediction: EvalPrediction):
         prediction_key_points_by_generation = prediction_by_generation[:, :-prediction_horizon, :]  # sample_num, 5, 2/4
         prediction_key_points_by_forward = prediction_by_forward[:, :-prediction_horizon, :]  # sample_num, 5, 2/4
     else:
+        # only trajectory, no key points
         assert prediction_by_forward.shape[1] == prediction_horizon, f'{prediction_key_points_by_generation.shape[1]} {prediction_horizon}'
-        # only trajectory
-        prediction_key_points_by_generation = prediction_by_generation[:, selected_indices, :]  # sample_num, 5, 2/4
-        prediction_key_points_by_forward = prediction_by_forward[:, selected_indices, :]  # sample_num, 5, 2/4
     prediction_trajectory_by_generation = prediction_by_generation[:, -prediction_horizon:, :]  # sample_num, 80, 2/4
     prediction_trajectory_by_forward = prediction_by_forward[:, -prediction_horizon:, :]  # sample_num, 80, 2/4
 
     # calculate error for generation results
-    if len(selected_indices) > 0:
+    if len(selected_indices) > 1:
+        label_key_points = labels[:, selected_indices, :]
         ade_x_error_key_points_gen = prediction_key_points_by_generation[:, :, 0] - label_key_points[:, :, 0]
         ade_y_error_key_points_gen = prediction_key_points_by_generation[:, :, 1] - label_key_points[:, :, 1]
         if selected_indices[0] > selected_indices[-1]:
@@ -114,6 +113,11 @@ def compute_metrics(prediction: EvalPrediction):
             # forward
             fde_x_error_key_points_gen = prediction_key_points_by_generation[:, -1, 0] - label_key_points[:, -1, 0]
             fde_y_error_key_points_gen = prediction_key_points_by_generation[:, -1, 1] - label_key_points[:, -1, 1]
+        ade_key_points_gen = np.sqrt(ade_x_error_key_points_gen ** 2 + ade_y_error_key_points_gen ** 2).mean()
+        eval_result['ade_keypoints_gen'] = ade_key_points_gen
+        fde_key_points_gen = np.sqrt(fde_x_error_key_points_gen ** 2 + fde_y_error_key_points_gen ** 2).mean()
+        eval_result['fde_keypoints_gen'] = fde_key_points_gen
+
     ade_x_error_gen = prediction_trajectory_by_generation[:, :, 0] - labels[:, :, 0]
     ade_y_error_gen = prediction_trajectory_by_generation[:, :, 1] - labels[:, :, 1]
     fde_x_error_gen = prediction_trajectory_by_generation[:, -1, 0] - labels[:, -1, 0]
@@ -153,11 +157,6 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['fde_horizon8_gen'] = fde8_gen.mean()
     eval_result['metric_fde'] = avg_fde_gen.mean()
     eval_result['fde_score'] = fde_score.mean()
-    if len(selected_indices) > 0:
-        ade_key_points_gen = np.sqrt(ade_x_error_key_points_gen ** 2 + ade_y_error_key_points_gen ** 2).mean()
-        eval_result['ade_keypoints_gen'] = ade_key_points_gen
-        fde_key_points_gen = np.sqrt(fde_x_error_key_points_gen ** 2 + fde_y_error_key_points_gen ** 2).mean()
-        eval_result['fde_keypoints_gen'] = fde_key_points_gen
 
     # heading error
     if prediction_trajectory_by_generation.shape[-1] == 4:
@@ -205,6 +204,7 @@ def compute_metrics(prediction: EvalPrediction):
     max_displacement3 = np.max(ade_gen[:, :30], axis=1)
     max_displacement5 = np.max(ade_gen[:, :50], axis=1)
     max_displacement8 = np.max(ade_gen[:, :80], axis=1)
+    # miss = 1, not miss = 0
     miss3 = np.where(max_displacement3 > MISS_THRESHHOLD[0], np.ones_like(max_displacement3), np.zeros_like(max_displacement3))
     miss5 = np.where(max_displacement5 > MISS_THRESHHOLD[1], np.ones_like(max_displacement5), np.zeros_like(max_displacement5))
     miss8 = np.where(max_displacement8 > MISS_THRESHHOLD[2], np.ones_like(max_displacement8), np.zeros_like(max_displacement8))
@@ -224,7 +224,7 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['ade_forward'] = ade_for
     fde_for = np.sqrt(fde_x_error_for ** 2 + fde_y_error_for ** 2).mean()
     eval_result['fde_forward'] = fde_for
-    if len(selected_indices) > 0:
+    if len(selected_indices) > 1:
         ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
         ade_y_error_key_points_for = prediction_key_points_by_forward[:, :, 1] - label_key_points[:, :, 1]
         if selected_indices[0] > selected_indices[-1]:
@@ -233,21 +233,43 @@ def compute_metrics(prediction: EvalPrediction):
             fde_y_error_key_points_for = prediction_key_points_by_forward[:, 0, 1] - label_key_points[:, 0, 1]
         elif selected_indices[0] < selected_indices[-1]:
             # backward
-            fde_x_error_key_points_gen = prediction_key_points_by_forward[:, -1, 0] - label_key_points[:, -1, 0]
-            fde_y_error_key_points_gen = prediction_key_points_by_forward[:, -1, 1] - label_key_points[:, -1, 1]
+            fde_x_error_key_points_for = prediction_key_points_by_forward[:, -1, 0] - label_key_points[:, -1, 0]
+            fde_y_error_key_points_for = prediction_key_points_by_forward[:, -1, 1] - label_key_points[:, -1, 1]
         ade_key_points_for = np.sqrt(ade_x_error_key_points_for ** 2 + ade_y_error_key_points_for ** 2).mean()
         eval_result['ade_keypoints_forward'] = ade_key_points_for
         fde_key_points_for = np.sqrt(fde_x_error_key_points_for ** 2 + fde_y_error_key_points_for ** 2).mean()
         eval_result['fde_keypoints_forward'] = fde_key_points_for
 
-    if prediction_key_points_by_forward.shape[-1] == 4:
-        heading_error_for = abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
-        eval_result['heading_error_forward'] = heading_error_for.mean()
+        if prediction_key_points_by_forward.shape[-1] == 4:
+            heading_error_for = abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
+            eval_result['heading_error_forward'] = heading_error_for.mean()
 
     score, miss_score = compute_scores(item_to_save)
     eval_result["average_score"] = score
     eval_result["miss_score"] = miss_score
-    
+
+    # include inputs by passing args.include_inputs_for_metrics = True to save eval result to pickle
+    if EVAL_LOG_SAVING_PATH is not None:
+        eval_result_to_save = {}
+        # get miss scenarios
+        miss_indices = np.where(miss == 1)[0]
+        scenario15s_id_miss = scenario15s_id[miss_indices]
+        # [(file_name, frame_id), ...]
+        eval_result_to_save["miss_scenarios"] = scenario15s_id_miss
+        # get top fde scenarios (about 10%)
+        total_num = len(fde8_gen)
+        fde_indices = np.argsort(fde8_gen)[::-1][:int(total_num/10)]
+        scenario15s_id_high_fde = scenario15s_id[fde_indices]
+        fde8s_value = fde8_gen[fde_indices]
+        # [(file_name, frame_id, fde8s_value), ...]
+        eval_result_to_save["top_fde_scenarios"] = list(zip(scenario15s_id_high_fde, fde8s_value))
+        # save eval result
+        with open(EVAL_LOG_SAVING_PATH, "wb") as f:
+            pickle.dump(eval_result_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f'eval result saved to {EVAL_LOG_SAVING_PATH} with {scenario15s_id_miss.shape[0]} miss scenarios and {scenario15s_id_high_fde.shape[0]} top fde scenarios')
+    else:
+        assert False, "EVAL_LOG_SAVING_PATH is None"
+
     return eval_result
 
 
@@ -325,6 +347,8 @@ class PlanningTrainer(Trainer):
             Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss,
             logits and labels (each being optional).
         """
+        global EVAL_LOG_SAVING_PATH
+        EVAL_LOG_SAVING_PATH = os.path.join(self.args.logging_dir, 'eval_log.pickle')
         if inputs is None:
             return None, None, None
         has_labels = False if len(self.label_names) == 0 else all(inputs.get(k) is not None for k in self.label_names)
@@ -407,12 +431,13 @@ class PlanningTrainer(Trainer):
             t0_frame_id = inputs["frame_id"]
         else:
             t0_frame_id = inputs['t0_frame_id']
-        scenario_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
+        scenario15s_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
+        # register each scenario15s_id to the global mapping
         logits = {
             "prediction_forward": logits,
             "prediction_generation": prediction_generation,
             "frame_id": inputs["frame_id"],
-            "scenario_ids": torch.tensor(scenario_ids, device=logits.device),
+            "scenario15s_id": torch.tensor(scenario15s_ids, device=logits.device),
             "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
             "loss_items": loss_items if loss_items is not None else 0,
         }
