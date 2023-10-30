@@ -43,9 +43,7 @@ def waymo_preprocess(sample, data_path):
     track_index_to_predict = sample["track_index_to_predict"].view(-1)
     split = sample["split"]
     with open(os.path.join(data_path, f"{split}", scene_id + ".pkl"), "rb") as f:
-        info_dict = pickle.load(f)
-
-    info = info_dict[scene_id]
+        info = pickle.load(f)
 
     sdc_track_index = info["sdc_track_index"]
     current_time_index = info["current_time_index"]

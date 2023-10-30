@@ -190,10 +190,11 @@ def main(args):
 
     def yield_data(shards, dl, save_dict, output_path):
         for shard in shards:
-            tf_dataset, _ = dl.get_next_file(specify_file_index=shard)
+            tf_dataset, file_name = dl.get_next_file(specify_file_index=shard)
             if tf_dataset is None:
                 continue
-
+            
+            dict_to_save = {}
             for data in tf_dataset:
                 scenario = scenario_pb2.Scenario()
                 scenario.ParseFromString(bytearray(data.numpy()))
@@ -233,9 +234,11 @@ def main(args):
                     info['sdc_track_index'] = scenario.sdc_track_index
                     info['objects_of_interest'] = list(scenario.objects_of_interest)
 
-                    with open(os.path.join(output_path, scenario.scenario_id + ".pkl"), "wb") as f:
-                        pickle.dump(info, f)
-                        f.close()
+                    dict_to_save[scenario.scenario_id] = info
+
+                    # with open(os.path.join(output_path, scenario.scenario_id + ".pkl"), "wb") as f:
+                    #     pickle.dump(info, f)
+                    #     f.close()
 
                 for i, index in enumerate(track_index_to_predict):
                     yield {
@@ -243,6 +246,11 @@ def main(args):
                             "track_index_to_predict": index,
                             "object_type": object_type_to_predict[i]
                         }
+                    
+            if len(dict_to_save.keys()) > 0:
+                with open(os.path.join(output_path, file_name + ".pkl"), "wb") as f:
+                    pickle.dump(dict_to_save, f)
+                    f.close()
 
     os.makedirs(args.output_path, exist_ok=True)
     data_loader = WaymoDL(data_path=data_path, mode=args.mode)
@@ -281,7 +289,7 @@ if __name__ == '__main__':
     parser.add_argument('--cache_folder', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_tmp')
     parser.add_argument('--dataset_name', type=str, default='t4p_waymo')
 
-    parser.add_argument('--num_proc', type=int, default=20)
+    parser.add_argument('--num_proc', type=int, default=50)
 
     args_p = parser.parse_args()
     main(args_p)

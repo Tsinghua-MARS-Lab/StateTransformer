@@ -73,8 +73,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 raise AttributeError("encoder_type should be either raster or vector")
         elif self.model_args.task == "waymo":
             from transformer4planning.models.encoder.waymo_vector_encoder import WaymoVectorizeEncoder
-            from dataset_gen.waymo.config import cfg_from_yaml_file
-            cfg_from_yaml_file(self.model_args.mtr_config_path)
+            from transformer4planning.utils.waymo_utils import cfg_from_yaml_file
+            cfg = cfg_from_yaml_file(self.model_args.mtr_config_path)
             action_kwargs = dict(
                 d_embed=self.config.n_embd
             )
