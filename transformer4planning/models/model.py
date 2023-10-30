@@ -47,6 +47,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.build_encoder()
         self.build_decoder()
         
+        
     def build_encoder(self):
         if self.model_args.task == "nuplan":
             if "raster" in self.model_args.encoder_type:
@@ -96,7 +97,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 if self.model_args.key_points_diffusion_decoder_load_from is not None:
                     print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
                     state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
-                    self.key_points_decoder.load_state_dict(state_dict)
+                    self.key_points_decoder.model.load_state_dict(state_dict)
                     print("Pretrained keypoint decoder has been loaded!")
                 else:
                     print("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
@@ -130,6 +131,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             return_dict=return_dict,
             # **kwargs
         )
+        
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
         
@@ -156,8 +158,18 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
 
         if self.use_key_points != 'no':
-            kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
-            # kp_loss will be 10x larger than traj_loss when converged
+            if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+                self.key_points_decoder.save_features(input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state)
+
+            if self.model_args.kp_decoder_type == "diffusion":
+                assert not self.training, "please train diffusion decoder separately."
+                # return a dummy loss&kp_logits here. The real data for computing metrics will be computed in the generate function
+                kp_loss = torch.tensor(0.0).to(transformer_outputs_hidden_state.device)
+                kp_logits = info_dict["future_key_points"].to(transformer_outputs_hidden_state.device) if self.model_args.predict_yaw else \
+                            info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
+            else:
+                kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
+                # kp_loss will be 10x larger than traj_loss when converged
             loss += kp_loss
             traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
             loss_items["kp_loss"] = kp_loss
@@ -198,6 +210,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
 
+
             proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64)
             proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
 
@@ -222,101 +235,84 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 road_dic = kwargs.get("road_dic", None)
                 idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
                 
-                if self.kp_decoder_type == "mlp":
-                    trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
-                    if 'specified' in self.use_key_points:
-                        future_key_points = trajectory_label_dummy[:, selected_indices, :]
-                    else:
-                        ar_future_interval = 20
-                        future_key_points = trajectory_label_dummy[:, ar_future_interval - 1::ar_future_interval, :]
+                
+                trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
+                if 'specified' in self.use_key_points:
+                    future_key_points = trajectory_label_dummy[:, selected_indices, :]
+                else:
+                    ar_future_interval = 20
+                    future_key_points = trajectory_label_dummy[:, ar_future_interval - 1::ar_future_interval, :]
 
-                    assert future_key_points.shape[1] > 0, 'future points not enough to sample'
-                    future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
-                    key_points_num = future_key_points.shape[1]
+                assert future_key_points.shape[1] > 0, 'future points not enough to sample'
+                future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
+                key_points_num = future_key_points.shape[1]
 
-                    input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
-                    pred_key_points_during_generate = []
-                    for i in range(key_points_num):
-                        input_embeds_current = input_embeds[:, :kp_start_index + i, :]
-                        attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
-                        position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-                        transformer_output = self.transformer(
-                            inputs_embeds=input_embeds_current,
-                            attention_mask=attention_mask,
-                            position_ids=position_ids,
-                        )
-                        transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-                        future_key_point_hidden_state = transformer_outputs_hidden_state[:,
-                                                        kp_start_index + i - 1,
-                                                        :].reshape(batch_size, 1, -1)
-
-                        if self.k > 1:
-                            key_points_logit, pred_logits = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
-                            selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
-                                                pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
-                            key_points_logit = selected_key_point
-                        else:
-                            key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
-                        pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
-                        if self.model_args.predict_yaw:
-                            pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
-                        else:
-                            pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
-
-                        off_road_checking = False
-                        if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
-                            # Check key points with map_api
-                            # WARNING: WIP, do not use
-                            pred_key_point_global = nuplan_utils.change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
-                                                                        ego_pose,
-                                                                        ego_to_global=True)
-                            closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
-                            nearest = closest_lane_road_dic['road_id']
-                            nearest_lane = closest_lane_road_dic['lane_id']
-                            dist = closest_lane_road_dic['distance_to_road_block']
-                            if nearest not in route_ids or dist > 0.5:
-                                # off-road, move to nearest lane according to PDMPath
-                                dist = nuplan_utils.euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
-                                interpolate_point = center_path.interpolate(np.array([dist]))[0]
-                                print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
-                                pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
-
-                        if idm_reference_global is not None and self.use_key_points == 'specified_backward':
-                            # replace last key point with IDM reference
-                            ego_state_global = idm_reference_global[selected_indices[i]]
-                            idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
-                                                                                                    ego_state_global.rear_axle.y]),
-                                                                                            ego_pose,
-                                                                                            ego_to_global=False)
-                            print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
-                            pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
-                            pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
-                        key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-                        # replace embed at the next position
-                        input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
-                        if self.model_args.predict_yaw:
-                            pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
-                        else:
-                            pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
-                    key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
-                elif self.kp_decoder_type == "diffusion":
-                    # TODO:confirm the attention mask here
+                input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
+                pred_key_points_during_generate = []
+                for i in range(key_points_num):
+                    input_embeds_current = input_embeds[:, :kp_start_index + i, :]
+                    attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+                    position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
                     transformer_output = self.transformer(
-                            inputs_embeds=input_embeds,
-                            attention_mask=None,
-                            position_ids=None,
-                        )
-                    key_points_num = len(selected_indices)
+                        inputs_embeds=input_embeds_current,
+                        attention_mask=attention_mask,
+                        position_ids=position_ids,
+                    )
                     transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-                    key_points_logits, pred_logits = self.key_points_decoder.generate_keypoints(transformer_outputs_hidden_state, info_dict)
-                    pred_key_point = torch.zeros((batch_size, key_points_num, 4), device=device)
-                    if self.model_args.predict_yaw:
-                        pred_key_point = key_points_logits
-                    else:
-                        pred_key_point[:, :, :2] = key_points_logits
-                    key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, key_points_num, -1)
-                    input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = key_point_embed[:, :, :]
+                    future_key_point_hidden_state = transformer_outputs_hidden_state[:,
+                                                    kp_start_index + i - 1,
+                                                    :].reshape(batch_size, 1, -1)
 
+                    if self.k > 1:
+                        key_points_logit, pred_logits = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+                        selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
+                                            pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
+                        key_points_logit = selected_key_point
+                    else:
+                        key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+                    pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
+                    if self.model_args.predict_yaw:
+                        pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
+                    else:
+                        pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+
+                    off_road_checking = False
+                    if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
+                        # Check key points with map_api
+                        # WARNING: WIP, do not use
+                        pred_key_point_global = nuplan_utils.change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
+                                                                    ego_pose,
+                                                                    ego_to_global=True)
+                        closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
+                        nearest = closest_lane_road_dic['road_id']
+                        nearest_lane = closest_lane_road_dic['lane_id']
+                        dist = closest_lane_road_dic['distance_to_road_block']
+                        if nearest not in route_ids or dist > 0.5:
+                            # off-road, move to nearest lane according to PDMPath
+                            dist = nuplan_utils.euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
+                            interpolate_point = center_path.interpolate(np.array([dist]))[0]
+                            print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
+                            pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
+
+                    if idm_reference_global is not None and self.use_key_points == 'specified_backward':
+                        # replace last key point with IDM reference
+                        ego_state_global = idm_reference_global[selected_indices[i]]
+                        idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
+                                                                                                ego_state_global.rear_axle.y]),
+                                                                                        ego_pose,
+                                                                                        ego_to_global=False)
+                        print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
+                        pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
+                        pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
+                    key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    # replace embed at the next position
+                    input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
+                    if self.model_args.predict_yaw:
+                        pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
+                    else:
+                        pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
+                
                 key_points_logits_k.append(pred_key_point)
 
             # generate remaining trajectory
@@ -529,8 +525,8 @@ def build_models(model_args):
             out_features = 4 if model_args.predict_yaw else 2
             diffusion_model = KeypointDiffusionModel(config_p.n_inner,
                                                      config_p.n_embd,
-                                                     out_features=model_args.k * out_features,
-                                                     key_point_num=model_args.key_points_num,
+                                                     out_features=out_features,
+                                                     key_point_num=1,
                                                      input_feature_seq_lenth=model_args.diffusion_condition_sequence_lenth,
                                                      use_key_points=model_args.use_key_points,
                                                      feat_dim=model_args.key_points_diffusion_decoder_feat_dim,)
@@ -556,7 +552,7 @@ def build_models(model_args):
         if model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
-                model.key_points_decoder.load_state_dict(state_dict)
+                model.key_points_decoder.model.load_state_dict(state_dict)
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p, model_args=model_args)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
