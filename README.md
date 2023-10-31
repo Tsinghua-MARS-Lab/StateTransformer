@@ -6,7 +6,7 @@ State Transformer (STR) is a general model for both motion prediction and motion
 
 Authors: [Qiao Sun](https://qiaosun.me/), [Shiduo Zhang](https://github.com/Shiduo-zh), [Danjiao Ma](https://github.com/dmame), [Jingzhe Shi](https://github.com/JingzheShi), [Derun Li](https://github.com/Dylan-LDR/), [Simian Luo](https://github.com/luosiallen), [Yu Wang](https://scholar.google.com/citations?user=uNj2w9gAAAAJ&hl=en), [Ningyi Xu](http://www.qingyuan.sjtu.edu.cn/a/xu-ning-yi-1.html), [Guangzhi Cao](https://scholar.google.com/citations?user=XY7knjAAAAAJ&hl=en&oi=ao), [Hang Zhao](https://hangzhaomit.github.io/)
 
-[Arxiv (TBD)]
+[[Arxiv](http://arxiv.org/abs/2310.19620)]
 
 # Abstract
 
@@ -477,4 +477,11 @@ or
 
 ## Citation
 If you find this work useful in your research, please consider cite:
-Bib info TBD
+```
+@article{sun2023large,
+  title={Large Trajectory Models are Scalable Motion Predictors and Planners},
+  author={Qiao Sun and Shiduo Zhang and Danjiao Ma and Jingzhe Shi and Derun Li and Simian Luo and Yu Wang and Ningyi Xu and Guangzhi Cao and Hang Zhao},
+  journal={arXiv preprint arXiv:2310.19620},
+  year={2023}
+}
+```
