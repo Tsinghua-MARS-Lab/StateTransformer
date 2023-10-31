@@ -47,7 +47,7 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
     datasets = []
     index_root_folders = os.path.join(root, split)
     indices = os.listdir(index_root_folders)
- 
+
     for index in indices:
         index_path = os.path.join(index_root_folders, index)
         if os.path.isdir(index_path):
@@ -89,6 +89,7 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
         dataset = dataset.select(range(samples))
 
     return dataset
+
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))

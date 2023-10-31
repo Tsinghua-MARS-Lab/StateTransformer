@@ -210,10 +210,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             transformer_outputs_hidden_state = transformer_output['last_hidden_state']
             proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
 
-
             proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64)
             proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
-
             topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k) 
             proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
             proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
@@ -234,8 +232,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 ego_pose = kwargs.get("ego_pose", None)
                 road_dic = kwargs.get("road_dic", None)
                 idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
-                
-                
                 trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
                 if 'specified' in self.use_key_points:
                     future_key_points = trajectory_label_dummy[:, selected_indices, :]
