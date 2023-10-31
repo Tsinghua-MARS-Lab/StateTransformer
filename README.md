@@ -47,9 +47,9 @@ Then install these packages:
     pip install aiofiles
     pip install bokeh==2.4.1
 
-### Install Waymo-Devkit
+### Install WOMD-Devkit
 
-TBD
+run `pip install waymo-open-dataset-tf-2-11-0==1.6.0` to install WOMD-Devkit following [here](https://github.com/waymo-research/waymo-open-dataset).
 
 ## Dataset
 
