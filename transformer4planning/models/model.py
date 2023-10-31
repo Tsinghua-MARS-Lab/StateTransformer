@@ -159,7 +159,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         if self.use_key_points != 'no':
             if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
-                self.key_points_decoder.save_features(input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state)
+                future_key_points = info_dict["future_key_points"] if self.model_args.predict_yaw else \
+                            info_dict["future_key_points"][..., :2]
+                self.key_points_decoder.save_features(input_embeds,info_dict["context_length"],info_dict,future_key_points,transformer_outputs_hidden_state)
 
             if self.model_args.kp_decoder_type == "diffusion":
                 assert not self.training, "please train diffusion decoder separately."

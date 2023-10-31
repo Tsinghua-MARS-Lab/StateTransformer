@@ -219,7 +219,7 @@ python3 convert_diffusion_dataset.py \
     --save_dir {PATH_TO_SAVE_DIR} \
     --data_dir {PATH_TO_DIFFUSION_FEATURE_SAVE_DIR} \
     --num_proc 10 \
-    --dataset_name nuplan_diffusion_train \
+    --dataset_name train \
     --map_dir {PATH_TO_MAP_DIR} \
     --saved_datase_folder {PATH_TO_DATASET_FOLDER} \
     --use_centerline False \
