@@ -489,13 +489,7 @@ class PlanningTrainer(Trainer):
                 prediction_generation = prediction_gen
                 labels = labels[:self.args.per_device_eval_batch_size]
             # print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
-        # file_id = convert_name_to_id(inputs["file_name"])
-        if 't0_frame_id' not in inputs or inputs['t0_frame_id'][0] == -1:
-            # val14 without 15s in the future
-            t0_frame_id = inputs["frame_id"]
-        else:
-            t0_frame_id = inputs['t0_frame_id']
-        scenario15s_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
+        
         logits_dict = {
             "prediction_forward": logits,
             "prediction_generation": prediction_generation,
@@ -508,7 +502,7 @@ class PlanningTrainer(Trainer):
                 t0_frame_id = inputs["frame_id"]
             else:
                 t0_frame_id = inputs['t0_frame_id']
-            scenario_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
+            scenario15s_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
             logits_dict.update({
             "frame_id": inputs["frame_id"],
             "scenario15s_id": torch.tensor(scenario15s_ids, device=logits.device),
