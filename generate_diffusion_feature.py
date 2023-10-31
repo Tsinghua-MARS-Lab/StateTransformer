@@ -304,16 +304,18 @@ def main():
     )
     trainer.pop_callback(DefaultFlowCallback)
     
-    trainer.model.key_points_decoder.save_testing_diffusion_feature_dir = model.key_points_decoder.save_testing_diffusion_feature_dir[:-4] + 'train/'
-    # print("Now generating the other 40%.")
-    trainer.eval_dataset = train_dataset.select(range(int(len(train_dataset)*0),len(train_dataset)))
-    result = trainer.evaluate()
-    logger.info(f"during training set generation: {result}")
+    
     
     # First we generate the testing set for our diffusion decoder.
     print("We skip generating diff feats for eval set.")
     result = trainer.evaluate()
     logger.info(f"during eval set generation: {result}")
+    
+    trainer.model.key_points_decoder.save_testing_diffusion_feature_dir = model.key_points_decoder.save_testing_diffusion_feature_dir[:-4] + 'train/'
+    # print("Now generating the other 40%.")
+    trainer.eval_dataset = train_dataset.select(range(int(len(train_dataset)*0),len(train_dataset)))
+    result = trainer.evaluate()
+    logger.info(f"during training set generation: {result}")
     # try:
     #     if model_args.autoregressive or True:
     #         result = trainer.evaluate()
