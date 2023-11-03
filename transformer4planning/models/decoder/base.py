@@ -3,7 +3,7 @@ from torch import nn
 from typing import Dict
 from transformer4planning.libs.mlp import DecoderResCat
 from torch.nn import CrossEntropyLoss, MSELoss
-    
+import os
 class TrajectoryDecoder(nn.Module):
     def __init__(self, model_args, config):
         super().__init__()
@@ -202,6 +202,7 @@ class KeyPointMLPDeocder(nn.Module):
         key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
         return key_points_logit, None
     def save_features(self,input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state):
+        # print("hidden_state shape: ",transformer_outputs_hidden_state.shape)
         current_device_idx = int(str(input_embeds.device)[-1])
         context_length = info_dict.get("context_length", None)
         assert context_length is not None, "context length can not be None"
@@ -209,10 +210,12 @@ class KeyPointMLPDeocder(nn.Module):
             input_length = info_dict.get("input_length", None)
         future_key_points = info_dict["future_key_points"]
         key_points_num = future_key_points.shape[-2]
-        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        
         # hidden state to predict future kp is different from mlp decoder
-        kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
-                    else scenario_type_len + input_length
+        kp_end_index = context_length
+        if self.model_args.use_proposal:
+            kp_end_index += 1
+        # print("kp_end_index: ",kp_end_index)
         save_id = (self.gpu_device_count * self.current_idx + current_device_idx)*key_points_num
         for key_point_idx in range(key_points_num):
             current_save_id = save_id + key_point_idx
