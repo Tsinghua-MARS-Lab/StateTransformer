@@ -76,8 +76,8 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
         pass
 
     dataset.set_format(type='torch')
-    if "centerline" in dataset.column_names:
-        dataset = dataset.filter(lambda example: np.sum(np.array(example["centerline"])) != 0, num_proc=mp.cpu_count())
+    # if "centerline" in dataset.column_names:
+    #     dataset = dataset.filter(lambda example: np.sum(np.array(example["centerline"])) != 0, num_proc=mp.cpu_count())
 
     if agent_type != "all":
         agent_type_list = agent_type.split()
@@ -135,25 +135,6 @@ def main():
         + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
-
-    # Handle config loading and saving
-    # if config_args.load_model_config_from_path is not None:
-    #     # Load the data class object from the JSON file
-    #     model_parser = HfArgumentParser(ModelArguments)
-    #     model_args, = model_parser.parse_json_file(config_args.load_model_config_from_path, allow_extra_keys=True)
-    #     print(model_args)
-    #     logger.warning("Loading model args, this will overwrite model args from command lines!!!")
-    # if config_args.load_data_config_from_path is not None:
-    #     # Load the data class object from the JSON file
-    #     data_parser = HfArgumentParser(DataTrainingArguments)
-    #     data_args, = data_parser.parse_json_file(config_args.load_data_config_from_path, allow_extra_keys=True)
-    #     logger.warning("Loading data args, this will overwrite data args from command lines!!!")
-    # if config_args.save_model_config_to_path is not None:
-    #     with open(config_args.save_model_config_to_path, 'w') as f:
-    #         json.dump(model_args.__dict__, f, indent=4)
-    # if config_args.save_data_config_to_path is not None:
-    #     with open(config_args.save_data_config_to_path, 'w') as f:
-    #         json.dump(data_args.__dict__, f, indent=4)
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -324,14 +305,15 @@ def main():
         compute_metrics=compute_metrics_waymo if model_args.task == "waymo" else compute_metrics
     )
     trainer.pop_callback(DefaultFlowCallback)
-    
+
+    checkpoint = None
+    if training_args.resume_from_checkpoint is not None:
+        checkpoint = training_args.resume_from_checkpoint
+    elif last_checkpoint is not None:
+        checkpoint = last_checkpoint
+
     # Training
     if training_args.do_train:
-        checkpoint = None
-        if training_args.resume_from_checkpoint is not None:
-            checkpoint = training_args.resume_from_checkpoint
-        elif last_checkpoint is not None:
-            checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()  # Saves the tokenizer too for easy upload
         trainer.save_state()
@@ -339,6 +321,8 @@ def main():
     # Evaluation
     results = {}
     if training_args.do_eval:
+        if not training_args.do_train and training_args.resume_from_checkpoint is not None:
+            assert 'pretrain' in model_args.model_name, 'resume_from_checkpoint is only for training, use pretrain model to load for eval only'
         # demo_id = ['ffbd3b860a825ef9'] 
         # demo_id = ['ff3e4f2876045591']
         #         #    'ffaf0595e6b15a1d', 'ff9f884349e65234', 'ff87f53ee3b85930', 'ff3e4f2876045591']
