@@ -4,7 +4,6 @@ import numpy as np
 from typing import Tuple, Optional, Dict
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
-from transformer4planning.utils import nuplan_utils, waymo_utils
 from transformer4planning.models.decoder.base import TrajectoryDecoder
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from dataclasses import dataclass
@@ -46,7 +45,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.post_init()
         self.build_encoder()
         self.build_decoder()
-        
+
+        if self.model_args.task == 'waymo':
+            from transformer4planning.utils import waymo_utils
+        elif self.model_args.task == 'nuplan':
+            from transformer4planning.utils import nuplan_utils
         
     def build_encoder(self):
         if self.model_args.task == "nuplan":
@@ -262,6 +265,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                     :].reshape(batch_size, 1, -1)
 
                     if self.k > 1:
+                        assert NotImplementedError, 'k>1 for key points not implemented yet'
                         key_points_logit, pred_logits = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                         selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
                                             pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
@@ -311,7 +315,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
                 key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
                 
-                key_points_logits_k.append(pred_key_point)
+                key_points_logits_k.append(key_points_logits)
 
             # generate remaining trajectory
             transformer_output = self.transformer(
@@ -335,6 +339,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.k == 1:
             traj_pred_logits = traj_logits_k[0]
             if len(key_points_logits_k) > 0:
+                # WARNING, k select if not implemented for key points
                 assert len(key_points_logits_k) == self.k
                 key_points_pred_logits = key_points_logits_k[0]
         else:

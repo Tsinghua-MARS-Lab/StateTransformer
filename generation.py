@@ -11,6 +11,8 @@ import logging
 import argparse
 import numpy as np
 
+import random
+
 # from visulization.checkraster import *
 
 def main(args):
@@ -56,6 +58,23 @@ def main(args):
                            "stationary_in_traffic"]
     else:
         filter_scenario = None
+
+    if args.balance:
+        # balance samples
+        balance_dic = {"starting_straight_traffic_light_intersection_traversal": 0.4,
+                       "high_lateral_acceleration": 2.2,
+                       "changing_lane": 0.1,
+                       "high_magnitude_speed": 48.6,
+                       "low_magnitude_speed": 8.0,
+                       "starting_left_turn": 1.6,
+                       "starting_right_turn": 1.6,
+                       "stopping_with_lead": 0.1,
+                       "following_lane_with_lead": 0.1,
+                       "near_multiple_vehicles": 3.8,
+                       "traversing_pickup_dropoff": 14.6,
+                       "behind_long_vehicle": 1.2,
+                       "waiting_for_pedestrian_to_cross": 0.5,
+                       "stationary_in_traffic": 17.3}
 
     if args.scenario_filter_yaml_path is not None:
         import yaml
@@ -169,6 +188,12 @@ def main(args):
                         continue
                     if len(loaded_dic["route"]) == 0:
                         continue
+                    if args.balance:
+                        if 'scenario_type' not in loaded_dic:
+                            print("WARNING: no scenario_type in loaded_dic", list(loaded_dic.keys()))
+                            continue
+                        if random.random() > 1.0 / balance_dic[loaded_dic["scenario_type"]]:
+                            continue
                     data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
                     # legitimacy check
                     data_to_return_filtered = {}
@@ -459,5 +484,6 @@ if __name__ == '__main__':
     parser.add_argument('--scenario_filter_yaml_path', type=str, default=None)
     parser.add_argument('--filter_by_scenario_type', default=False, action='store_true')
     parser.add_argument('--keep_future_steps', default=False, action='store_true')  # use with scenario_filter_yaml_path for val14
+    parser.add_argument('--balance', default=False, action='store_true')
     args_p = parser.parse_args()
     main(args_p)
