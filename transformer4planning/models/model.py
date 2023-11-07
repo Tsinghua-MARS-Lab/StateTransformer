@@ -4,7 +4,7 @@ import numpy as np
 from typing import Tuple, Optional, Dict
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
-from transformer4planning.utils import nuplan_utils, waymo_utils
+# from transformer4planning.utils import nuplan_utils, waymo_utils
 from transformer4planning.models.decoder.base import TrajectoryDecoder
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from dataclasses import dataclass
@@ -352,14 +352,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             center_objects_world = kwargs['center_objects_world'].type_as(traj_pred_logits)
             num_center_objects, num_modes, num_timestamps, num_feat = traj_pred_logits.shape
 
-            pred_trajs_world = waymo_utils.rotate_points_along_z(
+            from transformer4planning.utils.waymo_utils import rotate_points_along_z, str_to_tensor
+
+            pred_trajs_world = rotate_points_along_z(
                 points=traj_pred_logits.view(num_center_objects, num_modes * num_timestamps, num_feat),
                 angle=center_objects_world[:, 6].view(num_center_objects)
             ).view(num_center_objects, num_modes, num_timestamps, num_feat)
             pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
 
             pred_dict = {
-                'scenario_id': waymo_utils.str_to_tensor(kwargs['scenario_id']).to(device),
+                'scenario_id': str_to_tensor(kwargs['scenario_id']).to(device),
                 'pred_trajs': pred_trajs_world[:, :, :, 0:2],
                 'pred_scores': topk_score,
                 'object_id': torch.tensor(kwargs['center_objects_id']).to(device),
@@ -481,7 +483,7 @@ def build_models(model_args):
             Number of parameters: 300k
             """
             config_p.n_layer = 1
-            config_p.n_embd = config_p.d_model = 64
+            config_p.n_embd = config_p.d_model = model_args.d_model = 64
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 1
         elif 'gpt-small' in model_args.model_name:
@@ -489,7 +491,7 @@ def build_models(model_args):
             Number of parameters: 16M
             """
             config_p.n_layer = 4
-            config_p.n_embd = config_p.d_model = 256
+            config_p.n_embd = config_p.d_model = model_args.d_model = 256
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 8
         elif 'gpt-medium' in model_args.model_name:
@@ -497,7 +499,7 @@ def build_models(model_args):
             Number of parameters: 124M
             """
             config_p.n_layer = 12
-            config_p.n_embd = config_p.d_model = 768
+            config_p.n_embd = config_p.d_model = model_args.d_model = 768
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 12
         elif 'gpt-large' in model_args.model_name:
@@ -505,7 +507,7 @@ def build_models(model_args):
             Number of parameters: 1.5B
             """
             config_p.n_layer = 48
-            config_p.n_embd = config_p.d_model = 1600
+            config_p.n_embd = config_p.d_model = model_args.d_model = 1600
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 25
         else:

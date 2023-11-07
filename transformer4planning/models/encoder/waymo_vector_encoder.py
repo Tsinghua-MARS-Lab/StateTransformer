@@ -217,18 +217,18 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         self.in_proj_obj = nn.Sequential(
             nn.Linear(self.context_encoder.num_out_channels, model_dim),
             nn.ReLU(),
-            nn.Linear(model_dim, model_dim),
+            nn.Linear(model_dim, model_args.d_model),
         )
         
         self.in_proj_map = nn.Sequential(
             nn.Linear(self.context_encoder.num_out_channels, model_dim),
             nn.ReLU(),
-            nn.Linear(model_dim, model_dim),
+            nn.Linear(model_dim, model_args.d_model),
         )
 
-        self.load_intention_proposals("/home/ldr/workspace/transformer4planning/data/waymo/cluster_64_center_dict.pkl", 
+        self.load_intention_proposals(mtr_config["PROPOSAL_PATH"], 
                                     ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST'])
-        self.build_dense_future_prediction_layers(model_dim, 80)
+        self.build_dense_future_prediction_layers(model_args.d_model, 80)
     
     def load_intention_proposals(self, file_path, agent_types):
         with open(file_path, 'rb') as f:
