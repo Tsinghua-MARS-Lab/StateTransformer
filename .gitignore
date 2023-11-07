@@ -4,3 +4,4 @@ build
 wandb
 *.so
 .sh
+src/
