@@ -388,7 +388,7 @@ class KeyPointDiffusionDecoder(nn.Module):
                             info_dict:Dict=None):
         '''
             Input:
-                hidden_output: batch_size * (context_length * 2 + pred_length) * n_embd
+                hidden_output: batch_size *1 * n_embd
                 info_dict: Dict
             Output:
                 tuple of key_points_logits and scores

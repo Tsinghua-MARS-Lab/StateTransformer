@@ -178,7 +178,11 @@ def main():
     # loop all datasets
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
-    index_root = data_args.saved_dataset_folder
+    if model_args.task == "nuplan" or model_args.task == "waymo": # nuplan datasets are stored in index format
+        index_root = os.path.join(data_args.saved_dataset_folder, 'index')
+    elif model_args.task == "train_diffusion_decoder":
+        index_root = data_args.saved_dataset_folder
+    
     
     root_folders = os.listdir(index_root)
 
@@ -236,9 +240,6 @@ def main():
     )
     if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
         model.clf_metrics = clf_metrics
-    elif model_args.next_token_scorer:
-        assert model_args.k > 1 and model_args.use_key_points, "must use key points and k must be greater than 1"
-        model.clf_metrics = clf_metrics
 
     
     import multiprocessing
@@ -295,18 +296,26 @@ def main():
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
-        train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         callbacks=[CustomCallback,],
         data_collator=collate_fn,
         compute_metrics=compute_metrics
     )
     trainer.pop_callback(DefaultFlowCallback)
     
+    
+    
     # First we generate the testing set for our diffusion decoder.
     print("We skip generating diff feats for eval set.")
     result = trainer.evaluate()
     logger.info(f"during eval set generation: {result}")
+    
+    trainer.model.key_points_decoder.save_testing_diffusion_feature_dir = model.key_points_decoder.save_testing_diffusion_feature_dir[:-4] + 'train/'
+    # print("Now generating the other 40%.")
+    trainer.eval_dataset = train_dataset.select(range(int(len(train_dataset)*0),len(train_dataset)))
+    result = trainer.evaluate()
+    logger.info(f"during training set generation: {result}")
     # try:
     #     if model_args.autoregressive or True:
     #         result = trainer.evaluate()
@@ -318,14 +327,10 @@ def main():
     
     # Then we generate the training set for our diffusion decoder.
     # Since it's way more faster to run an evaluation iter than a training iter (because no back-propagation is needed), we do this by substituting the testing set with our training set.
-    trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-4] + 'train/'
-    # print("Now generating the other 40%.")
-    trainer.eval_dataset = train_dataset.select(range(int(len(train_dataset)*0),len(train_dataset)))
-    result = trainer.evaluate()
-    logger.info(f"during training set generation: {result}")
     
     
-    trainer.model.save_testing_diffusion_dataset_dir = model.save_testing_diffusion_dataset_dir[:-6] + 'test/'
+    
+    trainer.model.key_points_decoder.save_testing_diffusion_feature_dir = model.key_points_decoder.save_testing_diffusion_feature_dir[:-6] + 'test/'
     trainer.eval_dataset = test_dataset
     result = trainer.evaluate()
     logger.info(f"during testing set generation: {result}")

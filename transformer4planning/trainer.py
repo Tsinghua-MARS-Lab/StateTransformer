@@ -504,9 +504,9 @@ class PlanningTrainer(Trainer):
                 t0_frame_id = inputs['t0_frame_id']
             scenario15s_ids = convert_names_to_ids(inputs["file_name"], t0_frame_id)
             logits_dict.update({
-            "frame_id": inputs["frame_id"],
-            "scenario15s_id": torch.tensor(scenario15s_ids, device=logits.device),
-            "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
+                "frame_id": inputs["frame_id"],
+                "scenario15s_id": torch.tensor(scenario15s_ids, device=logits.device),
+                "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
             })
 
         return (loss, logits_dict, labels)
