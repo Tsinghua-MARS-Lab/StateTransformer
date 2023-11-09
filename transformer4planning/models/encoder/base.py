@@ -4,11 +4,11 @@ from transformers import GPT2Tokenizer
 from transformer4planning.models.encoder.augmentation import DataAugmentation
 
 class TrajectoryEncoder(nn.Module):
-    def __init__(self, model_args):
+    def __init__(self, config):
         super().__init__()
-        self.use_proposal = model_args.use_proposal
-        self.use_key_points = model_args.use_key_points
-        self.model_args = model_args
+        self.use_proposal = config.use_proposal
+        self.use_key_points = config.use_key_points
+        self.config = config
 
         self.augmentation = DataAugmentation()
         self.selected_indices = []  # dummy value, give None or [] will cause error

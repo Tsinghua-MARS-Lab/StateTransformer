@@ -15,41 +15,39 @@ from transformer4planning.utils.waymo_utils import nll_loss_gmm_direct, build_ml
 
 
 class MTREncoder(nn.Module):
-    def __init__(self, config):
+    def __init__(self, encoder_model_dim):
         super().__init__()
-        self.model_cfg = config
-
         # build polyline encoders
         self.agent_polyline_encoder = self.build_polyline_encoder(
-            in_channels=self.model_cfg["NUM_INPUT_ATTR_AGENT"] + 1,
-            hidden_dim=self.model_cfg["NUM_CHANNEL_IN_MLP_AGENT"],
-            num_layers=self.model_cfg["NUM_LAYER_IN_MLP_AGENT"],
-            out_channels=self.model_cfg["D_MODEL"],
+            in_channels=30,
+            hidden_dim=256,
+            num_layers=3,
+            out_channels=encoder_model_dim,
             return_multipoints_feature=True
         )
         self.map_polyline_encoder = self.build_polyline_encoder(
-            in_channels=self.model_cfg["NUM_INPUT_ATTR_MAP"],
-            hidden_dim=self.model_cfg["NUM_CHANNEL_IN_MLP_MAP"],
-            num_layers=self.model_cfg["NUM_LAYER_IN_MLP_MAP"],
-            num_pre_layers=self.model_cfg["NUM_LAYER_IN_PRE_MLP_MAP"],
-            out_channels=self.model_cfg["D_MODEL"],
+            in_channels=9,
+            hidden_dim=64,
+            num_layers=5,
+            num_pre_layers=3,
+            out_channels=encoder_model_dim,
             return_multipoints_feature=False
         )
 
         # build transformer encoder layers
-        self.use_local_attn = self.model_cfg.get('USE_LOCAL_ATTN', False)
+        self.use_local_attn = True
         self_attn_layers = []
-        for _ in range(self.model_cfg["NUM_ATTN_LAYERS"]):
+        for _ in range(6):
             self_attn_layers.append(self.build_transformer_encoder_layer(
-                d_model=self.model_cfg["D_MODEL"],
-                nhead=self.model_cfg["NUM_ATTN_HEAD"],
-                dropout=self.model_cfg.get('DROPOUT_OF_ATTN', 0.1),
+                d_model=encoder_model_dim,
+                nhead=8,
+                dropout=0.1,
                 normalize_before=False,
                 use_local_attn=self.use_local_attn
             ))
 
         self.self_attn_layers = nn.ModuleList(self_attn_layers)
-        self.num_out_channels = self.model_cfg["D_MODEL"]
+        self.num_out_channels = encoder_model_dim
 
     def build_polyline_encoder(self, in_channels, hidden_dim, num_layers, num_pre_layers=1, out_channels=None, return_multipoints_feature=False):
         ret_polyline_encoder = polyline_encoder.PointNetPolylineEncoder(
@@ -181,7 +179,7 @@ class MTREncoder(nn.Module):
         if self.use_local_attn:
             global_token_feature = self.apply_local_attn(
                 x=global_token_feature, x_mask=global_token_mask, x_pos=global_token_pos,
-                num_of_neighbors=self.model_cfg["NUM_OF_ATTN_NEIGHBORS"]
+                num_of_neighbors=16
             )
         else:
             global_token_feature = self.apply_global_attn(
@@ -202,33 +200,32 @@ class MTREncoder(nn.Module):
 
 class WaymoVectorizeEncoder(TrajectoryEncoder):
     def __init__(self, 
-                 mtr_config,
                  action_kwargs:Dict,
-                 model_args = None
+                 config,
                  ):
-        super().__init__(model_args)
-        self.model_args = model_args
-        self.context_encoder = MTREncoder(mtr_config)
+        super().__init__(config)
+        self.config = config
+        encoder_model_dim = min(config.d_model, 768)
+        self.context_encoder = MTREncoder(encoder_model_dim)
         self.action_m_embed = nn.Sequential(nn.Linear(10, action_kwargs.get("d_embed")), nn.Tanh())
         self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         self.proposal_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
 
-        model_dim = mtr_config["D_MODEL"]
         self.in_proj_obj = nn.Sequential(
-            nn.Linear(self.context_encoder.num_out_channels, model_dim),
+            nn.Linear(self.context_encoder.num_out_channels, config.d_model),
             nn.ReLU(),
-            nn.Linear(model_dim, model_dim),
+            nn.Linear(config.d_model, config.d_model),
         )
         
         self.in_proj_map = nn.Sequential(
-            nn.Linear(self.context_encoder.num_out_channels, model_dim),
+            nn.Linear(self.context_encoder.num_out_channels, config.d_model),
             nn.ReLU(),
-            nn.Linear(model_dim, model_dim),
+            nn.Linear(config.d_model, config.d_model),
         )
 
-        self.load_intention_proposals("/home/ldr/workspace/transformer4planning/data/waymo/cluster_64_center_dict.pkl", 
+        self.load_intention_proposals(config.proposal_path, 
                                     ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST'])
-        self.build_dense_future_prediction_layers(model_dim, 80)
+        self.build_dense_future_prediction_layers(config.d_model, 80)
     
     def load_intention_proposals(self, file_path, agent_types):
         with open(file_path, 'rb') as f:
@@ -361,11 +358,11 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         
         # action context
         context_actions = input_dict['center_objects_past']
-        if self.model_args.x_random_walk > 0 and self.training:
-            x_noise = torch.rand(context_actions.shape, device=device) * self.model_args.x_random_walk * 2 - self.model_args.x_random_walk
+        if self.config.x_random_walk > 0 and self.training:
+            x_noise = torch.rand(context_actions.shape, device=device) * self.config.x_random_walk * 2 - self.config.x_random_walk
             context_actions[:, :, 0] += x_noise[:, :, 0]
-        if self.model_args.y_random_walk > 0 and self.training:
-            y_noise = torch.rand(context_actions.shape, device=device) * self.model_args.y_random_walk * 2 - self.model_args.y_random_walk
+        if self.config.y_random_walk > 0 and self.training:
+            y_noise = torch.rand(context_actions.shape, device=device) * self.config.y_random_walk * 2 - self.config.y_random_walk
             context_actions[:, :, 1] += y_noise[:, :, 1]
 
         action_embeds = self.action_m_embed(context_actions)
@@ -390,7 +387,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         }
 
         # dense prediction
-        if self.model_args.dense_pred:
+        if self.config.dense_pred:
             _, ret_pred_dense_future_trajs = self.apply_dense_future_prediction(obj_feature, obj_mask, batch_dict['obj_pos'])
             loss_pred_future = self.get_dense_future_prediction_loss(ret_pred_dense_future_trajs, input_dict['obj_trajs_future_state'], input_dict['obj_trajs_future_mask'])
         

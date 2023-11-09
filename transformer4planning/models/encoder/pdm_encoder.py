@@ -7,8 +7,8 @@ from transformer4planning.models.encoder.base import TrajectoryEncoder
 class PDMEncoder(TrajectoryEncoder):
     def __init__(self, 
                  pdm_kwargs:Dict,
-                 model_args = None):
-        super(PDMEncoder, self).__init__(model_args)
+                 config = None):
+        super(PDMEncoder, self).__init__(config)
         # 3*3 means 3d pos, 3d vel & 3d acc concat
         self.state_embed = nn.Sequential(
             nn.Linear(
@@ -70,8 +70,8 @@ class PDMEncoder(TrajectoryEncoder):
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
-            future_key_points_aug = self.augmentation.trajectory_augmentation(future_key_points.clone(), self.model_args.arf_x_random_walk, self.model_args.arf_y_random_walk, expanded_indices)
-            if not self.model_args.predict_yaw:
+            future_key_points_aug = self.augmentation.trajectory_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk, expanded_indices)
+            if not self.config.predict_yaw:
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
 

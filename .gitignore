@@ -4,5 +4,6 @@ build
 wandb
 *.so
 .sh
+src/
 .venv
 node_modules

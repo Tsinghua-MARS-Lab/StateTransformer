@@ -30,8 +30,7 @@ Motion prediction and planning are vital tasks in autonomous driving, and recent
 
 ## Prepare Environment
 
-Run `pip install -r requirements.txt` to install all dependencies. There are some additional dependencies for NuScenes and Waymo datasets. Please refer to the official websites for more details.
-Also you need to install opencv for NuPlan raster encoder. Please refer to the official website for more details.
+Install Pytorch with CUDA first (our recommendation is `pip install torch==1.9.0+cu111 torchvision==0.10.0+cu111 torchaudio==0.9.0 -f https://download.pytorch.org/whl/torch_stable.html`). Then run `pip install -r requirements.txt` to install all dependencies. There are some additional dependencies for NuScenes and Waymo datasets. Please refer to the official websites for more details.
 
 ### Install Transformer4Planning
 
