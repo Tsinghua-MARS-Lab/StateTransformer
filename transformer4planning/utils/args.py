@@ -153,8 +153,8 @@ class ModelArguments:
     ######## end of nuplan args ########
 
     ######## begin of WOMD args ########
-    mtr_config_path: Optional[str] = field(
-        default="/home/ldr/workspace/transformer4planning/config/config_gpt2_small.yaml"
+    proposal_path: Optional[str] = field(
+        default="data/waymo/cluster_64_center_dict.pkl"
     )
     dense_pred: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use dense prediction in MTR model"}

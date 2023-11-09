@@ -5,23 +5,23 @@ from transformer4planning.libs.mlp import DecoderResCat
 from torch.nn import CrossEntropyLoss, MSELoss
     
 class TrajectoryDecoder(nn.Module):
-    def __init__(self, model_args, config):
+    def __init__(self, config):
         super().__init__()
-        self.model_args = model_args
-        out_features = 4 if self.model_args.predict_yaw else 2
+        self.config = config
+        out_features = 4 if self.config.predict_yaw else 2
         self.model = DecoderResCat(config.n_inner, 
                                    config.n_embd, 
                                    out_features=out_features)
         
-        if self.model_args.task == "waymo": loss_reduction = "none"
+        if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
 
-        if 'mse' in self.model_args.loss_fn:
+        if 'mse' in self.config.loss_fn:
             self.loss_fct = nn.MSELoss(reduction=loss_reduction)
-        elif 'l1' in self.model_args.loss_fn:
+        elif 'l1' in self.config.loss_fn:
             self.loss_fct = nn.SmoothL1Loss(reduction=loss_reduction)
         else:
-            print(self.model_args.loss_fn)
+            print(self.config.loss_fn)
             assert False, "loss fn not supported"
 
     
@@ -42,24 +42,24 @@ class TrajectoryDecoder(nn.Module):
         if device is None:
             device = traj_hidden_state.device
         # compute trajectory loss conditioned on gt keypoints
-        if not self.model_args.pred_key_points_only:
+        if not self.config.pred_key_points_only:
             traj_logits = self.model(traj_hidden_state)
-            if self.model_args.task == "waymo":
+            if self.config.task == "waymo":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
                 traj_loss = (self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
                     trajectory_label_mask.sum() + 1e-7)
-            elif self.model_args.task == "nuplan":
+            elif self.config.task == "nuplan":
                 aug_current = 1 - info_dict['aug_current']
                 # expand aug_current to match traj_logits shape
                 aug_current = aug_current.unsqueeze(-1).unsqueeze(-1).expand_as(traj_logits)
                 # set traj_logits equal to label where aug_current is 0
-                traj_logits = traj_logits * aug_current + label.to(device) * (1 - aug_current) if self.model_args.predict_yaw else \
+                traj_logits = traj_logits * aug_current + label.to(device) * (1 - aug_current) if self.config.predict_yaw else \
                     traj_logits[..., :2] * aug_current + label[..., :2].to(device) * (1 - aug_current)
 
-                traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.model_args.predict_yaw else \
+                traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.config.predict_yaw else \
                             self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
-            traj_loss *= self.model_args.trajectory_loss_rescale
+            traj_loss *= self.config.trajectory_loss_rescale
         else:
             traj_logits = torch.zeros_like(label[..., :2])
             traj_loss = None
@@ -75,9 +75,9 @@ class TrajectoryDecoder(nn.Module):
         return traj_logits
     
 class ProposalDecoder(nn.Module):
-    def __init__(self, model_args, config, proposal_num=64):
+    def __init__(self, config, proposal_num=64):
         super().__init__()
-        self.model_args = model_args
+        self.config = config
         self.proposal_num = proposal_num
         self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num)
         self.proposal_logits_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=2 * self.proposal_num)
@@ -118,29 +118,29 @@ class ProposalDecoder(nn.Module):
         return loss_proposal, loss_proposal_logits
 
 class KeyPointMLPDeocder(nn.Module):
-    def __init__(self, model_args, config):
+    def __init__(self, config):
         super().__init__()
-        self.model_args = model_args
-        self.k = model_args.k
-        out_features = 4 if self.model_args.predict_yaw else 2
+        self.config = config
+        self.k = config.k
+        out_features = 4 if self.config.predict_yaw else 2
         self.model = DecoderResCat(config.n_inner,
                                    config.n_embd,
                                    out_features=out_features * self.k)
         
-        if self.model_args.task == "waymo": loss_reduction = "none"
+        if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
 
-        if 'mse' in self.model_args.loss_fn:
+        if 'mse' in self.config.loss_fn:
             self.loss_fct = nn.MSELoss(reduction=loss_reduction)
-        elif 'l1' in self.model_args.loss_fn:
+        elif 'l1' in self.config.loss_fn:
             self.loss_fct = nn.SmoothL1Loss(reduction=loss_reduction)
         else:
-            print(self.model_args.loss_fn)
+            print(self.config.loss_fn)
             assert False, "loss fn not supported"
-        if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
-            self.save_training_diffusion_feature_dir = os.path.join(self.model_args.diffusion_feature_save_dir,'train/')
-            self.save_testing_diffusion_feature_dir  = os.path.join(self.model_args.diffusion_feature_save_dir,'val/')
-            self.save_test_diffusion_feature_dir = os.path.join(self.model_args.diffusion_feature_save_dir,'test/')
+        if self.config.generate_diffusion_dataset_for_key_points_decoder:
+            self.save_training_diffusion_feature_dir = os.path.join(self.config.diffusion_feature_save_dir,'train/')
+            self.save_testing_diffusion_feature_dir  = os.path.join(self.config.diffusion_feature_save_dir,'val/')
+            self.save_test_diffusion_feature_dir = os.path.join(self.config.diffusion_feature_save_dir,'test/')
             if not os.path.exists(self.save_training_diffusion_feature_dir):
                 os.makedirs(self.save_training_diffusion_feature_dir)
             if not os.path.exists(self.save_testing_diffusion_feature_dir):
@@ -153,6 +153,7 @@ class KeyPointMLPDeocder(nn.Module):
             # This is because evaluation is way faster than training (since there are no backward propagation), and after saving features for evaluation, we just change our test set to training set and then run the evaluation loop again.
             # The related code can be found in runner.py at around line 511.
             self.current_idx = 0
+            
     def compute_keypoint_loss(self,
                               hidden_output,
                               info_dict: Dict = None,
@@ -171,23 +172,23 @@ class KeyPointMLPDeocder(nn.Module):
         future_key_points = info_dict["future_key_points"]
         
         kp_start_index = context_length - 1
-        if self.model_args.use_proposal:
+        if self.config.use_proposal:
             kp_start_index += 1
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
         
         if self.k == 1:
-            assert self.model_args.task == "nuplan", "k=1 case only support nuplan task"
-            kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.model_args.predict_yaw else \
+            assert self.config.task == "nuplan", "k=1 case only support nuplan task"
+            kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
                             self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
         else:
-            assert self.model_args.task == "waymo", "k>1 case only support waymo task"
+            assert self.config.task == "waymo", "k>1 case only support waymo task"
             b, s, _ = future_key_points.shape
             k_result = key_points_logits.rehsape(b, s, self.k, -1)
 
             # get loss of minimal loss from k results
             k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
-            kp_loss_candidate = self.loss_fct(k_result, k_future_key_points.to(device)) if self.model_args.predict_yaw else \
+            kp_loss_candidate = self.loss_fct(k_result, k_future_key_points.to(device)) if self.config.predict_yaw else \
                         self.loss_fct(k_result[..., :2], k_future_key_points[..., :2].to(device))
         
             kp_loss, min_loss_indices = torch.min(kp_loss_candidate.sum(dim=-1), dim=2)
@@ -209,7 +210,7 @@ class KeyPointMLPDeocder(nn.Module):
             input_length = info_dict.get("input_length", None)
         future_key_points = info_dict["future_key_points"]
         key_points_num = future_key_points.shape[-2]
-        scenario_type_len = self.model_args.max_token_len if self.model_args.token_scenario_tag else 0
+        scenario_type_len = self.config.max_token_len if self.config.token_scenario_tag else 0
         # hidden state to predict future kp is different from mlp decoder
         kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
                     else scenario_type_len + input_length

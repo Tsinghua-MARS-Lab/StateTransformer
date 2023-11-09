@@ -28,16 +28,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
         self.transformer = GPT2Model(config)
-        self.model_args = kwargs["model_args"]
+        self.config = config
         self.traj_decoder = None
-        self.k = int(self.model_args.k)
+        self.k = int(self.config.k)
         
-        self.use_proposal = self.model_args.use_proposal
-        if self.use_proposal: assert self.model_args.task == "waymo", "NotImplemented"
+        self.use_proposal = self.config.use_proposal
+        if self.use_proposal: assert self.config.task == "waymo", "NotImplemented"
 
-        self.use_key_points = self.model_args.use_key_points
-        if self.use_key_points != "no": assert self.model_args.task == "nuplan", "NotImplemented"
-        self.kp_decoder_type = self.model_args.kp_decoder_type
+        self.use_key_points = self.config.use_key_points
+        if self.use_key_points != "no": assert self.config.task == "nuplan", "NotImplemented"
+        self.kp_decoder_type = self.config.kp_decoder_type
         
         self.model_parallel = False
         self.device_map = None
@@ -49,37 +49,35 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         
         
     def build_encoder(self):
-        if self.model_args.task == "nuplan":
-            if "raster" in self.model_args.encoder_type:
+        if self.config.task == "nuplan":
+            if "raster" in self.config.encoder_type:
                 from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
-                    in_channels=self.model_args.raster_channels,
-                    resnet_type=self.model_args.resnet_type, 
-                    pretrain=self.model_args.pretrain_encoder
+                    in_channels=self.config.raster_channels,
+                    resnet_type=self.config.resnet_type, 
+                    pretrain=self.config.pretrain_encoder
                 )
                 action_kwargs = dict(
                     d_embed=self.config.n_embd
                 )
-                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, self.model_args)
-            elif "vector" in self.model_args.encoder_type:
+                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, self.config)
+            elif "vector" in self.config.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
                     hidden_dim=self.config.n_embd,
                     centerline_dim=120,
                     history_dim=20
                 )
-                self.encoder = PDMEncoder(pdm_kwargs, self.model_args)
+                self.encoder = PDMEncoder(pdm_kwargs, self.config)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
-        elif self.model_args.task == "waymo":
+        elif self.config.task == "waymo":
             from transformer4planning.models.encoder.waymo_vector_encoder import WaymoVectorizeEncoder
-            from transformer4planning.utils.waymo_utils import cfg_from_yaml_file
-            cfg = cfg_from_yaml_file(self.model_args.mtr_config_path)
             action_kwargs = dict(
                 d_embed=self.config.n_embd
             )
-            self.encoder = WaymoVectorizeEncoder(cfg, action_kwargs, self.model_args)
+            self.encoder = WaymoVectorizeEncoder(action_kwargs, self.config)
         else:
             raise NotImplementedError
 
@@ -88,24 +86,24 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         #TODO: add diffusion decoder trained from scratch
         if self.use_proposal:
             from transformer4planning.models.decoder.base import ProposalDecoder
-            self.proposal_decoder = ProposalDecoder(self.model_args, self.config)
+            self.proposal_decoder = ProposalDecoder(self.config)
 
         if self.use_key_points != 'no':
             if self.kp_decoder_type == "diffusion":
                 from transformer4planning.models.decoder.diffusion_decoder import KeyPointDiffusionDecoder
-                self.key_points_decoder = KeyPointDiffusionDecoder(self.model_args, self.config)
-                if self.model_args.key_points_diffusion_decoder_load_from is not None:
-                    print(f"Now loading pretrained key_points_diffusion_decoder from {self.model_args.key_points_diffusion_decoder_load_from}.")
-                    state_dict = torch.load(self.model_args.key_points_diffusion_decoder_load_from)
+                self.key_points_decoder = KeyPointDiffusionDecoder(self.config)
+                if self.config.key_points_diffusion_decoder_load_from is not None:
+                    print(f"Now loading pretrained key_points_diffusion_decoder from {self.config.key_points_diffusion_decoder_load_from}.")
+                    state_dict = torch.load(self.config.key_points_diffusion_decoder_load_from)
                     self.key_points_decoder.model.load_state_dict(state_dict)
                     print("Pretrained keypoint decoder has been loaded!")
                 else:
                     print("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
             elif self.kp_decoder_type == "mlp":
                 from transformer4planning.models.decoder.base import KeyPointMLPDeocder
-                self.key_points_decoder = KeyPointMLPDeocder(self.model_args, self.config)
+                self.key_points_decoder = KeyPointMLPDeocder(self.config)
         
-        self.traj_decoder = TrajectoryDecoder(self.model_args, self.config)
+        self.traj_decoder = TrajectoryDecoder(self.config)
 
         
     def _prepare_attention_mask_for_generation(self, input_embeds):
@@ -152,20 +150,20 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             loss += proposal_loss_logits
             loss_items["proposal_loss"] = proposal_loss
 
-        if self.model_args.dense_pred:
-            assert self.model_args.task == "waymo"
+        if self.config.dense_pred:
+            assert self.config.task == "waymo"
             loss += info_dict["dense_pred_loss"]
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
 
         if self.use_key_points != 'no':
-            if self.model_args.generate_diffusion_dataset_for_key_points_decoder:
+            if self.config.generate_diffusion_dataset_for_key_points_decoder:
                 self.key_points_decoder.save_features(input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state)
 
-            if self.model_args.kp_decoder_type == "diffusion":
+            if self.config.kp_decoder_type == "diffusion":
                 assert not self.training, "please train diffusion decoder separately."
                 # return a dummy loss&kp_logits here. The real data for computing metrics will be computed in the generate function
                 kp_loss = torch.tensor(0.0).to(transformer_outputs_hidden_state.device)
-                kp_logits = info_dict["future_key_points"].to(transformer_outputs_hidden_state.device) if self.model_args.predict_yaw else \
+                kp_logits = info_dict["future_key_points"].to(transformer_outputs_hidden_state.device) if self.config.predict_yaw else \
                             info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
             else:
                 kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
@@ -267,7 +265,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     else:
                         key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                     pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
-                    if self.model_args.predict_yaw:
+                    if self.config.predict_yaw:
                         pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
                     else:
                         pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
@@ -303,7 +301,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     # replace embed at the next position
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
-                    if self.model_args.predict_yaw:
+                    if self.config.predict_yaw:
                         pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
                     else:
                         pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
@@ -322,8 +320,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             # expected shape for pred trajectory is (b, pred_length, 4)
             if self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
-                if self.model_args.predict_yaw:
-                    traj_logits = interplate_yaw(traj_logits, mode=self.model_args.postprocess_yaw)
+                if self.config.predict_yaw:
+                    traj_logits = interplate_yaw(traj_logits, mode=self.config.postprocess_yaw)
 
                 traj_logits_k.append(traj_logits)
             else:
@@ -348,7 +346,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if key_points_pred_logits is not None:
             pred_dict.update({"key_points_logits": key_points_pred_logits})
         
-        if self.model_args.task == "waymo":
+        if self.config.task == "waymo":
             center_objects_world = kwargs['center_objects_world'].type_as(traj_pred_logits)
             num_center_objects, num_modes, num_timestamps, num_feat = traj_pred_logits.shape
 
@@ -483,7 +481,7 @@ def build_models(model_args):
             Number of parameters: 300k
             """
             config_p.n_layer = 1
-            config_p.n_embd = config_p.d_model = model_args.d_model = 64
+            config_p.n_embd = config_p.d_model = 64
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 1
         elif 'gpt-small' in model_args.model_name:
@@ -491,7 +489,7 @@ def build_models(model_args):
             Number of parameters: 16M
             """
             config_p.n_layer = 4
-            config_p.n_embd = config_p.d_model = model_args.d_model = 256
+            config_p.n_embd = config_p.d_model = 256
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 8
         elif 'gpt-medium' in model_args.model_name:
@@ -499,7 +497,7 @@ def build_models(model_args):
             Number of parameters: 124M
             """
             config_p.n_layer = 12
-            config_p.n_embd = config_p.d_model = model_args.d_model = 768
+            config_p.n_embd = config_p.d_model = 768
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 12
         elif 'gpt-large' in model_args.model_name:
@@ -507,7 +505,7 @@ def build_models(model_args):
             Number of parameters: 1.5B
             """
             config_p.n_layer = 48
-            config_p.n_embd = config_p.d_model = model_args.d_model = 1600
+            config_p.n_embd = config_p.d_model = 1600
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 25
         else:
@@ -528,7 +526,7 @@ def build_models(model_args):
                                                      input_feature_seq_lenth=model_args.diffusion_condition_sequence_lenth,
                                                      use_key_points=model_args.use_key_points,
                                                      feat_dim=model_args.key_points_diffusion_decoder_feat_dim,)
-            model = T4PTrainDiffWrapper(diffusion_model, num_key_points=model_args.key_points_num, model_args=model_args)
+            model = T4PTrainDiffWrapper(diffusion_model, num_key_points=model_args.key_points_num, model_args=config_p)
             if model_args.key_points_diffusion_decoder_load_from is not None:
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
                 model.load_state_dict(state_dict)
@@ -542,17 +540,17 @@ def build_models(model_args):
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:
-        model = ModelCls(config_p, model_args=model_args)
+        model = ModelCls(config_p)
         print('Scratch ' + tag + ' Initialized!')
     elif 'pretrain' in model_args.model_name:
-        model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, model_args=model_args, config=config_p)
+        model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, config=config_p)
         print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
         if model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
                 model.key_points_decoder.model.load_state_dict(state_dict)
     elif 'transfer' in model_args.model_name:
-        model = ModelCls(config_p, model_args=model_args)
+        model = ModelCls(config_p)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
         
     return model
