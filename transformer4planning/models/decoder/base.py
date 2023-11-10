@@ -206,7 +206,7 @@ class KeyPointMLPDeocder(nn.Module):
 
         # hidden state to predict future kp is different from mlp decoder
         kp_end_index = context_length
-        if self.model_args.use_proposal:
+        if self.config.use_proposal:
             kp_end_index += 1
         # print("kp_end_index: ",kp_end_index)
         save_id = (self.gpu_device_count * self.current_idx + current_device_idx)*key_points_num

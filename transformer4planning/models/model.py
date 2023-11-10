@@ -35,7 +35,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.use_proposal: assert self.config.task == "waymo", "NotImplemented"
 
         self.use_key_points = self.config.use_key_points
-        if self.use_key_points != "no": assert self.config.task == "nuplan", "NotImplemented"
         self.kp_decoder_type = self.config.kp_decoder_type
         
         self.model_parallel = False
@@ -46,9 +45,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.build_encoder()
         self.build_decoder()
 
-        if self.model_args.task == 'waymo':
+        if self.config.task == 'waymo':
             from transformer4planning.utils import waymo_utils
-        elif self.model_args.task == 'nuplan':
+        elif self.config.task == 'nuplan':
             from transformer4planning.utils import nuplan_utils
         
     def build_encoder(self):
@@ -160,7 +159,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         if self.use_key_points != 'no':
             if self.config.generate_diffusion_dataset_for_key_points_decoder:
-                future_key_points = info_dict["future_key_points"] if self.model_args.predict_yaw else \
+                future_key_points = info_dict["future_key_points"] if self.config.predict_yaw else \
                             info_dict["future_key_points"][..., :2]
                 self.key_points_decoder.save_features(input_embeds,info_dict["context_length"],info_dict,future_key_points,transformer_outputs_hidden_state)
 

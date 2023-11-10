@@ -51,6 +51,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                     resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                     pretrain=cnn_kwargs.get("pretrain", False))
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        self.kp_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         
     def forward(self, **kwargs):
         """
