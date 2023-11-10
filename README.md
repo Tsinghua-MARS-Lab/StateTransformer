@@ -71,7 +71,42 @@ Usage:
 2. generate filtered scenario index and cache in .arrow files
 3. generate map dictionary to pickles
 
-Step 1: Process .db to .pkl by running:
+We recommend you to organize your downloaded dataset in the following way. If you need to process from a customized directory, check `generation.py` for more derivations.
+
+```
+    {DATASET_ROOT}
+    ├── maps
+    │   ├── us-ma-boston
+    │   ├── us-pa-pittsburgh-hazelwood
+    │   ├── us-nv-las-vegas-strip
+    │   ├── sg-one-north
+    │   ├── nuplan-maps-v1.0.json
+    ├── nuplan-v1.1
+    │   │── train_singapore
+    │   │   ├── *.db
+    │   │── train_boston
+    │   │   ├── *.db
+    │   │── train_pittsburgh
+    │   │   ├── *.db
+    │   │── train_las_vegas_1
+    │   │   ├── *.db
+    │   │── train_las_vegas_2
+    │   │   ├── *.db
+    │   │── train_las_vegas_3
+    │   │   ├── *.db
+    │   │── train_las_vegas_4
+    │   │   ├── *.db
+    │   │── train_las_vegas_5
+    │   │   ├── *.db
+    │   │── train_las_vegas_6
+    │   │   ├── *.db
+    │   │── test
+    │   │   ├── *.db
+    │   │── val
+    │   │   ├── *.db
+```
+
+Step 1: Process .db to .pkl by running (data_path is the folder name like 'train_singleapore'):
 ```
     python generation.py  --num_proc 40 --sample_interval 100  
     --dataset_name boston_index_demo  --starting_file_num 0  
@@ -141,7 +176,7 @@ root-
 
 The common training settings are shown below.
 
-`
+```
 python -m torch.distributed.run \
 --nproc_per_node=8 runner.py \
 --do_train --do_eval\
@@ -164,7 +199,7 @@ python -m torch.distributed.run \
 --max_eval_samples 10000 --predict_yaw True \
 --use_full_training_set False --past_sample_interval 2 \
 --x_random_walk 0.1 --y_random_walk 0.1 --augment_current_pose_rate 0.1
-`
+```
 
 To choose different encoder, please set the attribute `--encoder_type`. The choices are [`raster`, `vector`]. With different `--task` setting, the encoder can be initilized with different classes.
 
@@ -176,7 +211,7 @@ Training the diffusion decoder together with the backbone is not recommended due
 
 After training with an MLP decoder, you need to generate the dataset for training the diffusion decoder using `generate_diffusion_feature.py`: this is done using the same command for eval except that you need to set `--generate_diffusion_dataset_for_key_points_decoder` to True and `--diffusion_feature_save_dir` to the dir to save the pth files for training diffusion decoders.
 An example:
-`
+```
 python -m torch.distributed.run \
 --nproc_per_node=8 generate_diffusion_feature.py \
 --model_name pretrain-gpt-mini \
@@ -196,7 +231,7 @@ python -m torch.distributed.run \
 --next_token_scorer True \
 --pred_key_points_only False \
 --diffusion_feature_save_dir {PATH_TO_DIFFUSION_FEATURE_SAVE_DIR} \
-`
+```
 After running these, you are supposed to get three folders under `diffusion_feature_save_dir` for `train`, `val` and `test` diffusion features respectively.
 
 ```
@@ -213,17 +248,18 @@ diffusion_feature_save_dir
 ```
 
 After saving the pth files, you need to run `convert_diffusion_dataset.py` to convert them into arrow dataset which is consistent with the training format we are using here.
-`
+```
 python3 convert_diffusion_dataset.py \
     --save_dir {PATH_TO_SAVE_DIR} \
     --data_dir {PATH_TO_DIFFUSION_FEATURE_SAVE_DIR} \
     --num_proc 10 \
-    --dataset_name nuplan_diffusion_train \
+    --dataset_name train \
     --map_dir {PATH_TO_MAP_DIR} \
     --saved_datase_folder {PATH_TO_DATASET_FOLDER} \
     --use_centerline False \
     --split train \
-`
+```
+
 After which you are expected to see such structures in save_dir:
 ```
 save_dir
@@ -238,7 +274,7 @@ save_dir
 
 Fianlly, please set `--task` to `train_diffusion_decoder`. In this case, the model is initilized without a transformer backbone(Reduce the infence time to build backbone feature). 
 In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', obtained previously by `convert_diffusion_dataset.py`. In this case it should be consistent with `save_dir` in the previous step.
-`
+```
 python3 -m torch.distributed.run \
 --nproc_per_node=8 runner.py \
 --model_name pretrain-gpt-small \
@@ -260,10 +296,12 @@ python3 -m torch.distributed.run \
 --per_device_eval_batch_size 2 \
 --past_sample_interval 2 \
 --trajectory_loss_rescale 0.00001 \
-`
+```
+
+### Evaluate the performance of diffusion decoder
 
 After training the diffusion keypoint decoder separately, you may use such command to eval its performance:
-`
+```
 export CUDA_VISIBLE_DEVICES=0; \
 nohup python3 -m torch.distributed.run \
 --nproc_per_node=1 runner.py \
@@ -288,11 +326,11 @@ nohup python3 -m torch.distributed.run \
 --past_sample_interval 2 \
 --kp_decoder_type diffusion --key_points_diffusion_decoder_feat_dim 256 --diffusion_condition_sequence_lenth 1 \
 --key_points_diffusion_decoder_load_from {KEY_POINT_DIFFUSION_CHECKPOINT_PATH}
-`
+```
 
 ## To predict:
 
-`
+```
 export CUDA_VISIBLE_DEVICES=3; \
 python -m torch.distributed.run \
 --nproc_per_node=1 \
@@ -315,7 +353,7 @@ runner.py --model_name pretrain-gpt \
 --pred_key_points_only False \
 --specified_key_points True \
 --forward_specified_key_points False \
-`
+```
 
 ## Waymo Dataset Pipeline
 
