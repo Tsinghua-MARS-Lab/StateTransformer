@@ -496,7 +496,7 @@ class PlanningTrainer(Trainer):
             "loss_items": loss_items if loss_items is not None else 0,
         }
 
-        if self.model.model_args.task == "nuplan":
+        if self.model.config.task == "nuplan":
             if 't0_frame_id' not in inputs or inputs['t0_frame_id'][0] == -1:
                 # val14 without 15s in the future
                 t0_frame_id = inputs["frame_id"]

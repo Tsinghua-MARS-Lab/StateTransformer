@@ -26,6 +26,11 @@ class PDMEncoder(TrajectoryEncoder):
             nn.Linear(4, pdm_kwargs.get("hidden_dim")),
             nn.Tanh()
         )
+        
+        self.kp_m_embed = nn.Sequential(
+            nn.Linear(4, pdm_kwargs.get("hidden_dim")),
+            nn.Tanh()
+        )
     
     def forward(self, **kwargs):
         """

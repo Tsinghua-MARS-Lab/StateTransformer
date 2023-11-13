@@ -35,7 +35,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.use_proposal: assert self.config.task == "waymo", "NotImplemented"
 
         self.use_key_points = self.config.use_key_points
-        if self.use_key_points != "no": assert self.config.task == "nuplan", "NotImplemented"
         self.kp_decoder_type = self.config.kp_decoder_type
         
         self.model_parallel = False
@@ -45,11 +44,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.post_init()
         self.build_encoder()
         self.build_decoder()
-
-        if self.model_args.task == 'waymo':
-            from transformer4planning.utils import waymo_utils
-        elif self.model_args.task == 'nuplan':
-            from transformer4planning.utils import nuplan_utils
         
     def build_encoder(self):
         if self.config.task == "nuplan":
@@ -160,7 +154,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         if self.use_key_points != 'no':
             if self.config.generate_diffusion_dataset_for_key_points_decoder:
-                future_key_points = info_dict["future_key_points"] if self.model_args.predict_yaw else \
+                future_key_points = info_dict["future_key_points"] if self.config.predict_yaw else \
                             info_dict["future_key_points"][..., :2]
                 self.key_points_decoder.save_features(input_embeds,info_dict["context_length"],info_dict,future_key_points,transformer_outputs_hidden_state)
 
@@ -243,7 +237,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     future_key_points = trajectory_label_dummy[:, ar_future_interval - 1::ar_future_interval, :]
 
                 assert future_key_points.shape[1] > 0, 'future points not enough to sample'
-                future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
+                future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
                 key_points_num = future_key_points.shape[1]
 
                 input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
@@ -262,14 +256,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
 
-                    if self.k > 1:
-                        assert NotImplementedError, 'k>1 for key points not implemented yet'
-                        key_points_logit, pred_logits = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
-                        selected_key_point = key_points_logit.reshape(batch_size, self.k, -1)[torch.arange(batch_size),
-                                            pred_logits.argmax(dim=-1).reshape(-1), :].reshape(batch_size, 1, -1)
-                        key_points_logit = selected_key_point
-                    else:
-                        key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+
+                    key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                     pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
                     if self.config.predict_yaw:
                         pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
@@ -304,7 +292,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
                         pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                         pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
-                    key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     # replace embed at the next position
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
                     if self.config.predict_yaw:

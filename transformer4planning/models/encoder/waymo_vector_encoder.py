@@ -358,12 +358,8 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         
         # action context
         context_actions = input_dict['center_objects_past']
-        if self.config.x_random_walk > 0 and self.training:
-            x_noise = torch.rand(context_actions.shape, device=device) * self.config.x_random_walk * 2 - self.config.x_random_walk
-            context_actions[:, :, 0] += x_noise[:, :, 0]
-        if self.config.y_random_walk > 0 and self.training:
-            y_noise = torch.rand(context_actions.shape, device=device) * self.config.y_random_walk * 2 - self.config.y_random_walk
-            context_actions[:, :, 1] += y_noise[:, :, 1]
+        # add noise to context actions
+        context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.config.x_random_walk, self.config.y_random_walk)
 
         action_embeds = self.action_m_embed(context_actions)
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
@@ -394,30 +390,50 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             info_dict["dense_pred_loss"] = loss_pred_future
 
         # prepare proposals
-        gt_proposal_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
-        type_idx_str = {
-            1: 'TYPE_VEHICLE',
-            2: 'TYPE_PEDESTRIAN',
-            3: 'TYPE_CYCLIST',
-        }
-        center_obj_types = input_dict['center_objects_type']
-        
-        center_obj_proposal_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
-        center_obj_proposal_pts = torch.cat(center_obj_proposal_pts, dim=0) # (bs, 64, 2)
-        dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_proposal_pts, dim=2)
-        proposal_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+        if self.use_proposal:
+            gt_proposal_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+            type_idx_str = {
+                1: 'TYPE_VEHICLE',
+                2: 'TYPE_PEDESTRIAN',
+                3: 'TYPE_CYCLIST',
+            }
+            center_obj_types = input_dict['center_objects_type']
+            
+            center_obj_proposal_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
+            center_obj_proposal_pts = torch.cat(center_obj_proposal_pts, dim=0) # (bs, 64, 2)
+            dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_proposal_pts, dim=2)
+            proposal_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
 
-        proposal_GT_logits = center_obj_proposal_pts[torch.arange(batch_size), proposal_GT_cls, :] * gt_proposal_mask # (bs, 2)
-        proposal_embedding = self.proposal_m_embed(proposal_GT_logits).unsqueeze(1)
-        input_embeds = torch.cat([input_embeds, proposal_embedding], dim=1)
+            proposal_GT_logits = center_obj_proposal_pts[torch.arange(batch_size), proposal_GT_cls, :] * gt_proposal_mask # (bs, 2)
+            proposal_embedding = self.proposal_m_embed(proposal_GT_logits).unsqueeze(1)
+            input_embeds = torch.cat([input_embeds, proposal_embedding], dim=1)
 
-        info_dict["gt_proposal_cls"] = proposal_GT_cls
-        info_dict["gt_proposal_mask"] = gt_proposal_mask
-        info_dict["gt_proposal_logits"] = proposal_GT_logits
-        info_dict["center_obj_proposal_pts"] = center_obj_proposal_pts
+            info_dict["gt_proposal_cls"] = proposal_GT_cls
+            info_dict["gt_proposal_mask"] = gt_proposal_mask
+            info_dict["gt_proposal_logits"] = proposal_GT_logits
+            info_dict["center_obj_proposal_pts"] = center_obj_proposal_pts
 
         # prepare keypoints
         n_embed = action_embeds.shape[-1]
-        input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)    
+        if self.use_key_points == 'no':
+            input_embeds = torch.cat([input_embeds,
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+        else:
+            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
+            assert future_key_points.shape[1] != 0, 'future points not enough to sample'
+            # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+            # argument future trajectory
+            future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk)
+            if not self.config.predict_yaw:
+                # keep the same information when generating future points
+                future_key_points_aug[:, :, 2:] = 0
+
+            future_key_embeds = self.kps_m_embed(future_key_points_aug)
+            input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            
+            info_dict["future_key_points"] = future_key_points
+            info_dict["selected_indices"] = selected_indices
+            info_dict["key_points_mask"] = trajectory_label_mask[:, self.selected_indices, :]
+
         return input_embeds, info_dict

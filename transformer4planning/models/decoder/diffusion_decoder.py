@@ -359,24 +359,24 @@ class T4PTrainDiffWrapper(DiffusionWrapper):
             return dict(logits=value[0], scores=value[1])
 
 class KeyPointDiffusionDecoder(nn.Module):
-    def __init__(self, model_args, config):
+    def __init__(self, config):
         super().__init__()
-        self.model_args = model_args
-        self.out_features = 4 if model_args.predict_yaw else 2
-        self.k = model_args.k
-        self.use_key_points = model_args.use_key_points
+        self.config = config
+        self.out_features = 4 if config.predict_yaw else 2
+        self.k = config.k
+        self.use_key_points = config.use_key_points
         diffusion_model = KeypointDiffusionModel(config.n_inner,
                                                  config.n_embd,
-                                                 out_features=self.out_features * self.model_args.k,
+                                                 out_features=self.out_features * self.config.k,
                                                  key_point_num=1,
-                                                 feat_dim=self.model_args.key_points_diffusion_decoder_feat_dim,
-                                                 input_feature_seq_lenth=self.model_args.diffusion_condition_sequence_lenth,
-                                                 use_key_points=model_args.use_key_points,)
+                                                 feat_dim=self.config.key_points_diffusion_decoder_feat_dim,
+                                                 input_feature_seq_lenth=self.config.diffusion_condition_sequence_lenth,
+                                                 use_key_points=config.use_key_points,)
 
         self.model = DiffusionWrapper(diffusion_model, num_key_points=1,)# self.model_args.key_points_num)
-        if 'mse' in self.model_args.loss_fn:
+        if 'mse' in self.config.loss_fn:
             self.loss_fct = nn.MSELoss(reduction="mean")
-        elif 'l1' in self.model_args.loss_fn:
+        elif 'l1' in self.config.loss_fn:
             self.loss_fct = nn.SmoothL1Loss()
         else:
             raise NotImplementedError
@@ -409,7 +409,7 @@ class KeyPointDiffusionDecoder(nn.Module):
         if self.k == 1:
             key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
         else:
-            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.model_args.mc_num)
+            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.config.mc_num)
             reg_sigma_cls_dict = modify_func(
                 output = dict(
                     reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)],

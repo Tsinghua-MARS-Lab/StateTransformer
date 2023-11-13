@@ -121,11 +121,10 @@ class KeyPointMLPDeocder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.k = config.k
         out_features = 4 if self.config.predict_yaw else 2
         self.model = DecoderResCat(config.n_inner,
                                    config.n_embd,
-                                   out_features=out_features * self.k)
+                                   out_features=out_features)
         
         if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
@@ -176,25 +175,17 @@ class KeyPointMLPDeocder(nn.Module):
             kp_start_index += 1
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
-        
-        if self.k == 1:
-            assert self.config.task == "nuplan", "k=1 case only support nuplan task"
-            kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
-                            self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
-        else:
-            assert self.config.task == "waymo", "k>1 case only support waymo task"
-            b, s, _ = future_key_points.shape
-            k_result = key_points_logits.rehsape(b, s, self.k, -1)
 
-            # get loss of minimal loss from k results
-            k_future_key_points = future_key_points.unsqueeze(2).repeat(1, 1, self.k, 1).reshape(b, s, self.k, -1)
-            kp_loss_candidate = self.loss_fct(k_result, k_future_key_points.to(device)) if self.config.predict_yaw else \
-                        self.loss_fct(k_result[..., :2], k_future_key_points[..., :2].to(device))
-        
-            kp_loss, min_loss_indices = torch.min(kp_loss_candidate.sum(dim=-1), dim=2)
-    
-            future_key_points_gt_mask = info_dict["future_key_points_gt_mask"]
-            kp_loss = (kp_loss.unsqueeze(-1) * future_key_points_gt_mask).sum() / (future_key_points_gt_mask.sum() + 1e-7)
+        if self.config.task == "nuplan":
+            kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
+                        self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
+        elif self.config.task == "waymo":
+            kp_mask = info_dict["key_points_mask"]
+            assert kp_mask is not None, "key_points_mask is None"
+            kp_loss = (self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device)) * kp_mask).sum() / (
+                kp_mask.sum() + 1e-7)
+        else:
+            raise NotImplementedError
         
         return kp_loss, key_points_logits
 
@@ -202,6 +193,7 @@ class KeyPointMLPDeocder(nn.Module):
         batch_size = hidden_state.shape[0]
         key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
         return key_points_logit, None
+    
     def save_features(self,input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state):
         # print("hidden_state shape: ",transformer_outputs_hidden_state.shape)
         current_device_idx = int(str(input_embeds.device)[-1])
@@ -214,7 +206,7 @@ class KeyPointMLPDeocder(nn.Module):
 
         # hidden state to predict future kp is different from mlp decoder
         kp_end_index = context_length
-        if self.model_args.use_proposal:
+        if self.config.use_proposal:
             kp_end_index += 1
         # print("kp_end_index: ",kp_end_index)
         save_id = (self.gpu_device_count * self.current_idx + current_device_idx)*key_points_num
