@@ -44,11 +44,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.post_init()
         self.build_encoder()
         self.build_decoder()
-
-        if self.config.task == 'waymo':
-            from transformer4planning.utils import waymo_utils
-        elif self.config.task == 'nuplan':
-            from transformer4planning.utils import nuplan_utils
         
     def build_encoder(self):
         if self.config.task == "nuplan":
