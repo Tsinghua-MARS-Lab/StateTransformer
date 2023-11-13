@@ -237,6 +237,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     future_key_points = trajectory_label_dummy[:, ar_future_interval - 1::ar_future_interval, :]
 
                 assert future_key_points.shape[1] > 0, 'future points not enough to sample'
+                # future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
                 future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
                 key_points_num = future_key_points.shape[1]
 
@@ -255,7 +256,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     future_key_point_hidden_state = transformer_outputs_hidden_state[:,
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
-
 
                     key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                     pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
@@ -292,6 +292,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
                         pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                         pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
+                    # key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     # replace embed at the next position
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]

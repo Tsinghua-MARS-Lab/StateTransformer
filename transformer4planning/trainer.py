@@ -89,21 +89,24 @@ def compute_metrics(prediction: EvalPrediction):
             eval_result[each_key] = np.mean(loss_items[each_key])
 
     # fetch trajectory and key points predictions
-    if prediction_by_forward.shape[1] > prediction_horizon:
+    if 'key_points_logits' in prediction_by_generation:
+    # if prediction_by_forward.shape[1] > prediction_horizon:
         # first 5 are key points concatentate with trajectory
         prediction_key_points_by_generation = prediction_by_generation["key_points_logits"]  # sample_num, 5, 2/4
+        assert prediction_by_forward.shape[1] > prediction_horizon, f'{prediction_by_forward.shape[1]} {prediction_horizon}'
         prediction_key_points_by_forward = prediction_by_forward[:, :-prediction_horizon, :]  # sample_num, 5, 2/4
-    else:
-        # only trajectory, no key points
-        assert prediction_by_forward.shape[1] == prediction_horizon, f'{prediction_key_points_by_generation.shape[1]} {prediction_horizon}'
-        # only trajectory
-        prediction_key_points_by_generation = prediction_by_generation["key_points_logits"] # sample_num, 5, 2/4
-        prediction_key_points_by_forward = prediction_by_forward[:, selected_indices, :]  # sample_num, 5, 2/4
+    # else:
+    #     # only trajectory, no key points
+    #     assert prediction_by_forward.shape[1] == prediction_horizon, f'{prediction_key_points_by_generation.shape[1]} {prediction_horizon}'
+    #     # only trajectory
+    #     prediction_key_points_by_generation = prediction_by_generation["key_points_logits"] # sample_num, 5, 2/4
+    #     prediction_key_points_by_forward = prediction_by_forward[:, selected_indices, :]  # sample_num, 5, 2/4
     prediction_trajectory_by_generation = prediction_by_generation["traj_logits"] # sample_num, 80, 2/4
     prediction_trajectory_by_forward = prediction_by_forward[:, -prediction_horizon:, :]  # sample_num, 80, 2/4
 
     # calculate error for generation results
-    if len(selected_indices) > 1:
+    if 'key_points_logits' in prediction_by_generation:
+        assert len(selected_indices) > 1, selected_indices
         label_key_points = labels[:, selected_indices, :]
         ade_x_error_key_points_gen = prediction_key_points_by_generation[:, :, 0] - label_key_points[:, :, 0]
         ade_y_error_key_points_gen = prediction_key_points_by_generation[:, :, 1] - label_key_points[:, :, 1]
@@ -226,7 +229,8 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['ade_forward'] = ade_for
     fde_for = np.sqrt(fde_x_error_for ** 2 + fde_y_error_for ** 2).mean()
     eval_result['fde_forward'] = fde_for
-    if len(selected_indices) > 1:
+    if 'key_points_logits' in prediction_by_generation:
+        assert len(selected_indices) > 1, selected_indices
         ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
         ade_y_error_key_points_for = prediction_key_points_by_forward[:, :, 1] - label_key_points[:, :, 1]
         if selected_indices[0] > selected_indices[-1]:
