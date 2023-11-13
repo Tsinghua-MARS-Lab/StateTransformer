@@ -93,7 +93,8 @@ def compute_metrics(prediction: EvalPrediction):
     # if prediction_by_forward.shape[1] > prediction_horizon:
         # first 5 are key points concatentate with trajectory
         prediction_key_points_by_generation = prediction_by_generation["key_points_logits"]  # sample_num, 5, 2/4
-        prediction_key_points_by_forward = prediction_by_forward["key_points_logits"]  # sample_num, 5, 2/4
+        assert prediction_by_forward.shape[1] > prediction_horizon, f'{prediction_by_forward.shape[1]} {prediction_horizon}'
+        prediction_key_points_by_forward = prediction_by_forward[:, :-prediction_horizon, :]  # sample_num, 5, 2/4
     # else:
     #     # only trajectory, no key points
     #     assert prediction_by_forward.shape[1] == prediction_horizon, f'{prediction_key_points_by_generation.shape[1]} {prediction_horizon}'
