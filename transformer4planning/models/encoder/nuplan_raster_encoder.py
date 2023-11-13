@@ -115,7 +115,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
 
-            future_key_embeds = self.action_m_embed(future_key_points_aug)
+            future_key_embeds = self.kps_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
