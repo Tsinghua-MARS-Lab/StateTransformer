@@ -256,7 +256,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
 
-
                     key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                     pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
                     if self.config.predict_yaw:
