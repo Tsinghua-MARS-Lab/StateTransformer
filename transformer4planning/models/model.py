@@ -188,6 +188,8 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         route_ids = kwargs.get("route_ids", None)
         ego_pose = kwargs.get("ego_pose", None)
         road_dic = kwargs.get("road_dic", None)
+        project_to_lane = kwargs.get("project_to_lane", False)
+        off_road_checking = kwargs.get("off_road_checking", False)
         idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
         """
         Used for generate with key points
@@ -251,7 +253,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 else:
                     pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
-                off_road_checking = False
                 if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
                     # Check key points with map_api
                     # WARNING: WIP, do not use
@@ -276,9 +277,18 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                                 ego_state_global.rear_axle.y]),
                                                                         ego_pose,
                                                                         ego_to_global=False)
-                    print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
+                    print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
                     pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                     pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
+                
+                elif project_to_lane and road_dic is not None and route_ids is not None and batch_size==1 and ego_pose is not None:
+                    pred_key_point = project_point_to_nearest_lane_on_route(road_dic, 
+                                                                            route_ids, 
+                                                                            pred_key_point[0, 0, :].detach().cpu().numpy(),
+                                                                            ego_pose)
+                    print('project key points to the closest lane')
+                    pred_key_point = torch.from_numpy(pred_key_point.reshape(1, 1, -1)).to(device).to(torch.float32)
+                    assert pred_key_point.shape == (1, 1, 4), pred_key_point.shape
                 key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                 # replace embed at the next position
                 input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
@@ -394,8 +404,14 @@ def query_current_lane(map_api, target_point):
         'distance_to_lane': dist_to_nearest_lane
     }
 
-def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
+def project_point_to_nearest_lane_on_route(road_dic, route_ids, target_point, origin_point):
+    """
+    target_point: pred point to project to the closest point
+    origin_point: ego pose
+    """
     import numpy as np
+    import math
+    cos_, sin_ = math.cos(origin_point[-1] - math.pi / 2), math.sin(origin_point[-1] - math.pi / 2)
     points_of_lane = []
     for each_road_id in route_ids:
         each_road_id = int(each_road_id)
@@ -407,16 +423,20 @@ def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
             each_lane = int(each_lane)
             if each_lane not in road_dic:
                 continue
-            points_of_lane.append(road_dic[each_lane]['xyz'])
+            relative_lane_point = road_dic[each_lane]['xyz'][:, :2].copy() - origin_point[:2]
+            stored_points = relative_lane_point.copy()
+            relative_lane_point[:, 0] = stored_points[:, 0].copy() * cos_ - stored_points[:, 1].copy() * sin_
+            relative_lane_point[:, 1] = stored_points[:, 0].copy() * sin_ + stored_points[:, 1].copy() * cos_
+            points_of_lane.append(relative_lane_point)
     if len(points_of_lane) <= 1:
-        print('Warning: No lane found in route, return original point.')
-        return org_point
+        print('Warning: No lane found in route, return original target point.')
+        return target_point
     points_np = np.vstack(points_of_lane)
     total_points = points_np.shape[0]
-    dist_xy = abs(points_np[:, :2] - np.repeat(org_point[np.newaxis, :], total_points, axis=0))
+    dist_xy = abs(points_np[:, :2] - np.repeat(target_point[np.newaxis, :2], total_points, axis=0))
     dist = dist_xy[:, 0] + dist_xy[:, 1]
     minimal_index = np.argmin(dist)
-    minimal_point = points_np[minimal_index, :2]
+    minimal_point = np.concatenate([points_np[minimal_index, :2], target_point[2:]], axis=-1)
     min_dist = min(dist)
     return minimal_point
     # return minimal_point if min_dist < 10 else org_point
