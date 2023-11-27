@@ -27,6 +27,7 @@ var agentGroup = new Two.Group();
 var mapGroup = new Two.Group();
 var routeGroup = new Two.Group();
 var goalGroup = new Two.Group();
+var trajectoryGroup = new Two.Group();
 var percCirclesGroup = new Two.Group();
 var egoGroup = new Two.Group();
 var btnGroup = new Two.Group();
@@ -205,9 +206,7 @@ function drawMap(roads) {
     circle.opacity = 0.2;
     percCirclesGroup.add(circle);
     stage.add(percCirclesGroup);
-
     stage.add(mapGroup);
-
     two.add(stage);
 }
 
@@ -219,12 +218,14 @@ function drawRoute(route_ls, road_data) {
     two.add(stage);
 }
 
-function drawEgoPose(ego_states, ego_fill = 'train') {
+function drawEgoPose(ego_dic, ego_fill = 'train') {
+    var prev_x = 0;
+    var ego_states = ego_dic['pose'];
+    var ego_intentions = ego_dic['intention'];
     for (let i = 0; i < ego_states.length; i += 5) {
         let [x, y, z, yaw] = ego_states[i];
-        if (x == -1) {
-            continue;
-        }
+        if (x == -1) {continue;}
+        if (Math.abs(x - prev_x) < 0.1) {continue;}
         let [w, h] = [2.297, 5.176];
         var pointsArray = new Array();
         pointsArray.push(new Two.Anchor((x + offsets[0]) * scale * xReverse - w * scale / 2, (y + offsets[1]) * scale - h * scale / 2));
@@ -233,12 +234,29 @@ function drawEgoPose(ego_states, ego_fill = 'train') {
         pointsArray.push(new Two.Anchor((x + offsets[0]) * scale * xReverse + w * scale / 2, (y + offsets[1]) * scale + h * scale / 2));
         pointsArray.push(new Two.Anchor((x + offsets[0]) * scale * xReverse - w * scale / 2, (y + offsets[1]) * scale + h * scale / 2));
         var poly = two.makePath(pointsArray);
+
+        var color = 'gray';
+        // 0: turn left, 1: turn right, 2: accelerate, 3: decelerate, 4: idle
+        if (ego_intentions !== undefined) {
+            if (ego_intentions[i] == 0) {
+                color = 'blue';
+            } else if (ego_intentions[i] == 1) {
+                color = 'yellow';
+            } else if (ego_intentions[i] == 2) {
+                color = 'pink';
+            } else if (ego_intentions[i] == 3) {
+                color = 'red';
+            } else if (ego_intentions[i] == 4) {
+                color = 'gray';
+            }
+        }
+
         if (ego_fill == 'train') {
-            poly.fill = 'gray';
-            poly.opacity = 0.1;
+            poly.fill = color;
+            poly.opacity = 0.2;
         } else if (ego_fill == 'test') {
             // poly.fill = 'yellow';
-            poly.opacity = 0.1;
+            poly.opacity = 0.2;
         }
         //console.log('here')
         poly.rotation = -yaw - Math.PI / 2;
@@ -327,6 +345,8 @@ function update(frameCount) {
                 goalGroup.position.y += offsetFromLastFrame[1] * scale;
                 egoGroup.position.x += offsetFromLastFrame[0] * scale * xReverse;
                 egoGroup.position.y += offsetFromLastFrame[1] * scale;
+                trajectoryGroup.position.x += offsetFromLastFrame[0] * scale * xReverse;
+                trajectoryGroup.position.y += offsetFromLastFrame[1] * scale;
                 currentFrame++;
             } else {
                 console.log('stop playing: ', currentFrame, totalFrame, maxFrames);
@@ -371,6 +391,7 @@ function addZUI() {
         if (mouse.x < (two.width / 2 + 50 + btnOffset / 2 * 1.2) && mouse.x > (two.width / 2 + 50 - btnOffset / 2 * 0.2)
             && mouse.y > (two.height - 140 - 30) && mouse.y < (two.height - 140 + 30)) {
             isPlaying = !isPlaying;
+            if (!isPlaying) {Streamlit.setComponentValue(currentFrame);}
         } else if (mouse.x < (two.width / 2 + 50 + btnOffset / 2 * 1.2 + btnOffset) && mouse.x > (two.width / 2 + 50 - btnOffset / 2 * 0.2 + btnOffset)
             && mouse.y > (two.height - 140 - 30) && mouse.y < (two.height - 140 + 30)) {
             currentFrame = Math.min(currentFrame + 80, totalFrame - 1);
@@ -580,13 +601,28 @@ function initAgents(agentDic, frameId) {
     stage.add(agentGroup);
 }
 
+function drawTrajectory(poses, disc_size=0.35, interval=5) {
+    if (poses !== undefined) {
+        for (var i = 0; i < poses.length; i = i + interval) {
+            let [x, y, z, yaw] = poses[i];
+            // console.log('check prediction generation: ', x, y, offsets, scale);
+            var circle = two.makeCircle((x + offsets[0]) * scale * xReverse, (y + offsets[1]) * scale, disc_size * scale);
+            circle.fill = 'green';
+            circle.opacity = 0.5;
+            trajectoryGroup.add(circle);
+        }
+        stage.add(trajectoryGroup);
+        two.add(stage);
+    }
+}
+
 // Streamlit will call this function when the data is changed
 function onRender(event) {
     const data = event.detail.args.data;
     if (data.current_scenario_id !== undefined && data.agent_dic !== undefined && data.route_ids !== undefined && data.road_dic !== undefined) {
         if (currentScenarioId !== data.current_scenario_id) {
             // reset current scene
-            const allGroups = [agentGroup, mapGroup, routeGroup, goalGroup, percCirclesGroup, egoGroup, stage];
+            const allGroups = [agentGroup, mapGroup, routeGroup, goalGroup, percCirclesGroup, egoGroup, trajectoryGroup, stage];
             for (let i = 0; i < allGroups.length; i++) {
                 while (allGroups[i].children.length > 0) {
                     allGroups[i].remove(allGroups[i].children[0]);
@@ -598,6 +634,7 @@ function onRender(event) {
             agentGroup = new Two.Group();
             mapGroup = new Two.Group();
             routeGroup = new Two.Group();
+            trajectoryGroup = new Two.Group();
             goalGroup = new Two.Group();
             percCirclesGroup = new Two.Group();
             egoGroup = new Two.Group();
@@ -611,17 +648,17 @@ function onRender(event) {
             agentDic = JSON.parse(JSON.stringify(data.agent_dic));
             route_ids = JSON.parse(JSON.stringify(data.route_ids));
             roadDic = data.road_dic;
-            console.log('stepping to frame id: ', currentFrame)
-            currentFrame = Math.floor(data.frame_index / 2) - 20;
+            // currentFrame = Math.floor(data.frame_index / 2) - 20;
+            currentFrame = Math.floor(data.frame_index / 2);
+            console.log('stepping to frame id: ', currentFrame);
             data_initialized = true;
 
             setOffset(agentDic, route_ids);
-
             drawMap(roadDic);
-            // if (agentDic['ego'] !== undefined) {
-            //     drawEgoPose(agentDic['ego']['pose'])
-            // }
             drawRoute(route_ids, roadDic);
+            if (agentDic['ego'] !== undefined) {
+                drawEgoPose(agentDic['ego'])
+            }
             initAgents(agentDic, 0);
 
             // TODO: update with frames and new predictions
@@ -642,11 +679,20 @@ function onRender(event) {
             isPlaying = true;
             update(0);
             isPlaying = false;
+            Streamlit.setComponentValue(currentFrame);
+        }
+        if (data.prediction_generation !== undefined) {
+            // draw trajectory
+            console.log('draw trajectory: ', data.pred_kp_generation);
+            stage.remove(trajectoryGroup);
+            trajectoryGroup = new Two.Group();
+            drawTrajectory(data.prediction_generation, 0.35);
+            drawTrajectory(data.pred_kp_generation, 1, 1);
+            two.add(btnGroup);
         }
     } else {
         console.log('data not ready ', data);
     }
-    // Streamlit.setComponentValue(2);
 }
 
 // setInterval(() => {

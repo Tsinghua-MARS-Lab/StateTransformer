@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 import math, random
 import cv2
-import shapely
+import shapely.geometry
 import os
 import torch
 from functools import partial
@@ -73,7 +73,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           frame_rate=20, past_seconds=2, future_seconds=8,
                           high_res_scale=4, low_res_scale=0.77,
                           road_types=20, agent_types=8, traffic_types=4,
-                          past_sample_interval=5, future_sample_interval=2,
+                          past_sample_interval=2, future_sample_interval=2,
                           debug_raster_path=None, all_maps_dic=None, agent_dic=None,
                           frequency_change_rate=2, **kwargs):
     """
@@ -87,9 +87,10 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         - traffic_ids: the ids of the traffic lights
         - traffic_status: the status of the traffic lights
         - route_ids: the ids of the routes
-        - frame_id: the frame id of the current frame, this is the global index which is irrelevant to frame rate of agent_dic pickles
+        - frame_id: the frame id of the current frame, this is the global index which is irrelevant to frame rate of agent_dic pickles (20Hz)
         - debug_raster_path: if a debug_path past, will save rasterized images to disk, warning: will slow down the process
     :param data_path: the root path to load pickle files
+    starting_frame, ending_frame, sample_frame in 20Hz,
     """
     filename = sample["file_name"]
     map = sample["map"]
@@ -211,9 +212,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # 27-91: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
     
     route_channel = 3 if use_centerline else 2
-    
     total_raster_channels = route_channel + road_types + traffic_types + agent_types * len(sample_frames_in_past)
-
     rasters_high_res = np.zeros([raster_shape[0],
                                  raster_shape[1],
                                  total_raster_channels], dtype=np.uint8)
@@ -453,6 +452,12 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         result_to_return["scenario_id"] = sample['scenario_id']
     if 't0_frame_id' in sample:
         result_to_return["t0_frame_id"] = sample['t0_frame_id']
+    if 'halfs_intention' in sample and kwargs.get('use_proposal', False):
+        if sample['halfs_intention'].isnan():
+            if sample['split'] in ['train', 'val']:
+                print('debug: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
+            return None
+        result_to_return["halfs_intention"] = sample['halfs_intention']
     # try:
     #     result_to_return["scenario_type"] = sample["scenario_type"]
     # except:

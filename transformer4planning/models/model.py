@@ -1,17 +1,17 @@
-import os
 import torch
 import numpy as np
 from typing import Tuple, Optional, Dict
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
-from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformer4planning.models.decoder.base import TrajectoryDecoder
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from dataclasses import dataclass
+import numpy as np
 
 @dataclass
 class LTMOutput(CausalLMOutputWithCrossAttentions):
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
+    pred_dict: Optional[Dict[str, torch.FloatTensor]] = None
     past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
@@ -32,7 +32,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.k = int(self.config.k)
         
         self.use_proposal = self.config.use_proposal
-        if self.use_proposal: assert self.config.task == "waymo", "NotImplemented"
+        # if self.use_proposal: assert self.config.task == "waymo", "NotImplemented"
 
         self.use_key_points = self.config.use_key_points
         self.kp_decoder_type = self.config.kp_decoder_type
@@ -41,9 +41,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.device_map = None
         self.clf_metrics = None
         # Initialize weights and apply final processing
-        self.post_init()
         self.build_encoder()
         self.build_decoder()
+        self.post_init()
         
     def build_encoder(self):
         if self.config.task == "nuplan":
@@ -82,8 +82,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         # load pretrained diffusion keypoint decoder
         #TODO: add diffusion decoder trained from scratch
         if self.use_proposal:
-            from transformer4planning.models.decoder.base import ProposalDecoder
-            self.proposal_decoder = ProposalDecoder(self.config)
+            if self.config.task == "nuplan":
+                from transformer4planning.models.decoder.base import ProposalDecoderCLS
+                self.proposal_decoder = ProposalDecoderCLS(self.config)
+            elif self.config.task == "waymo":
+                from transformer4planning.models.decoder.base import ProposalDecoder
+                self.proposal_decoder = ProposalDecoder(self.config)
 
         if self.use_key_points != 'no':
             if self.kp_decoder_type == "diffusion":
@@ -116,8 +120,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             return_dict: Optional[bool] = None,
             **kwargs
     ):
-        # gpt non-autoregression version
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        if not return_dict:
+            raise NotImplementedError('need to return dict for evaluations in trainer.py')
+
         input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
         
         transformer_outputs = self.transformer(
@@ -126,7 +132,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             return_dict=return_dict,
             # **kwargs
         )
-        
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
         
@@ -142,15 +147,22 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         )
 
         if self.use_proposal:
-            proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
-            loss += proposal_loss
-            loss += proposal_loss_logits
-            loss_items["proposal_loss"] = proposal_loss
+            if self.config.task == "nuplan":
+                proposal_loss = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
+                loss += proposal_loss
+                loss_items["proposal_loss"] = proposal_loss
+            elif self.config.task == "waymo":
+                proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
+                loss += proposal_loss
+                loss += proposal_loss_logits
+                loss_items["proposal_loss"] = proposal_loss
 
         if self.config.dense_pred:
             assert self.config.task == "waymo"
             loss += info_dict["dense_pred_loss"]
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
+
+        pred_dict = {"traj_logits": traj_logits}
 
         if self.use_key_points != 'no':
             if self.config.generate_diffusion_dataset_for_key_points_decoder:
@@ -169,15 +181,17 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 # kp_loss will be 10x larger than traj_loss when converged
             loss += kp_loss
             traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
+            pred_dict["kp_logits"] = kp_logits
             loss_items["kp_loss"] = kp_loss
         
-        if not return_dict:
-            output = (traj_logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+        # if not return_dict:
+        #     output = (traj_logits,) + transformer_outputs[1:]
+        #     return ((loss,) + output) if loss is not None else output
 
         return LTMOutput(
             loss=loss,
-            logits=traj_logits,
+            logits=traj_logits,  # deprecated, use pred_dict for evaluation instead
+            pred_dict=pred_dict,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
@@ -192,8 +206,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         device = input_embeds.device
         context_length = info_dict["context_length"]
 
-        if self.use_proposal:        
-            dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
+        if self.use_proposal:
+            if self.config.task == "nuplan":
+                dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 1), device=device)).unsqueeze(1)
+            elif self.config.task == 'waymo':
+                dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
             input_embeds[:, context_length:context_length+1, :] = dummy_proposal_embedding
 
             context_embeds = input_embeds[:, :context_length+1, :]
@@ -208,10 +225,16 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
 
             proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64)
-            proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
-            topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k) 
-            proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
-            proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
+            if self.config.task == "nuplan":
+                topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                # topk_indx: (bs, k)
+                proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.unsqueeze(-1).float())
+                # proposal_pred_embed: (bs, k, n_embed)
+            elif self.config.task == 'waymo':
+                proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
+                topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
+                proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
 
         traj_logits_k = []
         key_points_logits_k = []
@@ -301,7 +324,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     else:
                         pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
                 key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
-                
                 key_points_logits_k.append(key_points_logits)
 
             # generate remaining trajectory
@@ -366,6 +388,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         return pred_dict
 
+
 def query_current_lane(map_api, target_point):
     """
     Query the current road_block id and lane id given a point on the map with map_api from NuPlan.
@@ -421,7 +444,6 @@ def query_current_lane(map_api, target_point):
     }
 
 def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
-    import numpy as np
     points_of_lane = []
     for each_road_id in route_ids:
         each_road_id = int(each_road_id)

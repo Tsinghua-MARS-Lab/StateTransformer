@@ -393,6 +393,7 @@ def main(args):
                                                                    "scenario_type": Value("string"),
                                                                    "t0_frame_id": Value("int64"),
                                                                    "scenario_id": Value("string"),
+                                                                   "halfs_intention": Value("int64"),
                                                                    }),)
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,

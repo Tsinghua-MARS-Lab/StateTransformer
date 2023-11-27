@@ -587,6 +587,6 @@ def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=
             data_to_return["agent_ids"].add(key)
     data_to_return["agent_ids"] = list(data_to_return["agent_ids"])
     # other infomation record
-    for key in ["frame_id", "file_name", "map", "timestamp", "scenario_type", "scenario_id", "t0_frame_id"]:
+    for key in ["frame_id", "file_name", "map", "timestamp", "scenario_type", "scenario_id", "t0_frame_id", "halfs_intention"]:
         data_to_return[key] = data_dic[key]
     return data_to_return
