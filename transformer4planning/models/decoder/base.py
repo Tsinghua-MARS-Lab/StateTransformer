@@ -38,7 +38,8 @@ class TrajectoryDecoder(nn.Module):
             info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
         """
         pred_length = info_dict.get("pred_length", label.shape[1])
-        traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
+        tail = pred_length if self.config.use_dummy else 0
+        traj_hidden_state = hidden_output[:, -pred_length-1-tail:-1-tail, :]
         if device is None:
             device = traj_hidden_state.device
         # compute trajectory loss conditioned on gt keypoints
@@ -69,7 +70,8 @@ class TrajectoryDecoder(nn.Module):
     def generate_trajs(self, hidden_output, info_dict):
         pred_length = info_dict.get("pred_length", 0)
         assert pred_length > 0
-        traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
+        tail = pred_length if self.config.use_dummy else 0
+        traj_hidden_state = hidden_output[:, -pred_length-1-tail:-1-tail, :]
         traj_logits = self.model(traj_hidden_state)
 
         return traj_logits

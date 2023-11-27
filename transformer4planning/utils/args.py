@@ -75,10 +75,22 @@ class ModelArguments:
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
     )
+    split_embed: Optional[bool] = field(
+        default=True
+    )
+    without_label: Optional[bool] = field(
+        default=False
+    )
+    use_dummy: Optional[bool] = field(
+        default=False
+    )
 
     ######## begin of  proposal args ########
     use_proposal: Optional[bool] = field(
         default=False
+    )
+    pred_traj: Optional[bool] = field(
+        default=True
     )
     ######## end of proposal args ########
 
@@ -158,6 +170,9 @@ class ModelArguments:
     )
     dense_pred: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use dense prediction in MTR model"}
+    )
+    pred_vel: Optional[bool] = field(
+        default=False
     )
     ######## end of WOMD args ########
 

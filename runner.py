@@ -184,7 +184,7 @@ def main():
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
     
-    if training_args.do_eval and 'test' in root_folders:
+    if (training_args.do_eval or training_args.do_predict) and 'test' in root_folders:
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
         print('Testset not found, using training set as test set')
@@ -349,167 +349,232 @@ def main():
         # TODO: fit new online process pipeline to save dagger and prediction results
         logger.info("*** Predict ***")
         with torch.no_grad():
-            dagger_results = {
-                'file_name':[],
-                'frame_id':[],
-                'rank':[],
-                'ADE':[],
-                'FDE':[],
-                'y_bias':[]
-            }
-            prediction_results = {
-                'file_names': [],
-                'current_frame': [],
-                'next_step_action': [],
-                'predicted_trajectory': [],
-            }
-            test_dataloader = DataLoader(
-                dataset=predict_dataset,
-                batch_size=training_args.per_device_eval_batch_size,
-                num_workers=training_args.per_device_eval_batch_size,
-                collate_fn=collate_fn,
-                pin_memory=True,
-                drop_last=True
-            )
+            if model_args.task == "nuplan":
+                dagger_results = {
+                    'file_name':[],
+                    'frame_id':[],
+                    'rank':[],
+                    'ADE':[],
+                    'FDE':[],
+                    'y_bias':[]
+                }
+                prediction_results = {
+                    'file_names': [],
+                    'current_frame': [],
+                    'next_step_action': [],
+                    'predicted_trajectory': [],
+                }
+                test_dataloader = DataLoader(
+                    dataset=predict_dataset,
+                    batch_size=training_args.per_device_eval_batch_size,
+                    num_workers=training_args.per_device_eval_batch_size,
+                    collate_fn=collate_fn,
+                    pin_memory=True,
+                    drop_last=True
+                )
 
 
-            if model_args.predict_trajectory:
-                end_bias_x = []
-                end_bias_y = []
-                all_bias_x = []
-                all_bias_y = []
-                losses = []
-                loss_fn = torch.nn.MSELoss(reduction="mean")
-
-            for itr, input in enumerate(tqdm(test_dataloader)):
-                # move batch to device
-                for each_key in input:
-                    if isinstance(input[each_key], type(torch.tensor(0))):
-                        input[each_key] = input[each_key].to("cuda")
-
-                eval_batch_size = training_args.per_device_eval_batch_size
-                if model_args.autoregressive or model_args.use_key_points is not None:
-                    # Todo: add autoregressive predict
-                    traj_pred = model.generate(**input)
-                else:
-                    output = model(**copy.deepcopy(input))
-                    traj_pred = output.logits                   
-                    try:
-                        file_name = input['file_name']
-                        current_frame_idx = input['frame_id']
-                    except:
-                        file_name = ["null"] * eval_batch_size
-                        current_frame_idx = -1 * torch.ones(eval_batch_size)
-                    prediction_results['file_names'].extend(file_name)
-                    prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
-                    if data_args.dagger:
-                        dagger_results['file_name'].extend(file_name)
-                        dagger_results['frame_id'].extend(list(current_frame_idx.cpu().numpy()))
-                
                 if model_args.predict_trajectory:
-                    if model_args.autoregressive:# trajectory label as token case
-                        trajectory_label = model.compute_normalized_points(input["trajectory"][:, 10:, :])
-                        traj_pred = model.compute_normalized_points(traj_pred)
-                        
+                    end_bias_x = []
+                    end_bias_y = []
+                    all_bias_x = []
+                    all_bias_y = []
+                    losses = []
+                    loss_fn = torch.nn.MSELoss(reduction="mean")
+
+                for itr, input in enumerate(tqdm(test_dataloader)):
+                    # move batch to device
+                    for each_key in input:
+                        if isinstance(input[each_key], type(torch.tensor(0))):
+                            input[each_key] = input[each_key].to("cuda")
+
+                    eval_batch_size = training_args.per_device_eval_batch_size
+                    if model_args.autoregressive or model_args.use_key_points is not None:
+                        # Todo: add autoregressive predict
+                        traj_pred = model.generate(**input)
                     else:
-                        if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
-                            trajectory_label = input["trajectory_label"][:, :, :2]
-                            trajectory_label = torch.where(trajectory_label != -1, trajectory_label, traj_pred)
+                        output = model(**copy.deepcopy(input))
+                        traj_pred = output.logits                   
+                        try:
+                            file_name = input['file_name']
+                            current_frame_idx = input['frame_id']
+                        except:
+                            file_name = ["null"] * eval_batch_size
+                            current_frame_idx = -1 * torch.ones(eval_batch_size)
+                        prediction_results['file_names'].extend(file_name)
+                        prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
+                        if data_args.dagger:
+                            dagger_results['file_name'].extend(file_name)
+                            dagger_results['frame_id'].extend(list(current_frame_idx.cpu().numpy()))
+                    
+                    if model_args.predict_trajectory:
+                        if model_args.autoregressive:# trajectory label as token case
+                            trajectory_label = model.compute_normalized_points(input["trajectory"][:, 10:, :])
+                            traj_pred = model.compute_normalized_points(traj_pred)
+                            
                         else:
-                            trajectory_label = input["trajectory_label"][:, 1::2, :]
+                            if 'mmtransformer' in model_args.model_name and model_args.task == 'waymo':
+                                trajectory_label = input["trajectory_label"][:, :, :2]
+                                trajectory_label = torch.where(trajectory_label != -1, trajectory_label, traj_pred)
+                            else:
+                                trajectory_label = input["trajectory_label"][:, 1::2, :]
 
-                    loss = loss_fn(trajectory_label[:, :, :2], traj_pred[:, -trajectory_label.shape[1]:, :2])
-                    end_trajectory_label = trajectory_label[:, -1, :]
-                    end_point = traj_pred[:, -1, :]
-                    end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])
-                    end_bias_y.append(end_trajectory_label[:, 1] - end_point[:, 1])
-                    all_bias_x.append(trajectory_label[:, :, 0] - traj_pred[:, -trajectory_label.shape[1]:, 0])
-                    all_bias_y.append(trajectory_label[:, :, 1] - traj_pred[:, -trajectory_label.shape[1]:, 1])
-                    losses.append(loss)
+                        loss = loss_fn(trajectory_label[:, :, :2], traj_pred[:, -trajectory_label.shape[1]:, :2])
+                        end_trajectory_label = trajectory_label[:, -1, :]
+                        end_point = traj_pred[:, -1, :]
+                        end_bias_x.append(end_trajectory_label[:, 0] - end_point[:, 0])
+                        end_bias_y.append(end_trajectory_label[:, 1] - end_point[:, 1])
+                        all_bias_x.append(trajectory_label[:, :, 0] - traj_pred[:, -trajectory_label.shape[1]:, 0])
+                        all_bias_y.append(trajectory_label[:, :, 1] - traj_pred[:, -trajectory_label.shape[1]:, 1])
+                        losses.append(loss)
 
-            if model_args.predict_trajectory:
-                end_bias_x = torch.stack(end_bias_x, 0).cpu().numpy()
-                end_bias_y = torch.stack(end_bias_y, 0).cpu().numpy()
-                all_bias_x = torch.stack(all_bias_x, 0).reshape(-1).cpu().numpy()
-                all_bias_y = torch.stack(all_bias_y, 0).reshape(-1).cpu().numpy()
-                final_loss = torch.mean(torch.stack(losses, 0)).item()
-                print('Mean L2 loss: ', final_loss)
-                print('End point x offset: ', np.average(np.abs(end_bias_x)))
-                print('End point y offset: ', np.average(np.abs(end_bias_y)))
-                distance_error = np.sqrt(np.abs(all_bias_x)**2 + np.abs(all_bias_y)**2).reshape(-1, 80)
-                final_distance_error = np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)
+                if model_args.predict_trajectory:
+                    end_bias_x = torch.stack(end_bias_x, 0).cpu().numpy()
+                    end_bias_y = torch.stack(end_bias_y, 0).cpu().numpy()
+                    all_bias_x = torch.stack(all_bias_x, 0).reshape(-1).cpu().numpy()
+                    all_bias_y = torch.stack(all_bias_y, 0).reshape(-1).cpu().numpy()
+                    final_loss = torch.mean(torch.stack(losses, 0)).item()
+                    print('Mean L2 loss: ', final_loss)
+                    print('End point x offset: ', np.average(np.abs(end_bias_x)))
+                    print('End point y offset: ', np.average(np.abs(end_bias_y)))
+                    distance_error = np.sqrt(np.abs(all_bias_x)**2 + np.abs(all_bias_y)**2).reshape(-1, 80)
+                    final_distance_error = np.sqrt(np.abs(end_bias_x)**2 + np.abs(end_bias_y)**2)
+                    if data_args.dagger:
+                        dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
+                        dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
+                        dagger_results['y_bias'].extend(list(np.average(all_bias_y.reshape(-1, 80), axis=1).reshape(-1)))
+                    print('ADE', np.average(distance_error))
+                    print('FDE', np.average(final_distance_error))
+                
+                # print(dagger_results)
+                def compute_dagger_dict(dic):
+                    tuple_list = list()
+                    fde_result_list = dict()
+                    y_bias_result_list = dict()
+                    for filename, id, ade, fde, y_bias in zip(dic["file_name"], dic["frame_id"], dic["ADE"], dic["FDE"], dic["y_bias"]):
+                        if filename == "null":
+                            continue
+                        tuple_list.append((filename, id, ade, fde, abs(y_bias)))
+        
+                    fde_sorted_list = sorted(tuple_list, key=lambda x:x[3], reverse=True)
+                    for idx, tp in enumerate(fde_sorted_list): 
+                        if tp[0] in fde_result_list.keys():
+                            fde_result_list[tp[0]]["frame_id"].append(tp[1])
+                            fde_result_list[tp[0]]["ade"].append(tp[2])
+                            fde_result_list[tp[0]]["fde"].append(tp[3])
+                            fde_result_list[tp[0]]["y_bias"].append(tp[4])
+                            fde_result_list[tp[0]]["rank"].append((idx+1)/len(fde_sorted_list))
+                            
+                        else:
+                            fde_result_list[tp[0]] = dict(
+                                frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(fde_sorted_list)]
+                            )
+                    y_bias_sorted_list = sorted(tuple_list, key=lambda x:x[-1], reverse=True)
+                    for idx, tp in enumerate(y_bias_sorted_list): 
+                        if tp[0] in y_bias_result_list.keys():
+                            y_bias_result_list[tp[0]]["frame_id"].append(tp[1])
+                            y_bias_result_list[tp[0]]["ade"].append(tp[2])
+                            y_bias_result_list[tp[0]]["fde"].append(tp[3])
+                            y_bias_result_list[tp[0]]["y_bias"].append(tp[4])
+                            y_bias_result_list[tp[0]]["rank"].append((idx+1)/len(y_bias_sorted_list))
+                        else:
+                            y_bias_result_list[tp[0]] = dict(
+                                frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(y_bias_sorted_list)]
+                            )
+                    return fde_result_list, y_bias_result_list
+                
+                def draw_histogram_graph(data, title, savepath):
+                    import matplotlib.pyplot as plt
+                    plt.hist(data, bins=range(20), edgecolor='black')
+                    plt.title(title)
+                    plt.xlabel("Value")
+                    plt.ylabel("Frequency")
+                    plt.savefig(os.path.join(savepath, "{}.png".format(title)))
                 if data_args.dagger:
-                    dagger_results['ADE'].extend(list(np.average(distance_error, axis=1).reshape(-1)))
-                    dagger_results['FDE'].extend(list(final_distance_error.reshape(-1)))
-                    dagger_results['y_bias'].extend(list(np.average(all_bias_y.reshape(-1, 80), axis=1).reshape(-1)))
-                print('ADE', np.average(distance_error))
-                print('FDE', np.average(final_distance_error))
-            
-            # print(dagger_results)
-            def compute_dagger_dict(dic):
-                tuple_list = list()
-                fde_result_list = dict()
-                y_bias_result_list = dict()
-                for filename, id, ade, fde, y_bias in zip(dic["file_name"], dic["frame_id"], dic["ADE"], dic["FDE"], dic["y_bias"]):
-                    if filename == "null":
-                        continue
-                    tuple_list.append((filename, id, ade, fde, abs(y_bias)))
-    
-                fde_sorted_list = sorted(tuple_list, key=lambda x:x[3], reverse=True)
-                for idx, tp in enumerate(fde_sorted_list): 
-                    if tp[0] in fde_result_list.keys():
-                        fde_result_list[tp[0]]["frame_id"].append(tp[1])
-                        fde_result_list[tp[0]]["ade"].append(tp[2])
-                        fde_result_list[tp[0]]["fde"].append(tp[3])
-                        fde_result_list[tp[0]]["y_bias"].append(tp[4])
-                        fde_result_list[tp[0]]["rank"].append((idx+1)/len(fde_sorted_list))
+                    draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
+                    draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
+                    draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
+                    fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
+
+
+                if training_args.output_dir is not None:
+                    # save results
+                    output_file_path = os.path.join(training_args.output_dir, 'generated_predictions.pickle')
+                    with open(output_file_path, 'wb') as handle:
+                        pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                    if data_args.dagger:
+                        dagger_result_path = os.path.join(training_args.output_dir, "fde_dagger.pkl")
+                        with open(dagger_result_path, 'wb') as handle:
+                            pickle.dump(fde_dagger_dic, handle)
+                        dagger_result_path = os.path.join(training_args.output_dir, "ybias_dagger.pkl")
+                        with open(dagger_result_path, 'wb') as handle:
+                            pickle.dump(y_bias_dagger_dic, handle)
+                        print("dagger results save to {}".format(dagger_result_path))
+
+            elif model_args.task == "waymo":
+                from waymo_open_dataset.protos import motion_submission_pb2
+                from transformer4planning.utils.waymo_utils import tensor_to_str
+
+                motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
+                motion_challenge_submission.account_name = "ldr.dylan@gmail.com"
+                motion_challenge_submission.authors.extend(["Qiao Sun", "Shiduo Zhang", "Danjiao Ma", "Jingzhe Shi", "Derun Li"])
+                motion_challenge_submission.submission_type = (
+                    motion_submission_pb2.MotionChallengeSubmission.SubmissionType.MOTION_PREDICTION
+                )
+                motion_challenge_submission.unique_method_name = "State Transformer"
+
+                test_dataloader = DataLoader(
+                    dataset=predict_dataset,
+                    batch_size=training_args.per_device_eval_batch_size,
+                    num_workers=training_args.per_device_eval_batch_size,
+                    collate_fn=collate_fn,
+                    pin_memory=True,
+                )
+
+                pred_by_scenario = {}
+                for _, input in enumerate(tqdm(test_dataloader)):
+                    # move batch to device
+                    for each_key in input:
+                        if isinstance(input[each_key], type(torch.tensor(0))):
+                            input[each_key] = input[each_key].to("cuda")
+
+                    traj_pred = model.generate(**input)
+                    scenario_id_batch = tensor_to_str(traj_pred["scenario_id"])
+                    for b in range(len(scenario_id_batch)):
+                        scenario_id = scenario_id_batch[b]
+                        if scenario_id not in pred_by_scenario.keys():
+                            pred_by_scenario[scenario_id] = []
                         
-                    else:
-                        fde_result_list[tp[0]] = dict(
-                            frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(fde_sorted_list)]
-                        )
-                y_bias_sorted_list = sorted(tuple_list, key=lambda x:x[-1], reverse=True)
-                for idx, tp in enumerate(y_bias_sorted_list): 
-                    if tp[0] in y_bias_result_list.keys():
-                        y_bias_result_list[tp[0]]["frame_id"].append(tp[1])
-                        y_bias_result_list[tp[0]]["ade"].append(tp[2])
-                        y_bias_result_list[tp[0]]["fde"].append(tp[3])
-                        y_bias_result_list[tp[0]]["y_bias"].append(tp[4])
-                        y_bias_result_list[tp[0]]["rank"].append((idx+1)/len(y_bias_sorted_list))
-                    else:
-                        y_bias_result_list[tp[0]] = dict(
-                            frame_id=[tp[1]], ade=[tp[2]], fde=[tp[3]], y_bias=[tp[4]], rank=[(idx+1)/len(y_bias_sorted_list)]
-                        )
-                return fde_result_list, y_bias_result_list
-            
-            def draw_histogram_graph(data, title, savepath):
-                import matplotlib.pyplot as plt
-                plt.hist(data, bins=range(20), edgecolor='black')
-                plt.title(title)
-                plt.xlabel("Value")
-                plt.ylabel("Frequency")
-                plt.savefig(os.path.join(savepath, "{}.png".format(title)))
-            if data_args.dagger:
-                draw_histogram_graph(dagger_results["FDE"], title="FDE-distributions", savepath=training_args.output_dir)
-                draw_histogram_graph(dagger_results["ADE"], title="ADE-distributions", savepath=training_args.output_dir)
-                draw_histogram_graph(dagger_results["y_bias"], title="ybias-distribution", savepath=training_args.output_dir)
-                fde_dagger_dic, y_bias_dagger_dic = compute_dagger_dict(dagger_results)
+                        single_pred = {}
+                        for key in ["object_id", "pred_trajs", "pred_scores"]:
+                            single_pred[key] = traj_pred[key][b].cpu().numpy()
+                        
+                        pred_by_scenario[scenario_id].append(single_pred)
 
+                for id in pred_by_scenario.keys():
+                    scenario_predictions = motion_challenge_submission.scenario_predictions.add()
+                    scenario_predictions.scenario_id = id
+                    prediction_set = scenario_predictions.single_predictions
 
-            if training_args.output_dir is not None:
-                # save results
-                output_file_path = os.path.join(training_args.output_dir, 'generated_predictions.pickle')
-                with open(output_file_path, 'wb') as handle:
-                    pickle.dump(prediction_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
-                if data_args.dagger:
-                    dagger_result_path = os.path.join(training_args.output_dir, "fde_dagger.pkl")
-                    with open(dagger_result_path, 'wb') as handle:
-                        pickle.dump(fde_dagger_dic, handle)
-                    dagger_result_path = os.path.join(training_args.output_dir, "ybias_dagger.pkl")
-                    with open(dagger_result_path, 'wb') as handle:
-                        pickle.dump(y_bias_dagger_dic, handle)
-                    print("dagger results save to {}".format(dagger_result_path))
+                    pred_dicts = pred_by_scenario[id]
+                    for pred_obj in pred_dicts:
+                        predictions = prediction_set.predictions.add()
+                        predictions.object_id = int(pred_obj["object_id"])
 
+                        for m in np.argsort(-pred_obj["pred_scores"]):
+                            scored_trajectory = predictions.trajectories.add()
+                            scored_trajectory.confidence = pred_obj["pred_scores"][m]
+
+                            trajectory = scored_trajectory.trajectory
+                            trajectory.center_x.extend(pred_obj["pred_trajs"][m, 4::5, 0])
+                            trajectory.center_y.extend(pred_obj["pred_trajs"][m, 4::5, 1])
+
+                if training_args.output_dir is not None:
+                    with open(os.path.join(training_args.output_dir, "submission.binproto"), "wb") as f:
+                        f.write(motion_challenge_submission.SerializeToString())
+
+            else:
+                raise NotImplementedError
         # predict_results = trainer.predict(predict_dataset, metric_key_prefix="predict")
         # metrics = predict_results.metrics
         # max_predict_samples = (

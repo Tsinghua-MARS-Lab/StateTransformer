@@ -296,7 +296,7 @@ def generate_centered_trajs_for_agents(center_objects, obj_trajs_past, obj_types
     ret_obj_trajs_future[ret_obj_valid_mask_future == 0] = 0
     ret_obj_trajs_labels[ret_obj_valid_mask_future == 0] = 0
 
-    return ret_obj_trajs.numpy(), ret_obj_valid_mask.numpy(), ret_center_past_trajs.numpy(), ret_obj_trajs_future.numpy(), ret_obj_valid_mask_future.numpy(), ret_obj_trajs_labels.numpy()
+    return ret_obj_trajs.numpy(), ret_obj_valid_mask.numpy(), ret_center_past_trajs.numpy(), ret_obj_trajs_future.numpy(), ret_obj_valid_mask_future.numpy(), ret_obj_trajs_future.numpy()
 
 def generate_batch_polylines_from_map(polylines, point_sampled_interval=1, vector_break_dist_thresh=1.0, num_points_each_polyline=20):
     """
@@ -382,7 +382,10 @@ def create_map_data_for_center_objects( center_objects, map_infos, center_offset
 
     # polylines = torch.from_numpy(map_infos["all_polylines"].copy())
     polylines = map_infos["all_polylines"].copy()
-    polylines = np.concatenate(polylines, axis=0)
+    try:
+        polylines = np.concatenate(polylines, axis=0).astype(np.float32)
+    except:
+        polylines = np.zeros((1, 7), dtype=np.float32)
     center_objects = torch.from_numpy(center_objects)
 
     batch_polylines, batch_polylines_mask = generate_batch_polylines_from_map(

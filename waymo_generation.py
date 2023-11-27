@@ -202,8 +202,10 @@ def main(args):
                 object_type_to_predict, track_index_to_predict, difficulty_to_predict = [], [], []
                 for cur_pred in scenario.tracks_to_predict:
                     cur_idx = cur_pred.track_index
-                    if track_infos['object_type'][cur_idx] in args.agent_type:
-                        object_type_to_predict.append(track_infos['object_type'][cur_idx])
+                    object_type = track_infos['object_type'][cur_idx]
+                    if object_type in args.agent_type:
+                        if object_type == 0 or object_type == 4: object_type = 1
+                        object_type_to_predict.append(object_type)
                         track_index_to_predict.append(cur_idx)
                         difficulty_to_predict.append(cur_pred.difficulty)
                 

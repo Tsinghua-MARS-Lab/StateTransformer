@@ -51,7 +51,8 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                     resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                     pretrain=cnn_kwargs.get("pretrain", False))
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if self.config.split_embed:
+            self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         
     def forward(self, **kwargs):
         """
@@ -116,7 +117,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 future_key_points_aug[:, :, 2:] = 0
 
             # future_key_embeds = self.action_m_embed(future_key_points_aug)
-            future_key_embeds = self.kps_m_embed(future_key_points_aug)
+            future_key_embeds = self.kps_m_embed(future_key_points_aug) if self.config.split_embed else self.action_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 

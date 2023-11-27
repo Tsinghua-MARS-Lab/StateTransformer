@@ -471,6 +471,8 @@ class PlanningTrainer(Trainer):
             logits = logits[0]
         logits = torch.as_tensor(logits)
 
+        if not self.model.config.pred_traj: return (loss, None, None)
+
         prediction_generation = self.model.generate(**inputs)
 
         if logits.shape[0] != self.args.per_device_eval_batch_size:

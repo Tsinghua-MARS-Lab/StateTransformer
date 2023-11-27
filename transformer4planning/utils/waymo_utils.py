@@ -427,5 +427,5 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
 
     result_dict.update(final_avg_results)
     result_dict.update(object_type_cnt_dict)
-
+    
     return result_dict, result_format_str

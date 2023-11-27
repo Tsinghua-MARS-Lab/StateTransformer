@@ -101,6 +101,9 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 self.key_points_decoder = KeyPointMLPDeocder(self.config)
         
         self.traj_decoder = TrajectoryDecoder(self.config)
+        
+        if self.config.pred_vel:
+            self.vel_decoder = TrajectoryDecoder(self.config)
 
         
     def _prepare_attention_mask_for_generation(self, input_embeds):
@@ -126,20 +129,28 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             return_dict=return_dict,
             # **kwargs
         )
-        
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
         
         trajectory_label = info_dict["trajectory_label"]
 
         loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
+        loss_items = dict()
         traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
                                                                      trajectory_label,
                                                                      info_dict)
-        loss += traj_loss
-        loss_items = dict(
-            traj_loss=traj_loss,
-        )
+        
+        if self.config.pred_traj:
+            loss += traj_loss
+            loss_items["traj_loss"] = traj_loss
+        
+        if self.config.pred_vel:
+            vel_loss, _ = self.vel_decoder.compute_traj_loss(transformer_outputs_hidden_state,
+                                                                     trajectory_label[..., 2:],
+                                                                     info_dict)
+
+            loss += vel_loss * 0.5
+            loss_items["vel_loss"] = vel_loss
 
         if self.use_proposal:
             proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
@@ -177,7 +188,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         return LTMOutput(
             loss=loss,
-            logits=traj_logits,
+            logits=traj_logits if self.config.pred_traj else None,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
@@ -238,7 +249,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
                 assert future_key_points.shape[1] > 0, 'future points not enough to sample'
                 # future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
-                future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
+                future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points) if hasattr(self.encoder, "kps_m_embed") else self.encoder.action_m_embed(future_key_points)
                 key_points_num = future_key_points.shape[1]
 
                 input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
@@ -293,7 +304,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                         pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
                     # key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-                    key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1) if hasattr(self.encoder, "kps_m_embed") else self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1) # b, 1, n_embed
                     # replace embed at the next position
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
                     if self.config.predict_yaw:
@@ -353,7 +364,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 angle=center_objects_world[:, 6].view(num_center_objects)
             ).view(num_center_objects, num_modes, num_timestamps, num_feat)
             pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
-
             pred_dict = {
                 'scenario_id': str_to_tensor(kwargs['scenario_id']).to(device),
                 'pred_trajs': pred_trajs_world[:, :, :, 0:2],

@@ -212,15 +212,15 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         self.proposal_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
 
         self.in_proj_obj = nn.Sequential(
-            nn.Linear(self.context_encoder.num_out_channels, config.d_model),
+            nn.Linear(self.context_encoder.num_out_channels, self.context_encoder.num_out_channels),
             nn.ReLU(),
-            nn.Linear(config.d_model, config.d_model),
+            nn.Linear(self.context_encoder.num_out_channels, config.d_model),
         )
         
         self.in_proj_map = nn.Sequential(
-            nn.Linear(self.context_encoder.num_out_channels, config.d_model),
+            nn.Linear(self.context_encoder.num_out_channels, self.context_encoder.num_out_channels),
             nn.ReLU(),
-            nn.Linear(config.d_model, config.d_model),
+            nn.Linear(self.context_encoder.num_out_channels, config.d_model),
         )
 
         self.load_intention_proposals(config.proposal_path, 
@@ -374,7 +374,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
         
         # future trajectory
-        pred_length = trajectory_label.shape[1]
+        pred_length = 80 if self.config.without_label else trajectory_label.shape[1]
         info_dict = {
             "trajectory_label": trajectory_label,
             "trajectory_label_mask": trajectory_label_mask,
@@ -391,26 +391,29 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
 
         # prepare proposals
         if self.use_proposal:
-            gt_proposal_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
             type_idx_str = {
-                1: 'TYPE_VEHICLE',
-                2: 'TYPE_PEDESTRIAN',
-                3: 'TYPE_CYCLIST',
-            }
+                    1: 'TYPE_VEHICLE',
+                    2: 'TYPE_PEDESTRIAN',
+                    3: 'TYPE_CYCLIST',
+                }
             center_obj_types = input_dict['center_objects_type']
-            
             center_obj_proposal_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
             center_obj_proposal_pts = torch.cat(center_obj_proposal_pts, dim=0) # (bs, 64, 2)
-            dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_proposal_pts, dim=2)
-            proposal_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
 
-            proposal_GT_logits = center_obj_proposal_pts[torch.arange(batch_size), proposal_GT_cls, :] * gt_proposal_mask # (bs, 2)
+            if self.config.without_label: 
+                proposal_GT_logits = torch.zeros((batch_size, 2), device=device)
+            else:
+                gt_proposal_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+                dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_proposal_pts, dim=2)
+                proposal_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+                proposal_GT_logits = center_obj_proposal_pts[torch.arange(batch_size), proposal_GT_cls, :] * gt_proposal_mask # (bs, 2)
+                
+                info_dict["gt_proposal_cls"] = proposal_GT_cls
+                info_dict["gt_proposal_mask"] = gt_proposal_mask
+                info_dict["gt_proposal_logits"] = proposal_GT_logits
+
             proposal_embedding = self.proposal_m_embed(proposal_GT_logits).unsqueeze(1)
             input_embeds = torch.cat([input_embeds, proposal_embedding], dim=1)
-
-            info_dict["gt_proposal_cls"] = proposal_GT_cls
-            info_dict["gt_proposal_mask"] = gt_proposal_mask
-            info_dict["gt_proposal_logits"] = proposal_GT_logits
             info_dict["center_obj_proposal_pts"] = center_obj_proposal_pts
 
         # prepare keypoints
@@ -419,7 +422,12 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             input_embeds = torch.cat([input_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         else:
-            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
+            if self.config.without_label: 
+                future_key_points, selected_indices, indices = self.select_keypoints(torch.zeros((batch_size, pred_length, 4), device=device))
+            else:
+                future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
+                info_dict["key_points_mask"] = trajectory_label_mask[:, selected_indices, :]
+
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
@@ -430,10 +438,13 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
 
             future_key_embeds = self.kps_m_embed(future_key_points_aug)
             input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+                                    torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             
             info_dict["future_key_points"] = future_key_points
             info_dict["selected_indices"] = selected_indices
-            info_dict["key_points_mask"] = trajectory_label_mask[:, self.selected_indices, :]
 
+        if self.config.use_dummy:
+            input_embeds = torch.cat([input_embeds,
+                                    torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            
         return input_embeds, info_dict
