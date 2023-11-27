@@ -117,6 +117,36 @@ class ProposalDecoder(nn.Module):
         
         return loss_proposal, loss_proposal_logits
 
+
+class ProposalDecoderCLS(nn.Module):
+    def __init__(self, config, proposal_num=5):
+        super().__init__()
+        self.config = config
+        self.proposal_num = proposal_num
+        self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num)
+        self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
+
+    def compute_proposal_loss(self,
+                              hidden_output,
+                              info_dict):
+        """
+        pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
+        params:
+            hidden_output: whole hidden state output from transformer backbone
+            label: ground truth trajectory in future 8-s
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc.
+        """
+        if 'halfs_intention' not in info_dict:
+            print('WARNING: no halfs_intention in info_dict')
+            return torch.tensor(0.0, device=hidden_output.device)
+        gt_proposal_cls = info_dict["halfs_intention"]
+        context_length = info_dict["context_length"]
+        pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
+
+        pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 64)
+        loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
+        return loss_proposal.mean()
+
 class KeyPointMLPDeocder(nn.Module):
     def __init__(self, config):
         super().__init__()

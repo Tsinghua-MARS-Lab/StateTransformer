@@ -42,7 +42,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
     def __init__(self, 
                  cnn_kwargs:Dict, 
                  action_kwargs:Dict,
-                 config = None
+                 config=None
                  ):
 
         super().__init__(config)
@@ -51,7 +51,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                     resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                     pretrain=cnn_kwargs.get("pretrain", False))
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if self.use_key_points != 'no':
+            self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if self.use_proposal:
+            self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())
         
     def forward(self, **kwargs):
         """
@@ -68,6 +71,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         context_actions = kwargs.get("context_actions", None)
         trajectory_label = kwargs.get("trajectory_label", None)
         aug_current = kwargs.get("aug_current", None)
+
+        is_training = kwargs.get("is_training", None)
+        assert is_training is not None, "is_training should not be None"
+        self.augmentation.training = is_training
 
         assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
@@ -100,6 +107,13 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
+        # add proposal embedding
+        if self.use_proposal:
+            halfs_intention = kwargs.get("halfs_intention", None)
+            assert halfs_intention is not None, "halfs_intention should not be None when using proposal"
+            proposal_embeds = self.proposal_m_embed(halfs_intention.unsqueeze(-1).float()).unsqueeze(1)
+            input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
+
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
             input_embeds = torch.cat([input_embeds,
@@ -120,6 +134,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
+
         info_dict = {
             "future_key_points": future_key_points,
             "selected_indices": self.selected_indices,
@@ -128,5 +143,8 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             "context_length": context_length * 2,
             "aug_current": aug_current,
         }
+
+        if self.use_proposal:
+            info_dict["halfs_intention"] = halfs_intention
 
         return input_embeds, info_dict

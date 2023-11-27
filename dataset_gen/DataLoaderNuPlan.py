@@ -926,7 +926,8 @@ class NuPlanDL:
                     loading_prediction_relation=False,
                     agent_only=False,
                     seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
-                    routes_per_file=False):
+                    routes_per_file=False,
+                    p5s_intention=True):
 
         skip = False
         agent_dic = self.pack_scenario_to_agentdic(scenario=scenario, total_frames_future=seconds_in_future)
@@ -1122,6 +1123,58 @@ class NuPlanDL:
                 return None
             else:
                 data_to_return['route'] = self.route_idx_mem
+
+        if p5s_intention:
+            # WARNING: this only works for NuPlan (since using index of 40 as current frame)
+            # get constant velocity position
+            ego_poses = copy.deepcopy(agent_dic['ego']['pose'])
+            current_pose = ego_poses[40]
+            # normalize at current pose
+            cos_, sin_ = math.cos(-current_pose[3]), math.sin(-current_pose[3])
+            ego_poses -= current_pose
+            rotated_poses = [ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
+                             ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_]
+            rotated_poses = np.stack(rotated_poses, axis=1)
+            assert rotated_poses[40, 0] == 0 and rotated_poses[40, 1] == 0, f'rotated pose not zero at 40: {rotated_poses[40]}'
+            i = 40
+            if i + 40 >= agent_dic['ego']['pose'].shape[0] or i - 40 < 0:
+                return None
+            # yaw in 1 s
+            future_yaw = np.mean(rotated_poses[i + 5: i + 15, -1])
+            # normalize yaw angle to [-pi, pi]
+            if future_yaw > math.pi:
+                future_yaw -= 2 * math.pi
+            elif future_yaw < -math.pi:
+                future_yaw += 2 * math.pi
+            yaw_threshold = 0.5
+
+            velocity = rotated_poses[i - 10:i + 10, :2] - rotated_poses[i - 40:i - 20, :2]
+            estimated_pose = rotated_poses[i - 10:i + 10, :2] + velocity
+            delta_pose = np.mean(estimated_pose - rotated_poses[i + 20:i + 40, :2], axis=0)
+            # y_threshold = 4
+            x_threshold = 5
+
+            if future_yaw > yaw_threshold:
+                intention = 0  # left
+            elif future_yaw < -yaw_threshold:
+                intention = 1  # right
+            # if delta_pose[1] > y_threshold:
+            #     intentions[i] = 0  # left
+            # elif delta_pose[1] < -y_threshold:
+            #     intentions[i] = 1  # right
+            elif delta_pose[0] > x_threshold:
+                intention = 3  # accelerate
+            elif delta_pose[0] < -x_threshold:
+                intention = 2  # decelerate
+            else:
+                intention = 4  # keep
+
+            # validity check
+            if abs(delta_pose[0]) > 100:
+                # invalid due to -1 values
+                # print('invalid intention, skipping ', current_pose, rotated_poses[35:51, :], agent_dic['ego']['pose'][35:51, :])
+                skip = True
+            data_to_return['halfs_intention'] = intention
 
         if 'ego' not in agent_dic:
             print("no ego and skip")

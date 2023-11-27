@@ -1,18 +1,10 @@
-import time
-import tqdm
-import datetime
 import pickle
-import copy
 import torch
 import torch.nn as nn
-import os
 import numpy as np
-import pandas as pd
 import copy
 import os
 import re
-from torch.utils.data import DataLoader
-from transformers.trainer_utils import EvalLoopOutput
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
@@ -21,7 +13,6 @@ from transformers.trainer import Trainer
 from transformers import EvalPrediction
 from typing import List, Optional, Dict, Any, Tuple, Union
 from transformer4planning.utils.nuplan_utils import compute_scores
-from datasets import Dataset
 from transformer4planning.utils.nuplan_utils import normalize_angle
 
 
@@ -61,7 +52,6 @@ def compute_metrics(prediction: EvalPrediction):
     """
     # TODO: Adapt to waymo
     # TODO: Add classification metrics (clf_metrics) for scoring
-    # TODO: Add visualization for prediction results with save_raster method
     eval_result = {}
     item_to_save = {}
 
@@ -70,8 +60,6 @@ def compute_metrics(prediction: EvalPrediction):
     prediction_horizon = labels.shape[1]
 
     # select gt key points from gt trajectories
-    # TODO: merge key points selection and abstract with encoders/base.py select_key_points() to utiles
-    # TODO: adoptive with different key point selection strategy
     selected_indices = predictions['selected_indices'][0]  # 5
 
     prediction_by_generation = predictions['prediction_generation']  # sample_num, 85, 2/4
@@ -90,19 +78,12 @@ def compute_metrics(prediction: EvalPrediction):
 
     # fetch trajectory and key points predictions
     if 'key_points_logits' in prediction_by_generation:
-    # if prediction_by_forward.shape[1] > prediction_horizon:
         # first 5 are key points concatentate with trajectory
         prediction_key_points_by_generation = prediction_by_generation["key_points_logits"]  # sample_num, 5, 2/4
-        assert prediction_by_forward.shape[1] > prediction_horizon, f'{prediction_by_forward.shape[1]} {prediction_horizon}'
-        prediction_key_points_by_forward = prediction_by_forward[:, :-prediction_horizon, :]  # sample_num, 5, 2/4
-    # else:
-    #     # only trajectory, no key points
-    #     assert prediction_by_forward.shape[1] == prediction_horizon, f'{prediction_key_points_by_generation.shape[1]} {prediction_horizon}'
-    #     # only trajectory
-    #     prediction_key_points_by_generation = prediction_by_generation["key_points_logits"] # sample_num, 5, 2/4
-    #     prediction_key_points_by_forward = prediction_by_forward[:, selected_indices, :]  # sample_num, 5, 2/4
+        assert prediction_by_forward['traj_logits'].shape[1] == prediction_horizon, f'{prediction_by_forward["traj_logits"].shape[1]} {prediction_horizon}'
+        prediction_key_points_by_forward = prediction_by_forward['kp_logits']  # sample_num, 5, 2/4
     prediction_trajectory_by_generation = prediction_by_generation["traj_logits"] # sample_num, 80, 2/4
-    prediction_trajectory_by_forward = prediction_by_forward[:, -prediction_horizon:, :]  # sample_num, 80, 2/4
+    prediction_trajectory_by_forward = prediction_by_forward['traj_logits']  # sample_num, 80, 2/4
 
     # calculate error for generation results
     if 'key_points_logits' in prediction_by_generation:
@@ -205,7 +186,7 @@ def compute_metrics(prediction: EvalPrediction):
         eval_result['metric_fhe'] = avg_fhe.mean()
         eval_result['fhe_score'] = fhe_score.mean()
     
-    # missing rate TODO: miss rate is designed for the whole scneario
+    # missing rate
     max_displacement3 = np.max(ade_gen[:, :30], axis=1)
     max_displacement5 = np.max(ade_gen[:, :50], axis=1)
     max_displacement8 = np.max(ade_gen[:, :80], axis=1)
@@ -438,34 +419,22 @@ class PlanningTrainer(Trainer):
 
         with torch.no_grad():
             if is_sagemaker_mp_enabled():
-                assert False, 'Not implemented yet, check source code of Transformers Trainer to adapt it.'
+                raise NotImplementedError('Not implemented yet, check source code of Transformers Trainer to adapt it.')
             else:
                 if has_labels or loss_without_labels:
                     with self.compute_loss_context_manager():
                         loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
                     loss = loss.mean().detach()
-
-                    if 'loss_items' in outputs:
-                        loss_items = outputs['loss_items']
-                    else:
-                        loss_items = None
-
+                    loss_items = outputs['loss_items'] if 'loss_items' in outputs else None
                     if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"] + ["loss_items"])
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"] + ["loss_items"])  # (logits, pred_dict)
                     else:
-                        logits = outputs[1:]
+                        raise NotImplementedError
+                        # logits = outputs[1:]
                 else:
-                    loss = None
-                    with self.compute_loss_context_manager():
-                        outputs = model(**inputs)
-                    if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
-                    else:
-                        logits = outputs
                     # # TODO: this needs to be fixed and made cleaner later.
-                    # if self.args.past_index >= 0:
-                    #     self._past = outputs[self.args.past_index - 1]
-
+                    raise NotImplementedError
+        pred_dict = logits[1]
         logits = nested_detach(logits)
         if len(logits) >= 1:
             logits = logits[0]
@@ -495,7 +464,7 @@ class PlanningTrainer(Trainer):
             # print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
         
         logits_dict = {
-            "prediction_forward": logits,
+            "prediction_forward": pred_dict,
             "prediction_generation": prediction_generation,
             "loss_items": loss_items if loss_items is not None else 0,
         }
@@ -515,124 +484,137 @@ class PlanningTrainer(Trainer):
 
         return (loss, logits_dict, labels)
 
-    def save_raster(self, path_to_save,
-                    inputs, sample_index,
-                    prediction_trajectory,
-                    file_index,
-                    high_scale=4, low_scale=0.77,
-                    prediction_key_point=None,
-                    prediction_key_point_by_gen=None,
-                    prediction_trajectory_by_gen=None):
-        import cv2
-        # save rasters
-        image_shape = None
-        image_to_save = {
-            'high_res_raster': None,
-            'low_res_raster': None
-        }
-        past_frames_num = inputs['context_actions'][sample_index].shape[0]
-        agent_type_num = 8
-        for each_key in ['high_res_raster', 'low_res_raster']:
-            """
-            # channels:
-            # 0: route raster
-            # 1-20: road raster
-            # 21-24: traffic raster
-            # 25-56: agent raster (32=8 (agent_types) * 4 (sample_frames_in_past))
-            """
-            each_img = inputs[each_key][sample_index].cpu().numpy()
-            goal = each_img[:, :, 0]
-            road = each_img[:, :, :21]
-            traffic_lights = each_img[:, :, 21:25]
-            agent = each_img[:, :, 25:]
-            # generate a color pallet of 20 in RGB space
-            color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
-            target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float)
-            image_shape = target_image.shape
-            for i in range(21):
-                road_per_channel = road[:, :, i].copy()
-                # repeat on the third dimension into RGB space
-                # replace the road channel with the color pallet
-                if np.sum(road_per_channel) > 0:
-                    for k in range(3):
-                        target_image[:, :, k][road_per_channel == 1] = color_pallet[i, k]
-            for i in range(3):
-                traffic_light_per_channel = traffic_lights[:, :, i].copy()
-                # repeat on the third dimension into RGB space
-                # replace the road channel with the color pallet
-                if np.sum(traffic_light_per_channel) > 0:
-                    for k in range(3):
-                        target_image[:, :, k][traffic_light_per_channel == 1] = color_pallet[i, k]
-            target_image[:, :, 0][goal == 1] = 255
-            # generate 9 values interpolated from 0 to 1
-            agent_colors = np.array([[0.01 * 255] * past_frames_num,
-                                     np.linspace(0, 255, past_frames_num),
-                                     np.linspace(255, 0, past_frames_num)]).transpose()
-            for i in range(past_frames_num):
-                for j in range(agent_type_num):
-                    # if j == 7:
-                    #     print('debug', np.sum(agent[:, :, j * 9 + i]), agent[:, :, j * 9 + i])
-                    agent_per_channel = agent[:, :, j * past_frames_num + i].copy()
-                    # agent_per_channel = agent_per_channel[:, :, None].repeat(3, axis=2)
-                    if np.sum(agent_per_channel) > 0:
-                        for k in range(3):
-                            target_image[:, :, k][agent_per_channel == 1] = agent_colors[i, k]
-            if 'high' in each_key:
-                scale = high_scale
-            elif 'low' in each_key:
-                scale = low_scale
-            # draw context actions, and trajectory label
-            for each_traj_key in ['context_actions', 'trajectory_label']:
-                pts = inputs[each_traj_key][sample_index].cpu().numpy()
-                for i in range(pts.shape[0]):
-                    x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
-                    y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
-                    if x < target_image.shape[0] and y < target_image.shape[1]:
-                        if 'actions' in each_traj_key:
-                            target_image[x, y, :] = [255, 0, 0]
-                        elif 'label' in each_traj_key:
-                            target_image[x, y, :] = [0, 255, 0]
+def save_raster(inputs, sample_index, file_index=0,
+                prediction_trajectory=None, path_to_save=None,
+                high_scale=4, low_scale=0.77,
+                prediction_key_point=None,
+                prediction_key_point_by_gen=None,
+                prediction_trajectory_by_gen=None):
+    import cv2
+    # save rasters
+    image_shape = None
+    image_to_save = {
+        'high_res_raster': None,
+        'low_res_raster': None
+    }
+    past_frames_num = inputs['context_actions'][sample_index].shape[0]
+    agent_type_num = 8
+    for each_key in ['high_res_raster', 'low_res_raster']:
+        """
+        # channels:
+        # 0: route raster
+        # 1-20: road raster
+        # 21-24: traffic raster
+        # 25-56: agent raster (32=8 (agent_types) * 4 (sample_frames_in_past))
+        """
+        each_img = inputs[each_key][sample_index].cpu().numpy()
+        goal = each_img[:, :, 0]
+        road = each_img[:, :, :21]
+        traffic_lights = each_img[:, :, 21:25]
+        agent = each_img[:, :, 25:]
+        # generate a color pallet of 20 in RGB space
+        color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
+        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float)
+        image_shape = target_image.shape
 
-            # draw prediction trajectory
+        for i in range(21):
+            if i in [0, 11]: continue
+            road_per_channel = road[:, :, i].copy()
+            # repeat on the third dimension into RGB space
+            # replace the road channel with the color pallet
+            if np.sum(road_per_channel) > 0:
+                for k in range(3):
+                    target_image[:, :, k][road_per_channel == 1] = color_pallet[i, k]
+        for i in [0, 11]:
+            road_per_channel = road[:, :, i].copy()
+            # repeat on the third dimension into RGB space
+            # replace the road channel with the color pallet
+            if np.sum(road_per_channel) > 0:
+                for k in range(3):
+                    target_image[:, :, k][road_per_channel == 1] = color_pallet[i, k]
+        for i in range(3):
+            traffic_light_per_channel = traffic_lights[:, :, i].copy()
+            # repeat on the third dimension into RGB space
+            # replace the road channel with the color pallet
+            if np.sum(traffic_light_per_channel) > 0:
+                for k in range(3):
+                    target_image[:, :, k][traffic_light_per_channel == 1] = color_pallet[i, k]
+        target_image[:, :, 0][goal == 1] = 255
+        # generate 9 values interpolated from 0 to 1
+        agent_colors = np.array([[0.01 * 255] * past_frames_num,
+                                 np.linspace(0, 255, past_frames_num),
+                                 np.linspace(255, 0, past_frames_num)]).transpose()
+        for i in range(past_frames_num):
+            for j in range(agent_type_num):
+                agent_per_channel = agent[:, :, j * past_frames_num + i].copy()
+                # agent_per_channel = agent_per_channel[:, :, None].repeat(3, axis=2)
+                if np.sum(agent_per_channel) > 0:
+                    for k in range(3):
+                        target_image[:, :, k][agent_per_channel == 1] = agent_colors[i, k]
+        if 'high' in each_key:
+            scale = high_scale
+        elif 'low' in each_key:
+            scale = low_scale
+        # draw context actions, and trajectory label
+        # for each_traj_key in ['context_actions', 'trajectory_label']:
+        #     pts = inputs[each_traj_key][sample_index].cpu().numpy()
+        #     for i in range(pts.shape[0]):
+        #         x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
+        #         y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
+        #         if x < target_image.shape[0] and y < target_image.shape[1]:
+        #             if 'actions' in each_traj_key:
+        #                 target_image[x, y, :] = [255, 0, 0]
+        #             elif 'label' in each_traj_key:
+        #                 target_image[x, y, :] = [0, 255, 0]
+
+        tray_point_size = int(0.75 * scale * 4 / 7)
+        key_point_size = int(3 * scale * 4 / 7)
+        # draw prediction trajectory
+        if prediction_trajectory is not None:
             for i in range(prediction_trajectory.shape[0]):
                 x = int(prediction_trajectory[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_trajectory[i, 1] * scale) + target_image.shape[1] // 2
                 if x < target_image.shape[0] and y < target_image.shape[1]:
-                    target_image[x, y, 0] += 100
+                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, 0] += 200
 
-            # draw key points
-            if prediction_key_point is not None:
-                for i in range(prediction_key_point.shape[0]):
-                    x = int(prediction_key_point[i, 0] * scale) + target_image.shape[0] // 2
-                    y = int(prediction_key_point[i, 1] * scale) + target_image.shape[1] // 2
-                    if x < target_image.shape[0] and y < target_image.shape[1]:
-                        target_image[x, y, 1] += 100
+        # draw prediction trajectory by generation
+        if prediction_trajectory_by_gen is not None:
+            for i in range(prediction_trajectory_by_gen.shape[0]):
+                x = int(prediction_trajectory_by_gen[i, 0] * scale) + target_image.shape[0] // 2
+                y = int(prediction_trajectory_by_gen[i, 1] * scale) + target_image.shape[1] // 2
+                if x < target_image.shape[0] and y < target_image.shape[1]:
+                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, :] += 100
 
-            # draw prediction key points during generation
-            if prediction_key_point_by_gen is not None:
-                for i in range(prediction_key_point_by_gen.shape[0]):
-                    x = int(prediction_key_point_by_gen[i, 0] * scale) + target_image.shape[0] // 2
-                    y = int(prediction_key_point_by_gen[i, 1] * scale) + target_image.shape[1] // 2
-                    if x < target_image.shape[0] and y < target_image.shape[1]:
-                        target_image[x, y, 2] += 100
+        # draw key points
+        if prediction_key_point is not None:
+            for i in range(prediction_key_point.shape[0]):
+                x = int(prediction_key_point[i, 0] * scale) + target_image.shape[0] // 2
+                y = int(prediction_key_point[i, 1] * scale) + target_image.shape[1] // 2
+                if x < target_image.shape[0] and y < target_image.shape[1]:
+                    target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 1] += 200
 
-            # draw prediction trajectory by generation
-            if prediction_trajectory_by_gen is not None:
-                for i in range(prediction_trajectory_by_gen.shape[0]):
-                    x = int(prediction_trajectory_by_gen[i, 0] * scale) + target_image.shape[0] // 2
-                    y = int(prediction_trajectory_by_gen[i, 1] * scale) + target_image.shape[1] // 2
-                    if x < target_image.shape[0] and y < target_image.shape[1]:
-                        target_image[x, y, :] += 100
-            target_image = np.clip(target_image, 0, 255)
-            image_to_save[each_key] = target_image
-        import wandb
+        # draw prediction key points during generation
+        if prediction_key_point_by_gen is not None:
+            for i in range(prediction_key_point_by_gen.shape[0]):
+                x = int(prediction_key_point_by_gen[i, 0] * scale) + target_image.shape[0] // 2
+                y = int(prediction_key_point_by_gen[i, 1] * scale) + target_image.shape[1] // 2
+                if x < target_image.shape[0] and y < target_image.shape[1]:
+                    target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 2] += 200
+
+        target_image = np.clip(target_image, 0, 255)
+        image_to_save[each_key] = target_image
+    # import wandb
+    if path_to_save is not None:
         for each_key in image_to_save:
-            images = wandb.Image(
-                image_to_save[each_key],
-                caption=f"{file_index}-{each_key}"
-            )
-            self.log({"pred examples": images})
+            # images = wandb.Image(
+            #     image_to_save[each_key],
+            #     caption=f"{file_index}-{each_key}"
+            # )
+            # self.log({"pred examples": images})
             cv2.imwrite(os.path.join(path_to_save, 'test' + '_' + str(file_index) + '_' + str(each_key) + '.png'), image_to_save[each_key])
-        print('length of action and labels: ',
-              inputs['context_actions'][sample_index].shape, inputs['trajectory_label'][sample_index].shape)
-        print('debug images saved to: ', path_to_save, file_index)
+    else:
+        return image_to_save
+
+    print('length of action and labels: ',
+          inputs['context_actions'][sample_index].shape, inputs['trajectory_label'][sample_index].shape)
+    print('debug images saved to: ', path_to_save, file_index)
