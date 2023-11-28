@@ -340,6 +340,10 @@ if make_prediction:
                                               agent_dic=agent_dic,
                                               all_maps_dic={map_name: road_dic})
         prepared_data = np_to_tensor(prepared_data)
+        prepared_data.update({'road_dic': road_dic,
+                              'route_ids': current_data['route_ids'],
+                              'ego_pose': agent_dic['ego']['pose'][current_frame // 2],
+                              'map_name': map_name,})
 
         with torch.no_grad():
             prediction_generation = model.generate(**prepared_data)

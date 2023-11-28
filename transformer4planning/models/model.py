@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import numpy as np
 from typing import Tuple, Optional, Dict
@@ -146,23 +148,25 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             traj_loss=traj_loss,
         )
 
+        pred_dict = {"traj_logits": traj_logits}
+
         if self.use_proposal:
             if self.config.task == "nuplan":
-                proposal_loss = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
+                proposal_loss, pred_proposal_cls = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
                 loss += proposal_loss
                 loss_items["proposal_loss"] = proposal_loss
+                pred_dict["proposal"] = pred_proposal_cls
             elif self.config.task == "waymo":
                 proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
                 loss += proposal_loss
                 loss += proposal_loss_logits
                 loss_items["proposal_loss"] = proposal_loss
+                pred_dict["proposal"] = proposal_loss_logits
 
         if self.config.dense_pred:
             assert self.config.task == "waymo"
             loss += info_dict["dense_pred_loss"]
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
-
-        pred_dict = {"traj_logits": traj_logits}
 
         if self.use_key_points != 'no':
             if self.config.generate_diffusion_dataset_for_key_points_decoder:
@@ -229,12 +233,14 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
                 # topk_indx: (bs, k)
                 proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.unsqueeze(-1).float())
+                proposal_result = topk_indx
                 # proposal_pred_embed: (bs, k, n_embed)
             elif self.config.task == 'waymo':
                 proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
                 topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
                 proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
                 proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
+                proposal_result = topk_indx
 
         traj_logits_k = []
         key_points_logits_k = []
@@ -287,23 +293,28 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     else:
                         pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
-                    off_road_checking = False
-                    if off_road_checking and batch_size == 1 and map_api is not None and route_ids is not None and road_dic is not None:
-                        # Check key points with map_api
-                        # WARNING: WIP, do not use
-                        pred_key_point_global = nuplan_utils.change_coordination(pred_key_point[0, 0, :2].cpu().numpy(),
-                                                                    ego_pose,
-                                                                    ego_to_global=True)
-                        closest_lane_road_dic = query_current_lane(map_api=map_api, target_point=pred_key_point_global)
-                        nearest = closest_lane_road_dic['road_id']
-                        nearest_lane = closest_lane_road_dic['lane_id']
-                        dist = closest_lane_road_dic['distance_to_road_block']
-                        if nearest not in route_ids or dist > 0.5:
-                            # off-road, move to nearest lane according to PDMPath
-                            dist = nuplan_utils.euclidean_distance(pred_key_point[0, 0, :2].cpu().numpy(), [0, 0])
-                            interpolate_point = center_path.interpolate(np.array([dist]))[0]
-                            print('test offroad correction: ', pred_key_point[0, 0, :2].cpu().numpy(), interpolate_point)
-                            pred_key_point[0, 0, :2] = torch.tensor(interpolate_point, device=pred_key_point.device)
+                    off_road_checking = True
+                    if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
+                        from transformer4planning.utils import nuplan_utils
+                        if i == 0 and self.use_key_points == 'specified_backward':
+                            # Check key points with map_api
+                            # WARNING: WIP, do not use
+                            y_inverse = -1 if map_name == 'sg-one-north' else 1
+                            pred_key_point_copy = copy.deepcopy(pred_key_point)
+                            pred_key_point_copy[0, 0, 1] *= y_inverse
+                            pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[0, 0, :2].cpu().numpy(),
+                                                                        ego_pose,
+                                                                        ego_to_global=True)
+                            closest_lane_point_on_route, dist, onraod = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
+                                                                                                                       route_ids.numpy().tolist(),
+                                                                                                                       road_dic)
+                            if not onraod:
+                                pred_key_point_ego = nuplan_utils.change_coordination(closest_lane_point_on_route,
+                                                                                      ego_pose,
+                                                                                      ego_to_global=False)
+                                pred_key_point_ego[1] *= y_inverse
+                                pred_key_point[0, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
+                                print('Off Road Detected! Replace 8s key point')
 
                     if idm_reference_global is not None and self.use_key_points == 'specified_backward':
                         # replace last key point with IDM reference
@@ -363,6 +374,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         if key_points_pred_logits is not None:
             pred_dict.update({"key_points_logits": key_points_pred_logits})
+
+        if self.use_proposal:
+            pred_dict.update({"proposal": proposal_result})
+            if self.config.task == "nuplan" and 'halfs_intention' in info_dict:
+                pred_dict.update({"halfs_intention": info_dict['halfs_intention']})
         
         if self.config.task == "waymo":
             center_objects_world = kwargs['center_objects_world'].type_as(traj_pred_logits)

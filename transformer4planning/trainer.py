@@ -14,7 +14,7 @@ from transformers import EvalPrediction
 from typing import List, Optional, Dict, Any, Tuple, Union
 from transformer4planning.utils.nuplan_utils import compute_scores
 from transformer4planning.utils.nuplan_utils import normalize_angle
-
+from sklearn.metrics import accuracy_score
 
 FDE_THRESHHOLD = 8 # keep same with nuplan simulation
 ADE_THRESHHOLD = 8 # keep same with nuplan simulation
@@ -82,6 +82,7 @@ def compute_metrics(prediction: EvalPrediction):
         prediction_key_points_by_generation = prediction_by_generation["key_points_logits"]  # sample_num, 5, 2/4
         assert prediction_by_forward['traj_logits'].shape[1] == prediction_horizon, f'{prediction_by_forward["traj_logits"].shape[1]} {prediction_horizon}'
         prediction_key_points_by_forward = prediction_by_forward['kp_logits']  # sample_num, 5, 2/4
+
     prediction_trajectory_by_generation = prediction_by_generation["traj_logits"] # sample_num, 80, 2/4
     prediction_trajectory_by_forward = prediction_by_forward['traj_logits']  # sample_num, 80, 2/4
 
@@ -230,6 +231,15 @@ def compute_metrics(prediction: EvalPrediction):
         if prediction_key_points_by_forward.shape[-1] == 4:
             heading_error_for = abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
             eval_result['heading_error_forward'] = heading_error_for.mean()
+
+    if 'proposal' in prediction_by_generation and 'halfs_intention' in prediction_by_generation:
+        # TODO: add waymo proposal accuracy to eval result
+        # evaluate classification accuracy and log to eval_result
+        prediction_proposal_by_generation = prediction_by_generation["proposal"]  # sample_num, 80, 5
+        prediction_proposal_class_by_generation = np.argmax(prediction_proposal_by_generation, axis=-1)  # sample_num, 80
+        proposal_labels = prediction_by_generation['halfs_intention']
+        accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
+        eval_result['proposal_accuracy'] = accuracy_by_generation
 
     score, miss_score = compute_scores(item_to_save)
     eval_result["average_score"] = score
