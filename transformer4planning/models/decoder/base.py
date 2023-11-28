@@ -143,9 +143,9 @@ class ProposalDecoderCLS(nn.Module):
         context_length = info_dict["context_length"]
         pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
 
-        pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 64)
+        pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 5)
         loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
-        return loss_proposal.mean()
+        return loss_proposal.mean(), pred_proposal_cls
 
 class KeyPointMLPDeocder(nn.Module):
     def __init__(self, config):
