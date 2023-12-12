@@ -11,11 +11,12 @@ from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner
 from nuplan.planning.simulation.planner.ml_planner.ml_planner import MLPlanner
 from nuplan.planning.training.modeling.lightning_module_wrapper import LightningModuleWrapper
 # customized model builder
-from nuplan_garage.planning.simulation.planner.control_tf_planner.control_tf_planner import ControlTFPlanner
+from nuplan_garage.planning.simulation.planner.str_planner.str_planner import STRPlanner
 from transformer4planning.models.model import build_models
-from transformer4planning.utils import ModelArguments
+from transformer4planning.utils.args import ModelArguments
 from transformers import (HfArgumentParser)
 import os
+import json
 
 model = None
 planner_counter = 0
@@ -44,38 +45,40 @@ def _build_planner(planner_cfg: DictConfig, scenario: Optional[AbstractScenario]
         OmegaConf.set_struct(config, True)
 
         planner: AbstractPlanner = instantiate(config, model=model)
-    elif is_target_type(planner_cfg, ControlTFPlanner):
-
+    elif is_target_type(planner_cfg, STRPlanner):
         # planner: AbstractPlanner = instantiate(config)
-        # print('testing without initializing model')
         if True: # planner_counter % 200 == 0:  # model is None:  # for small models
-        # if model is None:  # for large models
+            # initialize model args by default values
             parser = HfArgumentParser((ModelArguments))
-            model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
-            model_args.model_name = 'pretrain-gpt-small'
-            files_in_dir = os.listdir(config.checkpoint_path)
-            config_file_path = None
-            for file_in_dir in files_in_dir:
-                """
-                Load the config file from the checkpoint path if exists
-                """
-                if file_in_dir.endswith('.json') and 'config' in file_in_dir:
-                    config_file_path = os.path.join(config.checkpoint_path, file_in_dir)
-                    break
-            if config_file_path is not None:
-                model_args, = parser.parse_json_file(config_file_path, allow_extra_keys=True)
-            print('debug model args: ', model_args.model_name, model_args, config.checkpoint_path)
-            model_args.model_pretrain_name_or_path = config.checkpoint_path
+            # load model args from config.json
+            config_path = os.path.join(planner_cfg.checkpoint_path, 'config.json')
+            # with open(config_path) as f:
+            #     loaded_model_args = json.load(f)
+            # print('loaded model args: ', loaded_model_args)
+            # # update model args
+            # for key, value in loaded_model_args.items():
+            #     if hasattr(model_args, key):
+            #         setattr(model_args, key, value)
+            #     else:
+            #         print('WARNING key not found in model args: ', key)
+            if not os.path.exists(config_path):
+                print('WARNING config.json not found in checkpoint path, using default model args ', config_path)
+                model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
+            else:
+                model_args, = parser.parse_json_file(config_path, allow_extra_keys=True)
+                print('debug model args: ', model_args, planner_cfg.checkpoint_path)
+                model_args.model_pretrain_name_or_path = planner_cfg.checkpoint_path
+                model_args.model_name.replace('scratch', 'pretrained')
             new_model = build_models(model_args=model_args)
             print('model built')
             # use cpu only for ray distributed simulations
             # import torch
             # if torch.cuda.is_available():
             #     new_model.to('cuda')
-            model = new_model
+            model = new_model.to('cpu')
         else:
             new_model = model
-        print("control transformer planner initialized ", planner_counter)
+        print("STR planner initialized ", planner_counter)
         planner: AbstractPlanner = instantiate(config, model=new_model, scenario=scenario)
         planner_counter += 1
     else:

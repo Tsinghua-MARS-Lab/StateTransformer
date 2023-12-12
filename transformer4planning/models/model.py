@@ -1,7 +1,6 @@
 import copy
 
 import torch
-import numpy as np
 from typing import Tuple, Optional, Dict
 from transformers import (GPT2Model, GPT2PreTrainedModel, GPT2Config)
 from transformer4planning.models.decoder.base import TrajectoryDecoder
@@ -24,6 +23,10 @@ class TrajectoryGPTConfig(GPT2Config):
     def update_by_model_args(self, model_args):
         for each_key in model_args.__dict__:
             self.__dict__[each_key] = model_args.__dict__[each_key]
+        # to be compatible with older models
+        if not hasattr(self, "separate_kp_encoder"): self.separate_kp_encoder = True
+        if not hasattr(self, "use_proposal"): self.use_proposal = False
+        if not hasattr(self, "autoregressive_proposals"): self.autoregressive_proposals = False
 
 class TrajectoryGPT(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
@@ -32,13 +35,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.config = config
         self.traj_decoder = None
         self.k = int(self.config.k)
-        
+
         self.use_proposal = self.config.use_proposal
         # if self.use_proposal: assert self.config.task == "waymo", "NotImplemented"
 
         self.use_key_points = self.config.use_key_points
         self.kp_decoder_type = self.config.kp_decoder_type
-        
+
         self.model_parallel = False
         self.device_map = None
         self.clf_metrics = None
@@ -46,7 +49,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         self.build_encoder()
         self.build_decoder()
         self.post_init()
-        
+
     def build_encoder(self):
         if self.config.task == "nuplan":
             if "raster" in self.config.encoder_type:
@@ -54,7 +57,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 cnn_kwargs = dict(
                     d_embed=self.config.n_embd // 2,
                     in_channels=self.config.raster_channels,
-                    resnet_type=self.config.resnet_type, 
+                    resnet_type=self.config.resnet_type,
                     pretrain=self.config.pretrain_encoder
                 )
                 action_kwargs = dict(
@@ -105,10 +108,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             elif self.kp_decoder_type == "mlp":
                 from transformer4planning.models.decoder.base import KeyPointMLPDeocder
                 self.key_points_decoder = KeyPointMLPDeocder(self.config)
-        
+
         self.traj_decoder = TrajectoryDecoder(self.config)
 
-        
+
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
 
@@ -127,7 +130,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             raise NotImplementedError('need to return dict for evaluations in trainer.py')
 
         input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
-        
+
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
             attention_mask=None,
@@ -136,7 +139,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         )
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
-        
+
         trajectory_label = info_dict["trajectory_label"]
 
         loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
@@ -156,6 +159,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 loss += proposal_loss
                 loss_items["proposal_loss"] = proposal_loss
                 pred_dict["proposal"] = pred_proposal_cls
+                # debugging
+                pred_proposal_score = pred_proposal_cls.softmax(-1)
+                topk_score, topk_indx = torch.topk(pred_proposal_score[:, 0, :], dim=-1, k=self.k)
+                # print('test inspect model.py forward: ', self.training, info_dict['halfs_intention'], topk_score, topk_indx,
+                #       proposal_loss, pred_proposal_score)
+
             elif self.config.task == "waymo":
                 proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
                 loss += proposal_loss
@@ -187,7 +196,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
             pred_dict["kp_logits"] = kp_logits
             loss_items["kp_loss"] = kp_loss
-        
+
         # if not return_dict:
         #     output = (traj_logits,) + transformer_outputs[1:]
         #     return ((loss,) + output) if loss is not None else output
@@ -202,7 +211,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             cross_attentions=transformer_outputs.cross_attentions,
             loss_items=loss_items
         )
-    
+
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
         input_embeds, info_dict = self.encoder(is_training=False, **kwargs)
@@ -211,47 +220,94 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         context_length = info_dict["context_length"]
 
         if self.use_proposal:
-            if self.config.task == "nuplan":
-                dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 1), device=device)).unsqueeze(1)
-            elif self.config.task == 'waymo':
-                dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
-            input_embeds[:, context_length:context_length+1, :] = dummy_proposal_embedding
+            if self.config.autoregressive_proposals:
+                # TODO: Training for debugging results
+                proposal_result = []
+                proposal_scores = []
+                assert self.config.task == 'nuplan', 'waymo proposal autoregressive not implemented yet'
+                dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, int(self.config.proposal_num), 1), device=device))  # bsz, 16, 256
+                input_embeds[:, context_length:context_length+int(self.config.proposal_num), :] = dummy_proposal_embedding
+                # loop over each intention for generation
+                for i in range(int(self.config.proposal_num)):
+                    context_embeds = input_embeds[:, :context_length + 1 + i, :]
+                    attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
+                    position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+                    transformer_output = self.transformer(
+                        inputs_embeds=context_embeds,
+                        attention_mask=attention_mask,
+                        position_ids=position_ids
+                    )
+                    transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+                    proposal_hidden_state = transformer_outputs_hidden_state[:, context_length - 1 + i:context_length - 1 + 1 + i, :]  # (bs, 1, n_embed)
+                    proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1)  # (bs, 1, 5)
+                    # WARNING: Only tested with self.k = 1
+                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                    # topk_score: (bs, 5) topk_indx: (bs, 1)
+                    proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.float())  # (bs, n_embed)
+                    # print('test generate 1: ', topk_indx.unsqueeze(-1).float().shape, topk_indx, topk_score, proposal_pred_score[:, 0, :])
+                    proposal_result.append(topk_indx.unsqueeze(1))  # list of (bs, 1, 1)
+                    proposal_scores.append(proposal_pred_score[:, 0, :].unsqueeze(1))  # list of (bs, 1, 13)
+                    input_embeds[:, context_length+i:context_length+i+1, :] = proposal_pred_embed.unsqueeze(1)
+                proposal_result = torch.cat(proposal_result, dim=1)  # (bs, 13, 1)
+                proposal_scores = torch.cat(proposal_scores, dim=1)  # (bs, 13, 5)
+            else:
+                if self.config.task == "nuplan":
+                    dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 1), device=device)).unsqueeze(1)
+                elif self.config.task == 'waymo':
+                    dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
+                input_embeds[:, context_length:context_length+1, :] = dummy_proposal_embedding
 
-            context_embeds = input_embeds[:, :context_length+1, :]
-            attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
-            position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-            transformer_output = self.transformer(
-                inputs_embeds=context_embeds,
-                attention_mask=attention_mask,
-                position_ids=position_ids
-            )
-            transformer_outputs_hidden_state = transformer_output['last_hidden_state']
-            proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
+                context_embeds = input_embeds[:, :context_length+1, :]
+                attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
+                position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+                transformer_output = self.transformer(
+                    inputs_embeds=context_embeds,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids
+                )
+                transformer_outputs_hidden_state = transformer_output['last_hidden_state']
+                proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
 
-            proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64)
-            if self.config.task == "nuplan":
-                topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
-                # topk_indx: (bs, k)
-                proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.unsqueeze(-1).float())
-                proposal_result = topk_indx
-                # proposal_pred_embed: (bs, k, n_embed)
-            elif self.config.task == 'waymo':
-                proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
-                topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
-                proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
-                proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
-                proposal_result = topk_indx
+                proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64/5)
+                if self.config.task == "nuplan":
+                    # WARNING: Only tested with self.k = 1
+                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                    # topk_score: (bs, 5), topk_indx: (bs, 1)
+                    proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.float())  # (bs, n_embed)
+                    # print('test generate 1: ', topk_indx.unsqueeze(-1).float().shape, topk_indx, topk_score, proposal_pred_score[:, 0, :])
+                    proposal_result = topk_indx
+                    proposal_scores = proposal_pred_score[:, 0, :]
+                    # proposal_pred_embed: (bs, k, n_embed)
+                elif self.config.task == 'waymo':
+                    proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
+                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                    proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
+                    proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
+                    proposal_result = topk_indx
+                    proposal_scores = proposal_pred_score[:, 0, :]
 
         traj_logits_k = []
         key_points_logits_k = []
         for mode in range(self.k):
-            if self.use_proposal: input_embeds[:, context_length:context_length+1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
+            # print('test generate 2: ', proposal_pred_embed.shape)
+            if self.use_proposal:
+                if self.config.autoregressive_proposals:
+                    # already updated in previous step
+                    pass
+                else:
+                    if self.config.task == "nuplan":
+                        input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(1)
+                    elif self.config.task == 'waymo':
+                        input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
             if self.use_key_points != "no":
                 pred_length = info_dict["pred_length"]
                 selected_indices = info_dict["selected_indices"]
                 kp_start_index = context_length
                 if self.use_proposal:
-                    kp_start_index += 1
+                    if self.config.autoregressive_proposals:
+                        kp_start_index += int(self.config.proposal_num)
+                    else:
+                        kp_start_index += 1
                 # pass the following infos during generate for one sample (non-batch) generate with KP checking
                 map_name = kwargs.get("map", None)
                 route_ids = kwargs.get("route_ids", None)
@@ -266,8 +322,12 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     future_key_points = trajectory_label_dummy[:, ar_future_interval - 1::ar_future_interval, :]
 
                 assert future_key_points.shape[1] > 0, 'future points not enough to sample'
-                # future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
-                future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
+
+                if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                    future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
+                else:
+                    future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
+
                 key_points_num = future_key_points.shape[1]
 
                 input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
@@ -305,8 +365,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                             pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[0, 0, :2].cpu().numpy(),
                                                                         ego_pose,
                                                                         ego_to_global=True)
+                            if isinstance(route_ids, torch.Tensor):
+                                route_ids = route_ids.cpu().numpy().tolist()
                             closest_lane_point_on_route, dist, onraod = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
-                                                                                                                       route_ids.numpy().tolist(),
+                                                                                                                       route_ids,
                                                                                                                        road_dic)
                             if not onraod:
                                 pred_key_point_ego = nuplan_utils.change_coordination(closest_lane_point_on_route,
@@ -326,8 +388,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                         print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
                         pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                         pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
-                    # key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-                    key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+
+                    if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                        key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    else:
+                        key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     # replace embed at the next position
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
                     if self.config.predict_yaw:
@@ -349,7 +414,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             if self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
                 if self.config.predict_yaw:
-                    traj_logits = interplate_yaw(traj_logits, mode=self.config.postprocess_yaw)
+                    traj_logits = interpolate_yaw(traj_logits, mode=self.config.postprocess_yaw)
 
                 traj_logits_k.append(traj_logits)
             else:
@@ -376,10 +441,13 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             pred_dict.update({"key_points_logits": key_points_pred_logits})
 
         if self.use_proposal:
-            pred_dict.update({"proposal": proposal_result})
+            pred_dict.update({"proposal": proposal_result})  # topk results
+            pred_dict.update({"proposal_scores": proposal_scores})  # topk scores
             if self.config.task == "nuplan" and 'halfs_intention' in info_dict:
                 pred_dict.update({"halfs_intention": info_dict['halfs_intention']})
-        
+            elif self.config.task == 'nuplan' and 'intentions' in info_dict:
+                pred_dict.update({'intentions': info_dict['intentions']})
+
         if self.config.task == "waymo":
             center_objects_world = kwargs['center_objects_world'].type_as(traj_pred_logits)
             num_center_objects, num_modes, num_timestamps, num_feat = traj_pred_logits.shape
@@ -405,87 +473,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         return pred_dict
 
 
-def query_current_lane(map_api, target_point):
-    """
-    Query the current road_block id and lane id given a point on the map with map_api from NuPlan.
-    Args:
-        map_api: NuPlan's Map Api
-        target_point: [x, y, ..] in global coordination
-    Returns:
-        {
-            'road_id': int,
-            'lane_id': int,
-            'distance_to_road_block': float,
-            'distance_to_lane': float
-        }
-    """
-    from nuplan.common.actor_state.state_representation import Point2D
-    from nuplan.common.maps.maps_datatypes import SemanticMapLayer
-    from nuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_path import PDMPath
-    point2d = Point2D(target_point[0], target_point[1])
-    nearest_road_block_id, distance_to_road_block = map_api.get_distance_to_nearest_map_object(
-        point=point2d,
-        layer=SemanticMapLayer.ROADBLOCK
-    )
-    nearest_road_blockc_id, distance_to_road_block_c = map_api.get_distance_to_nearest_map_object(
-        point=point2d,
-        layer=SemanticMapLayer.ROADBLOCK_CONNECTOR
-    )
-    nearest_lane_id, distance_to_lane = map_api.get_distance_to_nearest_map_object(
-        point=point2d,
-        layer=SemanticMapLayer.LANE
-    )
-    nearest_lanec_id, distance_to_lanec = map_api.get_distance_to_nearest_map_object(
-        point=point2d,
-        layer=SemanticMapLayer.LANE_CONNECTOR
-    )
-    # check if on route
-    if distance_to_road_block < distance_to_road_block_c:
-        nearest_road_blockc_id = int(nearest_road_block_id)
-        dist_to_road_block = distance_to_road_block
-    else:
-        nearest_road_blockc_id = int(nearest_road_blockc_id)
-        dist_to_road_block = distance_to_road_block_c
-    if distance_to_lane < distance_to_lanec:
-        nearest_lane = int(nearest_lane_id)
-        dist_to_nearest_lane = distance_to_lane
-    else:
-        nearest_lane = int(nearest_lanec_id)
-        dist_to_nearest_lane = distance_to_lanec
-    return {
-        'road_id': nearest_road_blockc_id,
-        'lane_id': nearest_lane,
-        'distance_to_road_block': dist_to_road_block,
-        'distance_to_lane': dist_to_nearest_lane
-    }
-
-def project_point_to_nearest_lane_on_route(road_dic, route_ids, org_point):
-    points_of_lane = []
-    for each_road_id in route_ids:
-        each_road_id = int(each_road_id)
-        if each_road_id not in road_dic:
-            continue
-        road_block = road_dic[each_road_id]
-        lanes_in_block = road_block['lower_level']
-        for each_lane in lanes_in_block:
-            each_lane = int(each_lane)
-            if each_lane not in road_dic:
-                continue
-            points_of_lane.append(road_dic[each_lane]['xyz'])
-    if len(points_of_lane) <= 1:
-        print('Warning: No lane found in route, return original point.')
-        return org_point
-    points_np = np.vstack(points_of_lane)
-    total_points = points_np.shape[0]
-    dist_xy = abs(points_np[:, :2] - np.repeat(org_point[np.newaxis, :], total_points, axis=0))
-    dist = dist_xy[:, 0] + dist_xy[:, 1]
-    minimal_index = np.argmin(dist)
-    minimal_point = points_np[minimal_index, :2]
-    min_dist = min(dist)
-    return minimal_point
-    # return minimal_point if min_dist < 10 else org_point
-
-def interplate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
+def interpolate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
     if mode == "normal":
         return pred_traj
     elif mode == "interplate" or mode == "hybrid":
@@ -504,6 +492,7 @@ def interplate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
         else:
             pred_traj[:, :, -1] = torch.where(torch.abs(pred_traj[:, :, -1]) > yaw_change_upper_threshold, relative_yaw_angles_full, pred_traj[:, :, -1])
     return pred_traj
+
 
 def build_models(model_args):
     if 'gpt' in model_args.model_name:
@@ -549,7 +538,7 @@ def build_models(model_args):
             config_p.n_inner = model_args.d_inner
             config_p.n_head = model_args.n_heads
         config_p.activation_function = model_args.activation_function
-        
+
         if model_args.task == "train_diffusion_decoder":
             from transformer4planning.models.decoder.diffusion_decoder import (KeypointDiffusionModel, T4PTrainDiffWrapper)
             out_features = 4 if model_args.predict_yaw else 2
@@ -586,5 +575,5 @@ def build_models(model_args):
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p)
         print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
-        
+
     return model

@@ -10,12 +10,19 @@ Authors: [Qiao Sun](https://qiaosun.me/), [Shiduo Zhang](https://github.com/Shid
 
 # Abstract
 
-Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches. 
-    The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space. 
-    Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called State Transformer (STR). STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
-    With a simple model design, STR consistently outperforms baseline approaches in both problems.
-    Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by presenting outstanding adaptability and learning efficiency.
-    Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
+Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine
+learning-based approaches.
+The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon,
+interpreting heterogeneous behaviors, and generating policies in a large continuous state space.
+Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce
+a scalable trajectory model called State Transformer (STR). STR reformulates the motion prediction and motion planning
+problems by arranging observations, states, and actions into one unified sequence modeling task.
+With a simple model design, STR consistently outperforms baseline approaches in both problems.
+Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by
+presenting outstanding adaptability and learning efficiency.
+Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge
+significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning,
+without explicit loss designs or costly high-level annotations.
 
 
 # Method
@@ -180,7 +187,7 @@ The common training settings are shown below.
 python -m torch.distributed.run \
 --nproc_per_node=8 runner.py \
 --do_train --do_eval\
---model_name scratch-gpt-mini --model_pretrain_name_or_path None \
+--model_name scratch-gpt-mini \
 --saved_dataset_folder  {PATH_TO_DATASET_FOLDER} \
 --output_dir {PATH_TO_OUTPUT_FOLDER} \
 --logging_dir {PATH_TO_LOG_FOLDER} \
@@ -194,10 +201,10 @@ python -m torch.distributed.run \
 --task nuplan \
 --remove_unused_columns False \
 --evaluation_strategy steps \
---eval_steps 1000 --loss_fn mse \
+--eval_steps 1000 \
 --per_device_eval_batch_size 8 \
---max_eval_samples 10000 --predict_yaw True \
---use_full_training_set False --past_sample_interval 2 \
+--predict_yaw True \
+--past_sample_interval 2 \
 --x_random_walk 0.1 --y_random_walk 0.1 --augment_current_pose_rate 0.1
 ```
 
@@ -222,12 +229,11 @@ python -m torch.distributed.run \
 --run_name {RUN_NAME} \
 --dataloader_num_workers 10 \
 --dataloader_drop_last True \
---dataset_scale 1 \
 --task nuplan \
 --future_sample_interval 2 \
 --past_sample_interval 5 \
 --evaluation_strategy steps \
---overwrite_output_dir --loss_fn mse --max_eval_samples 10000\
+--overwrite_output_dir \
 --next_token_scorer True \
 --pred_key_points_only False \
 --diffusion_feature_save_dir {PATH_TO_DIFFUSION_FEATURE_SAVE_DIR} \
@@ -321,14 +327,13 @@ nohup python3 -m torch.distributed.run \
 --remove_unused_columns False \
 --do_eval \
 --evaluation_strategy epoch \
---loss_fn mse \
 --per_device_eval_batch_size 2 \
 --past_sample_interval 2 \
 --kp_decoder_type diffusion --key_points_diffusion_decoder_feat_dim 256 --diffusion_condition_sequence_lenth 1 \
 --key_points_diffusion_decoder_load_from {KEY_POINT_DIFFUSION_CHECKPOINT_PATH}
 ```
 
-## To predict:
+## To predict (Old):
 
 ```
 export CUDA_VISIBLE_DEVICES=3; \
@@ -395,7 +400,7 @@ run `pip install -e .` from the root directory of Transformer4Planning.
 ### Install NuPlan-Devkit
 (tested with v1.2)
 run `pip install -e .` from the root directory of NuPlan-Devkit.
-Then install these packages:
+Then install these additional packages:
 
     pip install aioboto3
     pip install retry
@@ -404,11 +409,9 @@ Then install these packages:
 
 
 ### Register the planner
-Create a new yaml file for Hydra at: `script/config/simulation/planner/control_tf_planner.yaml` with:
-
-
+Create a new yaml file for Hydra at: `script/config/simulation/planner/str_planner.yaml` with:
     control_tf_planner:
-        _target_: transformer4planning.submission.planner.ControlTFPlanner
+        _target_: transformer4planning.submission.planner.STRPlanner
         horizon_seconds: 10.0
         sampling_time: 0.1
         acceleration: [5.0, 5.0]  # x (longitudinal), y (lateral)
@@ -427,14 +430,16 @@ Create a new yaml file for Hydra at: `script/config/simulation/planner/rule_base
 
 1. Install Transformer4Planning and NuPlan-Devkit
 2. (Optional) Copy the script folder from NuPlan's Official Repo to update
-3. Modify dataset path in the `run_simulation.py` and run it to evaluate the model with the tran-xl planner
+3. Modify dataset path in the `run_simulation.py` and run it to evaluate the model with the STR planner
+`
+python nuplan_garage/run_simulation.py 'planner=str_planner' \
+'scenario_filter=val14_split' \
+'job_name=closed_loop_nonreactive_agents' 'scenario_builder=nuplan' \
+'ego_controller=perfect_tracking_controller' 'observation=box_observation' \
+hydra.searchpath="[pkg://nuplan_garage.planning.script.config.common, pkg://nuplan_garage.planning.script.config.simulation, pkg://nuplan.planning.script.config.common, pkg://nuplan.planning.script.config.simulation, pkg://nuplan.planning.script.experiments]"
+`
 
-
-    python script/run_simulation.py 'planner=control_tf_planner' 
-    'scenario_filter.limit_total_scenarios=2' 'scenario_filter.num_scenarios_per_type=1' 
-    'job_name=open_loop_boxes' 'scenario_builder=nuplan' 
-    'ego_controller=perfect_tracking_controller' 'observation=box_observation'
-    '+model_pretrain_name_or_path=/public/MARS/datasets/nuPlanCache/checkpoint/nonauto-regressive/xl-silu-fde1.1' 
+'scenario_filter.limit_total_scenarios=1' 'scenario_filter.num_scenarios_per_type=1' \
 
 
 ### Or Modify yaml files and py scripts 
@@ -463,7 +468,7 @@ nuplan/planning/script/config/simulation/default_simulation.yaml
 
     observation: box_observation
     ego_controller: perfect_tracking_controller
-    planner: control_tf_planner
+    planner: str_planner
 
 nuplan/planning/script/config/common/default_common.yaml
 

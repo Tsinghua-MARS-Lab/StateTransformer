@@ -22,6 +22,11 @@ var currentFrame = 0;
 var totalFrame = 0;
 var playBtn = two.load('./images/icons/play.svg');
 var pauseBtn = two.load('./images/icons/pause.svg');
+var nextFrameBtn = two.load('./images/icons/next-frame.svg');
+var nextScenarioBtn = two.load('./images/icons/next-scenario.svg');
+var previousFrameBtn = two.load('./images/icons/previous-frame.svg');
+var previousScenarioBtn = two.load('./images/icons/previous-scenario.svg');
+var panel = two.makeRoundedRectangle(two.width / 2 + 65, two.height - 123, 390, 70, 35);
 var stage = new Two.Group();
 var agentGroup = new Two.Group();
 var mapGroup = new Two.Group();
@@ -61,6 +66,31 @@ let data_initialized = false;
 const frequencyChange = 2;
 var currentScenarioId;
 var zui;
+
+
+// Debounce function handling resize event for button positions
+function debounce(func, wait) {
+    var timeout;
+    return function() {
+        var context = this, args = arguments;
+        var later = function() {
+            timeout = null;
+            func.apply(context, args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+};
+
+// Adjusted resize event
+var handleResize = debounce(function() {
+    updateBtn();
+    update(0);
+    console.log('resizing');
+}, 100); // Wait for 100 ms after resize event stops firing
+
+// Bind the debounced resize event
+two.bind('resize', handleResize);
 
 
 function drawPoly(dic, selected, colors, targetGroup, alpha = 1.0) {
@@ -253,10 +283,10 @@ function drawEgoPose(ego_dic, ego_fill = 'train') {
 
         if (ego_fill == 'train') {
             poly.fill = color;
-            poly.opacity = 0.2;
+            poly.opacity = 0.1;
         } else if (ego_fill == 'test') {
             // poly.fill = 'yellow';
-            poly.opacity = 0.2;
+            poly.opacity = 0.1;
         }
         //console.log('here')
         poly.rotation = -yaw - Math.PI / 2;
@@ -522,8 +552,17 @@ function addZUI() {
     }
 }
 
+function updateBtn(){
+    panel.position.set(two.width / 2 + 65, two.height - 123);
+    playBtn.position.set(two.width / 2 + 50, two.height - 140);
+    pauseBtn.position.set(two.width / 2 + 50, two.height - 140);
+    nextFrameBtn.position.set(two.width / 2 + 50 + btnOffset, two.height - 140);
+    nextScenarioBtn.position.set(two.width / 2 + 50 + btnOffset * 2, two.height - 140);
+    previousFrameBtn.position.set(two.width / 2 + 50 - btnOffset, two.height - 140);
+    previousScenarioBtn.position.set(two.width / 2 + 50 - btnOffset * 2, two.height - 140);
+}
+
 function addBtn() {
-    var panel = two.makeRoundedRectangle(two.width / 2 + 65, two.height - 123, 390, 70, 35);
     panel.fill = 'white';
     btnGroup.add(panel);
 
@@ -537,30 +576,26 @@ function addBtn() {
     pauseBtn.opacity = 0;
     btnGroup.add(pauseBtn);
 
-    var nextFrameBtn = two.load('./images/icons/next-frame.svg');
     nextFrameBtn.position.set(two.width / 2 + 50 + btnOffset, two.height - 140);
     nextFrameBtn.scale = 0.12;
     btnGroup.add(nextFrameBtn);
 
-    var nextScenarioBtn = two.load('./images/icons/next-scenario.svg');
     nextScenarioBtn.position.set(two.width / 2 + 50 + btnOffset * 2, two.height - 140);
     nextScenarioBtn.scale = 0.07;
     btnGroup.add(nextScenarioBtn);
 
-    var previousFrameBtn = two.load('./images/icons/previous-frame.svg');
     previousFrameBtn.position.set(two.width / 2 + 50 - btnOffset, two.height - 140);
     previousFrameBtn.scale = 0.07;
     btnGroup.add(previousFrameBtn);
 
-    var previousScenarioBtn = two.load('./images/icons/previous-scenario.svg');
     previousScenarioBtn.position.set(two.width / 2 + 50 - btnOffset * 2, two.height - 140);
     previousScenarioBtn.scale = 0.07;
     btnGroup.add(previousScenarioBtn);
 
-    var previousScenarioBtn = two.load('./images/icons/previous-scenario.svg');
-    previousScenarioBtn.position.set(two.width / 2 + 50 - btnOffset * 2, two.height - 140);
-    previousScenarioBtn.scale = 0.07;
-    btnGroup.add(previousScenarioBtn);
+    // var previousScenarioBtn = two.load('./images/icons/previous-scenario.svg');
+    // previousScenarioBtn.position.set(two.width / 2 + 50 - btnOffset * 2, two.height - 140);
+    // previousScenarioBtn.scale = 0.07;
+    // btnGroup.add(previousScenarioBtn);
     two.add(btnGroup);
 }
 
@@ -607,7 +642,7 @@ function drawTrajectory(poses, disc_size=0.35, interval=5) {
             let [x, y, z, yaw] = poses[i];
             // console.log('check prediction generation: ', x, y, offsets, scale);
             var circle = two.makeCircle((x + offsets[0]) * scale * xReverse, (y + offsets[1]) * scale, disc_size * scale);
-            circle.fill = 'green';
+            circle.fill = 'purple';
             circle.opacity = 0.5;
             trajectoryGroup.add(circle);
         }

@@ -14,6 +14,7 @@ import numpy as np
 import random
 
 # from visulization.checkraster import *
+intention_label_data_counter = [0] * 5
 
 def main(args):
     running_mode = args.running_mode
@@ -129,6 +130,7 @@ def main(args):
             del dl
 
     def yield_data_index(shards):
+        global intention_label_data_counter
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
                           file_to_start=shard,
@@ -140,7 +142,7 @@ def main(args):
                           keep_future_steps=args.keep_future_steps)
 
             while not dl.end:
-                loaded_dic, _ = dl.get_next(seconds_in_future=9, sample_interval=args.sample_interval,
+                loaded_dic, _ = dl.get_next(seconds_in_future=15, sample_interval=args.sample_interval,
                                             map_name=args.map_name,
                                             scenarios_to_keep=scenarios_to_keep)
                 if loaded_dic is None:
@@ -180,6 +182,10 @@ def main(args):
                                 print("WARNING: None data in ", each_key)
                         if error:
                             continue
+                        for each_intention in each_loaded_dic["intentions"]:
+                            intention_label_data_counter[int(each_intention)] += 1
+                        # intention_label_data_counter[int(each_loaded_dic["halfs_intention"])] += 1
+                        print('intention_label_data_counter', intention_label_data_counter)
                         yield data_to_return_filtered
                 else:
                     if loaded_dic["skip"]:
@@ -220,6 +226,10 @@ def main(args):
                             print("WARNING: None data in ", each_key)
                     if error:
                         continue
+                    for each_intention in data_to_return["intentions"]:
+                        intention_label_data_counter[int(each_intention)] += 1
+                    # intention_label_data_counter[int(data_to_return["halfs_intention"])] += 1
+                    print('intention_label_data_counter', intention_label_data_counter)
                     yield data_to_return_filtered
             del dl
 
@@ -393,7 +403,8 @@ def main(args):
                                                                    "scenario_type": Value("string"),
                                                                    "t0_frame_id": Value("int64"),
                                                                    "scenario_id": Value("string"),
-                                                                   "halfs_intention": Value("int64"),
+                                                                   # "halfs_intention": Value("int64"),
+                                                                   "intentions": Sequence(Value("int64")),
                                                                    }),)
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,
@@ -427,6 +438,7 @@ def main(args):
     nuplan_dataset.set_format(type="torch")
     nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
     print('Dataset saved')
+    print('summary intention labels: ', intention_label_data_counter)
     exit()
 
 

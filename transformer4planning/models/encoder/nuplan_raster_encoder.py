@@ -50,8 +50,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                     in_channels=cnn_kwargs.get("in_channels", None), 
                                                     resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                     pretrain=cnn_kwargs.get("pretrain", False))
+        # separate key point encoder is hard to train with larger models due to sparse signals
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        if self.use_key_points != 'no':
+
+        if self.config.separate_kp_encoder:
             self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         if self.use_proposal:
             self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())
@@ -109,10 +111,27 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         # add proposal embedding
         if self.use_proposal:
-            halfs_intention = kwargs.get("halfs_intention", None)
-            assert halfs_intention is not None, "halfs_intention should not be None when using proposal"
-            proposal_embeds = self.proposal_m_embed(halfs_intention.unsqueeze(-1).float()).unsqueeze(1)
-            input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
+            if self.config.autoregressive_proposals:
+                intentions = kwargs.get('intentions', None)  # batch_size, 16
+                assert intentions is not None, "intentions should not be None when using proposal"
+                proposal_embeds = self.proposal_m_embed(intentions.unsqueeze(-1).float())  # batch_size, 16, 256
+                # print('test encoder 1: ', proposal_embeds.shape)
+                input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
+            else:
+                halfs_intention = kwargs.get("halfs_intention", None)
+                intentions = kwargs.get("intentions", None)
+                if halfs_intention is None:
+                    if len(intentions.shape) == 1:
+                        intentions = intentions.unsqueeze(0)  # add batch dimension
+                    halfs_intention = intentions[:, 0]
+                assert halfs_intention is not None, "halfs_intention should not be None when using proposal"
+                # check if halfs_intention is a scalar
+                if len(halfs_intention.shape) == 0:
+                    halfs_intention = halfs_intention.unsqueeze(0)  # add batch dimension
+                # print('test encoder 1: ', halfs_intention, halfs_intention.shape, halfs_intention.unsqueeze(-1).float().shape)
+                proposal_embeds = self.proposal_m_embed(halfs_intention.unsqueeze(-1).float()).unsqueeze(1)  # batch_size, 1, 256
+                # print('test encoder 2: ', proposal_embeds.shape)
+                input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
 
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
@@ -129,8 +148,11 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
 
-            # future_key_embeds = self.action_m_embed(future_key_points_aug)
-            future_key_embeds = self.kps_m_embed(future_key_points_aug)
+            if self.config.separate_kp_encoder:
+                future_key_embeds = self.kps_m_embed(future_key_points_aug)
+            else:
+                future_key_embeds = self.action_m_embed(future_key_points_aug)
+
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
@@ -145,6 +167,9 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         }
 
         if self.use_proposal:
-            info_dict["halfs_intention"] = halfs_intention
+            if self.config.autoregressive_proposals:
+                info_dict["intentions"] = intentions
+            else:
+                info_dict["halfs_intention"] = halfs_intention
 
         return input_embeds, info_dict

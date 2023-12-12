@@ -76,7 +76,7 @@ class ModelArguments:
         default=1.0
     )
 
-    ######## begin of  proposal args ########
+    ######## begin of proposal args ########
     use_proposal: Optional[bool] = field(
         default=False
     )
@@ -89,6 +89,9 @@ class ModelArguments:
                           "universal: using universal key points, with interval of 20 frames."
                           "specified_forward: using specified key points, with exponentially growing frame indices."
                           "specified_backward: using specified key points, with exponentially growing frame indices."}
+    )
+    separate_kp_encoder: Optional[bool] = field(
+        default=False
     )
     pred_key_points_only: Optional[bool] = field(
         default=False
@@ -161,6 +164,14 @@ class ModelArguments:
     )
     ######## end of WOMD args ########
 
+    # WIP args
+    autoregressive_proposals: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use autoregressive proposals in MTR model"}
+    )
+    proposal_num: Optional[int] = field(
+        default=13
+    )
+
 
 @dataclass
 class DataTrainingArguments:
@@ -205,7 +216,7 @@ class DataTrainingArguments:
         default=1, metadata={"help": "The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
     dagger: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to save dagger results"}
+        default=False, metadata={"help": "(WIP) Whether to save dagger results"}
     )
     nuplan_map_path: Optional[str] = field(
         default=None, metadata={"help": "The root path of map file, to init map api used in nuplan package"}
@@ -219,6 +230,9 @@ class DataTrainingArguments:
                                         "2: pedestrian on WOMD"
                                         "3: cyclist on WOMD"
                                         "any combination of numbers will be decoded into list of int (1 2;2 3;1 3)"}
+    )
+    do_closed_loop_simulation: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to do closed loop simulation, This is a seperate process. Do not use with training."}
     )
 
 

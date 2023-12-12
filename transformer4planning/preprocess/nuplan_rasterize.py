@@ -95,7 +95,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     filename = sample["file_name"]
     map = sample["map"]
     split = sample["split"]
-    frame_id = sample["frame_id"]
+    frame_id = sample["frame_id"]  # current frame of this sample
     road_ids = sample["road_ids"]
     if not isinstance(road_ids, list):
         road_ids = road_ids.tolist()
@@ -455,9 +455,19 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     if 'halfs_intention' in sample and kwargs.get('use_proposal', False):
         if sample['halfs_intention'].isnan():
             if sample['split'] in ['train', 'val']:
-                print('debug: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
+                print('No proposal loaded at preprocess: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
             return None
         result_to_return["halfs_intention"] = sample['halfs_intention']
+        # if int(sample['halfs_intention']) != 4:
+        #     print('debug preprocess: ', sample['halfs_intention'], sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
+    if 'intentions' in sample and kwargs.get('use_proposal', False):
+        # if sample['split'] in ['val']:
+        #     print('test: ', sample['intentions'])
+        # if sample['intentions'].isnan():
+        #     if sample['split'] in ['train', 'val']:
+        #         print('No proposal loaded at preprocess: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
+        #     return None
+        result_to_return["intentions"] = sample['intentions']
     # try:
     #     result_to_return["scenario_type"] = sample["scenario_type"]
     # except:
