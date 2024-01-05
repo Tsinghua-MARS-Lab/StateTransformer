@@ -39,17 +39,33 @@ class CNNDownSamplingResNet(nn.Module):
 
 
 class NuplanRasterizeEncoder(TrajectoryEncoder):
-    def __init__(self, 
-                 cnn_kwargs:Dict, 
-                 action_kwargs:Dict,
-                 config=None
-                 ):
+    def __init__(self,  config=None):
 
         super().__init__(config)
-        self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None), 
-                                                    in_channels=cnn_kwargs.get("in_channels", None), 
-                                                    resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
-                                                    pretrain=cnn_kwargs.get("pretrain", False))
+        action_kwargs = dict(
+            d_embed=self.config.n_embd
+        )
+
+        # if 'resnet' in self.config.raster_encoder_type:
+        if 'vit' in self.config.raster_encoder_type:
+            from transformers import ViTModel, ViTConfig
+            vit_config = ViTConfig()
+            vit_config.hidden_size = self.config.n_embd // 2
+            vit_config.num_channels = self.config.raster_channels
+            vit_config.num_attention_heads = self.config.n_head
+            vit_config.return_dict = True
+            self.image_downsample = ViTModel(vit_config)
+        else:
+            cnn_kwargs = dict(
+                d_embed=self.config.n_embd // 2,
+                in_channels=self.config.raster_channels,
+                resnet_type=self.config.raster_encoder_type,
+                pretrain=self.config.pretrain_encoder
+            )
+            self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None),
+                                                          in_channels=cnn_kwargs.get("in_channels", None),
+                                                          resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
+                                                          pretrain=cnn_kwargs.get("pretrain", False))
         # separate key point encoder is hard to train with larger models due to sparse signals
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 
@@ -88,16 +104,22 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         # raster observation encoding & context action ecoding
         action_embeds = self.action_m_embed(context_actions)
         
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light, self.config.use_centerline)
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light, self.config.use_centerline)
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light)
         # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
         # context_length: 8, 40 frames / 5
         batch_size, context_length, c, h, w = high_res_seq.shape
 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+        if self.config.raster_encoder_type == 'vit':
+            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w)).pooler_output
+            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w)).pooler_output
+            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+        else:
+            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
 
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
         n_embed = action_embeds.shape[-1]

@@ -24,9 +24,13 @@ class TrajectoryGPTConfig(GPT2Config):
         for each_key in model_args.__dict__:
             self.__dict__[each_key] = model_args.__dict__[each_key]
         # to be compatible with older models
-        if not hasattr(self, "separate_kp_encoder"): self.separate_kp_encoder = True
-        if not hasattr(self, "use_proposal"): self.use_proposal = False
-        if not hasattr(self, "autoregressive_proposals"): self.autoregressive_proposals = False
+        attr_list = ["use_key_points", "kp_decoder_type", "separate_kp_encoder", "use_proposal",
+                     "autoregressive_proposals", "selected_exponential_past",
+                     "rms_norm", "residual_in_fp32", "fused_add_norm",
+                     "raster_encoder_type"]
+        for each_attr in attr_list:
+            if not hasattr(self, each_attr):
+                self.__dict__[each_attr] = False
 
 class TrajectoryGPT(GPT2PreTrainedModel):
     def __init__(self, config, **kwargs):
@@ -54,16 +58,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.config.task == "nuplan":
             if "raster" in self.config.encoder_type:
                 from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
-                cnn_kwargs = dict(
-                    d_embed=self.config.n_embd // 2,
-                    in_channels=self.config.raster_channels,
-                    resnet_type=self.config.resnet_type,
-                    pretrain=self.config.pretrain_encoder
-                )
-                action_kwargs = dict(
-                    d_embed=self.config.n_embd
-                )
-                self.encoder = NuplanRasterizeEncoder(cnn_kwargs, action_kwargs, self.config)
+                self.encoder = NuplanRasterizeEncoder(self.config)
             elif "vector" in self.config.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
@@ -472,6 +467,479 @@ class TrajectoryGPT(GPT2PreTrainedModel):
 
         return pred_dict
 
+import math
+from functools import partial
+
+from collections import namedtuple
+
+import torch
+import torch.nn as nn
+
+from mamba_ssm.modules.mamba_simple import Mamba, Block
+from mamba_ssm.utils.generation import GenerationMixin
+from mamba_ssm.utils.hf import load_config_hf, load_state_dict_hf
+
+try:
+    from mamba_ssm.ops.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
+except ImportError:
+    RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
+
+from mamba_ssm.models.mixer_seq_simple import create_block
+
+class TrajectoryMamba(TrajectoryGPT):
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
+        # initialize mamba block
+        factory_kwargs = {"device": 'cuda', "dtype": None}
+        self.residual_in_fp32 = kwargs.get('residual_in_fp32', False)
+        self.fused_add_norm = kwargs.get('fused_add_norm', False)
+        if self.fused_add_norm:
+            if layer_norm_fn is None or rms_norm_fn is None:
+                raise ImportError("Failed to import Triton LayerNorm / RMSNorm kernels")
+        d_model = config.n_embd
+        rms_norm = kwargs.get('rms_norm', False)
+        norm_epsilon = kwargs.get('norm_epsilon', 1e-5)
+        self.transformer = nn.ModuleList(
+            [
+                create_block(
+                    d_model,
+                    ssm_cfg=kwargs.get('ssm_cfg', None),
+                    norm_epsilon=norm_epsilon,
+                    rms_norm=rms_norm,
+                    residual_in_fp32=kwargs.get('residual_in_fp32', False),
+                    fused_add_norm=kwargs.get('fused_add_norm', False),
+                    layer_idx=i,
+                    **factory_kwargs,
+                )
+                for i in range(config.n_layer)
+            ]
+        )
+        self.norm_f = (nn.LayerNorm if not rms_norm else RMSNorm)(
+            d_model, eps=norm_epsilon, **factory_kwargs
+        )
+        initializer_cfg = kwargs.get("initializer_cfg", None)
+
+    def forward(
+            self,
+            return_dict: Optional[bool] = None,
+            **kwargs
+    ):
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        if not return_dict:  raise NotImplementedError('need to return dict for evaluations in trainer.py')
+        input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
+        # mamba forward
+        residual = None
+        for layer in self.transformer:
+            input_embeds, residual = layer(
+                input_embeds, residual, inference_params=None
+            )
+        if not self.fused_add_norm:
+            residual = (input_embeds + residual) if residual is not None else input_embeds
+            input_embeds = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+        else:
+            # Set prenorm=False here since we don't need the residual
+            fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+            input_embeds = fused_add_norm_fn(
+                input_embeds,
+                self.norm_f.weight,
+                self.norm_f.bias,
+                eps=self.norm_f.eps,
+                residual=residual,
+                prenorm=False,
+                residual_in_fp32=self.residual_in_fp32,
+            )
+        # end of mamba forward
+        transformer_outputs_hidden_state = input_embeds  # batch_size, seq_len (125 default), hidden_size
+
+        trajectory_label = info_dict["trajectory_label"]
+
+        loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
+        traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
+                                                                     trajectory_label,
+                                                                     info_dict)
+        loss += traj_loss
+        loss_items = dict(traj_loss=traj_loss,)
+
+        pred_dict = {"traj_logits": traj_logits}
+
+        if self.use_proposal:
+            if self.config.task == "nuplan":
+                proposal_loss, pred_proposal_cls = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
+                loss += proposal_loss
+                loss_items["proposal_loss"] = proposal_loss
+                pred_dict["proposal"] = pred_proposal_cls
+                # debugging
+                pred_proposal_score = pred_proposal_cls.softmax(-1)
+                topk_score, topk_indx = torch.topk(pred_proposal_score[:, 0, :], dim=-1, k=self.k)
+                # print('test inspect model.py forward: ', self.training, info_dict['halfs_intention'], topk_score, topk_indx,
+                #       proposal_loss, pred_proposal_score)
+
+            elif self.config.task == "waymo":
+                proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
+                loss += proposal_loss
+                loss += proposal_loss_logits
+                loss_items["proposal_loss"] = proposal_loss
+                pred_dict["proposal"] = proposal_loss_logits
+
+        if self.config.dense_pred:
+            assert self.config.task == "waymo"
+            loss += info_dict["dense_pred_loss"]
+            loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
+
+        if self.use_key_points != 'no':
+            if self.config.generate_diffusion_dataset_for_key_points_decoder:
+                future_key_points = info_dict["future_key_points"] if self.config.predict_yaw else \
+                    info_dict["future_key_points"][..., :2]
+                self.key_points_decoder.save_features(input_embeds, info_dict[
+                    "context_length"], info_dict, future_key_points, transformer_outputs_hidden_state)
+
+            if self.config.kp_decoder_type == "diffusion":
+                assert not self.training, "please train diffusion decoder separately."
+                # return a dummy loss&kp_logits here. The real data for computing metrics will be computed in the generate function
+                kp_loss = torch.tensor(0.0).to(transformer_outputs_hidden_state.device)
+                kp_logits = info_dict[
+                    "future_key_points"].to(transformer_outputs_hidden_state.device) if self.config.predict_yaw else \
+                    info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
+            else:
+                kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
+                # kp_loss will be 10x larger than traj_loss when converged
+            loss += kp_loss
+            traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
+            pred_dict["kp_logits"] = kp_logits
+            loss_items["kp_loss"] = kp_loss
+
+        # if not return_dict:
+        #     output = (traj_logits,) + transformer_outputs[1:]
+        #     return ((loss,) + output) if loss is not None else output
+
+        return LTMOutput(
+            loss=loss,
+            logits=traj_logits,  # deprecated, use pred_dict for evaluation instead
+            pred_dict=pred_dict,
+            hidden_states=transformer_outputs_hidden_state,
+            loss_items=loss_items
+        )
+
+    @torch.no_grad()
+    def generate(self, **kwargs) -> torch.FloatTensor:
+        input_embeds, info_dict = self.encoder(is_training=False, **kwargs)
+        batch_size, _, _ = input_embeds.shape
+        device = input_embeds.device
+        context_length = info_dict["context_length"]
+
+        if self.use_proposal:
+            if self.config.autoregressive_proposals:
+                # TODO: Training for debugging results
+                proposal_result = []
+                proposal_scores = []
+                assert self.config.task == 'nuplan', 'waymo proposal autoregressive not implemented yet'
+                dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size,
+                                                                                      int(self.config.proposal_num),
+                                                                                      1), device=device))  # bsz, 16, 256
+                input_embeds[:, context_length:context_length + int(self.config.proposal_num), :] = dummy_proposal_embedding
+                # loop over each intention for generation
+                for i in range(int(self.config.proposal_num)):
+                    context_embeds = input_embeds[:, :context_length + 1 + i, :]
+                    # begin of mamba forward
+                    residual = None
+                    for layer in self.transformer:
+                        context_embeds, residual = layer(
+                            context_embeds, residual, inference_params=None
+                        )
+                    if not self.fused_add_norm:
+                        residual = (context_embeds + residual) if residual is not None else context_embeds
+                        context_embeds = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+                    else:
+                        # Set prenorm=False here since we don't need the residual
+                        fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+                        context_embeds = fused_add_norm_fn(
+                            context_embeds,
+                            self.norm_f.weight,
+                            self.norm_f.bias,
+                            eps=self.norm_f.eps,
+                            residual=residual,
+                            prenorm=False,
+                            residual_in_fp32=self.residual_in_fp32,
+                        )
+                    transformer_outputs_hidden_state = context_embeds
+                    # end of mamba forward
+                    proposal_hidden_state = transformer_outputs_hidden_state[:,
+                                            context_length - 1 + i:context_length - 1 + 1 + i, :]  # (bs, 1, n_embed)
+                    proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1)  # (bs, 1, 5)
+                    # WARNING: Only tested with self.k = 1
+                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                    # topk_score: (bs, 5) topk_indx: (bs, 1)
+                    proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.float())  # (bs, n_embed)
+                    # print('test generate 1: ', topk_indx.unsqueeze(-1).float().shape, topk_indx, topk_score, proposal_pred_score[:, 0, :])
+                    proposal_result.append(topk_indx.unsqueeze(1))  # list of (bs, 1, 1)
+                    proposal_scores.append(proposal_pred_score[:, 0, :].unsqueeze(1))  # list of (bs, 1, 13)
+                    input_embeds[:, context_length + i:context_length + i + 1, :] = proposal_pred_embed.unsqueeze(1)
+                proposal_result = torch.cat(proposal_result, dim=1)  # (bs, 13, 1)
+                proposal_scores = torch.cat(proposal_scores, dim=1)  # (bs, 13, 5)
+            else:
+                if self.config.task == "nuplan":
+                    dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size,
+                                                                                          1), device=device)).unsqueeze(1)
+                elif self.config.task == 'waymo':
+                    dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size,
+                                                                                          2), device=device)).unsqueeze(1)
+                input_embeds[:, context_length:context_length + 1, :] = dummy_proposal_embedding
+
+                context_embeds = input_embeds[:, :context_length + 1, :]
+                # begin of mamba forward
+                residual = None
+                for layer in self.transformer:
+                    context_embeds, residual = layer(
+                        context_embeds, residual, inference_params=None
+                    )
+                if not self.fused_add_norm:
+                    residual = (context_embeds + residual) if residual is not None else context_embeds
+                    context_embeds = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+                else:
+                    # Set prenorm=False here since we don't need the residual
+                    fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+                    context_embeds = fused_add_norm_fn(
+                        context_embeds,
+                        self.norm_f.weight,
+                        self.norm_f.bias,
+                        eps=self.norm_f.eps,
+                        residual=residual,
+                        prenorm=False,
+                        residual_in_fp32=self.residual_in_fp32,
+                    )
+                transformer_outputs_hidden_state = context_embeds
+                # end of mamba forward
+                proposal_hidden_state = transformer_outputs_hidden_state[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
+                proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1)  # (bs, 1, 64/5)
+                if self.config.task == "nuplan":
+                    # WARNING: Only tested with self.k = 1
+                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                    # topk_score: (bs, 5), topk_indx: (bs, 1)
+                    proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.float())  # (bs, n_embed)
+                    # print('test generate 1: ', topk_indx.unsqueeze(-1).float().shape, topk_indx, topk_score, proposal_pred_score[:, 0, :])
+                    proposal_result = topk_indx
+                    proposal_scores = proposal_pred_score[:, 0, :]
+                    # proposal_pred_embed: (bs, k, n_embed)
+                elif self.config.task == 'waymo':
+                    proposal_logit = info_dict["center_obj_proposal_pts"]  # (bs, 64, 2)
+                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                    proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1),
+                                          topk_indx.view(-1), :].view(batch_size, self.k, 2)
+                    proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
+                    proposal_result = topk_indx
+                    proposal_scores = proposal_pred_score[:, 0, :]
+
+        traj_logits_k = []
+        key_points_logits_k = []
+        for mode in range(self.k):
+            if self.use_proposal:
+                if self.config.autoregressive_proposals:
+                    # already updated in previous step
+                    pass
+                else:
+                    if self.config.task == "nuplan":
+                        input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(1)
+                    elif self.config.task == 'waymo':
+                        input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
+            if self.use_key_points != "no":
+                pred_length = info_dict["pred_length"]
+                selected_indices = info_dict["selected_indices"]
+                kp_start_index = context_length
+                if self.use_proposal:
+                    if self.config.autoregressive_proposals:
+                        kp_start_index += int(self.config.proposal_num)
+                    else:
+                        kp_start_index += 1
+                # pass the following infos during generate for one sample (non-batch) generate with KP checking
+                map_name = kwargs.get("map", None)
+                route_ids = kwargs.get("route_ids", None)
+                ego_pose = kwargs.get("ego_pose", None)
+                road_dic = kwargs.get("road_dic", None)
+                idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
+                trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
+                if 'specified' in self.use_key_points:
+                    future_key_points = trajectory_label_dummy[:, selected_indices, :]
+                else:
+                    ar_future_interval = 20
+                    future_key_points = trajectory_label_dummy[:, ar_future_interval - 1::ar_future_interval, :]
+
+                assert future_key_points.shape[1] > 0, 'future points not enough to sample'
+
+                if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                    future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
+                else:
+                    future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
+
+                key_points_num = future_key_points.shape[1]
+
+                input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
+                pred_key_points_during_generate = []
+                for i in range(key_points_num):
+                    input_embeds_current = input_embeds[:, :kp_start_index + i, :]
+                    # begin of mamba forward
+                    residual = None
+                    for j, layer in enumerate(self.transformer):
+                    # for layer in self.transformer:
+                        input_embeds_current, residual = layer(
+                            input_embeds_current, residual, inference_params=None
+                        )
+                        # layer.mixer.A_log: (512, 16), layer.mixer.D: (512)
+                    if not self.fused_add_norm:
+                        residual = (input_embeds_current + residual) if residual is not None else input_embeds_current
+                        input_embeds_current = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+                    else:
+                        # Set prenorm=False here since we don't need the residual
+                        fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+                        input_embeds_current = fused_add_norm_fn(
+                            input_embeds_current,
+                            self.norm_f.weight,
+                            self.norm_f.bias,
+                            eps=self.norm_f.eps,
+                            residual=residual,
+                            prenorm=False,
+                            residual_in_fp32=self.residual_in_fp32,
+                        )
+                    transformer_outputs_hidden_state = input_embeds_current
+                    # end of mamba forward
+                    future_key_point_hidden_state = transformer_outputs_hidden_state[:,
+                                                    kp_start_index + i - 1,
+                                                    :].reshape(batch_size, 1, -1)
+
+                    key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+                    pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
+                    if self.config.predict_yaw:
+                        pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
+                    else:
+                        pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+
+                    off_road_checking = True
+                    if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
+                        from transformer4planning.utils import nuplan_utils
+                        if i == 0 and self.use_key_points == 'specified_backward':
+                            # Check key points with map_api
+                            # WARNING: WIP, do not use
+                            y_inverse = -1 if map_name == 'sg-one-north' else 1
+                            pred_key_point_copy = copy.deepcopy(pred_key_point)
+                            pred_key_point_copy[0, 0, 1] *= y_inverse
+                            pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[0, 0,
+                                                                                     :2].cpu().numpy(),
+                                                                                     ego_pose,
+                                                                                     ego_to_global=True)
+                            if isinstance(route_ids, torch.Tensor):
+                                route_ids = route_ids.cpu().numpy().tolist()
+                            closest_lane_point_on_route, dist, onraod = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
+                                                                                                                     route_ids,
+                                                                                                                     road_dic)
+                            if not onraod:
+                                pred_key_point_ego = nuplan_utils.change_coordination(closest_lane_point_on_route,
+                                                                                      ego_pose,
+                                                                                      ego_to_global=False)
+                                pred_key_point_ego[1] *= y_inverse
+                                pred_key_point[0, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
+                                print('Off Road Detected! Replace 8s key point')
+
+                    if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                        key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    else:
+                        key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    # replace embed at the next position
+                    input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
+                    if self.config.predict_yaw:
+                        pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
+                    else:
+                        pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+                key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
+                key_points_logits_k.append(key_points_logits)
+
+            # generate remaining trajectory
+            # begin of mamba forward
+            residual = None
+            for layer in self.transformer:
+                input_embeds, residual = layer(
+                    input_embeds, residual, inference_params=None
+                )
+            if not self.fused_add_norm:
+                residual = (input_embeds + residual) if residual is not None else input_embeds
+                input_embeds = self.norm_f(residual.to(dtype=self.norm_f.weight.dtype))
+            else:
+                # Set prenorm=False here since we don't need the residual
+                fused_add_norm_fn = rms_norm_fn if isinstance(self.norm_f, RMSNorm) else layer_norm_fn
+                input_embeds = fused_add_norm_fn(
+                    input_embeds,
+                    self.norm_f.weight,
+                    self.norm_f.bias,
+                    eps=self.norm_f.eps,
+                    residual=residual,
+                    prenorm=False,
+                    residual_in_fp32=self.residual_in_fp32,
+                )
+            transformer_outputs_hidden_state = input_embeds
+            # end of mamba forward
+
+            # expected shape for pred trajectory is (b, pred_length, 4)
+            if self.traj_decoder is not None:
+                traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
+                if self.config.predict_yaw:
+                    traj_logits = interpolate_yaw(traj_logits, mode=self.config.postprocess_yaw)
+
+                traj_logits_k.append(traj_logits)
+            else:
+                raise NotImplementedError
+
+        key_points_pred_logits = None
+        if self.k == 1:
+            traj_pred_logits = traj_logits_k[0]
+            if len(key_points_logits_k) > 0:
+                # WARNING, k select if not implemented for key points
+                assert len(key_points_logits_k) == self.k
+                key_points_pred_logits = key_points_logits_k[0]
+        else:
+            traj_pred_logits = torch.stack(traj_logits_k, dim=1)
+            if len(key_points_logits_k) > 0:
+                assert len(key_points_logits_k) == self.k
+                key_points_pred_logits = torch.stack(key_points_logits_k, dim=1)
+
+        pred_dict = {
+            "traj_logits": traj_pred_logits
+        }
+
+        if key_points_pred_logits is not None:
+            pred_dict.update({"key_points_logits": key_points_pred_logits})
+
+        if self.use_proposal:
+            pred_dict.update({"proposal": proposal_result})  # topk results
+            pred_dict.update({"proposal_scores": proposal_scores})  # topk scores
+            if self.config.task == "nuplan" and 'halfs_intention' in info_dict:
+                pred_dict.update({"halfs_intention": info_dict['halfs_intention']})
+            elif self.config.task == 'nuplan' and 'intentions' in info_dict:
+                pred_dict.update({'intentions': info_dict['intentions']})
+
+        if self.config.task == "waymo":
+            center_objects_world = kwargs['center_objects_world'].type_as(traj_pred_logits)
+            num_center_objects, num_modes, num_timestamps, num_feat = traj_pred_logits.shape
+
+            from transformer4planning.utils.waymo_utils import rotate_points_along_z, str_to_tensor
+
+            pred_trajs_world = rotate_points_along_z(
+                points=traj_pred_logits.view(num_center_objects, num_modes * num_timestamps, num_feat),
+                angle=center_objects_world[:, 6].view(num_center_objects)
+            ).view(num_center_objects, num_modes, num_timestamps, num_feat)
+            pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
+
+            pred_dict = {
+                'scenario_id': str_to_tensor(kwargs['scenario_id']).to(device),
+                'pred_trajs': pred_trajs_world[:, :, :, 0:2],
+                'pred_scores': topk_score,
+                'object_id': torch.tensor(kwargs['center_objects_id']).to(device),
+                'object_type': torch.tensor(kwargs['center_objects_type']).to(device),
+                'gt_trajs': kwargs['center_gt_trajs_src'],
+                'track_index_to_predict': kwargs['track_index_to_predict'],
+            }
+
+        return pred_dict
+
+
+
 
 def interpolate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
     if mode == "normal":
@@ -560,6 +1028,53 @@ def build_models(model_args):
         else:
             ModelCls = TrajectoryGPT
             tag = 'GPTTrajectory'
+    elif 'mamba' in model_args.model_name:
+        # TODO: WIP
+        config_p = TrajectoryGPTConfig()
+        config_p.update_by_model_args(model_args)
+        ModelCls = TrajectoryMamba
+        tag = 'MambaTrajectory'
+        if 'mamba-mini' in model_args.model_name:
+            """
+            Number of parameters: ?
+            """
+            config_p.n_layer = 1
+            config_p.n_embd = config_p.d_model = 64
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 1
+        elif 'mamba-small' in model_args.model_name:
+            """
+            Number of parameters: ?
+            """
+            config_p.n_layer = 4
+            config_p.n_embd = config_p.d_model = 256
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 8
+        elif 'mamba-medium' in model_args.model_name:
+            """
+            Number of parameters: 760M
+            """
+            config_p.n_layer = 8
+            config_p.n_embd = config_p.d_model = 512
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 16
+        elif 'mamba-large' in model_args.model_name:
+            """
+            WARNING: Gradient WILL CRUSH DURING TRAINING
+            Number of parameters: 1.3B
+            """
+            config_p.n_layer = 48
+            config_p.n_embd = config_p.d_model = 1600
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 25
+        elif 'mamba-xl' in model_args.model_name:
+            """
+            Number of parameters: 2.7B
+            """
+            config_p.n_layer = 64
+            config_p.n_embd = config_p.d_model = 2560
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 64
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:

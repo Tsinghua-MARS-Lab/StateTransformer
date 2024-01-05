@@ -405,6 +405,7 @@ def main(args):
                                                                    "scenario_id": Value("string"),
                                                                    # "halfs_intention": Value("int64"),
                                                                    "intentions": Sequence(Value("int64")),
+                                                                   "ego_goal": Sequence(Value("float32")),
                                                                    }),)
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,

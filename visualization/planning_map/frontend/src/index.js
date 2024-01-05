@@ -283,10 +283,10 @@ function drawEgoPose(ego_dic, ego_fill = 'train') {
 
         if (ego_fill == 'train') {
             poly.fill = color;
-            poly.opacity = 0.1;
+            poly.opacity = 0.3;
         } else if (ego_fill == 'test') {
             // poly.fill = 'yellow';
-            poly.opacity = 0.1;
+            poly.opacity = 0.3;
         }
         //console.log('here')
         poly.rotation = -yaw - Math.PI / 2;

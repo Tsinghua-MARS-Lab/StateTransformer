@@ -553,6 +553,15 @@ class NuPlanDL:
         poses_np = agent_dic['ego']['pose']
         shapes_np = agent_dic['ego']['shape']
         speeds_np = agent_dic['ego']['speed']
+        
+        # ego additional features
+        speed1d_np = np.ones([total_frames_past * 20 + 1, 1]) * -1
+        acceleration_np = np.ones([total_frames_past * 20 + 1, 2]) * -1
+        acceleration1d_np = np.ones([total_frames_past * 20 + 1, 1]) * -1
+        angular_vel_np = np.ones([total_frames_past * 20 + 1, 1]) * -1  # rad/s
+        angular_acc_np = np.ones([total_frames_past * 20 + 1, 1]) * -1  # rad/s^2
+        tire_steering_rate_np = np.ones([total_frames_past * 20 + 1, 1]) * -1  # rad/s
+        
         # past
         try:
             past_ego_states = scenario.get_ego_past_trajectory(0, total_frames_past, num_samples=total_frames_past * 20)
@@ -572,6 +581,15 @@ class NuPlanDL:
             speeds_np[current_t, :] = [ego_agent.dynamic_car_state.center_velocity_2d.x,
                                        ego_agent.dynamic_car_state.center_velocity_2d.y]
 
+            # additional features
+            speed1d_np[current_t, :] = [ego_agent.dynamic_car_state.speed]
+            acceleration_np[current_t, :] = [ego_agent.dynamic_car_state.center_acceleration_2d.x,
+                                             ego_agent.dynamic_car_state.center_acceleration_2d.y]
+            acceleration1d_np[current_t, :] = [ego_agent.dynamic_car_state.acceleration]
+            angular_vel_np[current_t, :] = [ego_agent.dynamic_car_state.angular_velocity]
+            angular_acc_np[current_t, :] = [ego_agent.dynamic_car_state.angular_acceleration]
+            tire_steering_rate_np[current_t, :] = [ego_agent.dynamic_car_state.tire_steering_rate]
+
         current_ego_state = scenario.get_ego_state_at_iteration(0)
         poses_np[total_frames_past * 20, :] = [current_ego_state.car_footprint.center.x,
                                                current_ego_state.car_footprint.center.y, 0,
@@ -580,6 +598,15 @@ class NuPlanDL:
                                                 current_ego_state.car_footprint.length, 2]
         speeds_np[total_frames_past * 20, :] = [current_ego_state.dynamic_car_state.center_velocity_2d.x,
                                                 current_ego_state.dynamic_car_state.center_velocity_2d.y]
+
+        # additional features
+        speed1d_np[total_frames_past * 20, :] = [current_ego_state.dynamic_car_state.speed]
+        acceleration_np[total_frames_past * 20, :] = [current_ego_state.dynamic_car_state.center_acceleration_2d.x,
+                                                      current_ego_state.dynamic_car_state.center_acceleration_2d.y]
+        acceleration1d_np[total_frames_past * 20, :] = [current_ego_state.dynamic_car_state.acceleration]
+        angular_vel_np[total_frames_past * 20, :] = [current_ego_state.dynamic_car_state.angular_velocity]
+        angular_acc_np[total_frames_past * 20, :] = [current_ego_state.dynamic_car_state.angular_acceleration]
+        tire_steering_rate_np[total_frames_past * 20, :] = [current_ego_state.dynamic_car_state.tire_steering_rate]
 
         try:
             future_ego_states = scenario.get_ego_future_trajectory(0, total_frames_future,
@@ -1130,7 +1157,8 @@ class NuPlanDL:
             data_to_return['intentions'] = []
             ego_poses = copy.deepcopy(agent_dic['ego']['pose'])  # in 20Hz, past 2s, future 15s, 341 frames in total
             # i = 40 + 10  # current pose in 2s + 0.5s
-            for i in range(2*20, min(8*20 + 5, ego_poses.shape[0] + 5), 10):  # looping over 2s to 8s with interval of 0.5s
+            # for i in range(2*20, min(8*20 + 5, ego_poses.shape[0] + 5), 10):  # looping over 2s to 8s with interval of 0.5s
+            for i in range(2 * 20, min(10 * 20 + 5, ego_poses.shape[0] + 5), 10):  # looping over 2s to 8s with interval of 0.5s
                 current_pose = ego_poses[i]
                 # normalize at current pose
                 cos_, sin_ = math.cos(-current_pose[3]), math.sin(-current_pose[3])

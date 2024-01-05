@@ -226,7 +226,7 @@ def get_discrete_centerline(current_lane, route_block_dict, route_lane_dict, sea
 
 def pdm_vectorize(sample, data_path, map_api=None, map_radius=50, 
                   centerline_samples=120, centerline_interval=1.0, 
-                  frame_rate=20, past_seconds=2, use_centerline=True):
+                  frame_rate=20, past_seconds=2, use_centerline=False):
     filename = sample["file_name"]
     map = sample["map"]
     split = sample["split"]

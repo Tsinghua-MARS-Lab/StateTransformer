@@ -262,10 +262,10 @@ def compute_scores(data):
     for i in range(len(data_frame)):
         # group eval results by scenario
         item = data_frame.iloc[i]
-        item['scenario15s_id'] = int(item['scenario15s_id'])
-        if int(item['scenario15s_id']) not in scenarios.keys():
-            scenarios[int(item['scenario15s_id'])] = list()
-        scenarios[int(item['scenario15s_id'])].append(item.to_dict())
+        int_scenario15s_id = int(item['scenario15s_id'])
+        if int_scenario15s_id not in scenarios.keys():
+            scenarios[int_scenario15s_id] = list()
+        scenarios[int_scenario15s_id].append(item.to_dict())
     scores = list()
     results = list()
     miss_scores = list()

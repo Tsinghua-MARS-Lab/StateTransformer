@@ -46,10 +46,14 @@ class ModelArguments:
         default=34,  # updated channels (added both block and lanes for route), change to 33 for older version
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
-    resnet_type: Optional[str] = field(
-        default="resnet18",
-        metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
+    raster_encoder_type: Optional[str] = field(
+        default='resnet18',
+        metadata={"help": "choose from [vit, resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
+    # resnet_type: Optional[str] = field(
+    #     default="resnet18",
+    #     metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
+    # )
     pretrain_encoder: Optional[bool] = field(
         default=False,
     )
@@ -132,13 +136,13 @@ class ModelArguments:
         default=True
     )
     past_sample_interval: Optional[int] = field(
-        default=5
+        default=2
+    )
+    selected_exponential_past: Optional[bool] = field(
+        default=False
     )
     future_sample_interval: Optional[int] = field(
         default=2
-    )
-    use_centerline: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
     postprocess_yaw: Optional[str] = field(
         default="normal", metadata={"help": "choose from hybrid, interplate or normal"}
@@ -172,6 +176,17 @@ class ModelArguments:
         default=13
     )
 
+    ######## begin of Mamba args ########
+    rms_norm: Optional[bool] = field(
+        default=False
+    )
+    residual_in_fp32: Optional[bool] = field(
+        default=False
+    )
+    fused_add_norm: Optional[bool] = field(
+        default=False
+    )
+    ######## end of Mamba args ########
 
 @dataclass
 class DataTrainingArguments:

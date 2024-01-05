@@ -21,7 +21,7 @@ def map_pdm_dataset(args):
                             )
     datapath = args.saved_dataset_folder
     def map_func(sample):
-        return pdm_vectorize(sample, datapath, map_api, args.use_centerline)
+        return pdm_vectorize(sample, datapath, map_api, False)
     dataset = load_dataset(os.path.join(datapath, "index"), args.split)
     dataset = dataset.map(map_func, num_proc=args.num_proc)
     Dataset.save_to_disk(dataset, os.path.join(args.savedir, args.dataset_name, args.split))
@@ -94,9 +94,6 @@ if __name__ == '__main__':
                         type=str,
                         default="/localdata_ssd/nuplan/online_float32_opt",
                         help="default online dataset, same as that used in runner.py")
-    parser.add_argument("--use_centerline",
-                        type=bool,
-                        default=False)
     parser.add_argument("--split",
                         type=str,
                         default="train")
