@@ -26,8 +26,7 @@ class TrajectoryGPTConfig(GPT2Config):
         # to be compatible with older models
         attr_list = ["use_key_points", "kp_decoder_type", "separate_kp_encoder", "use_proposal",
                      "autoregressive_proposals", "selected_exponential_past",
-                     "rms_norm", "residual_in_fp32", "fused_add_norm",
-                     "raster_encoder_type"]
+                     "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False

@@ -32,7 +32,7 @@ class ModelArguments:
         default=8,
     )
     activation_function: Optional[str] = field(
-        default="silu",
+        default="gelu_new",
         metadata={"help": "Activation function, to be selected in the list `[relu, silu, gelu, tanh, gelu_new]"},
     )
     task: Optional[str] = field(
@@ -60,9 +60,6 @@ class ModelArguments:
     k: Optional[int] = field(
         default=1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
-    )
-    autoregressive: Optional[bool] = field(
-        default=False
     )
     x_random_walk: Optional[float] = field(
         default=0.0
@@ -283,6 +280,10 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
+    do_test: Optional[bool] = field(
+        default=False,
+    )
+
     # label_names: Optional[List[str]] = field(
     #     default=lambda: ['trajectory_label']
     # )

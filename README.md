@@ -516,6 +516,12 @@ or
 ### Statics Simulation Scores
 `python script/run_metric_scores.py --file_path ... --save_dir ... --exp_name ... --simulation_type ...`
 
+## Different Backbones
+
+The default transformer backbone is the [GPT2 model](https://huggingface.co/docs/transformers/model_doc/gpt2) from the Hugging Face's Transformers Lib.
+We also tried the recent Mamba backbone and it works even better (with some minor bugs to be fixed in the current version).
+Follow the instructions from the [official Mamba](https://github.com/state-spaces/mamba) repo to install and change the model name from `gpt` to `mamba` to use it.
+
 
 ## Citation
 If you find this work useful in your research, please consider cite:

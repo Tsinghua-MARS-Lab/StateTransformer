@@ -42,7 +42,6 @@ from transformer4planning.trainer import compute_metrics
 from datasets import Dataset, Value
 
 # os.environ["WANDB_DISABLED"] = "true"
-
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
@@ -188,8 +187,9 @@ def main():
             train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-    
-    if training_args.do_eval and 'test' in root_folders:
+
+    if training_args.do_test and 'test' in root_folders:
+        # TODO: compatible with older training args
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
         print('Testset not found, using training set as test set')
@@ -239,6 +239,7 @@ def main():
     if training_args.do_train:
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
+            # os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / training_args.dataloader_num_workers))
             os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / 8))
         train_dataset = dataset_dict["train"]
         if data_args.max_train_samples is not None:
