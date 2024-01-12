@@ -52,7 +52,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             vit_config = ViTConfig()
             vit_config.hidden_size = self.config.n_embd // 2
             vit_config.num_channels = self.config.raster_channels
-            vit_config.intermediate_size = 512  # must be multiplier of 12 (number of the head)
+            vit_config.intermediate_size = self.config.vit_intermediate_size  # must be multiplier of 12 (number of the head)
             vit_config.num_attention_heads = self.config.n_head
             vit_config.return_dict = True
             self.image_downsample = ViTModel(vit_config)
@@ -98,39 +98,55 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
         _, pred_length = trajectory_label.shape[:2]
-        context_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
+        action_seq_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
 
         # add noise to context actions
         context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.config.x_random_walk, self.config.y_random_walk)
         # raster observation encoding & context action ecoding
         action_embeds = self.action_m_embed(context_actions)
         
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light)
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light)
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), action_seq_length, self.config.with_traffic_light)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), action_seq_length, self.config.with_traffic_light)
         # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
         # context_length: 8, 40 frames / 5
-        batch_size, context_length, c, h, w = high_res_seq.shape
+        batch_size, action_seq_length, c, h, w = high_res_seq.shape
+        assert c == self.config.raster_channels, "raster channel number should be {}, but got {}".format(self.config.raster_channels, c)
 
         if self.config.raster_encoder_type == 'vit':
-            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w)).pooler_output
-            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w)).pooler_output
-            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
-        else:
-            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            # batch_size * context_length, 196 (14*14), embed_dim//2
+            _, sequence_length, half_embed = high_res_embed.shape
+            high_res_embed = high_res_embed.reshape(batch_size, action_seq_length, sequence_length, half_embed)
+            low_res_embed = low_res_embed.reshape(batch_size, action_seq_length, sequence_length, half_embed)
 
-        state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
-        n_embed = action_embeds.shape[-1]
-        input_embeds = torch.zeros(
-            (batch_size, context_length * 2, n_embed),
-            dtype=torch.float32,
-            device=device
-        )
-        input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
-        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)  # batch_size, action_seq_length, sequence_length, embed_dim
+            n_embed = action_embeds.shape[-1]
+            context_length = action_seq_length + action_seq_length * sequence_length
+            input_embeds = torch.zeros(
+                (batch_size, context_length, n_embed),
+                dtype=torch.float32,
+                device=device
+            )
+            for j in range(action_seq_length):
+                input_embeds[:, j * (1 + sequence_length): j * (1 + sequence_length) + sequence_length, :] = state_embeds[:, j, :, :]
+            input_embeds[:, sequence_length::1 + sequence_length, :] = action_embeds
+        else:
+            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w))
+            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w))
+            high_res_embed = high_res_embed.reshape(batch_size, action_seq_length, -1)
+            low_res_embed = low_res_embed.reshape(batch_size, action_seq_length, -1)
+
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+            n_embed = action_embeds.shape[-1]
+            context_length = action_seq_length * 2
+            input_embeds = torch.zeros(
+                (batch_size, context_length, n_embed),
+                dtype=torch.float32,
+                device=device
+            )
+            input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
+            input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
         # add proposal embedding
         if self.use_proposal:
@@ -185,7 +201,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             "selected_indices": self.selected_indices,
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
-            "context_length": context_length * 2,
+            "context_length": context_length,
             "aug_current": aug_current,
         }
 

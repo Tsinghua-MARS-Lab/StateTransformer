@@ -144,7 +144,8 @@ def main(args):
             while not dl.end:
                 loaded_dic, _ = dl.get_next(seconds_in_future=15, sample_interval=args.sample_interval,
                                             map_name=args.map_name,
-                                            scenarios_to_keep=scenarios_to_keep)
+                                            scenarios_to_keep=scenarios_to_keep,
+                                            filter_still=args.filter_still,)
                 if loaded_dic is None:
                     continue
                 if args.keep_future_steps:
@@ -185,7 +186,8 @@ def main(args):
                         for each_intention in each_loaded_dic["intentions"]:
                             intention_label_data_counter[int(each_intention)] += 1
                         # intention_label_data_counter[int(each_loaded_dic["halfs_intention"])] += 1
-                        print('intention_label_data_counter', intention_label_data_counter)
+                        if shard % 200 == 0:
+                            print('intention_label_data_counter', intention_label_data_counter)
                         yield data_to_return_filtered
                 else:
                     if loaded_dic["skip"]:
@@ -229,7 +231,8 @@ def main(args):
                     for each_intention in data_to_return["intentions"]:
                         intention_label_data_counter[int(each_intention)] += 1
                     # intention_label_data_counter[int(data_to_return["halfs_intention"])] += 1
-                    print('intention_label_data_counter', intention_label_data_counter)
+                    if shard % 200 == 0:
+                        print('intention_label_data_counter', intention_label_data_counter)
                     yield data_to_return_filtered
             del dl
 
@@ -406,6 +409,7 @@ def main(args):
                                                                    # "halfs_intention": Value("int64"),
                                                                    "intentions": Sequence(Value("int64")),
                                                                    "ego_goal": Sequence(Value("float32")),
+                                                                   "navigation": Sequence(Value("int64")),
                                                                    }),)
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,
@@ -499,5 +503,6 @@ if __name__ == '__main__':
     parser.add_argument('--filter_by_scenario_type', default=False, action='store_true')
     parser.add_argument('--keep_future_steps', default=False, action='store_true')  # use with scenario_filter_yaml_path for val14
     parser.add_argument('--balance', default=False, action='store_true')
+    parser.add_argument('--filter_still', default=False, action='store_true')
     args_p = parser.parse_args()
     main(args_p)

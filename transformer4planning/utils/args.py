@@ -50,6 +50,9 @@ class ModelArguments:
         default='resnet18',
         metadata={"help": "choose from [vit, resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
+    vit_intermediate_size: Optional[int] = field(
+        default=3072,
+    )
     # resnet_type: Optional[str] = field(
     #     default="resnet18",
     #     metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
@@ -76,10 +79,19 @@ class ModelArguments:
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
     )
+    mean_circular_loss: Optional[bool] = field(
+        default=False
+    )
+
+    ######## begin of navigation args ########
+    use_navigation: Optional[bool] = field(
+        default=False
+    )
 
     ######## begin of proposal args ########
-    use_proposal: Optional[bool] = field(
-        default=False
+    use_proposal: Optional[int] = field(
+        default=0,
+        metadata={"help": "number of proposal candidates. 0: not using proposal"}
     )
     ######## end of proposal args ########
 

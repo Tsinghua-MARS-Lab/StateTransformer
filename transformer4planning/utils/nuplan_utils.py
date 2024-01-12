@@ -4,7 +4,6 @@ import numpy as np
 from typing import List
 import pickle
 import pandas as pd
-import numpy as np
 from shapely import geometry
 
 def rotate_array(origin, points, angle, tuple=False):
@@ -47,9 +46,33 @@ def change_coordination(target_point, ego_center, ego_to_global=False):
     return target_point_new
 
 
+def get_closest_lane_on_route(pred_key_point_global,
+                              route_ids,
+                              road_dic):
+    # loop over all the route ids
+    pred_key_point_global_copy = copy.deepcopy(pred_key_point_global)
+    route_lanes = []
+    for each_route_block in route_ids:
+        route_lanes += road_dic[each_route_block]['lower_level']
+    route_lane_pts = []
+    lane_ids = []
+    for each_lane in route_lanes:
+        if road_dic[each_lane]['type'] not in [0, 11]:
+            continue
+        route_lane_pts.append(road_dic[each_lane]['xyz'][:, :2])
+        lane_ids += [each_lane] * road_dic[each_lane]['xyz'].shape[0]
+    # concatenate all points in the list in one dimension
+    route_lane_pts_np = np.concatenate(route_lane_pts, axis=0)
+    # get the closest point over all of the selected lanes
+    dist = np.linalg.norm(route_lane_pts_np - pred_key_point_global_copy[:2], axis=1)
+    closest_index = np.argmin(dist)
+    closest_lane_id = lane_ids[closest_index]
+    return closest_lane_id, dist[closest_index]
+
+
 def get_closest_lane_point_on_route(pred_key_point_global,
                                     route_ids,
-                                    road_dic) -> np.ndarray:
+                                    road_dic):
     # loop over all the route ids
     pred_key_point_global_copy = copy.deepcopy(pred_key_point_global)
     route_lanes = []
@@ -80,9 +103,9 @@ def get_closest_lane_point_on_route(pred_key_point_global,
     line = geometry.LineString(road_dic[closest_road_block]['xyz'][:, :2])
     point = geometry.Point(pred_key_point_global_copy[:2])
     polygon = geometry.Polygon(line)
-    onraod = polygon.contains(point)
+    on_road = polygon.contains(point)
 
-    return closest_lane_point, dist[closest_index], onraod
+    return closest_lane_point, dist[closest_index], on_road
 
 
 def normalize_angle(angle):

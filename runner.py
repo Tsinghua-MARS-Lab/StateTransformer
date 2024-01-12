@@ -192,7 +192,7 @@ def main():
         # TODO: compatible with older training args
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
-        print('Testset not found, using training set as test set')
+        print('Using training set as test set')
         test_dataset = train_dataset
     
     if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:

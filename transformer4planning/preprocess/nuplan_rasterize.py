@@ -120,19 +120,13 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     route_ids = sample["route_ids"].tolist()
     if not isinstance(route_ids, list):
         route_ids = route_ids.tolist()
-    centerline = None
-    if "centerline" in sample.keys():
-        if isinstance(sample["centerline"], torch.Tensor):
-            centerline = np.array(sample["centerline"])
-        else:
-            centerline = sample["centerline"]
 
     if map == 'sg-one-north':
         y_inverse = -1
     else:
         y_inverse = 1
 
-    use_centerline = kwargs.get("use_centerline", False)
+    ego_point = sample["ego_goal"].numpy() if "ego_goal" in sample.keys() else None
 
     # clean traffic ids, for legacy reasons, there might be -1 in the list
     traffic_light_ids = [x for x in traffic_light_ids if x != -1]
@@ -166,7 +160,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         elif os.path.exists(path_all_city):
             pickle_path = path_all_city
         else:
-            print(f"Error: cannot load {path_per_city} from {data_path} with {map}")
+            print(f"Error: cannot load {path_per_city} from {data_path} with {map} or {path_all_city}")
             return None
 
         if os.path.exists(pickle_path):
@@ -227,12 +221,13 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     if np.isinf(origin_ego_pose[0]) or np.isinf(origin_ego_pose[1]):
         assert False, f"Error: ego pose is inf {origin_ego_pose}, not enough precision while generating dictionary"
     # channels:
-    # 0-2: route raster, centerline
+    # 0-2: route raster
     # 3-22: road raster
     # 23-26: traffic raster
     # 27-91: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
-    
-    route_channel = 3 if use_centerline else 2
+    route_channel = 2
+    route_channel += 1 if ego_point is not None else 0
+
     total_raster_channels = route_channel + road_types + traffic_types + agent_types * len(sample_frames_in_past)
     rasters_high_res = np.zeros([raster_shape[0],
                                  raster_shape[1],
@@ -289,26 +284,16 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                 cv2.line(rasters_low_res_channels[1], tuple(low_res_route[j, :2]),
                          tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
 
-    # centerline encoding
-    if use_centerline:
-        pts = zip(centerline[:, 0], centerline[:, 1])
-        line = shapely.geometry.LineString(pts)
-        simplified_xyz_line = line.simplify(1)
-        simplified_x, simplified_y = simplified_xyz_line.xy
-        simplified_xyz = np.ones((len(simplified_x), 2)) * -1
-        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_x, simplified_y
-        simplified_xyz[:, 0], simplified_xyz[:, 1] = simplified_xyz[:, 0].copy() * cos_ - simplified_xyz[:, 1].copy() * sin_, simplified_xyz[:, 0].copy() * sin_ + simplified_xyz[:, 1].copy() * cos_
-        simplified_xyz[:, 1] *= -1
-        simplified_xyz[:, 0] *= y_inverse
-        high_res_centerline = (simplified_xyz * high_res_scale).astype('int32') + raster_shape[0] // 2
-        low_res_centerline = (simplified_xyz * low_res_scale).astype('int32') + raster_shape[0] // 2
-        for j in range(simplified_xyz.shape[0] - 1):
-            cv2.line(rasters_high_res_channels[2],
-                        tuple(high_res_centerline[j, :2]),
-                        tuple(high_res_centerline[j + 1, :2]), (255, 255, 255), 2)
-            cv2.line(rasters_low_res_channels[2],
-                        tuple(low_res_centerline[j, :2]),
-                        tuple(low_res_centerline[j + 1, :2]), (255, 255, 255), 2)
+        # raster ego point
+        if ego_point is not None:
+            ego_point[:2] -= origin_ego_pose[:2]
+            ego_point[0], ego_point[1] = ego_point[0].copy() * cos_ - ego_point[1].copy() * sin_, ego_point[0].copy() * sin_ + ego_point[1].copy() * cos_
+            ego_point[1] *= -1
+            ego_point[0] *= y_inverse
+            high_res_ego_point = (ego_point * high_res_scale).astype('int32') + raster_shape[0] // 2
+            low_res_ego_point = (ego_point * low_res_scale).astype('int32') + raster_shape[0] // 2
+            cv2.circle(rasters_high_res_channels[2], tuple(high_res_ego_point[:2]), 3, (255, 255, 255), -1)
+            cv2.circle(rasters_low_res_channels[2], tuple(low_res_ego_point[:2]), 3, (255, 255, 255), -1)
 
     # road raster
     for road_id in road_ids:
@@ -481,12 +466,6 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             return None
         result_to_return["halfs_intention"] = sample['halfs_intention']
     if 'intentions' in sample and kwargs.get('use_proposal', False):
-        # if sample['split'] in ['val']:
-        #     print('test: ', sample['intentions'])
-        # if sample['intentions'].isnan():
-        #     if sample['split'] in ['train', 'val']:
-        #         print('No proposal loaded at preprocess: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
-        #     return None
         result_to_return["intentions"] = sample['intentions']
     # try:
     #     result_to_return["scenario_type"] = sample["scenario_type"]
@@ -497,8 +476,6 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     #     result_to_return["scenario_id"] = sample["scenario_id"]
     # except:
     #     pass
-    if centerline is not None:
-        result_to_return["centerline"] = centerline
 
     result_to_return["route_ids"] = sample['route_ids']
     result_to_return["aug_current"] = aug_current

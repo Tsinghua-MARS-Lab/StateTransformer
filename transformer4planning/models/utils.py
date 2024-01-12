@@ -11,7 +11,7 @@ DEFAULT_TOKEN_CONFIG = dict(
     sample_frequency=4
 )
 
-def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True, use_centerline=False):
+def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True):
     """
     input raster can be either high resolution raster or low resolution raster
     expected input size: [bacthsize, channel, h, w], and channel is consisted of goal(1d)+roadtype(20d)+agenttype*time(8*9d)
@@ -20,7 +20,8 @@ def cat_raster_seq(raster:Optional[torch.LongTensor], framenum=9, traffic=True, 
     agent_type = 8
     road_type = 20
     traffic_light_type = 4
-    route_type = 3 if use_centerline else 2
+    # updated to dynamic route types
+    route_type = c - agent_type * framenum - road_type - traffic_light_type
 
     goal_raster = raster[:, :route_type, :, :].reshape(b, route_type, h, w)  # updated as route raster
     road_ratser = raster[:, route_type : route_type+road_type, :, :]

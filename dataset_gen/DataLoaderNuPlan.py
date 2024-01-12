@@ -180,7 +180,8 @@ class NuPlanDL:
                  agent_only=False, 
                  seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
                  map_name=None,
-                 scenarios_to_keep=None,):
+                 scenarios_to_keep=None,
+                 filter_still=False,):
         """
         :param sample_interval:
         :param agent_only:
@@ -273,7 +274,8 @@ class NuPlanDL:
                 data_to_return = self.get_datadic(scenario=scenario_in_loop,
                                                   scenario_id=scenario_id,
                                                   agent_only=agent_only,
-                                                  seconds_in_future=seconds_in_future)
+                                                  seconds_in_future=seconds_in_future,
+                                                  filter_still=filter_still)
                 if data_to_return is None:
                     continue
                 data_to_return['scenario_type'] = scenario_type
@@ -301,7 +303,8 @@ class NuPlanDL:
         data_to_return = self.get_datadic(scenario=scenario,
                                           scenario_id=scenario_id, 
                                           agent_only=agent_only,
-                                          seconds_in_future=seconds_in_future)
+                                          seconds_in_future=seconds_in_future,
+                                          filter_still=filter_still)
         if data_to_return is None:
             data_to_return = {'skip': True}
             return data_to_return, new_files_loaded
@@ -546,10 +549,9 @@ class NuPlanDL:
         # GENERIC_OBJECT = 6, 'generic_object'
         # EGO = 7, 'ego'
 
-        agent_dic = {}
+        agent_dic = {'ego': new_dic}
 
         # pack ego
-        agent_dic['ego'] = new_dic
         poses_np = agent_dic['ego']['pose']
         shapes_np = agent_dic['ego']['shape']
         speeds_np = agent_dic['ego']['speed']
@@ -727,6 +729,42 @@ class NuPlanDL:
                                                                        each_agent.center.heading]
                 shapes_np[current_t + total_frames_past * 20 + 1, :] = [each_agent.box.width, each_agent.box.length, 2]
                 speeds_np[current_t + total_frames_past * 20 + 1, :] = [each_agent.velocity.x, each_agent.velocity.y]
+
+        # clean agents invalid at current frame
+        agent_to_delete = []
+        for each_agent in agent_dic:
+            if agent_dic[each_agent]['pose'][40, 0] == -1 and each_agent != 'ego':
+                agent_to_delete.append(each_agent)
+        for each_agent in agent_to_delete:
+            del agent_dic[each_agent]
+
+        # check agent number
+        if len(list(agent_dic.keys())) > 200:
+            # can compress about 40-60 peds
+            print("Too many agents in this scenario!!!!!!!!!!!!!!!!")
+            print("Before: ", len(list(agent_dic.keys())))
+            agent_num_counter = [0] * 8
+            from scipy.cluster.hierarchy import ward, fcluster
+            from scipy.spatial.distance import pdist
+            X = []
+            ids = []
+            for each_agent in agent_dic:
+                agent_num_counter[agent_dic[each_agent]['type']] += 1
+                if agent_dic[each_agent]['type'] == 1:
+                    X.append(agent_dic[each_agent]['pose'][40, :2].tolist())
+                    ids.append(each_agent)
+            Z = ward(pdist(X))
+            # cluster and keep one agent in each cluster
+            cluster_ids = fcluster(Z, 1, criterion='distance')
+            prev_ids = []
+            for i in range(len(cluster_ids)):
+                if cluster_ids[i] not in prev_ids:
+                    prev_ids.append(cluster_ids[i])
+                else:
+                    agent_dic.pop(ids[i])
+            print('#########################')
+            print('inspect number: ', agent_num_counter, 'total after: ', len(list(agent_dic.keys())))
+            print('#########################')
 
         # total shape of agent pose is 181
         return agent_dic
@@ -954,7 +992,9 @@ class NuPlanDL:
                     agent_only=False,
                     seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
                     routes_per_file=False,
-                    include_intentions=True):
+                    include_intentions=True,
+                    include_navigation=True,
+                    filter_still=False) -> dict:
 
         skip = False
         agent_dic = self.pack_scenario_to_agentdic(scenario=scenario, total_frames_future=seconds_in_future)
@@ -1062,10 +1102,10 @@ class NuPlanDL:
                         # skip unrelated scenarios
                         skip = True
 
-
         if not agent_only:
             if self.running_mode == 1:
-                road_dic = self.pack_scenario_to_roaddic(scenario, map_radius=1e2)
+                if self.road_dic_mem is None:
+                    self.road_dic_mem = self.pack_scenario_to_roaddic(scenario, map_radius=1e2)
                 traffic_dic = self.pack_scenario_to_trafficdic(scenario)
             else:
                 if self.road_dic_mem is None:
@@ -1101,15 +1141,20 @@ class NuPlanDL:
             traffic_dic = {}
 
         # mark still agents is the past
-        for agent_id in agent_dic:
-            is_still = False
-            for i in range(10):
-                if agent_dic[agent_id]['pose'][i, 0] == -1:
-                    continue
-                if util.euclidean_distance(agent_dic[agent_id]['pose'][i, :2],
-                                           agent_dic[agent_id]['pose'][10, :2]) < 1:
-                    is_still = True
-            agent_dic[agent_id]['still_in_past'] = is_still
+        # for agent_id in agent_dic:
+        #     is_still = False
+        #     for i in range(10):
+        #         if agent_dic[agent_id]['pose'][i, 0] == -1:
+        #             continue
+        #         if util.euclidean_distance(agent_dic[agent_id]['pose'][i, :2],
+        #                                    agent_dic[agent_id]['pose'][10, :2]) < 1:
+        #             is_still = True
+        #     agent_dic[agent_id]['still_in_past'] = is_still
+
+        # check if ego is still
+        if filter_still and 'ego' in agent_dic and abs(agent_dic['ego']['pose'][0, 0] - agent_dic['ego']['pose'][-1, 0]) < 0.5 and abs(agent_dic['ego']['pose'][0, 1] - agent_dic['ego']['pose'][-1, 1]) < 0.5:
+            # print('skipping still ego scenario')
+            return None
 
         if self.road_dic_mem is None or traffic_dic is None:
             return None
@@ -1183,20 +1228,27 @@ class NuPlanDL:
                 # y_threshold = 4
                 x_threshold = 5
 
-                if future_yaw > yaw_threshold:
-                    intention = 0  # left
-                elif future_yaw < -yaw_threshold:
-                    intention = 1  # right
-                # if delta_pose[1] > y_threshold:
-                #     intentions[i] = 0  # left
-                # elif delta_pose[1] < -y_threshold:
-                #     intentions[i] = 1  # right
-                elif delta_pose[0] > x_threshold:
-                    intention = 3  # accelerate
+                # if future_yaw > yaw_threshold:
+                #     intention = 0  # left
+                # elif future_yaw < -yaw_threshold:
+                #     intention = 1  # right
+                # # if delta_pose[1] > y_threshold:
+                # #     intentions[i] = 0  # left
+                # # elif delta_pose[1] < -y_threshold:
+                # #     intentions[i] = 1  # right
+                # elif delta_pose[0] > x_threshold:
+                #     intention = 3  # accelerate
+                # elif delta_pose[0] < -x_threshold:
+                #     intention = 2  # decelerate
+                # else:
+                #     intention = 4  # keep
+
+                if delta_pose[0] > x_threshold:
+                    intention = 0  # accelerate
                 elif delta_pose[0] < -x_threshold:
-                    intention = 2  # decelerate
+                    intention = 1  # decelerate
                 else:
-                    intention = 4  # keep
+                    intention = 2  # keep
 
                 # validity check
                 if abs(delta_pose[0]) > 100:
@@ -1205,6 +1257,25 @@ class NuPlanDL:
                     skip = True
                     break
                 data_to_return['intentions'].append(intention)
+                # only classify the current intention
+                break
+
+        if include_navigation and 'route' in data_to_return and len(data_to_return['route']) > 0:
+            # WARNING: Currently only works for nuplan with route infos
+            from transformer4planning.utils import nuplan_utils
+            dist_threshold = 10
+            nav_lanes = []
+            for i in range(40, agent_dic['ego']['pose'].shape[0], 10):
+                # loop over from 2s to 10s with 0.5s interval
+                # 1. get current lane
+                current_pose = agent_dic['ego']['pose'][i]
+                current_lane_id, dist = nuplan_utils.get_closest_lane_on_route(current_pose, data_to_return['route'], self.road_dic_mem)
+                if dist < dist_threshold and current_lane_id not in nav_lanes:
+                    nav_lanes.append(int(current_lane_id))
+            data_to_return['navigation'] = nav_lanes
+            if len(nav_lanes) == 0 and filter_still:
+                # skip off route
+                skip = True
 
         if 'ego' not in agent_dic:
             print("no ego and skip")

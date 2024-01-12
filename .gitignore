@@ -7,3 +7,8 @@ wandb
 src/
 .venv
 node_modules
+<<<<<<< Updated upstream
+=======
+.DS_Store
+.idea
+>>>>>>> Stashed changes

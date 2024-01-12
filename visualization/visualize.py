@@ -13,8 +13,6 @@ from datasets import disable_caching
 import sys
 from runner import load_dataset
 from transformer4planning.trainer import convert_names_to_ids
-import pandas as pd  # for visualization
-import altair as alt  # for barchart
 
 css = """
 <style>

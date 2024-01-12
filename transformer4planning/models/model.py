@@ -26,7 +26,9 @@ class TrajectoryGPTConfig(GPT2Config):
         # to be compatible with older models
         attr_list = ["use_key_points", "kp_decoder_type", "separate_kp_encoder", "use_proposal",
                      "autoregressive_proposals", "selected_exponential_past",
-                     "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",]
+                     "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
+                     "vit_intermediate_size",
+                     "mean_circular_loss"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
@@ -83,7 +85,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         if self.use_proposal:
             if self.config.task == "nuplan":
                 from transformer4planning.models.decoder.base import ProposalDecoderCLS
-                self.proposal_decoder = ProposalDecoderCLS(self.config)
+                self.proposal_decoder = ProposalDecoderCLS(self.config, proposal_num=self.use_proposal)
             elif self.config.task == "waymo":
                 from transformer4planning.models.decoder.base import ProposalDecoder
                 self.proposal_decoder = ProposalDecoder(self.config)
@@ -133,7 +135,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
         )
 
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
-
         trajectory_label = info_dict["trajectory_label"]
 
         loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
@@ -361,10 +362,10 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                                                         ego_to_global=True)
                             if isinstance(route_ids, torch.Tensor):
                                 route_ids = route_ids.cpu().numpy().tolist()
-                            closest_lane_point_on_route, dist, onraod = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
+                            closest_lane_point_on_route, dist, on_road = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
                                                                                                                        route_ids,
                                                                                                                        road_dic)
-                            if not onraod:
+                            if not on_road:
                                 pred_key_point_ego = nuplan_utils.change_coordination(closest_lane_point_on_route,
                                                                                       ego_pose,
                                                                                       ego_to_global=False)
@@ -826,10 +827,10 @@ class TrajectoryMamba(TrajectoryGPT):
                                                                                      ego_to_global=True)
                             if isinstance(route_ids, torch.Tensor):
                                 route_ids = route_ids.cpu().numpy().tolist()
-                            closest_lane_point_on_route, dist, onraod = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
+                            closest_lane_point_on_route, dist, on_road = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
                                                                                                                      route_ids,
                                                                                                                      road_dic)
-                            if not onraod:
+                            if not on_road:
                                 pred_key_point_ego = nuplan_utils.change_coordination(closest_lane_point_on_route,
                                                                                       ego_pose,
                                                                                       ego_to_global=False)
@@ -1043,7 +1044,7 @@ def build_models(model_args):
             config_p.n_head = 1
         elif 'mamba-small' in model_args.model_name:
             """
-            Number of parameters: ?
+            Number of parameters: 6M (ViT512)
             """
             config_p.n_layer = 4
             config_p.n_embd = config_p.d_model = 256
@@ -1051,7 +1052,7 @@ def build_models(model_args):
             config_p.n_head = 8
         elif 'mamba-medium' in model_args.model_name:
             """
-            Number of parameters: 760M
+            Number of parameters: 40M (ViT)
             """
             config_p.n_layer = 8
             config_p.n_embd = config_p.d_model = 512
