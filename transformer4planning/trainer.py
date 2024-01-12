@@ -232,40 +232,50 @@ def compute_metrics(prediction: EvalPrediction):
             heading_error_for = abs(prediction_key_points_by_forward[:, :, -1] - label_key_points[:, :, -1])
             eval_result['heading_error_forward'] = heading_error_for.mean()
 
-    if 'proposal' in prediction_by_generation and 'halfs_intention' in prediction_by_generation:
-        # TODO: add waymo proposal accuracy to eval result
-        # evaluate classification accuracy and log to eval_result
-        prediction_proposal_by_generation = prediction_by_generation["proposal"]  # sample_num, 80, 5
-        prediction_proposal_class_by_generation = np.argmax(prediction_proposal_by_generation, axis=-1)  # sample_num, 80
-        proposal_labels = prediction_by_generation['halfs_intention']
-        accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
-        eval_result['proposal_accuracy'] = accuracy_by_generation
+    if 'proposal' in prediction_by_generation:
+        if 'halfs_intention' in prediction_by_generation:
+            # TODO: add waymo proposal accuracy to eval result
+            # evaluate classification accuracy and log to eval_result
+            # print('debuging trainer compute metrics: ', prediction_by_generation['proposal'], prediction_by_forward['proposal'], prediction_by_generation['halfs_intention'])
+            prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 1
+            proposal_labels = prediction_by_generation['halfs_intention']
+            accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
+            print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels.flatten(), prediction_proposal_class_by_generation.flatten())
+            eval_result['proposal_accuracy'] = accuracy_by_generation
+        elif 'intentions' in prediction_by_generation:
+            prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 16
+            proposal_labels = prediction_by_generation['intentions']  # sample_num, 16
+            accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
+            # print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels, prediction_proposal_class_by_generation)
+            eval_result['proposal_accuracy'] = accuracy_by_generation
+        else:
+            print('WARNING: no intention found in generation. ', list(prediction_by_generation.keys()))
 
     score, miss_score = compute_scores(item_to_save)
     eval_result["average_score"] = score
     eval_result["miss_score"] = miss_score
 
     # include inputs by passing args.include_inputs_for_metrics = True to save eval result to pickle
-    if EVAL_LOG_SAVING_PATH is not None:
-        eval_result_to_save = {}
-        # get miss scenarios
-        miss_indices = np.where(miss == 1)[0]
-        scenario15s_id_miss = scenario15s_id[miss_indices]
-        # [(file_name, frame_id), ...]
-        eval_result_to_save["miss_scenarios"] = scenario15s_id_miss
-        # get top fde scenarios (about 10%)
-        total_num = len(fde8_gen)
-        fde_indices = np.argsort(fde8_gen)[::-1][:int(total_num/10)]
-        scenario15s_id_high_fde = scenario15s_id[fde_indices]
-        fde8s_value = fde8_gen[fde_indices]
-        # [(file_name, frame_id, fde8s_value), ...]
-        eval_result_to_save["top_fde_scenarios"] = list(zip(scenario15s_id_high_fde, fde8s_value))
-        # save eval result
-        with open(EVAL_LOG_SAVING_PATH, "wb") as f:
-            pickle.dump(eval_result_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
-        print(f'eval result saved to {EVAL_LOG_SAVING_PATH} with {scenario15s_id_miss.shape[0]} miss scenarios and {scenario15s_id_high_fde.shape[0]} top fde scenarios')
-    else:
-        assert False, "EVAL_LOG_SAVING_PATH is None"
+    # if EVAL_LOG_SAVING_PATH is not None:
+    #     eval_result_to_save = {}
+    #     # get miss scenarios
+    #     miss_indices = np.where(miss == 1)[0]
+    #     scenario15s_id_miss = scenario15s_id[miss_indices]
+    #     # [(file_name, frame_id), ...]
+    #     eval_result_to_save["miss_scenarios"] = scenario15s_id_miss
+    #     # get top fde scenarios (about 10%)
+    #     total_num = len(fde8_gen)
+    #     fde_indices = np.argsort(fde8_gen)[::-1][:int(total_num/10)]
+    #     scenario15s_id_high_fde = scenario15s_id[fde_indices]
+    #     fde8s_value = fde8_gen[fde_indices]
+    #     # [(file_name, frame_id, fde8s_value), ...]
+    #     eval_result_to_save["top_fde_scenarios"] = list(zip(scenario15s_id_high_fde, fde8s_value))
+    #     # save eval result
+    #     with open(EVAL_LOG_SAVING_PATH, "wb") as f:
+    #         pickle.dump(eval_result_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+    #     print(f'eval result saved to {EVAL_LOG_SAVING_PATH} with {scenario15s_id_miss.shape[0]} miss scenarios and {scenario15s_id_high_fde.shape[0]} top fde scenarios')
+    # else:
+    #     assert False, "EVAL_LOG_SAVING_PATH is None"
 
     return eval_result
 
@@ -444,7 +454,8 @@ class PlanningTrainer(Trainer):
                 else:
                     # # TODO: this needs to be fixed and made cleaner later.
                     raise NotImplementedError
-        pred_dict = logits[1]
+
+        pred_dict = outputs['pred_dict'] if 'pred_dict' in outputs else logits[-1]
         logits = nested_detach(logits)
         if len(logits) >= 1:
             logits = logits[0]
@@ -493,6 +504,25 @@ class PlanningTrainer(Trainer):
             })
 
         return (loss, logits_dict, labels)
+
+    def do_closed_loop_simulation(self,
+                                  val1k_datasest,
+                                  metric_key_prefix: str = "CLS",):
+        """
+        Run closed loop simulation and returns the metrics.
+        Args:
+            val1k_datasest (`Dataset`, *optional*):
+                Pass a dataset. If it is a [`~datasets.Dataset`], columns not accepted by the `model.forward()` method
+                 are automatically removed. It must implement the `__len__` method.
+            metric_key_prefix (`str`, *optional*, defaults to `"eval"`):
+                An optional prefix to be used as the metrics key prefix. For example the metrics "8sFDE" will be named
+                "CLS_8sFDE" if the prefix is "CLS" (default)
+
+        Returns:
+            A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
+            dictionary also contains the epoch number which comes from the training state.
+        """
+        pass
 
 def save_raster(inputs, sample_index, file_index=0,
                 prediction_trajectory=None, path_to_save=None,

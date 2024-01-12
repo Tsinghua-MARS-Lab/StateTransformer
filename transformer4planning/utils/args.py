@@ -32,7 +32,7 @@ class ModelArguments:
         default=8,
     )
     activation_function: Optional[str] = field(
-        default="silu",
+        default="gelu_new",
         metadata={"help": "Activation function, to be selected in the list `[relu, silu, gelu, tanh, gelu_new]"},
     )
     task: Optional[str] = field(
@@ -46,19 +46,20 @@ class ModelArguments:
         default=34,  # updated channels (added both block and lanes for route), change to 33 for older version
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
-    resnet_type: Optional[str] = field(
-        default="resnet18",
-        metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
+    raster_encoder_type: Optional[str] = field(
+        default='resnet18',
+        metadata={"help": "choose from [vit, resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
+    # resnet_type: Optional[str] = field(
+    #     default="resnet18",
+    #     metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
+    # )
     pretrain_encoder: Optional[bool] = field(
         default=False,
     )
     k: Optional[int] = field(
         default=1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
-    )
-    autoregressive: Optional[bool] = field(
-        default=False
     )
     x_random_walk: Optional[float] = field(
         default=0.0
@@ -76,7 +77,7 @@ class ModelArguments:
         default=1.0
     )
 
-    ######## begin of  proposal args ########
+    ######## begin of proposal args ########
     use_proposal: Optional[bool] = field(
         default=False
     )
@@ -89,6 +90,9 @@ class ModelArguments:
                           "universal: using universal key points, with interval of 20 frames."
                           "specified_forward: using specified key points, with exponentially growing frame indices."
                           "specified_backward: using specified key points, with exponentially growing frame indices."}
+    )
+    separate_kp_encoder: Optional[bool] = field(
+        default=False
     )
     pred_key_points_only: Optional[bool] = field(
         default=False
@@ -129,13 +133,13 @@ class ModelArguments:
         default=True
     )
     past_sample_interval: Optional[int] = field(
-        default=5
+        default=2
+    )
+    selected_exponential_past: Optional[bool] = field(
+        default=False
     )
     future_sample_interval: Optional[int] = field(
         default=2
-    )
-    use_centerline: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use centerline in the pdm model"}
     )
     postprocess_yaw: Optional[str] = field(
         default="normal", metadata={"help": "choose from hybrid, interplate or normal"}
@@ -161,6 +165,25 @@ class ModelArguments:
     )
     ######## end of WOMD args ########
 
+    # WIP args
+    autoregressive_proposals: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use autoregressive proposals in MTR model"}
+    )
+    proposal_num: Optional[int] = field(
+        default=13
+    )
+
+    ######## begin of Mamba args ########
+    rms_norm: Optional[bool] = field(
+        default=False
+    )
+    residual_in_fp32: Optional[bool] = field(
+        default=False
+    )
+    fused_add_norm: Optional[bool] = field(
+        default=False
+    )
+    ######## end of Mamba args ########
 
 @dataclass
 class DataTrainingArguments:
@@ -205,7 +228,7 @@ class DataTrainingArguments:
         default=1, metadata={"help": "The dataset size, choose from any float <=1, such as 1, 0.1, 0.01"}
     )
     dagger: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to save dagger results"}
+        default=False, metadata={"help": "(WIP) Whether to save dagger results"}
     )
     nuplan_map_path: Optional[str] = field(
         default=None, metadata={"help": "The root path of map file, to init map api used in nuplan package"}
@@ -219,6 +242,9 @@ class DataTrainingArguments:
                                         "2: pedestrian on WOMD"
                                         "3: cyclist on WOMD"
                                         "any combination of numbers will be decoded into list of int (1 2;2 3;1 3)"}
+    )
+    do_closed_loop_simulation: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to do closed loop simulation, This is a seperate process. Do not use with training."}
     )
 
 
@@ -254,6 +280,10 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
+    do_test: Optional[bool] = field(
+        default=False,
+    )
+
     # label_names: Optional[List[str]] = field(
     #     default=lambda: ['trajectory_label']
     # )

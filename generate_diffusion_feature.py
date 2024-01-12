@@ -280,8 +280,7 @@ def main():
                                             map_name=map)
             collate_fn = partial(nuplan_vector_collate_func, 
                                  dic_path=data_args.saved_dataset_folder, 
-                                 map_api=map_api,
-                                 use_centerline=model_args.use_centerline)
+                                 map_api=map_api)
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":

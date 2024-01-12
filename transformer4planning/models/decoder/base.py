@@ -126,9 +126,7 @@ class ProposalDecoderCLS(nn.Module):
         self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num)
         self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
 
-    def compute_proposal_loss(self,
-                              hidden_output,
-                              info_dict):
+    def compute_proposal_loss(self, hidden_output, info_dict):
         """
         pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
         params:
@@ -136,16 +134,42 @@ class ProposalDecoderCLS(nn.Module):
             label: ground truth trajectory in future 8-s
             info_dict: dict contains additional infomation, such as context length/input length, pred length, etc.
         """
-        if 'halfs_intention' not in info_dict:
-            print('WARNING: no halfs_intention in info_dict')
-            return torch.tensor(0.0, device=hidden_output.device)
-        gt_proposal_cls = info_dict["halfs_intention"]
-        context_length = info_dict["context_length"]
-        pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
+        assert self.config.use_proposal, 'must set use_proposal to true to compute proposal loss'
 
-        pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 5)
-        loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
-        return loss_proposal.mean(), pred_proposal_cls
+        if self.config.autoregressive_proposals:
+            if 'intentions' not in info_dict:
+                print('WARNING: no intentions in info_dict')
+                return torch.tensor(0.0, device=hidden_output.device), torch.tensor([0] * int(self.config.proposal_num), device=hidden_output.device)
+            gt_proposal_cls = info_dict["intentions"]
+            context_length = info_dict["context_length"]
+            pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + int(self.config.proposal_num), :]  # (bs, 16, n_embed)
+            pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 16, 5)
+            loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())  # (bs * 16)
+            return loss_proposal.mean(), pred_proposal_cls
+        else:
+            if 'halfs_intention' in info_dict:
+                gt_proposal_cls = info_dict["halfs_intention"]
+            elif 'intentions' in info_dict:
+                gt_proposal_cls = info_dict["intentions"][0]
+            else:
+                print('WARNING: no halfs_intention or intentions in info_dict ', list(info_dict.keys()))
+                return torch.tensor(0.0, device=hidden_output.device), torch.tensor(0, device=hidden_output.device)
+            context_length = info_dict["context_length"]
+            pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
+            pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 5)
+            loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
+            return loss_proposal.mean(), pred_proposal_cls
+
+        # if 'halfs_intention' not in info_dict and self.config.use_proposal:
+        #     print('WARNING: no halfs_intention in info_dict')
+        #     return torch.tensor(0.0, device=hidden_output.device)
+        # gt_proposal_cls = info_dict["halfs_intention"]
+        # context_length = info_dict["context_length"]
+        # pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
+        #
+        # pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 5)
+        # loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
+        # return loss_proposal.mean(), pred_proposal_cls
 
 class KeyPointMLPDeocder(nn.Module):
     def __init__(self, config):
@@ -197,12 +221,14 @@ class KeyPointMLPDeocder(nn.Module):
             device = hidden_output.device
 
         context_length = info_dict.get("context_length", None)
-
         future_key_points = info_dict["future_key_points"]
         
         kp_start_index = context_length - 1
         if self.config.use_proposal:
-            kp_start_index += 1
+            if self.config.autoregressive_proposals:
+                kp_start_index += int(self.config.proposal_num)
+            else:
+                kp_start_index += 1
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
 

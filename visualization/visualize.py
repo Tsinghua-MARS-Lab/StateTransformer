@@ -13,6 +13,8 @@ from datasets import disable_caching
 import sys
 from runner import load_dataset
 from transformer4planning.trainer import convert_names_to_ids
+import pandas as pd  # for visualization
+import altair as alt  # for barchart
 
 css = """
 <style>
@@ -125,6 +127,8 @@ def load_dictionary_for_file(root_path, split, _sample):
     print('Processing Data Dic')
     file_name = _sample['file_name']
     map = _sample['map']
+    if 'halfs_intention' in _sample:
+        print('inspect intention', _sample['halfs_intention'])
     if map not in st.session_state.all_map_dic:
         if os.path.exists(os.path.join(root_path, "map", f"{map}.pkl")):
             with open(os.path.join(root_path, "map", f"{map}.pkl"), "rb") as f:
@@ -148,7 +152,7 @@ def load_dictionary_for_file(root_path, split, _sample):
                     agent_dic = data_dic['agent']
                 else:
                     raise ValueError(f'cannot find agent_dic or agent in pickle file, keys: {data_dic.keys()}')
-                # agent_dic = add_intention_to_agent_dic(agent_dic)
+                agent_dic = add_intention_to_agent_dic(agent_dic)
         else:
             print(f"Error: cannot load {pickle_path} from {root_path} with {map}")
             return None
@@ -199,10 +203,11 @@ def ego_to_global(poses, ego_pose, y_reverse=1):
     return rotated_poses
 
 def add_intention_to_agent_dic(agent_dic):
+    print('processing intentino')
     total_frames = agent_dic['ego']['pose'].shape[0]
     intentions = np.zeros((total_frames, 1))
-    intentions[:40] = 0
-    intentions[-40:] = 0
+    intentions[:40] = 4
+    intentions[-40:] = 4
     for i in range(40, total_frames - 40):
         ego_poses = copy.deepcopy(agent_dic['ego']['pose'])
         current_pose = ego_poses[i]
@@ -222,9 +227,9 @@ def add_intention_to_agent_dic(agent_dic):
             future_yaw += 2 * math.pi
         yaw_threshold = 0.5
 
-        velocity = rotated_poses[i - 10:i + 10, :2] - rotated_poses[i - 40:i - 20,:2]
-        estimated_pose = rotated_poses[i - 10:i + 10, :2] + velocity
-        delta_pose = np.mean(estimated_pose - rotated_poses[i + 20:i + 40, :2], axis=0)
+        velocity = rotated_poses[i - 10:i + 10, :2] - rotated_poses[i - 20:i, :2]  # 0-10
+        estimated_pose = rotated_poses[i - 10:i + 10, :2] + velocity * 3
+        delta_pose = np.mean(estimated_pose - rotated_poses[i + 20:i + 40, :2], axis=0)  # 0-30
         # y_threshold = 4
         x_threshold = 5
 
@@ -255,8 +260,9 @@ st.sidebar.title("STR Scenario Visualization")
 # Initialize data in the app state
 if not st.session_state.scenario_ids_by_file:
     st.session_state.new_frame = 'Initializating...'
-    if 'val' in root_folders:
-        st.session_state.dataset = load_data(root=index_root, split='val', agent_type=args.agent_type, select=False)
+    target_split = 'val'
+    if target_split in root_folders:
+        st.session_state.dataset = load_data(root=index_root, split=target_split, agent_type=args.agent_type, select=False)
         if args.training_log_path is not None:
             # load training log from pickle
             with open(args.training_log_path, 'rb') as f:
@@ -264,7 +270,6 @@ if not st.session_state.scenario_ids_by_file:
             # st.session_state.dataset = st.session_state.dataset.filter(lambda example: convert_names_to_ids(
             #     file_names=[example['file_name']],t0_frame_ids=[example['frame_id']]
             # )[0] in training_log['miss_scenarios'], num_proc=mp.cpu_count())
-            print('after filter: ', len(st.session_state.dataset))
         for i, each_sample in enumerate(st.session_state.dataset):
             file_name = each_sample['file_name']
             if args.training_log_path is not None:
@@ -282,6 +287,7 @@ if not st.session_state.scenario_ids_by_file:
                 'route_ids': each_sample['route_ids'],
                 'dataset_index': i
             })
+        print('after filter: ', len(st.session_state.dataset))
     print('Updating data', st.session_state.running_conditions)
 
 agent_dic = None
@@ -325,6 +331,7 @@ if make_prediction:
         with open(config_path) as f:
             model_args = json.load(f)
         print('loaded model args: ', model_args)
+
         model_args = LoadedModelArguments(model_args)
         model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
         model_args.model_pretrain_name_or_path = args.model_checkpoint_path
@@ -338,7 +345,8 @@ if make_prediction:
         prepared_data = static_coor_rasterize(sample=current_data,
                                               data_path=args.saved_dataset_folder,
                                               agent_dic=agent_dic,
-                                              all_maps_dic={map_name: road_dic})
+                                              all_maps_dic={map_name: road_dic},
+                                              use_proposal=True)
         prepared_data = np_to_tensor(prepared_data)
         prepared_data.update({'road_dic': road_dic,
                               'route_ids': current_data['route_ids'],
@@ -352,16 +360,24 @@ if make_prediction:
             image_dictionary = save_raster(inputs=prepared_data, sample_index=0,
                                            prediction_trajectory_by_gen=prediction_generation['traj_logits'][0],
                                            prediction_key_point_by_gen=prediction_generation['key_points_logits'][0])
-            with st.sidebar.expander('raster_visualization', expanded=True):
-                for each_key in image_dictionary:
-                    image = image_dictionary[each_key]
-                    st.image(image/255, caption=each_key, use_column_width=True, clamp=True, channels='BGR')
             st.session_state.data['prediction_generation'] = ego_to_global(
                 prediction_generation['traj_logits'][0].numpy(),
                 agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
             st.session_state.data['pred_kp_generation'] = ego_to_global(
                 prediction_generation['key_points_logits'][0].numpy(),
                 agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
+            if model.use_proposal:
+                with st.sidebar.expander('Proposal Prediction', expanded=True):
+                    print('proposal prediction result: ', prediction_generation['proposal'].numpy().tolist()[0])
+                    print('proposal prediction scores: ', prediction_generation['proposal_scores'].numpy().tolist()[0])
+                    st.session_state.data['proposal_generation'] = prediction_generation['proposal'].numpy().tolist()[0]
+                    chart_data = {'scores': prediction_generation['proposal_scores'].numpy()[0],
+                                  "index": np.array(['Left', 'Right', 'Fwd', 'Bwd', 'Same'])}
+                    st.bar_chart(chart_data, x='index', y='scores')
+            with st.sidebar.expander('Raster Visualization', expanded=True):
+                for each_key in image_dictionary:
+                    image = image_dictionary[each_key]
+                    st.image(image/255, caption=each_key, use_column_width=True, clamp=True, channels='BGR')
 
 # Render the component with given data, and it will return a new timestamp if animating
 st.session_state.new_frame = planning_map(data=st.session_state.data, key="planning_map")  # in 10Hz or None

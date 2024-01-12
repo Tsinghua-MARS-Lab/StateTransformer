@@ -6,6 +6,7 @@ Train a Transformer ML Model for Planning
 
 import logging
 import os
+import random
 import sys
 import pickle
 import copy
@@ -41,7 +42,6 @@ from transformer4planning.trainer import compute_metrics
 from datasets import Dataset, Value
 
 # os.environ["WANDB_DISABLED"] = "true"
-
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
         index_path = os.path.join(index_root_folders, index)
         if os.path.isdir(index_path):
             # load training dataset
-            logger.info("Loading training dataset {}".format(index_path))
+            print("Loading dataset {}".format(index_path))
             dataset = Dataset.load_from_disk(index_path)
             if dataset is not None:
                 datasets.append(dataset)
@@ -80,6 +80,8 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
     dataset.set_format(type='torch')
     # if "centerline" in dataset.column_names:
     #     dataset = dataset.filter(lambda example: np.sum(np.array(example["centerline"])) != 0, num_proc=mp.cpu_count())
+    # if 'halfs_intention' in dataset.column_names and split == 'train':
+    #     dataset = dataset.filter(lambda example: not (int(example["halfs_intention"]) == 4 and random.random() > 0.1), num_proc=mp.cpu_count())
 
     if agent_type != "all":
         agent_type_list = agent_type.split()
@@ -185,8 +187,9 @@ def main():
             train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-    
-    if training_args.do_eval and 'test' in root_folders:
+
+    if training_args.do_test and 'test' in root_folders:
+        # TODO: compatible with older training args
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
         print('Testset not found, using training set as test set')
@@ -198,6 +201,10 @@ def main():
         print('Validation set not found, using training set as val set')
         val_dataset = test_dataset
         # val_dataset = train_dataset
+
+    if data_args.do_closed_loop_simulation and 'val1k' in root_folders:
+        val1k_dataset = load_dataset(index_root, "val1k", data_args.dataset_scale, data_args.agent_type, False)
+        val1k_dataset = val1k_dataset.suffle(seed=training_args.seed)
 
     if model_args.task == "nuplan":
         all_maps_dic = {}
@@ -221,18 +228,18 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
-    clf_metrics = dict(
-        accuracy=evaluate.load("accuracy"),
-        f1=evaluate.load("f1"),
-        precision=evaluate.load("precision"),
-        recall=evaluate.load("recall")
-    )
-    if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token 
-        model.clf_metrics = clf_metrics
-
+    # clf_metrics = dict(
+    #     accuracy=evaluate.load("accuracy"),
+    #     f1=evaluate.load("f1"),
+    #     precision=evaluate.load("precision"),
+    #     recall=evaluate.load("recall")
+    # )
+    # if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token
+    #     model.clf_metrics = clf_metrics
     if training_args.do_train:
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
+            # os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / training_args.dataloader_num_workers))
             os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / 8))
         train_dataset = dataset_dict["train"]
         if data_args.max_train_samples is not None:
@@ -325,23 +332,19 @@ def main():
     if training_args.do_eval:
         if not training_args.do_train and training_args.resume_from_checkpoint is not None:
             assert 'pretrain' in model_args.model_name, 'resume_from_checkpoint is only for training, use pretrain model to load for eval only'
-        # demo_id = ['ffbd3b860a825ef9'] 
-        # demo_id = ['ff3e4f2876045591']
-        #         #    'ffaf0595e6b15a1d', 'ff9f884349e65234', 'ff87f53ee3b85930', 'ff3e4f2876045591']
-        # def filter(sample):
-        #     if sample["scenario_id"] in demo_id:
-        #         return True
-        #     else:
-        #         return False
-        # eval_dataset = eval_dataset.filter(filter)
-        # for each in eval_dataset:
-        #     print("scenario_id", each["scenario_id"], "timestamp", each["timestamp"], "frame_id", each["frame_id"])
         result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
         logger.info("***** Final Eval results *****")
         logger.info(f"  {result}")
         # hyperparams = {"model": model_args.model_name, "dataset": data_args.saved_dataset_folder, "seed": training_args.seed}
         # evaluate.save("./results/", ** result, ** hyperparams)
         # logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
+
+    if data_args.do_closed_loop_simulation:
+        """
+        Will save closed loop simulation results
+        """
+        logger.info("*** Closed Loop Simulation ***")
+
 
     if training_args.do_predict:
         # Currently only supports single GPU predict outputs
@@ -538,16 +541,6 @@ def main():
         trainer.push_to_hub(**kwargs)
     else:
         trainer.create_model_card(**kwargs)
-
-    # Automatically saving all args into a json file.
-    # TODO: Add this into Trainer class to save config while saving other logs
-    # all_args_dic = {**model_args.__dict__, **data_args.__dict__, **config_args.__dict__, **training_args.__dict__}
-    # if training_args.do_train:
-    #     with open(os.path.join(training_args.output_dir, "training_args.json"), 'w') as f:
-    #         json.dump(all_args_dic, f, indent=4)
-    # elif training_args.do_eval:
-    #     with open(os.path.join(training_args.output_dir, "eval_args.json"), 'w') as f:
-    #         json.dump(all_args_dic, f, indent=4)
 
     return results
 

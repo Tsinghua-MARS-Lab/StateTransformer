@@ -21,6 +21,7 @@ def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **
     """
     # padding for tensor data
     expected_padding_keys = ["road_ids", "route_ids", "traffic_ids"]
+    # expected_padding_keys = ["route_ids", "traffic_ids"]
     agent_id_lengths = list()
     for i, d in enumerate(batch):
         agent_id_lengths.append(len(d["agent_ids"]))
@@ -29,6 +30,7 @@ def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **
         agent_ids = d["agent_ids"]
         agent_ids.extend(["null"] * (max_agent_id_length - len(agent_ids)))
         batch[i]["agent_ids"] = agent_ids
+
     padded_tensors = dict()
     for key in expected_padding_keys:
         tensors = [data[key] for data in batch]
@@ -95,11 +97,20 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     filename = sample["file_name"]
     map = sample["map"]
     split = sample["split"]
-    frame_id = sample["frame_id"]
-    road_ids = sample["road_ids"]
-    if not isinstance(road_ids, list):
-        road_ids = road_ids.tolist()
-    agent_ids = sample["agent_ids"]  # list of strings
+    frame_id = sample["frame_id"]  # current frame of this sample
+
+    if "road_ids" not in sample.keys():
+        assert False
+    else:
+        road_ids = sample["road_ids"]
+        if not isinstance(road_ids, list):
+            road_ids = road_ids.tolist()
+
+    if "agent_ids" not in sample.keys():
+        assert False
+    else:
+        agent_ids = sample["agent_ids"]  # list of strings
+
     traffic_light_ids = sample["traffic_ids"]
     if not isinstance(traffic_light_ids, list):
         traffic_light_ids = traffic_light_ids.tolist()
@@ -148,7 +159,16 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     if agent_dic is not None:
         pass
     elif filename is not None:
-        pickle_path = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
+        path_per_city = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
+        path_all_city = os.path.join(data_path, f"{split}", f"all_cities", f"{filename}.pkl")
+        if os.path.exists(path_per_city):
+            pickle_path = path_per_city
+        elif os.path.exists(path_all_city):
+            pickle_path = path_all_city
+        else:
+            print(f"Error: cannot load {path_per_city} from {data_path} with {map}")
+            return None
+
         if os.path.exists(pickle_path):
             # current_time = time.time()
             # print('loading data from disk ', split, map, filename)
@@ -164,9 +184,6 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             # print('loading data from disk done ', split, map, filename, time_spent, 'total frames: ', agent_dic['ego']['pose'].shape[0])
             # if split == 'test':
             #     print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
-        else:
-            print(f"Error: cannot load {pickle_path} from {data_path} with {map}")
-            return None
     else:
         assert False, 'either filename or agent_dic should be provided for online process'
 
@@ -177,10 +194,14 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     scenario_start_frame = frame_id - past_seconds * frame_rate
     scenario_end_frame = frame_id + future_seconds * frame_rate
     # for example,
-    # [10, 11, ...., 10+(2+8)*20=210], past_interval=2, future_interval=2, current_frame=50
-    # sample_frames_in_past = [10, 12, 14, ..., 48], number=(50-10)/2=20
+    if kwargs.get('selected_exponential_past', False):
+        # 2s, 1s, 0.5s
+        sample_frames_in_past = [scenario_start_frame + 0, scenario_start_frame + 20, scenario_start_frame + 30]
+    else:
+        # [10, 11, ...., 10+(2+8)*20=210], past_interval=2, future_interval=2, current_frame=50
+        # sample_frames_in_past = [10, 12, 14, ..., 48], number=(50-10)/2=20
+        sample_frames_in_past = list(range(scenario_start_frame, frame_id, past_sample_interval))  # add current frame in the end
     # sample_frames_in_future = [52, 54, ..., 208, 210], number=(210-50)/2=80
-    sample_frames_in_past = list(range(scenario_start_frame, frame_id, past_sample_interval))  # add current frame in the end
     sample_frames_in_future = list(range(frame_id + future_sample_interval, scenario_end_frame + future_sample_interval, future_sample_interval))  # + one step to avoid the current frame
 
     sample_frames = sample_frames_in_past + sample_frames_in_future
@@ -347,6 +368,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                      tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
     # agent raster
     cos_, sin_ = math.cos(-origin_ego_pose[3]), math.sin(-origin_ego_pose[3])
+
     for _, agent_id in enumerate(agent_ids):
         if agent_id == "null":
             continue
@@ -455,9 +477,17 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     if 'halfs_intention' in sample and kwargs.get('use_proposal', False):
         if sample['halfs_intention'].isnan():
             if sample['split'] in ['train', 'val']:
-                print('debug: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
+                print('No proposal loaded at preprocess: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
             return None
         result_to_return["halfs_intention"] = sample['halfs_intention']
+    if 'intentions' in sample and kwargs.get('use_proposal', False):
+        # if sample['split'] in ['val']:
+        #     print('test: ', sample['intentions'])
+        # if sample['intentions'].isnan():
+        #     if sample['split'] in ['train', 'val']:
+        #         print('No proposal loaded at preprocess: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
+        #     return None
+        result_to_return["intentions"] = sample['intentions']
     # try:
     #     result_to_return["scenario_type"] = sample["scenario_type"]
     # except:

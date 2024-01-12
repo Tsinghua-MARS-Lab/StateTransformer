@@ -12,6 +12,7 @@ import numpy.typing as npt
 import shapely
 import torch
 import copy
+import time
 
 from nuplan.common.actor_state.ego_state import DynamicCarState, EgoState
 from nuplan.common.actor_state.state_representation import Point2D
@@ -21,11 +22,9 @@ from nuplan.planning.simulation.observation.observation_type import DetectionsTr
 from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner, PlannerInitialization, PlannerInput
 from nuplan.planning.simulation.trajectory.abstract_trajectory import AbstractTrajectory
 from nuplan.planning.simulation.trajectory.interpolated_trajectory import InterpolatedTrajectory
-from nuplan.planning.simulation.planner.idm_planner import IDMPlanner
 from nuplan.common.actor_state.vehicle_parameters import get_pacifica_parameters
 from nuplan.planning.simulation.planner.planner_report import PlannerReport
 from nuplan.planning.simulation.controller.motion_model.kinematic_bicycle import KinematicBicycleModel
-import time
 from nuplan.planning.simulation.planner.ml_planner.transform_utils import _get_absolute_agent_states_from_numpy_poses, _get_fixed_timesteps
 
 def generate_contour_pts(center_pt, w, l, direction):
@@ -61,31 +60,13 @@ def get_angle_of_a_line(pt1, pt2):
     return angle
 
 
-class ControlTFPlanner(AbstractPlanner):
+class STRPlanner(AbstractPlanner):
 
     requires_scenario: bool = True
 
     def __init__(self,
-                 max_velocity: float = 5.0,
-                 use_backup_planner=True,
                  model=None,
-                 steering_angle: float = 0.0,
-                 map_radius: float = 50,  # following default PDM offset Model
                  **kwargs):
-
-        self.max_velocity = max_velocity
-        self.steering_angle = steering_angle
-        self.use_backup_planner = use_backup_planner
-        self.idm_planner = IDMPlanner(
-            target_velocity=max_velocity,
-            min_gap_to_lead_agent=1.0,
-            headway_time=1.5,
-            accel_max=1.0,
-            decel_max=3.0,
-            planned_trajectory_samples=80,
-            planned_trajectory_sample_interval=0.1,
-            occupancy_map_radius=map_radius
-        )
         self.vehicle = get_pacifica_parameters()
         self.motion_model = KinematicBicycleModel(self.vehicle)
         # model initialization and configuration
@@ -94,8 +75,8 @@ class ControlTFPlanner(AbstractPlanner):
         scenario = kwargs.get('scenario', None)
         self.scenario_type = scenario.scenario_type
         self.scenario_id = scenario.token
-        # self.use_gpu = False  # torch.cuda.is_available()
-        self.use_gpu = model.device != 'cpu'
+        self.use_gpu = False  # torch.cuda.is_available()
+        # self.use_gpu = model.device != 'cpu'
         self._iteration = 0
         self.road_dic = None
         del scenario
@@ -105,8 +86,8 @@ class ControlTFPlanner(AbstractPlanner):
         self.initialization = initialization
         self.goal = initialization.mission_goal
         self.route_roadblock_ids = initialization.route_roadblock_ids
+        self.route_roadblock_ids = [int(roadblock_id) for roadblock_id in self.route_roadblock_ids]
         self._map_api = initialization.map_api
-        self.idm_planner.initialize(initialization)
 
     def name(self) -> str:
         """ Inherited, see superclass. """
@@ -116,7 +97,6 @@ class ControlTFPlanner(AbstractPlanner):
         return DetectionsTracks
 
     def compute_planner_trajectory(self, current_input) -> List[AbstractTrajectory]:
-        use_backup_planner = self.use_backup_planner
         start = time.time()
         print("count: ", self._iteration, "cuda:", torch.cuda.is_available(), 'scenario type:', self.scenario_type, "device: ", self.model.device)
         self._iteration += 1
@@ -132,7 +112,7 @@ class ControlTFPlanner(AbstractPlanner):
         frame_id = context_length * frame_rate_change - 1  # 22 * 2 = 44 in 20hz
         scenario_start_frame = frame_id - past_seconds * frame_rate  # 44 - 2 * 20 = 4
         past_sample_interval = 2
-        # past_sample_interval = int(self.model.model_args.past_sample_interval)  # 5
+        # past_sample_interval = int(self.model.config.past_sample_interval)  # 5
         sample_frames_in_past_20hz = list(range(scenario_start_frame, frame_id, past_sample_interval))  # length = 8
         sample_frames_in_past_10hz = [int(frame_id / frame_rate_change) for frame_id in sample_frames_in_past_20hz]  # length = 8
         # past_frames = int(past_seconds * frame_rate)
@@ -181,12 +161,12 @@ class ControlTFPlanner(AbstractPlanner):
         # compute idm trajectory and scenario flag
         traffic_stop_threshold = 5
         
-        pred_length = int(160 / self.model.model_args.future_sample_interval)
-        idm_reference_trajectory = self.idm_planner.compute_planner_trajectory(current_input)
+        pred_length = int(160 / self.model.config.future_sample_interval)
         with torch.no_grad():
+            print("start generating trajectory", self.use_gpu)
             if self.use_gpu:
                 device = self.model.device
-                output = self.model.generate(
+                prediction_generation = self.model.generate(
                     context_actions=torch.tensor(context_action[np.newaxis, ...]).to(device),
                     high_res_raster=torch.tensor(high_res_raster[np.newaxis, ...]).to(device),
                     low_res_raster=torch.tensor(low_res_raster[np.newaxis, ...]).to(device),
@@ -199,8 +179,10 @@ class ControlTFPlanner(AbstractPlanner):
                     scenario_type=self.scenario_type if self.scenario_type is not None else None,
                     # idm_reference_global=idm_reference_trajectory._trajectory 
                 )
+                pred_traj = prediction_generation['traj_logits'].detach.cpu()
+                pred_key_points = prediction_generation['key_points_logits'].detach.cpu()
             else:
-                output = self.model.generate(
+                prediction_generation = self.model.generate(
                     context_actions=torch.tensor(context_action[np.newaxis, ...]),
                     high_res_raster=torch.tensor(high_res_raster[np.newaxis, ...]),
                     low_res_raster=torch.tensor(low_res_raster[np.newaxis, ...]),
@@ -209,19 +191,13 @@ class ControlTFPlanner(AbstractPlanner):
                     route_ids=self.route_roadblock_ids,
                     ego_pose=oriented_point,
                     road_dic=self.road_dic,
-                    map=self._map_api.map_name,
+                    map_name=self._map_api.map_name,
                     scenario_type=self.scenario_type if self.scenario_type is not None else None,
                     # idm_reference_global=idm_reference_trajectory._trajectory 
                 )
-            pred_traj = output[0, -pred_length:].detach().cpu()  # (80, 2) or (80, 4)
-            pred_key_points = output[0, :-pred_length].detach().cpu()
-
-        pred_traj = torch.cat([pred_traj[..., :2], pred_traj[..., -1].unsqueeze(-1),], dim=1).numpy()
-                               # torch.ones([pred_length, 1]) * ego_states[-1].rear_axle.heading], dim=1).numpy()
-        
-        # print('inspect 240 trajshape: ', pred_traj.shape)
-        # print('inspect 241 traj: ', pred_traj)
-        # print('inspect 242 kp: ', pred_key_points)
+                pred_traj = prediction_generation['traj_logits'].numpy()[0]  # (80, 2) or (80, 4)
+                pred_key_points = prediction_generation['key_points_logits'].numpy()[0]
+        # pred_traj = torch.cat([pred_traj[..., :2], pred_traj[..., -1].unsqueeze(-1)], dim=1).numpy()
         # # post-processing
         low_filter = False
         low_threshold = 0.1
@@ -241,92 +217,7 @@ class ControlTFPlanner(AbstractPlanner):
                 last_pose = filtered_traj[idx, :] = [last_pose[0] + dx, last_pose[1] + dy, each_pose[2]]
             pred_traj = filtered_traj
 
-        # # print('inspect 263: ', pred_traj)
-
-        # absolute_traj = np.zeros_like(pred_traj)
-        # cos_, sin_ = math.cos(-ego_trajectory[-1][2]), math.sin(-ego_trajectory[-1][2])
-        # for i in range(pred_traj.shape[0]):
-        #     new_x = pred_traj[i, 0] * cos_ + pred_traj[i, 1] * sin_ + ego_trajectory[-1][0]
-        #     new_y = pred_traj[i, 1] * cos_ - pred_traj[i, 0] * sin_ + ego_trajectory[-1][1]
-        #     absolute_traj[i, 0] = new_x
-        #     absolute_traj[i, 1] = new_y
-        #     absolute_traj[i, 2] = 0
-        #     absolute_traj[i, -1] = ego_trajectory[-1][-1]
-
-        # # compare pred trajectory and idm trajectory
-        # # idm_threshold = 3
-        # # traffic_stop_threshold = 5
-        # # agent_stop_threshold = 3
-        # # ## judge if route is valid:
-        # # all_nearby_map_instances = self.map_api.get_proximal_map_objects(
-        # #     Point2D(ego_trajectory[-1, 0], ego_trajectory[-1, 1]),
-        # #     0.001, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
-        # # all_nearby_map_instances_ids = []
-        # # for each_type in all_nearby_map_instances:
-        # #     for each_ins in all_nearby_map_instances[each_type]:
-        # #         all_nearby_map_instances_ids.append(each_ins.id)
-        # # for each in all_nearby_map_instances_ids:
-        # #     if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
-        # #         in_route = True
-        # #         break
-        # #     else:
-        # #         in_route = False
-        # #         print("route wrong, forbid IDM")
-        # # use_backup_planner = use_backup_planner and in_route
-        # # if use_backup_planner:
-        # #     # compute idm trajectory and scenario flag
-        # #     idm_trajectory, flag, relative_distance = self.idm_planner.compute_planner_trajectory(current_input)
-        # #     if flag == "redlight" and relative_distance < traffic_stop_threshold:
-        # #         return idm_trajectory
-        # #
-        # #     out_pts = 0
-        # #     sample_frames = list(range(10)) + list(range(10, absolute_traj.shape[0], 5))
-        # #     for i in sample_frames:
-        # #         all_nearby_map_instances = self.map_api.get_proximal_map_objects(
-        # #             Point2D(absolute_traj[i, 0], absolute_traj[i, 1]),
-        # #             0.1, [SemanticMapLayer.ROADBLOCK, SemanticMapLayer.ROADBLOCK_CONNECTOR])
-        # #         all_nearby_map_instances_ids = []
-        # #         for each_type in all_nearby_map_instances:
-        # #             for each_ins in all_nearby_map_instances[each_type]:
-        # #                 all_nearby_map_instances_ids.append(each_ins.id)
-        # #         any_in = False
-        # #         for each in all_nearby_map_instances_ids:
-        # #             if each in self.route_roadblock_ids or int(each) in self.route_roadblock_ids:
-        # #                 any_in = True
-        # #                 break
-        # #         if not any_in:
-        # #             out_pts += 1
-        # #         if out_pts > idm_threshold:
-        # #             break
-        # #
-        # #     if out_pts > idm_threshold:
-        # #         out_of_route = True
-        # #         print('OUT OF ROUTE, Use IDM Planner to correct trajectory')
-        # #
-        # #         print(time.time() - start)
-        # #         return idm_trajectory
-
-
         relative_traj = pred_traj.copy()
-        
-        # # compute heading by tan
-        # yaw_change_upper_threshold = 0.1
-        # # generating yaw angle from relative_traj
-        # dx = relative_traj[4::5, 0] - relative_traj[:-4:5, 0]
-        # dy = relative_traj[4::5, 1] - relative_traj[:-4:5, 1]
-        # distances = np.sqrt(dx ** 2 + dy ** 2)
-        # relative_yaw_angles = np.where(distances > 0.1, np.arctan2(dy, dx), 0)
-        # # accumulate yaw angle
-        # # relative_yaw_angles = yaw_angles.cumsum()
-        # relative_yaw_angles_full = np.repeat(relative_yaw_angles, 5, axis=0)
-        # relative_traj[:, -1] = relative_yaw_angles_full
-
-        # heading = relative_traj[0, -1]
-        # for i in range(relative_traj.shape[0]):
-        #     if i > 1 and euclidean_distance(relative_traj[i - 1, :2], relative_traj[i, :2]) > 0.1:
-        #         delta_heading = get_angle_of_a_line(relative_traj[i - 1, :2], relative_traj[i, :2])
-        #         heading = normalize_angle(heading + min(delta_heading, yaw_change_upper_threshold))
-        #     relative_traj[i, -1] = heading
 
         # change relative poses to absolute states
         if relative_traj.shape[1] == 4:
@@ -361,12 +252,8 @@ class ControlTFPlanner(AbstractPlanner):
                                                              timesteps=planned_time_points)
         states.insert(0, ego_states[-1])
 
-        # post process
-        # if use_backup_planner and flag == "leadagent" and relative_distance < agent_stop_threshold:
-        #     states[1:5] = idm_trajectory.get_sampled_trajectory()[1:5]
-
         trajectory = InterpolatedTrajectory(states)
-        # print("time consumed", time.time() - start)
+        print("time consumed", time.time() - start)
         return trajectory
 
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, traffic_data=None,
@@ -382,7 +269,7 @@ class ControlTFPlanner(AbstractPlanner):
         traffic_types = 4
         high_res_scale = 4
         low_res_scale = 0.77
-        # context_length = past_frames // self.model.model_args.past_sample_interval  # 4
+        # context_length = past_frames // self.model.config.past_sample_interval  # 4
         context_length = len(ego_trajectory)
         # print("context length", context_length)
         # assert context_length == len(ego_trajectory), f'context length {context_length} != ego trajectory length {len(ego_trajectory)}'

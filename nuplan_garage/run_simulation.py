@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 set_default_path()
 
 # If set, use the env. variable to overwrite the Hydra config
-CONFIG_PATH = os.getenv('NUPLAN_HYDRA_CONFIG_PATH', 'config/simulation')
+# CONFIG_PATH = os.getenv('NUPLAN_HYDRA_CONFIG_PATH', 'config/simulation')
+CONFIG_PATH = os.getenv('NUPLAN_HYDRA_CONFIG_PATH', 'planning/script/config/simulation')
 
 if os.environ.get('NUPLAN_HYDRA_CONFIG_PATH') is not None:
     CONFIG_PATH = os.path.join('../../../../', CONFIG_PATH)
@@ -116,7 +117,16 @@ def main(cfg: DictConfig) -> None:
 if __name__ == '__main__':
     import os
     os.environ['HYDRA_FULL_ERROR'] = '1'
-    os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan'
+    # os.environ['NUPLAN_DATA_ROOT'] = '/public/MARS/datasets/nuPlan'
     os.environ['NUPLAN_MAPS_ROOT'] = '/public/MARS/datasets/nuPlan/nuplan-maps-v1.0'
-    os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/trainval'
+    # os.environ['NUPLAN_DB_FILES'] = '/public/MARS/datasets/nuPlan/nuplan-v1.1/trainval'
+    # os.environ['NUPLAN_DATA_ROOT'] = '/localdata_hdd1/nuplan/dataset'
+    os.environ['NUPLAN_DATA_ROOT'] = '/localdata_ssd/nuplan_raw/nuplan-v1.1'
+    # print('setting env: ', os.environ['NUPLAN_DB_FILES'])
+    # update planner builder to nuplan-devkit
+    path_of_planner_builder = 'nuplan_garage/planner_builder.py'
+    import nuplan
+    target_path = os.path.join(nuplan.__file__.split('__init__.py')[0], 'planning/script/builders/planner_builder.py')
+    os.system('cp {} {}'.format(path_of_planner_builder, target_path))
+
     main()

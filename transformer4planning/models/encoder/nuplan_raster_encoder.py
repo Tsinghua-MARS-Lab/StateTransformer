@@ -39,19 +39,38 @@ class CNNDownSamplingResNet(nn.Module):
 
 
 class NuplanRasterizeEncoder(TrajectoryEncoder):
-    def __init__(self, 
-                 cnn_kwargs:Dict, 
-                 action_kwargs:Dict,
-                 config=None
-                 ):
+    def __init__(self,  config=None):
 
         super().__init__(config)
-        self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None), 
-                                                    in_channels=cnn_kwargs.get("in_channels", None), 
-                                                    resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
-                                                    pretrain=cnn_kwargs.get("pretrain", False))
+        action_kwargs = dict(
+            d_embed=self.config.n_embd
+        )
+
+        # if 'resnet' in self.config.raster_encoder_type:
+        if 'vit' in self.config.raster_encoder_type:
+            from transformers import ViTModel, ViTConfig
+            vit_config = ViTConfig()
+            vit_config.hidden_size = self.config.n_embd // 2
+            vit_config.num_channels = self.config.raster_channels
+            vit_config.intermediate_size = 512  # must be multiplier of 12 (number of the head)
+            vit_config.num_attention_heads = self.config.n_head
+            vit_config.return_dict = True
+            self.image_downsample = ViTModel(vit_config)
+        else:
+            cnn_kwargs = dict(
+                d_embed=self.config.n_embd // 2,
+                in_channels=self.config.raster_channels,
+                resnet_type=self.config.raster_encoder_type,
+                pretrain=self.config.pretrain_encoder
+            )
+            self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None),
+                                                        in_channels=cnn_kwargs.get("in_channels", None),
+                                                        resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
+                                                        pretrain=cnn_kwargs.get("pretrain", False))
+        # separate key point encoder is hard to train with larger models due to sparse signals
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        if self.use_key_points != 'no':
+
+        if self.config.separate_kp_encoder:
             self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
         if self.use_proposal:
             self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())
@@ -86,16 +105,22 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         # raster observation encoding & context action ecoding
         action_embeds = self.action_m_embed(context_actions)
         
-        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light, self.config.use_centerline)
-        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light, self.config.use_centerline)
+        high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light)
+        low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), context_length, self.config.with_traffic_light)
         # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
         # context_length: 8, 40 frames / 5
         batch_size, context_length, c, h, w = high_res_seq.shape
 
-        high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
-        high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
-        low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+        if self.config.raster_encoder_type == 'vit':
+            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w)).pooler_output
+            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w)).pooler_output
+            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
+        else:
+            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * context_length, c, h, w))
+            high_res_embed = high_res_embed.reshape(batch_size, context_length, -1)
+            low_res_embed = low_res_embed.reshape(batch_size, context_length, -1)
 
         state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
         n_embed = action_embeds.shape[-1]
@@ -109,10 +134,27 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         # add proposal embedding
         if self.use_proposal:
-            halfs_intention = kwargs.get("halfs_intention", None)
-            assert halfs_intention is not None, "halfs_intention should not be None when using proposal"
-            proposal_embeds = self.proposal_m_embed(halfs_intention.unsqueeze(-1).float()).unsqueeze(1)
-            input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
+            if self.config.autoregressive_proposals:
+                intentions = kwargs.get('intentions', None)  # batch_size, 16
+                assert intentions is not None, "intentions should not be None when using proposal"
+                proposal_embeds = self.proposal_m_embed(intentions.unsqueeze(-1).float())  # batch_size, 16, 256
+                # print('test encoder 1: ', proposal_embeds.shape)
+                input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
+            else:
+                halfs_intention = kwargs.get("halfs_intention", None)
+                intentions = kwargs.get("intentions", None)
+                if halfs_intention is None:
+                    if len(intentions.shape) == 1:
+                        intentions = intentions.unsqueeze(0)  # add batch dimension
+                    halfs_intention = intentions[:, 0]
+                assert halfs_intention is not None, "halfs_intention should not be None when using proposal"
+                # check if halfs_intention is a scalar
+                if len(halfs_intention.shape) == 0:
+                    halfs_intention = halfs_intention.unsqueeze(0)  # add batch dimension
+                # print('test encoder 1: ', halfs_intention, halfs_intention.shape, halfs_intention.unsqueeze(-1).float().shape)
+                proposal_embeds = self.proposal_m_embed(halfs_intention.unsqueeze(-1).float()).unsqueeze(1)  # batch_size, 1, 256
+                # print('test encoder 2: ', proposal_embeds.shape)
+                input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
 
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
@@ -129,8 +171,11 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 # keep the same information when generating future points
                 future_key_points_aug[:, :, 2:] = 0
 
-            # future_key_embeds = self.action_m_embed(future_key_points_aug)
-            future_key_embeds = self.kps_m_embed(future_key_points_aug)
+            if self.config.separate_kp_encoder:
+                future_key_embeds = self.kps_m_embed(future_key_points_aug)
+            else:
+                future_key_embeds = self.action_m_embed(future_key_points_aug)
+
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
 
@@ -145,6 +190,9 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         }
 
         if self.use_proposal:
-            info_dict["halfs_intention"] = halfs_intention
+            if self.config.autoregressive_proposals:
+                info_dict["intentions"] = intentions
+            else:
+                info_dict["halfs_intention"] = halfs_intention
 
         return input_embeds, info_dict
