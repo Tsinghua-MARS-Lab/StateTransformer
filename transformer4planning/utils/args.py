@@ -140,6 +140,12 @@ class ModelArguments:
     )
     ######## end of diffusion decoder args ########
 
+    ######## begin of camera images args ########
+    camera_image_encoder: Optional[str] = field(
+        default=None, metadata={"help": "choose from [dinov2], set None to not use camera images"}
+    )
+    ####### end of camera images args ########
+
     ######## begin of nuplan args ########
     with_traffic_light: Optional[bool] = field(
         default=True
@@ -208,7 +214,12 @@ class DataTrainingArguments:
     saved_valid_dataset_folder: Optional[str] = field(
         default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
     )
-
+    camera_images_path: Optional[str] = field(
+        default=None, metadata={"help": "path to the folder containing camera images"}
+    )
+    use_mission_goal: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use mission goal in the model"}
+    )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={

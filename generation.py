@@ -145,7 +145,8 @@ def main(args):
                 loaded_dic, _ = dl.get_next(seconds_in_future=15, sample_interval=args.sample_interval,
                                             map_name=args.map_name,
                                             scenarios_to_keep=scenarios_to_keep,
-                                            filter_still=args.filter_still,)
+                                            filter_still=args.filter_still,
+                                            sensor_blob_path=args.sensor_blob_path)
                 if loaded_dic is None:
                     continue
                 if args.keep_future_steps:
@@ -470,6 +471,7 @@ if __name__ == '__main__':
     parser.add_argument("--running_mode", type=int, default=None)
     parser.add_argument("--data_path", type=str, default="train_singapore")
     parser.add_argument("--dataset_root", type=str, default="/localdata_hdd/nuplan/dataset")
+    parser.add_argument("--sensor_blob_path", type=str, default=None)
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
     parser.add_argument("--nsm_label_path", type=str,
                         default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")

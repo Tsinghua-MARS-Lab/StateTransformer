@@ -40,7 +40,6 @@ class CNNDownSamplingResNet(nn.Module):
 
 class NuplanRasterizeEncoder(TrajectoryEncoder):
     def __init__(self,  config=None):
-
         super().__init__(config)
         action_kwargs = dict(
             d_embed=self.config.n_embd

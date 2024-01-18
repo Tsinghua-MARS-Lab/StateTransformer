@@ -126,7 +126,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     else:
         y_inverse = 1
 
-    ego_point = sample["ego_goal"].numpy() if "ego_goal" in sample.keys() else None
+    ego_point = sample["ego_goal"].numpy() if "ego_goal" in sample.keys() and kwargs.get('use_mission_goal', False) else None
 
     # clean traffic ids, for legacy reasons, there might be -1 in the list
     traffic_light_ids = [x for x in traffic_light_ids if x != -1]

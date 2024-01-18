@@ -26,7 +26,8 @@ from transformers import (
     HfArgumentParser,
     set_seed,
 )
-from transformer4planning.models.model import build_models
+# from transformer4planning.models.model import build_models
+from transformer4planning.models.backbone.str_base import build_models
 from transformer4planning.utils.args import (
     ModelArguments, 
     DataTrainingArguments, 

@@ -146,7 +146,7 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['fde_score'] = fde_score.mean()
 
     def normalize_angles(angles):
-        return np.atan2(np.sin(angles), np.cos(angles))
+        return np.arctan2(np.sin(angles), np.cos(angles))
 
     # heading error
     if prediction_trajectory_by_generation.shape[-1] == 4:

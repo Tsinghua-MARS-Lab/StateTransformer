@@ -181,7 +181,8 @@ class NuPlanDL:
                  seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
                  map_name=None,
                  scenarios_to_keep=None,
-                 filter_still=False,):
+                 filter_still=False,
+                 sensor_blob_path=None):
         """
         :param sample_interval:
         :param agent_only:
@@ -279,12 +280,25 @@ class NuPlanDL:
                 if data_to_return is None:
                     continue
                 data_to_return['scenario_type'] = scenario_type
-                # goal_state = scenario.get_mission_goal()
-                goal_state = scenario_in_loop.get_expert_goal_state()
-                if goal_state is None:
-                    data_to_return['ego_goal'] = None
+                mission_goal_state = scenario.get_mission_goal()
+                expert_goal_state = scenario.get_expert_goal_state()
+                if mission_goal_state is None:
+                    data_to_return['ego_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0,
+                                                  expert_goal_state.heading]
                 else:
-                    data_to_return['ego_goal'] = [goal_state.point.x, goal_state.point.y, 0, goal_state.heading]
+                    data_to_return['ego_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0,
+                                                  mission_goal_state.heading]
+
+                if sensor_blob_path is not None:
+                    from nuplan.planning.simulation.observation.observation_type import CameraChannel, LidarChannel
+                    from nuplan.database.nuplan_db.nuplan_scenario_queries import get_images_from_lidar_tokens
+                    from typing import cast
+                    scenario._sensor_root = sensor_blob_path
+                    local_store, remote_store = scenario._create_blob_store_if_needed()
+                    retrieved_images = get_images_from_lidar_tokens(
+                        scenario._log_file, [lidar_pc_in_loop.token], [cast(str, channel.value) for channel in CameraChannel]
+                    )
+                    data_to_return['images_path'] = [each.filename_jpg for each in retrieved_images]
 
                 data_to_return['dataset'] = 'NuPlan'
                 data_to_return['lidar_pc_tokens'] = lidar_pc_in_loop.lidar_token
@@ -310,12 +324,25 @@ class NuPlanDL:
             return data_to_return, new_files_loaded
 
         data_to_return['scenario_type'] = scenario_type
-        # goal_state = scenario.get_mission_goal()
-        goal_state = scenario.get_expert_goal_state()
-        if goal_state is None:
-            data_to_return['ego_goal'] = None
+        mission_goal_state = scenario.get_mission_goal()
+        expert_goal_state = scenario.get_expert_goal_state()
+        if mission_goal_state is None:
+            print('expert goal ')
+            data_to_return['ego_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0, expert_goal_state.heading]
         else:
-            data_to_return['ego_goal'] = [goal_state.point.x, goal_state.point.y, 0, goal_state.heading]
+            print('mission goal ')
+            data_to_return['ego_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0, mission_goal_state.heading]
+
+        if sensor_blob_path is not None:
+            from nuplan.planning.simulation.observation.observation_type import CameraChannel, LidarChannel
+            from nuplan.database.nuplan_db.nuplan_scenario_queries import get_images_from_lidar_tokens
+            from typing import cast
+            scenario._sensor_root = sensor_blob_path
+            local_store, remote_store = scenario._create_blob_store_if_needed()
+            retrieved_images = get_images_from_lidar_tokens(
+                scenario._log_file, [lidar_pc.token], [cast(str, channel.value) for channel in CameraChannel]
+            )
+            data_to_return['images_path'] = [each.filename_jpg for each in retrieved_images]
 
         data_to_return['dataset'] = 'NuPlan'
         data_to_return['lidar_pc_tokens'] = log_db.lidar_pc
@@ -994,7 +1021,7 @@ class NuPlanDL:
                     routes_per_file=False,
                     include_intentions=True,
                     include_navigation=True,
-                    filter_still=False) -> dict:
+                    filter_still=False,) -> dict:
 
         skip = False
         agent_dic = self.pack_scenario_to_agentdic(scenario=scenario, total_frames_future=seconds_in_future)
