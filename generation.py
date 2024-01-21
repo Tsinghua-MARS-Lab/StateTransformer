@@ -411,6 +411,7 @@ def main(args):
                                                                    "intentions": Sequence(Value("int64")),
                                                                    "ego_goal": Sequence(Value("float32")),
                                                                    "navigation": Sequence(Value("int64")),
+                                                                   "images_path": Sequence(Value("string")),
                                                                    }),)
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,

@@ -126,9 +126,7 @@ class STR(PreTrainedModel):
             raise NotImplementedError('need to return dict for evaluations in trainer.py')
 
         input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
-        print('STR Forward ', input_embeds.shape)
         transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds, return_dict=return_dict)
-        print('STR Forward 1 ', transformer_outputs_hidden_state.shape)
         trajectory_label = info_dict["trajectory_label"]
 
         loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
@@ -569,6 +567,39 @@ def build_models(model_args):
             config_p.n_embd = config_p.d_model = 2560
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 64
+    elif 'mixtral' in model_args.model_name:
+        from transformer4planning.models.backbone.mixtral import STR_Mixtral, STRMixtralConfig
+        config_p = STRMixtralConfig()
+        config_p.update_by_model_args(model_args)
+        ModelCls = STR_Mixtral
+        tag = 'MixTralTrajectory'
+        if 'mixtral-small' in model_args.model_name:
+            config_p.n_layer = 4
+            config_p.n_embd = config_p.d_model = 256
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 8
+            config_p.num_hidden_layers = 4
+            config_p.hidden_size = 256
+            config_p.intermediate_size = config_p.n_embd * 4
+            config_p.num_attention_heads = 8
+        elif 'mixtral-medium' in model_args.model_name:
+            """
+            Number of parameters: 40M (ViT)
+            """
+            config_p.n_layer = 8
+            config_p.n_embd = config_p.d_model = 512
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 16
+
+        elif 'mixtral-large' in model_args.model_name:
+            """
+            WARNING: Gradient WILL CRUSH DURING TRAINING
+            Number of parameters: 1.3B
+            """
+            config_p.n_layer = 16
+            config_p.n_embd = config_p.d_model = 1000
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 25
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
     if 'scratch' in model_args.model_name:

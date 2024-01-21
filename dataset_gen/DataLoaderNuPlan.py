@@ -283,8 +283,11 @@ class NuPlanDL:
                 mission_goal_state = scenario.get_mission_goal()
                 expert_goal_state = scenario.get_expert_goal_state()
                 if mission_goal_state is None:
-                    data_to_return['ego_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0,
-                                                  expert_goal_state.heading]
+                    print('###### ERROR: mission goal missing for val set, skipping ######')
+                    continue
+                    # data_to_return['ego_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0,
+                    #                               expert_goal_state.heading]
+
                 else:
                     data_to_return['ego_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0,
                                                   mission_goal_state.heading]
@@ -327,10 +330,8 @@ class NuPlanDL:
         mission_goal_state = scenario.get_mission_goal()
         expert_goal_state = scenario.get_expert_goal_state()
         if mission_goal_state is None:
-            print('expert goal ')
             data_to_return['ego_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0, expert_goal_state.heading]
         else:
-            print('mission goal ')
             data_to_return['ego_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0, mission_goal_state.heading]
 
         if sensor_blob_path is not None:

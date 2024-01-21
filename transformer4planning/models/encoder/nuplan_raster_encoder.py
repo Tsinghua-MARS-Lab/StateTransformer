@@ -55,6 +55,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             vit_config.num_attention_heads = self.config.n_head
             vit_config.return_dict = True
             self.image_downsample = ViTModel(vit_config)
+            print('Building ViT encoder')
         else:
             cnn_kwargs = dict(
                 d_embed=self.config.n_embd // 2,
@@ -66,6 +67,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                         in_channels=cnn_kwargs.get("in_channels", None),
                                                         resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                         pretrain=cnn_kwargs.get("pretrain", False))
+            print('Building ResNet encoder')
         # separate key point encoder is hard to train with larger models due to sparse signals
         self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 

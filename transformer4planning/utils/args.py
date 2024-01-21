@@ -203,6 +203,10 @@ class ModelArguments:
     )
     ######## end of Mamba args ########
 
+    use_mission_goal: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use mission goal in the model"}
+    )
+
 @dataclass
 class DataTrainingArguments:
     """
@@ -216,9 +220,6 @@ class DataTrainingArguments:
     )
     camera_images_path: Optional[str] = field(
         default=None, metadata={"help": "path to the folder containing camera images"}
-    )
-    use_mission_goal: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use mission goal in the model"}
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -305,6 +306,9 @@ class PlanningTrainingArguments(TrainingArguments):
     )
     do_test: Optional[bool] = field(
         default=False,
+    )
+    images_cleaning_to_folder: Optional[str] = field(
+        default=None, metadata={"help": "Pass a target folder to clean the raw image folder to the target folder."}
     )
 
     # label_names: Optional[List[str]] = field(
