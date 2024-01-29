@@ -1,0 +1,1041 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<title>Large Trajectory Models are Scalable Motion Predictors and Planners</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+		<link rel="stylesheet" href="assets/css/main.css" />
+		<noscript><link rel="stylesheet" href="assets/css/noscript.css" /></noscript>
+		<link href="images/favicon.png" rel="shortcut icon" />
+	</head>
+	<body class="is-preload">
+
+		<!-- Wrapper -->
+			<div id="wrapper" class="divided">
+
+				<!-- One -->
+					<section class="banner style1 orient-left content-align-center image-position-center fullscreen onload-image-fade-in onload-content-fade-right">
+						<div class="content">
+							<!-- <h1>InterSim</h1> -->
+							<!-- <p>* Denotes equal contribution</p> -->
+							<h2>Large Trajectory Models are Scalable Motion Predictors and Planners</h2>
+							<!-- <h3>A Simulator for <strong>Interactive</strong> Behaviour Simulations</h3> -->
+							<p><a href="https://scholar.google.com/citations?user=D1KNQasAAAAJ&amp;hl=en&amp;authuser=1">Qiao Sun</a><sup>1</sup>,
+								<a href="">Shiduo Zhang</a><sup>1,2</sup>,
+								<a href="">Danjiao Ma</a><sup>3</sup>,
+								<a href="">Jingzhe Shi</a><sup>1,4</sup>,
+								<a href="">Derun Li</a><sup>1,5</sup>,
+								<a href="">Simian Luo</a><sup>1,4</sup>,
+								<a href="">Yu Wang</a><sup>3</sup>,
+								<a href="">Ningyi Xu</a><sup>5</sup>,
+								<a href="">Guangzhi Cao</a><sup>3</sup>,
+								<a href="https://hangzhaomit.github.io/">Hang Zhao</a><sup>1,4</sup>
+							</p>
+							<h5><sup>1</sup> Shanghai Qi Zhi Institute, <sup>2</sup> Fudan University, <sup>3</sup> Pegasus Tech,  <sup>4</sup> IIIS, Tsinghua University,  <sup>5</sup> Shanghai Jiaotong University</h5>
+							<!-- <h3>IROS 2022</h3> -->
+							<!-- <p>InterSim is a simulator that loads real world dataset and run <strong>interactive</strong> closed-loop simulations. 
+								InterSim minimizes the sim2real gap by explicitly modeling the relations of the surrouding traffic. </p> -->
+							<!-- <p>Coming Soon! <br> Stay tuned for our presentation and beta release on IROS 2022, Wed 26 Oct 2022.</p> -->
+							<!-- <p class="major">A (modular, highly tweakable) responsive one-page template designed by <a href="https://html5up.net">HTML5 UP</a> and released for free under the <a href="https://html5up.net/license">Creative Commons</a>.</p> -->
+							<div class="inner">
+								<ul class="icons">
+									<li><a href="https://github.com/Tsinghua-MARS-Lab/StateTransformer" class="icon brands style2 fa-github"><span class="label">Github</span></a></li>
+									<li><a href="https://arxiv.org/abs/2310.19620" class="icon style2 fa-file-pdf"><span class="label">Arxiv</span></a></li>
+								</ul>
+							</div>
+							<ul class="actions stacked">
+								<li><a href="#first" class="button big wide smooth-scroll-middle">Coming Soon</a></li>
+							</ul>
+						</div>
+						<div class="image">
+							<img src="images/teaser.png" alt="" />
+						</div>
+					</section>
+
+				<!-- Closed-loop_Simulation -->
+				<!--
+				<section class="spotlight style4 fullscreen orient-right content-align-left image-position-right" id="first">
+					<div class="content">
+						<h2>Closed-loop Simulation</h2>
+						<p>InterSim is born for <strong>closed-loop</strong> interactive simulations. <br>
+							Closed-loop simulations are pivotal to revealing failure patterns of predictors and planners before their deployment. <br>
+							InterSim leverages relation reasoning models learned from a real-driving dataset to simulate human drivers' behaviors. <br>
+							It is the best simulator to test your predictor and planner for L4 urban autonomous driving.
+						</p>
+						<ul class="actions stacked">
+							<li><a href="#second" class="button big wide smooth-scroll-middle">Next</a></li>
+						</ul>
+					</div>
+					<div class="image">
+						<img src="images/intersim_sim.png" alt="">
+					</div>
+				</section>
+				-->
+
+				<!-- dashboard -->
+				<!-- 
+				<section class="spotlight style4 fullscreen orient-left content-align-left image-position-right" id="second">
+					<div class="content">
+						<h2>Dashboard</h2>
+						<p>Forget about complex versions and directories configurations. <br>
+							InterSim dashboard helps you to focus on what is important with diverse default and customized settings. <br>
+							You can upload your predictors and planners, select the configs, launch a simulation and check them with our dashboard. Here are some simulation results with playbacks from the <a href="https://waymo.com/open/">Waymo Open Motion Dataset</a>. </p>
+						<ul class="actions stacked">
+							<li><a href="#third" class="button big wide smooth-scroll-middle">Next</a></li>
+						</ul>
+					</div>
+					<div class="image">
+						<img src="images/intersim_simlist_1.png" alt="">
+					</div>
+				</section>
+
+				<section class="wrapper style1 align-left" id="third">
+					<div class="inner">
+						<h2>Abstract</h2>
+						<p>Interactive traffic simulation is crucial to autonomous driving systems by enabling testing for planners in a more scalable and safe way compared to real-world road testing. Existing approaches learn an agent model from large-scale driving data to simulate realistic traffic scenarios, yet it remains an open question to produce consistent and diverse multi-agent interactive behaviors in crowded scenes. In this work, we present InterSim, an interactive traffic simulator for testing autonomous driving planners. Given a test plan trajectory from the ego agent, InterSim reasons about the interaction relations between the agents in the scene and generates realistic trajectories for each environment agent that are consistent with the relations. We train and validate our model on a large-scale interactive driving dataset. Experiment results show that InterSim achieves better simulation realism and reactivity in two simulation tasks compared to a state-of-the-art learning-based traffic simulator.
+						</p>
+					</div>
+				</section>
+
+				<section class="wrapper style1 align-left">
+					<div class="inner">
+						<h2>Interactive Closed-loop Simulation Pipeline</h2>
+						<p>Illustration of InterSim. In this example, given a new plan for the ego agent (in cyan) to slow down, the simulator updates its simulated trajectories for the environment agents as follows. First, it checks for potential collisions with all environment agents and labels colliding ones as the relevant agents in yellow. For each relevant agent, such as Env #1, it predicts the interaction relation and updates its trajectory based on the relation using a goal driven trajectory predictor. Second, it resolves collisions between the newly updated trajectories of the environment agent(s) and the remaining agents (i.e. Env #2) iteratively until all collisions are resolved. In the end, InterSim successfully generates scene consistent trajectories for Env #1 and Env #2 to react and slow down, and commit these trajectories to simulate for the next step.
+						</p>
+						<span class="image main"><img src="images/intersim_pipeline.png" alt=""></span>
+					</div>
+				</section>
+				-->
+
+				<!-- Relation prediction demos -->
+				<!-- 
+				<section class="wrapper style1 align-left">
+					<div class="inner">
+						<h2>Efficient and Realistic Closed-loop Simulations</h2>
+						<p>InterSim generates proper reactions to a plan slightly different from the playback of the <a href="https://waymo.com/open/">Waymo Open Motion Dataset</a>. 
+							Each scenario lasts for eight seconds.
+						</p>
+						<img width=100% height=auto src="images/legends1.png" alt="" />
+					</div>
+					<div class="spotlight onscroll-fade-in">
+						<span class="video">
+							<video controls autoplay muted loop class="html-video" width=100% height=auto>
+								<source src="videos/demo_compress_2.mp4" type="video/mp4">
+								</video>
+							</span>
+					</div>
+				</section>
+
+				<section class="wrapper style1 align-left">
+					<div class="inner">
+						<h2>Play with More Demos</h2>
+						<p>This visualization loops through 30 randomly chosen simulations with the Waymo Open Motion Dataset - Interactive Validation Subset.
+							The white vehicle is controlled by a fairly basic planner. 
+							The yellow agents, if any, were detected as relevant agents and hence controlled by the simulator.
+							The red pin is the goal point assigned to the ego vehicle.
+						</p>
+						<p>Drag to move the center of the visualization in case of misalignment. </p>
+						<div class="spotlight", id="canvas">
+						</div>
+					</div>
+
+				</section>
+
+
+				<section class="wrapper style1 align-left">
+					<div class="inner">
+						<h2>Contact Us</h2>
+						<p>
+							We release InterSim Beta as an open-source project. 
+							We hope this tool can help the community push the frontline of interactive planning systems. 
+							If you are enlightened, please consider citing our paper. 
+							If you like our idea and want to give your planner a test, follow our easier-than-you-thought tutorials and fork our codes. 
+							Moreover, building a realistic planning simulator is a big challenge demanding broad collaborations across multiple communities. 
+							If you are annoyed by some bugs, unfinished functions, or lacking fundamental extensions, 
+							please consider contributing your effort and building it for all. 
+							And you are more than welcome to connect with us if you don't know where to start.
+						</p>
+						
+						<div class="index align-left">
+							
+							<form action="https://submit-form.com/3TNtd6SQ">
+								<div class="fields">
+									<div class="field half">
+										<label for="name">Name</label>
+										<input type="text" id="name" name="name" value=""/>
+									</div>
+									<div class="field half">
+										<label for="email">Email</label>
+										<input type="email" name="email" id="email" value="">
+									</div>
+									<div class="field">
+										<label for="message">Message</label>
+										<textarea name="message" id="message" rows="5"></textarea>
+									</div>
+									<div class="field align-center">
+										<ul class="actions">
+											<li><input type="submit" name="submit" id="submit" value="Send This Message"></li>
+										</ul>
+									</div>
+
+								</div>
+
+							</form>
+						</div>					
+					</div>					
+				</section>
+
+				<section class="wrapper style1 align-center">
+					<div class="inner">
+						<h2>Citing</h2>
+						<blockquote style="text-align:left; background-color:#EEEEEE">
+							@inproceedings{sun2022intersim,<br>
+								title={{InterSim}: Interactive Traffic Simulation via Explicit Relation Modeling},<br>
+								author={Sun, Qiao and Huang, Xin and Williams, Brian and Zhao, Hang},<br>
+								booktitle={2022 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},<br>
+								year={2022},<br>
+								organization={IEEE}<br>
+								}
+							</blockquote>						
+					</div>					
+				</section>
+				-->
+
+			</div>
+
+		<!-- Scripts -->
+			<script src="assets/js/jquery.min.js"></script>
+			<script src="assets/js/jquery.scrollex.min.js"></script>
+			<script src="assets/js/jquery.scrolly.min.js"></script>
+			<script src="assets/js/browser.min.js"></script>
+			<script src="assets/js/breakpoints.min.js"></script>
+			<script src="assets/js/util.js"></script>
+			<script src="assets/js/main.js"></script>
+
+
+
+
+
+
+
+
+
+			
+			<script>
+			  jQuery(document).ready(function() {
+				jQuery('input[name="dateRange"]').daterangepicker({
+				autoUpdateInput: false,
+				singleDatePicker: true,
+				locale: {
+				  cancelLabel: 'Clear'
+				}
+			  });
+				jQuery('input[name="dateRange"]').on('apply.daterangepicker', function (ev, picker) {
+				  jQuery(this).val(picker.startDate.format('MM/DD/YYYY'));
+				});
+				jQuery('input[name="dateRange"]').on('cancel.daterangepicker', function (ev, picker) {
+				  jQuery(this).val('');
+				});
+			  });
+			</script>
+
+			<!-- <script type="module" src="js/draw.js"></script> -->
+			<script src="assets/js/two.js"></script>
+			<script src="assets/js/zui.js"></script>
+
+			
+
+			<script>
+			  var params = {
+			  fitted: true,
+			  autostart: true
+			  };
+			  
+
+			  var elem = document.getElementById('canvas');
+			  var two = new Two(params).appendTo(elem);
+			  // two.renderer.domElement.style.background = 'rgb(0, 191, 168)';
+			  two.renderer.domElement.style.background = 'rgb(0, 128, 150)';
+			  // two.renderer.domElement.style.background = 'black';
+			  // two.width = elem.clientWidth - 70;
+			  // two.height = elem.clientHeight - 70;
+			  two.height = elem.clientHeight + 90;
+
+			  var stage = new Two.Group();
+			  var understage = new Two.Group();
+			  var shape = new Two.Rectangle(0, 0, 1, 1);
+			  var offsets = undefined;
+
+			  // LANE = 0
+			  // INTERSECTION = 1
+			  // STOP_LINE = 2
+			  // TURN_STOP = 3
+			  // CROSSWALK = 4
+			  // DRIVABLE_AREA = 5
+			  // YIELD = 6
+			  // TRAFFIC_LIGHT = 7
+			  // STOP_SIGN = 8
+			  // EXTENDED_PUDO = 9
+			  // SPEED_BUMP = 10
+			  // LANE_CONNECTOR = 11
+			  // BASELINE_PATHS = 12
+			  // WALKWAYS = 13
+			  // CARPARK_AREA = 14
+			  // PUDO = 15
+			  // ROADBLOCK = 16
+			  // ROADBLOCK_CONNECTOR = 17
+			  var sceneIndex = 0;
+			  var totalScenes = undefined;
+			  var allScenes = undefined;
+			  var shownScenes = 0;
+
+			  var accu_dx = 0;
+			  var accu_dy = 0;
+
+			  const polyTypes = [16, 1];
+			  var lineTypes = [0];
+			  const rectTypes = [99];
+			  const scale = 3;
+			  const lineWidth = 1;
+			  const xReverse = -1;
+			  var agentPoly = {};
+			  const btnOffset = 70;
+			  var isPlaying = true;
+			  var currentFrame = 0;
+			  var totalFrame = undefined;
+			  var loadedData = undefined;
+			  var agentGroup = new Two.Group();
+			  var mapGroup = new Two.Group();
+			  var goalGroup = new Two.Group();
+			  var percCirclesGroup = new Two.Group();
+			  var offsetFromLastFrame = [0, 0, 0];
+			  var maxFrames = 80;
+			  var lanes_to_mark = undefined;
+			  var goal_pts = undefined;      
+			  var currentScene = 0;    
+			  var egoId = 'ego';          
+
+			  const datasetName = 'Waymo';
+			  var loadDemo = true;
+
+			  var playBtn = two.load('images/icons/play.svg');
+			  var pauseBtn = two.load('images/icons/pause.svg');
+
+			  function drawPoly(dic, selected){
+				const roadType = dic['type'];
+				if (selected.includes(roadType)){
+				  var pointsArray = new Array();
+				  const points = dic['xyz'];
+				  for (let xyzArray of points){
+					if (offsets === undefined){
+					  offsets = [-xyzArray[0], -xyzArray[1]];
+					}
+					pointsArray.push(new Two.Anchor((xyzArray[0]+offsets[0])*scale*xReverse, (xyzArray[1]+offsets[1])*scale));
+				  }
+				  var poly = two.makePath(pointsArray);
+				  // draw polygons
+				  // var poly = new two.makePath);
+				  poly.linewidth = lineWidth / 2;
+				  poly.opacity = 0.5;
+				  if (polyTypes.includes(roadType)){
+					poly.fill = 'gray';
+					poly.opacity = 1;
+				  }
+				  else if (roadType == 4){
+					poly.fill = 'white';
+				  }
+				  else if (roadType == 2){
+					poly.fill = 'red';
+				  }
+				  else if (roadType == 13){
+					poly.fill = 'brown';
+				  }
+				  else if (roadType == 14){
+					poly.fill = 'blue';
+				  }
+				  else{
+					poly.fill = 'black';
+				  }
+				  mapGroup.add(poly);
+				}
+			  }
+			  
+			  function drawALine(points, arrow, color, dash, continuous = false){
+				var ptCounter = 0;
+				var prev_x = undefined;
+				var prev_y = undefined;
+				var interval = 0;
+				if (dash){
+				  interval = 10;
+				}
+				for (let xyzArray of points){
+				  if (ptCounter == interval){
+					ptCounter = 0;
+				  }
+				  else{
+					ptCounter ++;
+					continue;
+				  }
+				  if (prev_x === undefined){
+					prev_x = (xyzArray[0] + offsets[0]) * scale * xReverse;
+					prev_y = (xyzArray[1] + offsets[1]) * scale;
+				  }
+				  else{
+					x = (xyzArray[0] + offsets[0]) * scale * xReverse;
+					y = (xyzArray[1] + offsets[1]) * scale;
+					if (arrow){
+					  var line = two.makeArrow(prev_x, prev_y, x, y);
+					  line.linewidth = lineWidth*3;
+					}
+					else{
+					  var line = two.makeLine(prev_x, prev_y, x, y);
+					  // line.stroke = 'white';
+					  line.linewidth = lineWidth;
+					}
+					prev_x = x;
+					prev_y = y;
+					line.stroke = color;
+					mapGroup.add(line);
+					if (!continuous){
+					  prev_x = undefined;
+					  prev_y = undefined;
+					}
+				  }
+				}
+			  }
+			  function drawLanes(roads){
+				if (datasetName === 'Waymo'){
+				  for (var key in roads){
+					const dic = roads[key];
+					var roadType = dic['type'];
+					if (Array.isArray(roadType)){
+					  roadType = roadType[0];
+					}
+					const pointsToGo = dic['xyz'];
+					if (roadType == 1){
+					  drawALine(pointsToGo, false, 'brown', false);
+					}
+					if (roadType == 2){
+					  drawALine(pointsToGo, false, 'rgba(80,0,94,1)', false);
+					}
+					if (roadType == 3){
+					  drawALine(pointsToGo, false, 'blue', false);
+					}
+					if (roadType == 6){
+					  drawALine(pointsToGo, false, 'white', true);
+					}
+					if (roadType == 8){
+					  drawALine(pointsToGo, false, 'white', false, true);
+					}
+					if (roadType == 9){
+					  drawALine(pointsToGo, false, 'yellow', false, true);
+					}
+					if (roadType == 10){
+					  drawALine(pointsToGo, false, 'rgba(235, 207, 111, 1)', true);
+					}
+					if (roadType == 11){
+					  drawALine(pointsToGo, false, 'yellow', false, true);
+					}
+					if (roadType == 12){
+					  drawALine(pointsToGo, false, 'yellow', false, true);
+					}
+					if (roadType == 13){
+					  drawALine(pointsToGo, false, 'rgba(235, 207, 111, 1)', false, true);
+					}
+					if (roadType == 15){
+					  drawALine(pointsToGo, false, 'green', false, true);
+					}
+					if (roadType == 16){
+					  drawALine(pointsToGo, false, 'rgba(0, 235, 132, 1)', false, true);
+					}
+					if (roadType == 18){
+					  drawALine(pointsToGo, false, 'purple', false, true);
+					}
+					if (roadType == 19){
+					  drawALine(pointsToGo, false, 'red', false, true);
+					}
+				  }
+				}
+				if (datasetName === 'NuPlan'){
+				  for (var key in roads) {
+					const dic = roads[key];
+					var roadType = dic['type'];
+					if (Array.isArray(roadType)){
+					  roadType = roadType[0];
+					}
+					const pointsToGo = dic['xyz'];
+					if (lineTypes.includes(roadType)){
+					  var to_mark = false;
+					  var colorToGo = 'white'
+					  var dashToGO = true;
+					  if (lanes_to_mark !== undefined && lanes_to_mark.includes(key)){
+						to_mark = true;
+						colorToGo = 'black'
+						dashToGO = true;
+					  }
+					  drawALine(pointsToGo, to_mark, colorToGo, dashToGO);
+
+					  // var ptCounter = 0;
+					  // prev_x = undefined;
+					  // prev_y = undefined;
+					  // const points = dic['xyz'];
+
+					  // if (offsets === undefined){
+					  //     offsets = [-points[0][0], -points[0][1]];
+					  //   }
+					  // x0 = (points[0][0] + offsets[0]) * scale * xReverse;
+					  // y0 = (points[0][1] + offsets[1]) * scale;
+					  // if (true){  // (Math.abs(x0) < 3000 && Math.abs(y0) < 3000){
+					  //   for (let xyzArray of points){
+					  //     if (ptCounter == 10){
+					  //       ptCounter = 0;
+					  //     }
+					  //     else{
+					  //       ptCounter ++;
+					  //       continue;
+					  //     }
+					  //     if (prev_x === undefined){
+					  //       prev_x = (xyzArray[0] + offsets[0]) * scale * xReverse;
+					  //       prev_y = (xyzArray[1] + offsets[1]) * scale;
+					  //     }
+					  //     else{
+					  //       x = (xyzArray[0] + offsets[0]) * scale * xReverse;
+					  //       y = (xyzArray[1] + offsets[1]) * scale;
+					  //       if (lanes_to_mark !== undefined && lanes_to_mark.includes(key)){
+					  //         var line = two.makeArrow(prev_x, prev_y, x, y);
+					  //         prev_x = x;
+					  //         prev_y = y;
+					  //         line.stroke = 'black';
+					  //         line.linewidth = lineWidth*3;
+					  //       }
+					  //       else{
+					  //         var line = two.makeLine(prev_x, prev_y, x, y);
+					  //         prev_x = x;
+					  //         prev_y = y;
+					  //         line.stroke = 'white';
+					  //         line.linewidth = lineWidth;
+					  //     }
+					  //       mapGroup.add(line);
+					  //       prev_x = undefined;
+					  //       prev_y = undefined;
+					  //     }
+					  //   }
+					  // }
+					}
+				  }
+				}
+			  }
+			  function drawMap(roads){
+				for (var key in roads) {
+				  drawPoly(roads[key], polyTypes);  // 17=1
+				}
+				// draw lanes
+				drawLanes(roads);
+				// draw others
+				for (var key in roads) {
+				  drawPoly(roads[key], [2, 4, 13, 14, 7, 8]);  // no 3, 5, 6
+				}
+				// draw parking lots
+				for (var key in roads) {  
+				  const dic = roads[key];
+				  const roadType = dic['type'];
+				  if (rectTypes.includes(roadType)){
+					const points = dic['xyz'];
+					rectShape = dic['shape'];
+					x = (points[0] + offsets[0]) * scale * xReverse;
+					y = (points[1] + offsets[1]) * scale;
+					var rect = two.makeRectangle(x, y, rectShape[0]*scale, rectShape[1]*scale);
+					rect.rotation = Math.PI/2 - dic['dir'];
+					rect.fill = 'white';
+					rect.opacity = 0.3;
+					mapGroup.add(rect);
+				  }                          
+				}
+
+				// draw circle
+				circle = two.makeCircle(two.width / 4, two.height / 4, 300*scale);
+				// circle.fill = 'gray';
+				circle.opacity = 0.2;
+				circle.stroke = 'red';
+				percCirclesGroup.add(circle);
+				circle = two.makeCircle(two.width / 4, two.height / 4, 150*scale);
+				// circle.fill = 'gray';
+				circle.stroke = 'green';
+				circle.opacity = 0.2;
+				percCirclesGroup.add(circle);
+				stage.add(percCirclesGroup);
+				stage.add(mapGroup);
+
+				understage.add(stage);
+				two.add(understage);
+				// two.add(stage);
+			  }
+
+			  function drawScenario(dataDic, scenarioId){
+				var agents = dataDic[scenarioId]['agent'];
+				for (var key in agents){
+				  [x, y, z, yaw] = agents[key]['pose'][0];
+				  if (totalFrame === undefined){
+					totalFrame = agents[key]['pose'].length;
+				  }
+				  else{
+					totalFrame = Math.min(totalFrame, agents[key]['pose'].length);
+				  }
+				  // yaw = 0;
+				  if (x == -1){
+					continue;
+				  }
+				  [w, h] = agents[key]['shape'][0];
+
+				  var pointsArray = new Array();
+				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse-w*scale/2, (y+offsets[1])*scale-h*scale/2));
+				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale-h*scale/2*1.3));
+				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse+w*scale/2, (y+offsets[1])*scale-h*scale/2));
+				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse+w*scale/2, (y+offsets[1])*scale+h*scale/2));
+				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse-w*scale/2, (y+offsets[1])*scale+h*scale/2));
+				  var poly = two.makePath(pointsArray);
+
+				  // poly = new Two.Rectangle((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale, w*scale, h*scale);
+				  if (key == egoId){
+					poly.fill = 'white';
+				  }
+				  else{
+					if ('predicting' in dataDic[scenarioId] && 'relevant_agents' in dataDic[scenarioId]['predicting'] && dataDic[scenarioId]['predicting']['relevant_agents'].includes(parseInt(key))){
+						poly.fill = 'yellow';
+					}
+					// if ('action' in agents){
+					// 	poly.fill = 'yellow';
+					// }
+					else{
+						poly.fill = 'green';
+					}
+				  }
+				  // poly.rotation = -Math.PI/2+yaw;
+				  // Math.PI/2 - dic['dir'];
+				  // poly.rotation = yaw;
+				  poly.rotation = -yaw - Math.PI/2;
+				  agentPoly[key] = poly;
+				  agentGroup.add(poly);
+				}
+				stage.add(agentGroup);
+			  }
+
+			  function drawGoals(dataDic, scenarioId){
+				// var goals = dataDic[scenarioId]['ltp_goals'];
+				// if (goals !== undefined){
+				//   goalGroup = new Two.Group();
+				//   for (var goal of goals){
+				//     const pt = goal[0];
+				//     [x, y] = pt;
+				//     // poly = two.makeArrow((x+offsets[0])*scale*xReverse, (y-5+offsets[1])*scale, 
+				//     // (x+offsets[0])*scale*xReverse, (y+offsets[1])*scale, 30);
+				//     // poly.center();
+				//     // poly.position.x = (x+offsets[0])*scale*xReverse;
+				//     // poly.position.y = (y+offsets[1])*scale;
+				//     // poly.stroke = 'red';
+				//     var line = two.makeLine((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale,
+				//     (x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale);
+				//     line.stroke = 'black';
+				//     goalGroup.add(line);
+				//     var circle = two.makeCircle((x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale, 2*scale);
+				//     circle.fill = 'red';
+				//     goalGroup.add(circle);
+				//   }
+				// }
+				// stage.add(goalGroup);
+				if (goal_pts !== undefined){
+				  goalGroup = new Two.Group();
+				  [x, y] = goal_pts;
+				  var line = two.makeLine((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale, (x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale);
+				  line.stroke = 'black';
+				  goalGroup.add(line);
+				  var circle = two.makeCircle((x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale, 2*scale);
+				  circle.fill = 'red';
+				  goalGroup.add(circle);                          
+				  stage.add(goalGroup);
+				}
+			  }
+
+			  function setOffset(){
+				if (loadedData !== undefined && currentFrame !== undefined){
+				  if (datasetName == 'Waymo'){
+					egoId = loadedData['predicting']['ego_id'][1];
+					var ego = loadedData['agent'][egoId];
+				  }
+				  if (datasetName == 'NuPlan'){
+					egoId = 'ego';
+					var ego = loadedData['agent'][egoId];
+				  }
+				  [x, y, z, yaw] = ego['pose'][currentFrame];
+				  if (offsets !== undefined){
+					var dx = -x - two.width / 4 / scale - offsets[0];
+					var dy = -y + two.height / 4 / scale - offsets[1];
+					// var dyaw = -yaw - offsets[2];
+					// offsetFromLastFrame = [dx, dy, dyaw];
+					offsetFromLastFrame = [dx, dy, 0];
+				  }
+				  // offsets = [-x - two.width / 4 / scale, -y + two.height / 4 / scale, -yaw];
+				  // offsets = [-x - two.width / 4 / scale, -y + two.height / 4 / scale, yaw*xReverse];
+				  offsets = [-x - two.width / 4 / scale, -y + two.height / 4 / scale, 0];
+				}
+
+				if (lanes_to_mark === undefined){
+				  lanes_to_mark = [];
+				  if (ego['current_route'] !== undefined){
+					for (const each_route of ego['current_route']){
+					for (const lane_id of each_route){
+					  if (!lanes_to_mark.includes(lane_id)){
+						lanes_to_mark.push(lane_id);
+					  } 
+					}
+					}
+				  }
+				  if (loadedData['predicting']['route'][egoId] !== undefined){
+					for (const each_lane_id of loadedData['predicting']['route'][egoId]){
+					  if (!lanes_to_mark.includes(each_lane_id)){
+						lanes_to_mark.push(each_lane_id);
+					  }
+					}
+				  }
+				}
+
+				if (goal_pts === undefined){
+				  if (loadedData['goals'] !== undefined){
+					goal_pts = loadedData['goals'][egoId][0][0];
+				  }
+				  if (loadedData['predicting']['goal_pts'][egoId] !== undefined){
+					goal_pts = loadedData['predicting']['goal_pts'][egoId][0];
+				  }
+				  
+				}
+			  }
+
+			  function addBtn(){
+				  
+				  var btnGroup = new Two.Group();
+
+				  var panel = two.makeRoundedRectangle(two.width/2 + 65, two.height - 123, 390, 70, 35);
+				  panel.fill = 'white';
+				  btnGroup.add(panel);
+
+				  playBtn.position.set(two.width/2 + 50, two.height-140);
+				  playBtn.scale = 0.07;
+				  // playBtn.opacity = 1;
+				  btnGroup.add(playBtn);
+
+				  pauseBtn.position.set(two.width/2 + 50, two.height-140);
+				  pauseBtn.scale = 0.75;
+				  pauseBtn.opacity = 0;
+				  btnGroup.add(pauseBtn);
+
+				  var nextFrameBtn = two.load('images/icons/next-frame.svg');
+				  nextFrameBtn.position.set(two.width/2 + 50 + btnOffset, two.height-140);
+				  nextFrameBtn.scale = 0.12;
+				  btnGroup.add(nextFrameBtn);
+
+				  var nextScenarioBtn = two.load('images/icons/next-scenario.svg');
+				  nextScenarioBtn.position.set(two.width/2 + 50 + btnOffset * 2, two.height-140);
+				  nextScenarioBtn.scale = 0.07;
+				  btnGroup.add(nextScenarioBtn);
+
+				  var previousFrameBtn = two.load('images/icons/previous-frame.svg');
+				  previousFrameBtn.position.set(two.width/2 + 50 - btnOffset, two.height-140);
+				  previousFrameBtn.scale = 0.07;
+				  btnGroup.add(previousFrameBtn);
+
+				  var previousScenarioBtn = two.load('images/icons/previous-scenario.svg');
+				  previousScenarioBtn.position.set(two.width/2 + 50 - btnOffset * 2, two.height-140);
+				  previousScenarioBtn.scale = 0.07;
+				  btnGroup.add(previousScenarioBtn);
+
+				  var previousScenarioBtn = two.load('images/icons/previous-scenario.svg');
+				  previousScenarioBtn.position.set(two.width/2 + 50 - btnOffset * 2, two.height-140);
+				  previousScenarioBtn.scale = 0.07;
+				  btnGroup.add(previousScenarioBtn);
+
+				  two.add(btnGroup);
+				}
+			
+			
+			  if (loadDemo){
+				fetch("demo/validation_interactive_tfexample.tfrecord-00009-of-00150.json")
+				  .then(response => response.json())
+				  .then(data => {
+					allScenes = data;
+					keys = Object.keys(data);
+					totalScenes = keys.length;
+					sceneIndex = Math.floor(Math.random()*totalScenes);
+					const key = keys[sceneIndex];
+					loadedData = data[key];
+
+					if (loadedData['info'] !== undefined){
+						maxFrames = loadedData['info']['max_frames'];
+					}
+					const roads = loadedData['road'];
+					setOffset();
+					drawMap(roads);
+					drawScenario(data, key);
+					drawGoals(data, key);
+					// // Bind a function to scale and rotate the group to the animation loop.
+					two.bind('update', update);
+					// // Finally, start the animation loop
+					two.play();
+					addZUI();
+					});
+			  }
+			var FRAMERATE = 6;  //10fps
+            function update(frameCount){
+				isPlaying = true;
+
+				two.fit();
+				
+				if (shownScenes >= 100){
+					isPlaying = false;
+					two.pause();
+				}
+
+				if (isPlaying){
+					playBtn.opacity = 0;
+					pauseBtn.opacity = 1;
+				}
+				else{
+					playBtn.opacity = 1;
+					pauseBtn.opacity = 0;
+				}
+				if (isPlaying && totalFrame !== undefined && loadedData !== undefined 
+				&& frameCount % FRAMERATE == 0){
+					if (currentFrame < totalFrame && currentFrame < maxFrames){
+						setOffset();
+						// if (currentFrame == 0){
+						// 	}
+							// offsets[1] -= 230;}
+						if (accu_dx == 0 && accu_dy == 0){
+							accu_dx = 200;
+							accu_dy = 900;
+						}
+						understage.position.y = accu_dy;
+						understage.position.x = accu_dx;
+
+						agents = loadedData['agent'];
+						for (var key in agentPoly){
+							poly = agentPoly[key];
+							[x, y, z, yaw] = agents[key]['pose'][currentFrame];
+							// [w, h] = agents[key]['shape'][currentFrame];
+							[w, h] = agents[key]['shape'][0];
+							poly.position.x = (x+offsets[0])*scale*xReverse;
+							poly.position.y = (y+offsets[1])*scale;
+							poly.rotation = - yaw - Math.PI/2;
+							// poly.rotation = yaw;
+							// poly.shape.width = w;
+							// poly.shape.height = h;
+						}
+						mapGroup.position.x += offsetFromLastFrame[0]*scale*xReverse;
+						mapGroup.position.y += offsetFromLastFrame[1]*scale;
+
+						goalGroup.position.x += offsetFromLastFrame[0]*scale*xReverse;
+						goalGroup.position.y += offsetFromLastFrame[1]*scale;
+
+						// stage.position.x += deltaX*scale*xReverse;
+						// stage.position.y += deltaY*scale;
+						// stage.rotation += deltaYaw;
+
+						currentFrame ++;
+					}
+					else{
+						two.clear();
+						shownScenes += 1;
+
+						prev_stage_x = stage.position.x;
+						prev_stage_y = stage.position.y;
+						stage = new Two.Group();
+						understage = new Two.Group();
+						understage.position.x = prev_stage_x;
+						understage.position.y = prev_stage_y;
+
+						agentPoly = {};
+						currentFrame = 0;
+						totalFrame = undefined;
+						loadedData = undefined;
+						agentGroup = new Two.Group();
+						mapGroup = new Two.Group();
+						goalGroup = new Two.Group();
+						percCirclesGroup = new Two.Group();
+						offsetFromLastFrame = [0, 0, 0];
+						maxFrames = 80;
+						lanes_to_mark = undefined;
+						goal_pts = undefined;      
+						currentScene = 0;    
+						egoId = 'ego';          
+
+						currentFrame = 0;
+
+						keys = Object.keys(allScenes);
+						totalScenes = keys.length;
+						sceneIndex = Math.floor(Math.random()*totalScenes);
+						const key = keys[sceneIndex];
+						loadedData = allScenes[key];
+
+						if (loadedData['info'] !== undefined){
+							maxFrames = loadedData['info']['max_frames'];
+						}
+						const roads = loadedData['road'];
+						
+						setOffset();
+						drawMap(roads);
+						drawScenario(allScenes, key);
+						drawGoals(allScenes, key);
+						addZUI();
+					}
+				}
+				// if (frameCount > 50){
+				//   two.pause();
+				// }
+				}
+				function addZUI() {
+					var domElement = two.renderer.domElement;
+					var zui = new Two.ZUI(stage);
+					var mouse = new Two.Vector();
+					var touches = {};
+					var distance = 0;
+					var dragging = false;
+
+					zui.zoomBy(0.15, 0, 0);
+					zui.addLimits(0.06, 8);
+
+					domElement.addEventListener('mousedown', mousedown, false);
+					// domElement.addEventListener('mousewheel', mousewheel, false);
+					// domElement.addEventListener('wheel', mousewheel, false);
+
+					domElement.addEventListener('touchstart', touchstart, false);
+					domElement.addEventListener('touchmove', touchmove, false);
+					domElement.addEventListener('touchend', touchend, false);
+					domElement.addEventListener('touchcancel', touchend, false);
+
+					function mousedown(e) {
+						mouse.x = e.clientX;
+						mouse.y = e.clientY;
+
+						// process btn actions
+						two.width/2 + 50, two.height-140
+						if (mouse.x < (two.width/2 + 50 + btnOffset / 2 * 1.2) && mouse.x > (two.width/2 + 50 - btnOffset / 2 * 0.2) 
+						&& mouse.y > (two.height - 140 - 30) && mouse.y < (two.height - 140 + 30)){
+						isPlaying = !isPlaying;
+						}
+						else{
+						var rect = shape.getBoundingClientRect();
+						dragging = mouse.x > rect.left && mouse.x < rect.right
+							&& mouse.y > rect.top && mouse.y < rect.bottom;
+						window.addEventListener('mousemove', mousemove, false);
+						window.addEventListener('mouseup', mouseup, false);
+						}
+					}
+
+					function mousemove(e) {
+						var dx = e.clientX - mouse.x;
+						var dy = e.clientY - mouse.y;
+						accu_dx += dx;
+						accu_dy += dy;
+						if (dragging) {
+						shape.position.x += dx / zui.scale;
+						shape.position.y += dy / zui.scale;
+						} else {
+						zui.translateSurface(dx, dy);
+						}
+						mouse.set(e.clientX, e.clientY);
+					}
+
+					function mouseup(e) {
+						window.removeEventListener('mousemove', mousemove, false);
+						window.removeEventListener('mouseup', mouseup, false);
+					}
+
+					function mousewheel(e) {
+						var dy = (e.wheelDeltaY || - e.deltaY) / 1000;
+						zui.zoomBy(dy, e.clientX, e.clientY);
+					}
+
+					function touchstart(e) {
+						switch (e.touches.length) {
+						case 2:
+							pinchstart(e);
+							break;
+						case 1:
+							panstart(e)
+							break;
+						}
+					}
+
+					function touchmove(e) {
+						switch (e.touches.length) {
+						case 2:
+							pinchmove(e);
+							break;
+						case 1:
+							panmove(e)
+							break;
+						}
+					}
+
+					function touchend(e) {
+						touches = {};
+						var touch = e.touches[ 0 ];
+						if (touch) {  // Pass through for panning after pinching
+						mouse.x = touch.clientX;
+						mouse.y = touch.clientY;
+						}
+					}
+
+					function panstart(e) {
+						var touch = e.touches[ 0 ];
+						mouse.x = touch.clientX;
+						mouse.y = touch.clientY;
+					}
+
+					function panmove(e) {
+						var touch = e.touches[ 0 ];
+						var dx = touch.clientX - mouse.x;
+						var dy = touch.clientY - mouse.y;
+						zui.translateSurface(dx, dy);
+						mouse.set(touch.clientX, touch.clientY);
+					}
+
+					function pinchstart(e) {
+						for (var i = 0; i < e.touches.length; i++) {
+						var touch = e.touches[ i ];
+						touches[ touch.identifier ] = touch;
+						}
+						var a = touches[ 0 ];
+						var b = touches[ 1 ];
+						var dx = b.clientX - a.clientX;
+						var dy = b.clientY - a.clientY;
+						distance = Math.sqrt(dx * dx + dy * dy);
+						mouse.x = dx / 2 + a.clientX;
+						mouse.y = dy / 2 + a.clientY;
+					}
+
+					function pinchmove(e) {
+						for (var i = 0; i < e.touches.length; i++) {
+						var touch = e.touches[ i ];
+						touches[ touch.identifier ] = touch;
+						}
+						var a = touches[ 0 ];
+						var b = touches[ 1 ];
+						var dx = b.clientX - a.clientX;
+						var dy = b.clientY - a.clientY;
+						var d = Math.sqrt(dx * dx + dy * dy);
+						var delta = d - distance;
+						zui.zoomBy(delta / 250, mouse.x, mouse.y);
+						distance = d;
+					}
+					}
+
+
+
+
+
+			</script>
+
+			
+
+	</body>
+</html>
