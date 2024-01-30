@@ -30,7 +30,7 @@ class STRConfig(PretrainedConfig):
                      "autoregressive_proposals", "selected_exponential_past",
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
-                     "camera_image_encoder"]
+                     "camera_image_encoder", "use_speed"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
@@ -520,7 +520,6 @@ def build_models(model_args):
             return model
         # whole model training
     elif 'mamba' in model_args.model_name:
-        # TODO: WIP
         from transformer4planning.models.backbone.mamba import STRMamba, STRMambaConfig
         config_p = STRMambaConfig()
         config_p.update_by_model_args(model_args)
@@ -544,7 +543,7 @@ def build_models(model_args):
             config_p.n_head = 8
         elif 'mamba-medium' in model_args.model_name:
             """
-            Number of parameters: 40M (ViT)
+            Number of parameters: 27M (ViT)
             """
             config_p.n_layer = 8
             config_p.n_embd = config_p.d_model = 512
@@ -553,7 +552,7 @@ def build_models(model_args):
         elif 'mamba-large' in model_args.model_name:
             """
             WARNING: Gradient WILL CRUSH DURING TRAINING
-            Number of parameters: 1.3B
+            Number of parameters: 139M (ViT)
             """
             config_p.n_layer = 16
             config_p.n_embd = config_p.d_model = 1000
@@ -561,12 +560,12 @@ def build_models(model_args):
             config_p.n_head = 25
         elif 'mamba-xl' in model_args.model_name:
             """
-            Number of parameters: 2.7B
+            Number of parameters: 764M (ViT)
             """
-            config_p.n_layer = 64
-            config_p.n_embd = config_p.d_model = 2560
+            config_p.n_layer = 24
+            config_p.n_embd = config_p.d_model = 2048
             config_p.n_inner = config_p.n_embd * 4
-            config_p.n_head = 64
+            config_p.n_head = 32
     elif 'mixtral' in model_args.model_name:
         from transformer4planning.models.backbone.mixtral import STR_Mixtral, STRMixtralConfig
         config_p = STRMixtralConfig()
@@ -586,22 +585,30 @@ def build_models(model_args):
             """
             Number of parameters: 40M (ViT)
             """
-            config_p.n_layer = 8
-            config_p.n_embd = config_p.d_model = 512
-            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_layer = 16
+            config_p.n_embd = config_p.d_model = 1024
+            config_p.n_inner = 4096
             config_p.n_head = 16
-
+            config_p.num_hidden_layers = 16
+            config_p.hidden_size = 1024
+            config_p.intermediate_size = 4096
+            config_p.num_attention_heads = 16
         elif 'mixtral-large' in model_args.model_name:
             """
             WARNING: Gradient WILL CRUSH DURING TRAINING
             Number of parameters: 1.3B
             """
-            config_p.n_layer = 16
-            config_p.n_embd = config_p.d_model = 1000
-            config_p.n_inner = config_p.n_embd * 4
-            config_p.n_head = 25
+            config_p.n_layer = 32
+            config_p.n_embd = config_p.d_model = 2048
+            config_p.n_inner = 8192
+            config_p.n_head = 32
+            config_p.num_hidden_layers = 32
+            config_p.hidden_size = 2048
+            config_p.intermediate_size = 8192
+            config_p.num_attention_heads = 32
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
+
     if 'scratch' in model_args.model_name:
         model = ModelCls(config_p)
         print('Scratch ' + tag + ' Initialized!')

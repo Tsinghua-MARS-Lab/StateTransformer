@@ -407,10 +407,22 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                               ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                               np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
     rotated_poses[:, 1] *= y_inverse
-    for i in sample_frames_in_past:
-        action = rotated_poses[i//frequency_change_rate]  # hard-coded frequency change
-        action[-1] = normalize_angle(action[-1])
-        context_actions.append(action)
+
+    if kwargs.get('use_speed', False):
+        # speed, old data dic does not have speed key
+        speed = agent_dic['ego']['speed']
+        rotated_speed = np.array([speed[:, 0] * cos_ - speed[:, 1] * sin_,
+                                  speed[:, 0] * sin_ + speed[:, 1] * cos_]).transpose((1, 0))
+        for i in sample_frames_in_past:
+            selected_pose = rotated_poses[i // frequency_change_rate]  # hard-coded frequency change
+            selected_pose[-1] = normalize_angle(selected_pose[-1])
+            action = np.concatenate((selected_pose, rotated_speed[i // frequency_change_rate]))
+            context_actions.append(action)
+    else:
+        for i in sample_frames_in_past:
+            action = rotated_poses[i//frequency_change_rate]  # hard-coded frequency change
+            action[-1] = normalize_angle(action[-1])
+            context_actions.append(action)
 
     # future trajectory
     # check if samples in the future is beyond agent_dic['ego']['pose'] length
@@ -437,6 +449,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["low_res_raster"] = np.array(rasters_low_res, dtype=bool)
     result_to_return["context_actions"] = np.array(context_actions, dtype=np.float32)
     result_to_return['trajectory_label'] = trajectory_label.astype(np.float32)
+
+    # print('inspect: ', result_to_return["context_actions"].shape)
 
     if debug_raster_path is not None:
         # check if path not exist, create

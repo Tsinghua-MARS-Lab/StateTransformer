@@ -182,7 +182,8 @@ class NuPlanDL:
                  map_name=None,
                  scenarios_to_keep=None,
                  filter_still=False,
-                 sensor_blob_path=None):
+                 sensor_blob_path=None,
+                 sensor_meta_path=None):
         """
         :param sample_interval:
         :param agent_only:
@@ -251,7 +252,7 @@ class NuPlanDL:
         current_frame_idx = round(20 * (lidar_token_timestamp - log_db.lidar_pc[0].timestamp) / 1e6)
         if scenarios_to_keep is not None and scenario_id not in scenarios_to_keep:
             return None, True
-        if scenarios_to_keep and self.keep_future_steps:
+        if self.keep_future_steps:
             # return a list of dictionary instead of one
             dic_list_to_returen = []
             if total_frames < 150:
@@ -282,26 +283,58 @@ class NuPlanDL:
                 data_to_return['scenario_type'] = scenario_type
                 mission_goal_state = scenario.get_mission_goal()
                 expert_goal_state = scenario.get_expert_goal_state()
+                data_to_return['mission_goal'] = []
+                data_to_return['expert_goal'] = []
                 if mission_goal_state is None:
                     print('###### ERROR: mission goal missing for val set, skipping ######')
-                    continue
-                    # data_to_return['ego_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0,
-                    #                               expert_goal_state.heading]
-
+                    return None, new_files_loaded
                 else:
-                    data_to_return['ego_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0,
-                                                  mission_goal_state.heading]
+                    data_to_return['mission_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0,
+                                                      mission_goal_state.heading]
+                if expert_goal_state is not None:
+                    data_to_return['expert_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0,
+                                                     expert_goal_state.heading]
 
-                if sensor_blob_path is not None:
+                if sensor_meta_path is not None:
+                    # using meta should be faster than looping the whole sensor path
                     from nuplan.planning.simulation.observation.observation_type import CameraChannel, LidarChannel
                     from nuplan.database.nuplan_db.nuplan_scenario_queries import get_images_from_lidar_tokens
                     from typing import cast
                     scenario._sensor_root = sensor_blob_path
-                    local_store, remote_store = scenario._create_blob_store_if_needed()
+                    # local_store, remote_store = scenario._create_blob_store_if_needed()
+                    retrieved_images = get_images_from_lidar_tokens(
+                        scenario._log_file, [lidar_pc_in_loop.token], [cast(str, channel.value) for channel in
+                                                                       CameraChannel]
+                    )
+                    data_to_return['images_path'] = [each.filename_jpg for each in retrieved_images]
+
+                    # check if image exist at all
+                    # read plain text utf8 file
+                    file_path = sensor_meta_path
+                    with open(file_path, 'r') as f:
+                        meta_folders = f.read()
+                        for each in data_to_return['images_path']:
+                            if each.split('/')[0] not in meta_folders:
+                                print('###### ERROR: image missing for val set, skipping ###### ', each)
+                                return None, new_files_loaded
+
+                elif sensor_blob_path is not None:
+                    from nuplan.planning.simulation.observation.observation_type import CameraChannel, LidarChannel
+                    from nuplan.database.nuplan_db.nuplan_scenario_queries import get_images_from_lidar_tokens
+                    from typing import cast
+                    scenario._sensor_root = sensor_blob_path
+                    # local_store, remote_store = scenario._create_blob_store_if_needed()
                     retrieved_images = get_images_from_lidar_tokens(
                         scenario._log_file, [lidar_pc_in_loop.token], [cast(str, channel.value) for channel in CameraChannel]
                     )
                     data_to_return['images_path'] = [each.filename_jpg for each in retrieved_images]
+
+                    # check if image exist at all
+                    for each in data_to_return['images_path']:
+                        image_path = os.path.join(sensor_blob_path, each)
+                        if not os.path.exists(image_path):
+                            print('###### ERROR: image missing for val set, skipping ###### ', image_path)
+                            return None, new_files_loaded
 
                 data_to_return['dataset'] = 'NuPlan'
                 data_to_return['lidar_pc_tokens'] = lidar_pc_in_loop.lidar_token
@@ -329,21 +362,51 @@ class NuPlanDL:
         data_to_return['scenario_type'] = scenario_type
         mission_goal_state = scenario.get_mission_goal()
         expert_goal_state = scenario.get_expert_goal_state()
-        if mission_goal_state is None:
-            data_to_return['ego_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0, expert_goal_state.heading]
-        else:
-            data_to_return['ego_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0, mission_goal_state.heading]
+        data_to_return['mission_goal'] = []
+        data_to_return['expert_goal'] = []
+        if expert_goal_state is not None:
+            data_to_return['expert_goal'] = [expert_goal_state.point.x, expert_goal_state.point.y, 0, expert_goal_state.heading]
+        if mission_goal_state is not None:
+            data_to_return['mission_goal'] = [mission_goal_state.point.x, mission_goal_state.point.y, 0, mission_goal_state.heading]
 
-        if sensor_blob_path is not None:
+        if sensor_meta_path is not None:
+            # using meta should be faster than looping the whole sensor path
             from nuplan.planning.simulation.observation.observation_type import CameraChannel, LidarChannel
             from nuplan.database.nuplan_db.nuplan_scenario_queries import get_images_from_lidar_tokens
             from typing import cast
             scenario._sensor_root = sensor_blob_path
-            local_store, remote_store = scenario._create_blob_store_if_needed()
+            # local_store, remote_store = scenario._create_blob_store_if_needed()
+            retrieved_images = get_images_from_lidar_tokens(
+                scenario._log_file, [lidar_pc.token], [cast(str, channel.value) for channel in
+                                                               CameraChannel]
+            )
+            data_to_return['images_path'] = [each.filename_jpg for each in retrieved_images]
+
+            # check if image exist at all
+            # read plain text utf8 file
+            file_path = sensor_meta_path
+            with open(file_path, 'r') as f:
+                meta_folders = f.read()
+                for each in data_to_return['images_path']:
+                    if each.split('/')[0] not in meta_folders:
+                        return None, new_files_loaded
+        elif sensor_blob_path is not None:
+            from nuplan.planning.simulation.observation.observation_type import CameraChannel, LidarChannel
+            from nuplan.database.nuplan_db.nuplan_scenario_queries import get_images_from_lidar_tokens
+            from typing import cast
+            scenario._sensor_root = sensor_blob_path
+            # local_store, remote_store = scenario._create_blob_store_if_needed()
             retrieved_images = get_images_from_lidar_tokens(
                 scenario._log_file, [lidar_pc.token], [cast(str, channel.value) for channel in CameraChannel]
             )
             data_to_return['images_path'] = [each.filename_jpg for each in retrieved_images]
+
+            # check if image exist at all
+            for each in data_to_return['images_path']:
+                image_path = os.path.join(sensor_blob_path, each)
+                if not os.path.exists(image_path):
+                    # print('###### ERROR: image missing for training set, skipping ###### ', image_path)
+                    return None, new_files_loaded
 
         data_to_return['dataset'] = 'NuPlan'
         data_to_return['lidar_pc_tokens'] = log_db.lidar_pc
@@ -400,6 +463,7 @@ class NuPlanDL:
         agent_dic = {}
         new_dic = {'pose': np.ones([total_frames, 4]) * -1,
                    'shape': np.ones([total_frames, 3]) * -1,
+                   'speed': np.ones([total_frames, 3]) * -1,  # [v, a, angular_v]
                    'type': 0,
                    'is_sdc': 0, 'to_predict': 0,
                    'starting_frame': 0,
@@ -408,6 +472,7 @@ class NuPlanDL:
         agent_dic['ego'] = copy.deepcopy(new_dic)
         poses_np = agent_dic['ego']['pose']
         shapes_np = agent_dic['ego']['shape']
+        speed_np = agent_dic['ego']['speed']  # [v, a, angular_v]
         agent_dic['ego']['type'] = 7
         # get ego
         current_pc = first_lidar_pc
@@ -419,6 +484,9 @@ class NuPlanDL:
                                          current_ego_pose.qw * current_ego_pose.qw + current_ego_pose.qx * current_ego_pose.qx - current_ego_pose.qy * current_ego_pose.qy - current_ego_pose.qz * current_ego_pose.qz)]
             shapes_np[i, :] = [any_ego_state.car_footprint.width,
                                any_ego_state.car_footprint.length, 2]
+            speed_np[i, :] = [math.sqrt(current_ego_pose.vx ** 2 + current_ego_pose.vy ** 2 + current_ego_pose.vz ** 2),
+                              math.sqrt(current_ego_pose.acceleration_x ** 2 + current_ego_pose.acceleration_y ** 2 + current_ego_pose.acceleration_z ** 2),
+                              math.sqrt(current_ego_pose.angular_rate_x ** 2 + current_ego_pose.angular_rate_y ** 2 + current_ego_pose.angular_rate_z ** 2)]
             if current_pc != last_lidar_pc:
                 current_pc = current_pc.next
                 current_ego_pose = current_pc.ego_pose
@@ -492,6 +560,8 @@ class NuPlanDL:
             # change 20hz into 10hz to save disk space
             agent_dic[key]['pose'] = agent_dic[key]['pose'][::sample_interval, :].astype(np.float32)
             agent_dic[key]['shape'] = agent_dic[key]['shape'][::sample_interval, :].astype(np.float16)
+            if key == 'ego':
+                agent_dic[key]['speed'] = agent_dic[key]['speed'][::sample_interval, :].astype(np.float32)
         skip = False
         if not agent_only:
             road_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,

@@ -243,7 +243,7 @@ def compute_metrics(prediction: EvalPrediction):
             prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 1
             proposal_labels = prediction_by_generation['halfs_intention']
             accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
-            print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels.flatten(), prediction_proposal_class_by_generation.flatten())
+            # print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels.flatten(), prediction_proposal_class_by_generation.flatten())
             eval_result['proposal_accuracy'] = accuracy_by_generation
         elif 'intentions' in prediction_by_generation:
             prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 16

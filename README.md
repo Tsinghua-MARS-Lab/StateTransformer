@@ -10,20 +10,12 @@ Authors: [Qiao Sun](https://qiaosun.me/), [Shiduo Zhang](https://github.com/Shid
 
 # Abstract
 
-Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine
-learning-based approaches.
-The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon,
-interpreting heterogeneous behaviors, and generating policies in a large continuous state space.
-Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce
-a scalable trajectory model called State Transformer (STR). STR reformulates the motion prediction and motion planning
-problems by arranging observations, states, and actions into one unified sequence modeling task.
-With a simple model design, STR consistently outperforms baseline approaches in both problems.
-Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by
-presenting outstanding adaptability and learning efficiency.
-Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge
-significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning,
-without explicit loss designs or costly high-level annotations.
-
+Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches. 
+The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space. 
+Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called State Transformer (STR). STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
+Our approach unites trajectory generation problems with other sequence modeling problems, powering rapid iterations with breakthroughs in neighbor domains such as language modeling.
+Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by presenting outstanding adaptability and learning efficiency.
+Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
 
 # Method
 
@@ -175,6 +167,30 @@ root-
         |--test-index_pittsburgh
             --*.arrow    
 ```
+
+## Load checkpoints and evaluate:
+
+We provide the pretrained checkpoint for STR(CKS) - 16M. This is a checkpoint with a diffusion decoder. You can download via [this link](http://180.167.251.46:880/NuPlanSTR/checkpoints/small_state_dict_1by1_Decckpt_12e.pth) for STR(CKS)-16M-Diff.12e, and [this link](http://180.167.251.46:880/NuPlanSTR/checkpoints/Small_CKS_PI2.zip) for STR(CKS)-16M.
+These checkpoints were trained with the NuPlan dataset, so please make sure to read their [non-comercial policies](https://www.nuscenes.org/terms-of-use) carefully before using them.
+
+The OLS (Open Loop Simulation) performance of these checkpoints is as follows:
+
+|                       | OLS   | 8sADE  | 3sFDE  | 5sFDE  | 8sFDE  |
+|-----------------------|-------|--------|--------|--------|--------|
+| STR(CKS)-16M          | 83.42 | 1.9134 | 1.0463 | 2.2173 | 4.8369 |
+| STR(CKS)-16M-Diff.12e | 86.52 | 1.773  | 0.9477 | 2.104  | 4.505  |
+
+The CLS-NR (Closed Loop Simulation - Not Reactive) performance of this checkpoint is as follows:
+
+|                       | CLS-NR | drivable_area_compliance | driving_direction_compliance | ego_is_comfortable | ego_is_making_progress | ego_progress_along_expert_route | no_ego_at_fault_collisions | speed_limit_compliance | time_to_collision_within_bound |
+|-----------------------|--------|--------------------------|------------------------------|--------------------|------------------------|---------------------------------|----------------------------|------------------------|--------------------------------|
+| STR(CKS)-16M-Diff.12e | 54.46  | 0.81216458               | 0.961091234                  | 0.973166369        | 0.921288014            | 0.709096891                     | 0.763416816                | 0.957543143            | 0.711091234                    |
+
+The CLS-R (Closed Loop Simulation - Reactive) performance of this checkpoint is as follows:
+
+|                       | CLS-R | drivable_area_compliance | driving_direction_compliance | ego_is_comfortable | ego_is_making_progress | ego_progress_along_expert_route | no_ego_at_fault_collisions | speed_limit_compliance | time_to_collision_within_bound |
+|-----------------------|-------|--------------------------|------------------------------|--------------------|------------------------|---------------------------------|----------------------------|------------------------|--------------------------------|
+| STR(CKS)-16M-Diff.12e | 57.34 | 0.810375671              | 0.96019678                   | 0.972271914        | 0.913237925            | 0.708428908                     | 0.813953488                | 0.955975959            | 0.770125224                    |
 
 
 ## To train and evaluate during training:
@@ -521,6 +537,7 @@ or
 The default transformer backbone is the [GPT2 model](https://huggingface.co/docs/transformers/model_doc/gpt2) from the Hugging Face's Transformers Lib.
 We also tried the recent Mamba backbone and it works even better (with some minor bugs to be fixed in the current version).
 Follow the instructions from the [official Mamba](https://github.com/state-spaces/mamba) repo to install and change the model name from `gpt` to `mamba` to use it.
+
 
 
 ## Citation

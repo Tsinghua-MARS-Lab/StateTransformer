@@ -146,7 +146,8 @@ def main(args):
                                             map_name=args.map_name,
                                             scenarios_to_keep=scenarios_to_keep,
                                             filter_still=args.filter_still,
-                                            sensor_blob_path=args.sensor_blob_path)
+                                            sensor_meta_path=args.sensor_meta_path,)
+                                            # sensor_blob_path=args.sensor_blob_path)
                 if loaded_dic is None:
                     continue
                 if args.keep_future_steps:
@@ -261,7 +262,7 @@ def main(args):
             # check if folder exists
             store_path = os.path.join(args.cache_folder, args.dataset_name)
             if not os.path.exists(store_path):
-                os.makedirs(store_path)
+                os.makedirs(store_path, exist_ok=True)
             print("Storing at ", os.path.join(store_path, f"{file_name}.pkl"))
             with open(os.path.join(store_path, f"{file_name}.pkl"), "wb") as f:
                 pickle.dump(loaded_dic, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -269,14 +270,7 @@ def main(args):
             if shard < 2:
                 # inspect result
                 print("Inspecting result\n**************************\n")
-                print("ego pose shape: ", loaded_dic["agent"]["ego"]["pose"].shape, loaded_dic["agent"]["ego"]["starting_frame"], loaded_dic["agent"]["ego"]["ending_frame"])
-                starting_frames = []
-                ending_frames = []
-                for each_agent in loaded_dic['agent']:
-                    starting_frames.append(loaded_dic['agent'][each_agent]['starting_frame'])
-                    ending_frames.append(loaded_dic['agent'][each_agent]['ending_frame'])
-                print("starting frames: ", starting_frames)
-                print("ending frames: ", ending_frames)
+                print("ego pose shape: ", loaded_dic["agent"]["ego"]["pose"].shape, loaded_dic["agent"]["ego"]["speed"].shape, loaded_dic["agent"]["ego"]["starting_frame"], loaded_dic["agent"]["ego"]["ending_frame"])
             yield {'file_name': loaded_dic["file_name"]}
             del dl
 
@@ -409,7 +403,8 @@ def main(args):
                                                                    "scenario_id": Value("string"),
                                                                    # "halfs_intention": Value("int64"),
                                                                    "intentions": Sequence(Value("int64")),
-                                                                   "ego_goal": Sequence(Value("float32")),
+                                                                   "mission_goal": Sequence(Value("float32")),
+                                                                   "expert_goal": Sequence(Value("float32")),
                                                                    "navigation": Sequence(Value("int64")),
                                                                    "images_path": Sequence(Value("string")),
                                                                    }),)
@@ -473,6 +468,7 @@ if __name__ == '__main__':
     parser.add_argument("--data_path", type=str, default="train_singapore")
     parser.add_argument("--dataset_root", type=str, default="/localdata_hdd/nuplan/dataset")
     parser.add_argument("--sensor_blob_path", type=str, default=None)
+    parser.add_argument("--sensor_meta_path", type=str, default=None)
     parser.add_argument("--road_dic_path", type=str, default=str(Path.home()) + "/nuplan/dataset/pickles/road_dic.pkl")
     parser.add_argument("--nsm_label_path", type=str,
                         default="labels/intentions/nuplan_boston/training.wtime.0-100.iter0.pickle")

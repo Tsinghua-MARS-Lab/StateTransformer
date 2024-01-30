@@ -95,6 +95,10 @@ class ModelArguments:
     )
     ######## end of proposal args ########
 
+    use_speed: Optional[bool] = field(
+        default=False
+    )
+
     ######## begin of key points args ########
     use_key_points: Optional[str] = field(
         default='specified_backward',
@@ -205,6 +209,11 @@ class ModelArguments:
 
     use_mission_goal: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use mission goal in the model"}
+    )
+
+    ######## model args, check your model config before using it! ########
+    attention_dropout: Optional[float] = field(
+        default=0.0, metadata={"help": "The dropout ratio for attention layers."}
     )
 
 @dataclass

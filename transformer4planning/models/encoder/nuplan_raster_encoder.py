@@ -44,7 +44,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         action_kwargs = dict(
             d_embed=self.config.n_embd
         )
-
         # if 'resnet' in self.config.raster_encoder_type:
         if 'vit' in self.config.raster_encoder_type:
             from transformers import ViTModel, ViTConfig
@@ -69,7 +68,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                         pretrain=cnn_kwargs.get("pretrain", False))
             print('Building ResNet encoder')
         # separate key point encoder is hard to train with larger models due to sparse signals
-        self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if self.config.use_speed:
+            self.action_m_embed = nn.Sequential(nn.Linear(6, action_kwargs.get("d_embed")), nn.Tanh())
+        else:
+            self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 
         if self.config.separate_kp_encoder:
             self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
@@ -81,7 +83,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         Nuplan raster encoder require inputs:
         `high_res_raster`: torch.Tensor, shape (batch_size, 224, 224, seq)
         `low_res_raster`: torch.Tensor, shape (batch_size, 224, 224, seq)
-        `context_actions`: torch.Tensor, shape (batch_size, seq, 4)
+        `context_actions`: torch.Tensor, shape (batch_size, seq, 4 / 6)
         `trajectory_label`: torch.Tensor, shape (batch_size, seq, 2/4), depend on whether pred yaw value
         `pred_length`: int, the length of prediction trajectory
         `context_length`: int, the length of context actions
