@@ -7,6 +7,7 @@ Train a Transformer ML Model for Planning
 import logging
 import os
 import random
+import shutil
 import sys
 import pickle
 import copy
@@ -26,7 +27,8 @@ from transformers import (
     HfArgumentParser,
     set_seed,
 )
-from transformer4planning.models.model import build_models
+# from transformer4planning.models.model import build_models
+from transformer4planning.models.backbone.str_base import build_models
 from transformer4planning.utils.args import (
     ModelArguments, 
     DataTrainingArguments, 
@@ -192,7 +194,7 @@ def main():
         # TODO: compatible with older training args
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
-        print('Testset not found, using training set as test set')
+        print('Using training set as test set')
         test_dataset = train_dataset
     
     if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
@@ -219,6 +221,27 @@ def main():
 
     # loop split info and update for test set
     print('TrainingSet: ', train_dataset, '\nValidationSet', val_dataset, '\nTestingSet', test_dataset)
+
+    # clean image fodler
+    if training_args.images_cleaning_to_folder is not None:
+        if data_args.camera_images_path is None:
+            raise ValueError("Must provide camera_images_path to clean images")
+        print('Cleaning images from ', data_args.camera_images_path, '\nto folder: ', training_args.images_cleaning_to_folder)
+        print('Cleaning training set')
+        if not os.path.isdir(training_args.images_cleaning_to_folder):
+            os.mkdir(training_args.images_cleaning_to_folder)
+        datasets_list = [train_dataset, val_dataset]
+        for dataset in datasets_list:
+            for each in dataset:
+                for each_image in each['image_path']:
+                    # requires python 3.2+
+                    src_fpath = os.path.join(data_args.camera_images_path, each_image)
+                    dest_fpath = os.path.join(training_args.images_cleaning_to_folder, each_image)
+                    os.makedirs(os.path.dirname(dest_fpath), exist_ok=True)
+                    shutil.copy(src_fpath, dest_fpath)
+                    print('Copied ', src_fpath, ' to ', dest_fpath)
+        print('Image clean finished')
+        exit()
 
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),

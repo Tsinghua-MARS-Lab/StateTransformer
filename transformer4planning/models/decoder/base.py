@@ -4,6 +4,35 @@ from typing import Dict
 from transformer4planning.libs.mlp import DecoderResCat
 from torch.nn import CrossEntropyLoss, MSELoss
 import os
+
+
+def mean_circular_error(y_pred, y_true):
+    """
+    Calculate Mean Circular Error for predicted and true angles.
+
+    Args:
+    y_pred (torch.Tensor): Predicted angles (in radians).
+    y_true (torch.Tensor): True angles (in radians).
+
+    Returns:
+    torch.Tensor: Mean circular error.
+    """
+    # Ensure the angles are in the range -pi to pi
+    y_pred = torch.atan2(torch.sin(y_pred), torch.cos(y_pred))
+    y_true = torch.atan2(torch.sin(y_true), torch.cos(y_true))
+
+    # Calculate the angular difference
+    angular_difference = y_true - y_pred
+
+    # Adjust differences to be in the range -pi to pi for circular continuity
+    angular_difference = torch.atan2(torch.sin(angular_difference), torch.cos(angular_difference))
+
+    # Compute the mean squared error of the angular differences
+    loss = torch.mean(torch.square(angular_difference))
+
+    return loss
+
+
 class TrajectoryDecoder(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -56,9 +85,13 @@ class TrajectoryDecoder(nn.Module):
                 # set traj_logits equal to label where aug_current is 0
                 traj_logits = traj_logits * aug_current + label.to(device) * (1 - aug_current) if self.config.predict_yaw else \
                     traj_logits[..., :2] * aug_current + label[..., :2].to(device) * (1 - aug_current)
-
-                traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.config.predict_yaw else \
-                            self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+                if self.config.mean_circular_loss:
+                    assert self.config.predict_yaw, "mean_circular_loss only works for yaw prediction"
+                    traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+                    traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device)
+                else:
+                    traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.config.predict_yaw else \
+                                self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
             traj_loss *= self.config.trajectory_loss_rescale
         else:
             traj_logits = torch.zeros_like(label[..., :2])

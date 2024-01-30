@@ -50,6 +50,9 @@ class ModelArguments:
         default='resnet18',
         metadata={"help": "choose from [vit, resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
+    vit_intermediate_size: Optional[int] = field(
+        default=3072,
+    )
     # resnet_type: Optional[str] = field(
     #     default="resnet18",
     #     metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
@@ -76,12 +79,25 @@ class ModelArguments:
     trajectory_loss_rescale: Optional[float] = field(
         default=1.0
     )
-
-    ######## begin of proposal args ########
-    use_proposal: Optional[bool] = field(
+    mean_circular_loss: Optional[bool] = field(
         default=False
     )
+
+    ######## begin of navigation args ########
+    use_navigation: Optional[bool] = field(
+        default=False
+    )
+
+    ######## begin of proposal args ########
+    use_proposal: Optional[int] = field(
+        default=0,
+        metadata={"help": "number of proposal candidates. 0: not using proposal"}
+    )
     ######## end of proposal args ########
+
+    use_speed: Optional[bool] = field(
+        default=False
+    )
 
     ######## begin of key points args ########
     use_key_points: Optional[str] = field(
@@ -127,6 +143,12 @@ class ModelArguments:
         default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
     ######## end of diffusion decoder args ########
+
+    ######## begin of camera images args ########
+    camera_image_encoder: Optional[str] = field(
+        default=None, metadata={"help": "choose from [dinov2], set None to not use camera images"}
+    )
+    ####### end of camera images args ########
 
     ######## begin of nuplan args ########
     with_traffic_light: Optional[bool] = field(
@@ -185,6 +207,15 @@ class ModelArguments:
     )
     ######## end of Mamba args ########
 
+    use_mission_goal: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use mission goal in the model"}
+    )
+
+    ######## model args, check your model config before using it! ########
+    attention_dropout: Optional[float] = field(
+        default=0.0, metadata={"help": "The dropout ratio for attention layers."}
+    )
+
 @dataclass
 class DataTrainingArguments:
     """
@@ -196,7 +227,9 @@ class DataTrainingArguments:
     saved_valid_dataset_folder: Optional[str] = field(
         default=None, metadata={"help": "The path of a pre-saved validation dataset folder. The dataset should be saved by Dataset.save_to_disk())."}
     )
-
+    camera_images_path: Optional[str] = field(
+        default=None, metadata={"help": "path to the folder containing camera images"}
+    )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
@@ -282,6 +315,9 @@ class PlanningTrainingArguments(TrainingArguments):
     )
     do_test: Optional[bool] = field(
         default=False,
+    )
+    images_cleaning_to_folder: Optional[str] = field(
+        default=None, metadata={"help": "Pass a target folder to clean the raw image folder to the target folder."}
     )
 
     # label_names: Optional[List[str]] = field(

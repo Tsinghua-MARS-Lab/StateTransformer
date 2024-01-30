@@ -145,14 +145,17 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['metric_fde'] = avg_fde_gen.mean()
     eval_result['fde_score'] = fde_score.mean()
 
+    def normalize_angles(angles):
+        return np.arctan2(np.sin(angles), np.cos(angles))
+
     # heading error
     if prediction_trajectory_by_generation.shape[-1] == 4:
         # average heading error comutation
         # heading_error_gen = abs(batch_angle_normalize(prediction_trajectory_by_generation[:, :, -1] - labels[:, :, -1]))
-        heading_diff_gen = prediction_trajectory_by_generation[:, :, -1] - labels[:, :, -1]
-        normalized_angles = np.fmod(heading_diff_gen + 2 * np.pi, 2 * np.pi)  # normalize to 0, 2pi
-        normalized_angles = np.where(normalized_angles > np.pi, normalized_angles - 2 * np.pi, normalized_angles)  # normalize to -pi, pi
-        heading_error_gen = abs(normalized_angles)
+        heading_diff_gen = normalize_angles(prediction_trajectory_by_generation[:, :, -1]) - normalize_angles(labels[:, :, -1])
+        # normalized_angles = np.fmod(heading_diff_gen + 2 * np.pi, 2 * np.pi)  # normalize to 0, 2pi
+        # normalized_angles = np.where(normalized_angles > np.pi, normalized_angles - 2 * np.pi, normalized_angles)  # normalize to -pi, pi
+        heading_error_gen = abs(normalize_angles(heading_diff_gen))
 
         ahe3_gen = np.mean(copy.deepcopy(heading_error_gen[:, :30]), axis=1)
         ahe5_gen = np.mean(copy.deepcopy(heading_error_gen[:, :50]), axis=1)
@@ -240,7 +243,7 @@ def compute_metrics(prediction: EvalPrediction):
             prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 1
             proposal_labels = prediction_by_generation['halfs_intention']
             accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
-            print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels.flatten(), prediction_proposal_class_by_generation.flatten())
+            # print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels.flatten(), prediction_proposal_class_by_generation.flatten())
             eval_result['proposal_accuracy'] = accuracy_by_generation
         elif 'intentions' in prediction_by_generation:
             prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 16
