@@ -211,9 +211,12 @@ class ModelArguments:
         default=False, metadata={"help": "Whether to use mission goal in the model"}
     )
 
-    ######## model args, check your model config before using it! ########
+    ######## temporal model args, check your model config before using it! ########
     attention_dropout: Optional[float] = field(
         default=0.0, metadata={"help": "The dropout ratio for attention layers."}
+    )
+    num_local_experts: Optional[int] = field(
+        default=8, metadata={"help": "The number of local experts."}
     )
 
 @dataclass

@@ -56,7 +56,7 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
         index_path = os.path.join(index_root_folders, index)
         if os.path.isdir(index_path):
             # load training dataset
-            print("Loading dataset {}".format(index_path))
+            logger.info("Loading dataset {}".format(index_path))
             dataset = Dataset.load_from_disk(index_path)
             if dataset is not None:
                 datasets.append(dataset)
@@ -194,19 +194,72 @@ def main():
         # TODO: compatible with older training args
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
-        print('Using training set as test set')
+        logger.warning('Using training set as test set')
         test_dataset = train_dataset
     
     if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
         val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False)
     else:
-        print('Validation set not found, using training set as val set')
+        logger.warning('Validation set not found, using training set as val set')
         val_dataset = test_dataset
         # val_dataset = train_dataset
 
     if data_args.do_closed_loop_simulation and 'val1k' in root_folders:
         val1k_dataset = load_dataset(index_root, "val1k", data_args.dataset_scale, data_args.agent_type, False)
         val1k_dataset = val1k_dataset.suffle(seed=training_args.seed)
+
+    # clean image fodler
+    def check_images(each):
+        if 'images_path' not in each:
+            logger.error('images_path not found in dataset')
+            print(each)
+            raise ValueError('images_path not found in dataset')
+        return each
+
+    def clean_images(each):
+        global success, fail
+        for each_image in each['images_path']:
+            # requires python 3.2+
+            src_fpath = os.path.join(data_args.camera_images_path, each_image)
+            if os.path.exists(src_fpath):
+                try:
+                    # src_fpath = os.path.join(data_args.camera_images_path, each_image)
+                    dest_fpath = os.path.join(training_args.images_cleaning_to_folder, each_image)
+                    os.makedirs(os.path.dirname(dest_fpath), exist_ok=True)
+                    shutil.copy(src_fpath, dest_fpath)
+                    # print('Copied ', src_fpath, ' to ', dest_fpath)
+                    # success += 1
+                except:
+                    logger.warning('Failed to copy ' + src_fpath, ' to ' + dest_fpath)
+                    # fail += 1
+            else:
+                logger.warning('Image not found: ' + src_fpath)
+
+    if training_args.images_cleaning_to_folder is not None:
+        if data_args.camera_images_path is None:
+            raise ValueError("Must provide camera_images_path to clean images")
+        logger.info(f'Cleaning images from: {data_args.camera_images_path} to folder: {training_args.images_cleaning_to_folder}')
+        logger.info('checking if any invalid folders')
+        for each_folder in os.listdir(data_args.camera_images_path):
+            if not os.path.isdir(os.path.join(data_args.camera_images_path, each_folder)):
+                logger.error('invalid folder: ' + each_folder)
+                raise ValueError('invalid folder: ' + each_folder)
+            if len(os.listdir(os.path.join(data_args.camera_images_path, each_folder))) != 8:
+                logger.error(f'invalid folder: {each_folder}, with: {os.listdir(os.path.join(data_args.camera_images_path, each_folder))}')
+                raise ValueError('invalid folder: ', each_folder)
+        logger.info('Cleaning training set')
+        if not os.path.isdir(training_args.images_cleaning_to_folder):
+            os.mkdir(training_args.images_cleaning_to_folder)
+        datasets_list = [train_dataset]
+        for dataset in datasets_list:
+            success = 0
+            fail = 0
+            dataset = dataset.map(check_images, num_proc=120)
+            dataset = dataset.map(clean_images, num_proc=120)
+            logger.info('Success: ' + str(success) + ' Fail: ' + str(fail))
+            # Val: Success:  15218  Fail:  127560
+        logger.info('Image clean finished')
+        exit()
 
     if model_args.task == "nuplan":
         all_maps_dic = {}
@@ -220,28 +273,7 @@ def main():
                 all_maps_dic[map_name] = map_dic
 
     # loop split info and update for test set
-    print('TrainingSet: ', train_dataset, '\nValidationSet', val_dataset, '\nTestingSet', test_dataset)
-
-    # clean image fodler
-    if training_args.images_cleaning_to_folder is not None:
-        if data_args.camera_images_path is None:
-            raise ValueError("Must provide camera_images_path to clean images")
-        print('Cleaning images from ', data_args.camera_images_path, '\nto folder: ', training_args.images_cleaning_to_folder)
-        print('Cleaning training set')
-        if not os.path.isdir(training_args.images_cleaning_to_folder):
-            os.mkdir(training_args.images_cleaning_to_folder)
-        datasets_list = [train_dataset, val_dataset]
-        for dataset in datasets_list:
-            for each in dataset:
-                for each_image in each['image_path']:
-                    # requires python 3.2+
-                    src_fpath = os.path.join(data_args.camera_images_path, each_image)
-                    dest_fpath = os.path.join(training_args.images_cleaning_to_folder, each_image)
-                    os.makedirs(os.path.dirname(dest_fpath), exist_ok=True)
-                    shutil.copy(src_fpath, dest_fpath)
-                    print('Copied ', src_fpath, ' to ', dest_fpath)
-        print('Image clean finished')
-        exit()
+    logger.info('TrainingSet: '+ str(train_dataset) + '\nValidationSet' + str(val_dataset) + '\nTestingSet' + str(test_dataset))
 
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
