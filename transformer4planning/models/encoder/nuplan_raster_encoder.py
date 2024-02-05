@@ -23,6 +23,8 @@ class CNNDownSamplingResNet(nn.Module):
         elif resnet_type == 'resnet152':
             self.cnn = models.resnet152(pretrained=pretrain, num_classes=d_embed)
             cls_feature_dim = 2048
+        else:
+            assert False, f'Unknown resnet type: {resnet_type}'
         self.cnn = torch.nn.Sequential(*(list(self.cnn.children())[1:-1]))
         self.layer1 = nn.Sequential(
             nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
@@ -45,7 +47,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             d_embed=self.config.n_embd
         )
         # if 'resnet' in self.config.raster_encoder_type:
-        if 'vit' in self.config.raster_encoder_type:
+        if isinstance(self.config.raster_encoder_type, str) and 'vit' in self.config.raster_encoder_type:
             from transformers import ViTModel, ViTConfig
             vit_config = ViTConfig()
             vit_config.hidden_size = self.config.n_embd // 2
@@ -59,7 +61,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             cnn_kwargs = dict(
                 d_embed=self.config.n_embd // 2,
                 in_channels=self.config.raster_channels,
-                resnet_type=self.config.raster_encoder_type,
+                resnet_type=self.config.resnet_type,
                 pretrain=self.config.pretrain_encoder
             )
             self.cnn_downsample = CNNDownSamplingResNet(d_embed=cnn_kwargs.get("d_embed", None),
@@ -69,7 +71,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             print('Building ResNet encoder')
         # separate key point encoder is hard to train with larger models due to sparse signals
         if self.config.use_speed:
-            self.action_m_embed = nn.Sequential(nn.Linear(6, action_kwargs.get("d_embed")), nn.Tanh())
+            self.action_m_embed = nn.Sequential(nn.Linear(7, action_kwargs.get("d_embed")), nn.Tanh())
         else:
             self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 
@@ -193,7 +195,12 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             if self.config.separate_kp_encoder:
                 future_key_embeds = self.kps_m_embed(future_key_points_aug)
             else:
-                future_key_embeds = self.action_m_embed(future_key_points_aug)
+                if self.config.use_speed:
+                    # padding speed, padding the last dimension from 4 to 7
+                    future_key_points_aug = torch.cat([future_key_points_aug, torch.zeros_like(future_key_points_aug)[:, :, :3]], dim=-1)
+                    future_key_embeds = self.action_m_embed(future_key_points_aug)
+                else:
+                    future_key_embeds = self.action_m_embed(future_key_points_aug)
 
             input_embeds = torch.cat([input_embeds, future_key_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)

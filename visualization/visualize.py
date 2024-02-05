@@ -201,7 +201,7 @@ def ego_to_global(poses, ego_pose, y_reverse=1):
     return rotated_poses
 
 def add_intention_to_agent_dic(agent_dic):
-    print('processing intentino')
+    print('processing intention')
     total_frames = agent_dic['ego']['pose'].shape[0]
     intentions = np.zeros((total_frames, 1))
     intentions[:40] = 4
@@ -313,13 +313,17 @@ else:
     st.sidebar.write('Current Scenario: ', st.session_state.data['current_scenario_id'])
 
 
-make_prediction = st.sidebar.button('Make Prediction')
+make_prediction_1frame = st.sidebar.button('Predict - Single Frame')
+make_prediction_15s = st.sidebar.button('Predict(Open-Loop) - 15s')
+# Experimental
+# make_prediction_CL_15s = st.sidebar.button('Predict(Close Loop) - 15s')
+make_prediction_CL_15s = False
 st.sidebar.write('Prediction frame: ', st.session_state.new_frame)
 
-if make_prediction:
+if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
     print('making prediction')
     import json, torch
-    from transformer4planning.models.model import build_models
+    from transformer4planning.models.backbone.str_base import build_models
     from transformer4planning.preprocess.nuplan_rasterize import static_coor_rasterize
     if args.model_checkpoint_path is None:
         st.sidebar.write('No model path given. Please specify a model checkpoint path and rerun the script')
@@ -334,48 +338,75 @@ if make_prediction:
         model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
         model_args.model_pretrain_name_or_path = args.model_checkpoint_path
         model = build_models(model_args)
+
+        # init prediction keys in data
+        if 'prediction_generation' not in st.session_state.data:
+            st.session_state.data['prediction_generation'] = {}
+        if 'pred_kp_generation' not in st.session_state.data:
+            st.session_state.data['pred_kp_generation'] = {}
+        if model.use_proposal and 'proposal_generation' not in st.session_state.data:
+            st.session_state.data['proposal_generation'] = {}
+
         current_data = st.session_state.dataset[st.session_state.data['selected_index']]
         # update frame index
         if st.session_state.new_frame is not None:
             current_data['frame_id'] = st.session_state.new_frame * 2
         current_frame = int(current_data['frame_id'])
-        map_name = current_data['map']
-        prepared_data = static_coor_rasterize(sample=current_data,
-                                              data_path=args.saved_dataset_folder,
-                                              agent_dic=agent_dic,
-                                              all_maps_dic={map_name: road_dic},
-                                              use_proposal=True)
-        prepared_data = np_to_tensor(prepared_data)
-        prepared_data.update({'road_dic': road_dic,
-                              'route_ids': current_data['route_ids'],
-                              'ego_pose': agent_dic['ego']['pose'][current_frame // 2],
-                              'map_name': map_name,})
 
-        with torch.no_grad():
-            prediction_generation = model.generate(**prepared_data)
-            print('prediction_generation: ', list(prediction_generation.keys()), st.session_state.data['selected_index'], current_frame)
-            from transformer4planning.trainer import save_raster
-            image_dictionary = save_raster(inputs=prepared_data, sample_index=0,
-                                           prediction_trajectory_by_gen=prediction_generation['traj_logits'][0],
-                                           prediction_key_point_by_gen=prediction_generation['key_points_logits'][0])
-            st.session_state.data['prediction_generation'] = ego_to_global(
-                prediction_generation['traj_logits'][0].numpy(),
-                agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
-            st.session_state.data['pred_kp_generation'] = ego_to_global(
-                prediction_generation['key_points_logits'][0].numpy(),
-                agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
-            if model.use_proposal:
-                with st.sidebar.expander('Proposal Prediction', expanded=True):
-                    print('proposal prediction result: ', prediction_generation['proposal'].numpy().tolist()[0])
-                    print('proposal prediction scores: ', prediction_generation['proposal_scores'].numpy().tolist()[0])
-                    st.session_state.data['proposal_generation'] = prediction_generation['proposal'].numpy().tolist()[0]
-                    chart_data = {'scores': prediction_generation['proposal_scores'].numpy()[0],
-                                  "index": np.array(['Left', 'Right', 'Fwd', 'Bwd', 'Same'])}
-                    st.bar_chart(chart_data, x='index', y='scores')
-            with st.sidebar.expander('Raster Visualization', expanded=True):
-                for each_key in image_dictionary:
-                    image = image_dictionary[each_key]
-                    st.image(image/255, caption=each_key, use_column_width=True, clamp=True, channels='BGR')
+        if make_prediction_1frame:
+            indices_to_predict = [current_frame]
+        elif make_prediction_15s or make_prediction_CL_15s:
+            indices_to_predict = list(range(current_frame, current_frame + 150, 10))
+
+        for i, current_frame in enumerate(indices_to_predict):
+            # predict on each frame
+            map_name = current_data['map']
+            prepared_data = static_coor_rasterize(sample=current_data,
+                                                  data_path=args.saved_dataset_folder,
+                                                  agent_dic=agent_dic,
+                                                  all_maps_dic={map_name: road_dic},
+                                                  use_proposal=True)
+            prepared_data = np_to_tensor(prepared_data)
+            prepared_data.update({'road_dic': road_dic,
+                                  'route_ids': current_data['route_ids'],
+                                  'ego_pose': agent_dic['ego']['pose'][current_frame // 2],
+                                  'map_name': map_name,})
+
+            with torch.no_grad():
+                prediction_generation = model.generate(**prepared_data)
+                print('prediction_generation: ', list(prediction_generation.keys()), st.session_state.data['selected_index'], current_frame)
+                from transformer4planning.trainer import save_raster
+                image_dictionary = save_raster(inputs=prepared_data, sample_index=0,
+                                               prediction_trajectory_by_gen=prediction_generation['traj_logits'][0],
+                                               prediction_key_point_by_gen=prediction_generation['key_points_logits'][0])
+                st.session_state.data['prediction_generation'][current_frame // 2] = ego_to_global(
+                    prediction_generation['traj_logits'][0].numpy(),
+                    agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
+                st.session_state.data['pred_kp_generation'][current_frame // 2] = ego_to_global(
+                    prediction_generation['key_points_logits'][0].numpy(),
+                    agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
+                if model.use_proposal:
+                    with st.sidebar.expander('Proposal Prediction', expanded=True):
+                        print('proposal prediction result: ', prediction_generation['proposal'].numpy().tolist()[0])
+                        print('proposal prediction scores: ', prediction_generation['proposal_scores'].numpy().tolist()[0])
+                        st.session_state.data['proposal_generation'][current_frame // 2] = prediction_generation['proposal'].numpy().tolist()[0]
+                        chart_data = {'scores': prediction_generation['proposal_scores'].numpy()[0],
+                                      "index": np.array(['Left', 'Right', 'Fwd', 'Bwd', 'Same'])}
+                        st.bar_chart(chart_data, x='index', y='scores')
+                if i == len(indices_to_predict) - 1:
+                    with st.sidebar.expander('Raster Visualization', expanded=True):
+                        for each_key in image_dictionary:
+                            image = image_dictionary[each_key]
+                            st.image(image/255, caption=each_key, use_column_width=True, clamp=True, channels='BGR')
+                if make_prediction_CL_15s:
+                    # update the current frame to the last frame
+                    prediction_np = np.array(st.session_state.data['prediction_generation'][current_frame // 2])
+                    agent_dic['ego']['pose'][current_frame // 2: current_frame // 2 + 40: 2, :] = prediction_np[:20, :]
+                    agent_dic['ego']['pose'][current_frame // 2 + 1: current_frame // 2 + 40 + 1: 2, :] = prediction_np[:20, :]
+
+        if make_prediction_CL_15s:
+            st.session_state.agent_dic = nested_numpy_to_list_for_json(copy.deepcopy(agent_dic))
+            st.session_state.data['agent_dic'] = st.session_state.agent_dic
 
 # Render the component with given data, and it will return a new timestamp if animating
 st.session_state.new_frame = planning_map(data=st.session_state.data, key="planning_map")  # in 10Hz or None

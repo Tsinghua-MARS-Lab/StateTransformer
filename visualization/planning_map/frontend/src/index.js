@@ -60,6 +60,8 @@ var ego_fill = false;
 var agentDic = {};
 var route_ids = [];
 var roadDic = {};
+var predictionGeneration = {};
+var keyPointsGeneration = {};
 // Update timestamp for animation
 // let timestamp = 0;
 let data_initialized = false;
@@ -381,6 +383,23 @@ function update(frameCount) {
             } else {
                 console.log('stop playing: ', currentFrame, totalFrame, maxFrames);
                 isPlaying = false;
+            }
+
+            if (Object.keys(predictionGeneration).length > 0) {
+                // draw trajectory
+                console.log('drawing trajectory');
+                stage.remove(trajectoryGroup);
+                trajectoryGroup = new Two.Group();
+                // get closest frame
+                // get all available frames
+                let frames = Object.keys(predictionGeneration);
+                // find one frame that is closest to current frame
+                let closestFrame = frames.reduce((a, b) => Math.abs(b - currentFrame) < Math.abs(a - currentFrame) ? b : a);
+                console.log('closest frame: ', closestFrame, currentFrame);
+
+                drawTrajectory(predictionGeneration[closestFrame], 0.35);
+                drawTrajectory(keyPointsGeneration[closestFrame], 1, 1);
+                two.add(btnGroup);
             }
         }
     }
@@ -721,9 +740,19 @@ function onRender(event) {
             console.log('draw trajectory: ', data.pred_kp_generation);
             stage.remove(trajectoryGroup);
             trajectoryGroup = new Two.Group();
-            drawTrajectory(data.prediction_generation, 0.35);
-            drawTrajectory(data.pred_kp_generation, 1, 1);
+            // get closest frame
+            // get all available frames
+            let frames = Object.keys(data.prediction_generation);
+            // find one frame that is closest to current frame
+            let closestFrame = frames.reduce((a, b) => Math.abs(b - currentFrame) < Math.abs(a - currentFrame) ? b : a);
+            console.log('closest frame: ', closestFrame, currentFrame);
+
+            drawTrajectory(data.prediction_generation[closestFrame], 0.35);
+            drawTrajectory(data.pred_kp_generation[closestFrame], 1, 1);
             two.add(btnGroup);
+
+            predictionGeneration = data.prediction_generation;
+            keyPointsGeneration = data.pred_kp_generation;
         }
     } else {
         console.log('data not ready ', data);

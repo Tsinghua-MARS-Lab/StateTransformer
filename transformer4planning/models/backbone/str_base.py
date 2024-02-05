@@ -311,6 +311,9 @@ class STR(PreTrainedModel):
                 assert future_key_points.shape[1] > 0, 'future points not enough to sample'
 
                 if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                    if self.config.use_speed:
+                        # padding speed, padding the last dimension from 4 to 7
+                        future_key_points = torch.cat([future_key_points, torch.zeros_like(future_key_points)[:, :, :3]], dim=-1)
                     future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
                 else:
                     future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
@@ -376,6 +379,9 @@ class STR(PreTrainedModel):
                         pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
 
                     if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                        if self.config.use_speed:
+                            # padding speed, padding the last dimension from 4 to 7
+                            pred_key_point = torch.cat([pred_key_point, torch.zeros_like(pred_key_point)[:, :, :3]], dim=-1)
                         key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     else:
                         key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed

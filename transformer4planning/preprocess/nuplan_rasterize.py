@@ -299,6 +299,9 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     for road_id in road_ids:
         if int(road_id) == -1:
             continue
+        if int(road_id) not in road_dic:
+            print('Warning: road_id not in road_dic! ', road_id)
+            continue
         xyz = road_dic[int(road_id)]["xyz"].copy()
         road_type = int(road_dic[int(road_id)]["type"])
         assert 0 <= road_type < road_types, f'road_type {road_type} is larger than road_types {road_types}'
@@ -410,13 +413,13 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     if kwargs.get('use_speed', False):
         # speed, old data dic does not have speed key
-        speed = agent_dic['ego']['speed']
-        rotated_speed = np.array([speed[:, 0] * cos_ - speed[:, 1] * sin_,
-                                  speed[:, 0] * sin_ + speed[:, 1] * cos_]).transpose((1, 0))
+        speed = agent_dic['ego']['speed']  # v, a, angular_v
+        if speed.shape[0] == ego_poses.shape[0] * 2:
+            speed = speed[::2, :]
         for i in sample_frames_in_past:
             selected_pose = rotated_poses[i // frequency_change_rate]  # hard-coded frequency change
             selected_pose[-1] = normalize_angle(selected_pose[-1])
-            action = np.concatenate((selected_pose, rotated_speed[i // frequency_change_rate]))
+            action = np.concatenate((selected_pose, speed[i // frequency_change_rate]))
             context_actions.append(action)
     else:
         for i in sample_frames_in_past:
