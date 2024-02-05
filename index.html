@@ -44,7 +44,7 @@
 								</ul>
 							</div>
 							<ul class="actions stacked">
-								<li><a href="#first" class="button big wide smooth-scroll-middle">Coming Soon</a></li>
+								<li><a href="#third" class="button big wide smooth-scroll-middle">Coming Soon</a></li>
 							</ul>
 						</div>
 						<div class="image">
@@ -54,23 +54,27 @@
 
 				<!-- Closed-loop_Simulation -->
 				<!--
-				<section class="spotlight style4 fullscreen orient-right content-align-left image-position-right" id="first">
+				<section class="spotlight style1 fullscreen orient-right content-align-left image-position-right" id="first">
 					<div class="content">
-						<h2>Closed-loop Simulation</h2>
-						<p>InterSim is born for <strong>closed-loop</strong> interactive simulations. <br>
-							Closed-loop simulations are pivotal to revealing failure patterns of predictors and planners before their deployment. <br>
-							InterSim leverages relation reasoning models learned from a real-driving dataset to simulate human drivers' behaviors. <br>
-							It is the best simulator to test your predictor and planner for L4 urban autonomous driving.
-						</p>
+						<h2>Abstract</h2>
+						<p>
+							Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches.
+							The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space.
+							Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called <strong>State Transformer (STR)</strong>. <br>
+							STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
+							Our approach unites trajectory generation problems with other sequence modeling problems, powering rapid iterations with breakthroughs in neighbor domains such as language modeling. <br>
+							Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the <strong>scaling laws</strong> by presenting outstanding adaptability and learning efficiency.
+							Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
 						<ul class="actions stacked">
 							<li><a href="#second" class="button big wide smooth-scroll-middle">Next</a></li>
 						</ul>
 					</div>
 					<div class="image">
-						<img src="images/intersim_sim.png" alt="">
+						<img src="images/traffic.png" alt="">
 					</div>
 				</section>
 				-->
+
 
 				<!-- dashboard -->
 				<!-- 
@@ -89,43 +93,67 @@
 					</div>
 				</section>
 
+				-->
+
 				<section class="wrapper style1 align-left" id="third">
 					<div class="inner">
 						<h2>Abstract</h2>
-						<p>Interactive traffic simulation is crucial to autonomous driving systems by enabling testing for planners in a more scalable and safe way compared to real-world road testing. Existing approaches learn an agent model from large-scale driving data to simulate realistic traffic scenarios, yet it remains an open question to produce consistent and diverse multi-agent interactive behaviors in crowded scenes. In this work, we present InterSim, an interactive traffic simulator for testing autonomous driving planners. Given a test plan trajectory from the ego agent, InterSim reasons about the interaction relations between the agents in the scene and generates realistic trajectories for each environment agent that are consistent with the relations. We train and validate our model on a large-scale interactive driving dataset. Experiment results show that InterSim achieves better simulation realism and reactivity in two simulation tasks compared to a state-of-the-art learning-based traffic simulator.
+						<p>	Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches.
+							The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space.
+							Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called <strong>State Transformer (STR)</strong>.
+							STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
+							Our approach unites trajectory generation problems with other sequence modeling problems, powering rapid iterations with breakthroughs in neighbor domains such as language modeling.
+							Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the <strong>scaling laws</strong> by presenting outstanding adaptability and learning efficiency.
+							Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
 						</p>
 					</div>
 				</section>
 
 				<section class="wrapper style1 align-left">
 					<div class="inner">
-						<h2>Interactive Closed-loop Simulation Pipeline</h2>
-						<p>Illustration of InterSim. In this example, given a new plan for the ego agent (in cyan) to slow down, the simulator updates its simulated trajectories for the environment agents as follows. First, it checks for potential collisions with all environment agents and labels colliding ones as the relevant agents in yellow. For each relevant agent, such as Env #1, it predicts the interaction relation and updates its trajectory based on the relation using a goal driven trajectory predictor. Second, it resolves collisions between the newly updated trajectories of the environment agent(s) and the remaining agents (i.e. Env #2) iteratively until all collisions are resolved. In the end, InterSim successfully generates scene consistent trajectories for Env #1 and Env #2 to react and slow down, and commit these trajectories to simulate for the next step.
+						<h2>State Transformer</h2>
+						<p>The main idea is to formulate the future states prediction problem as a conditional sequence modeling problem. This formulation
+arranges the observations, the past states, and the future states into one large sequence. This formulation is maintained as general, allowing it to be applicable for both motion planning and motion
+prediction tasks with diverse intermediate supervisions or priors.
 						</p>
-						<span class="image main"><img src="images/intersim_pipeline.png" alt=""></span>
+						<span class="image main"><img src="images/pipeline.gif" alt=""></span>
 					</div>
 				</section>
-				-->
+
+				<section class="wrapper style1 align-left">
+					<div class="inner">
+						<h2>Scalability Analysis</h2>
+						<p>These two figures demonstrate the substantial scalability of STR, illustrating the scaling laws for training LTMs. The left figure reveals that LTMs exhibit smooth scalability with the size of the training dataset. When the training is not constrained by the size of the dataset, larger trajectory models tend to converge to a lower evaluation loss. The right figure shows that larger trajectory models learn faster to converge than their smaller counterparts, indicating superior data efficiency.
+						</p>
+						<span class="image main"><img src="images/scaling.png" alt=""></span>
+					</div>
+				</section>
+
 
 				<!-- Relation prediction demos -->
-				<!-- 
+
 				<section class="wrapper style1 align-left">
 					<div class="inner">
-						<h2>Efficient and Realistic Closed-loop Simulations</h2>
-						<p>InterSim generates proper reactions to a plan slightly different from the playback of the <a href="https://waymo.com/open/">Waymo Open Motion Dataset</a>. 
-							Each scenario lasts for eight seconds.
+						<h2>Qualitative analysis</h2>
+						<p>Qualitative analysis on trajectory models of different scales. The route given for each
+							scenario is marked as green roadblocks. The ego vehicle to plan is marked as the dark blue box.
+							All the other road users are marked as green boxes with their given size of shape as well as the yaw
+							angles. The planning results are marked as larger circles in orange for larger models and purple for
+							smaller models. These circles are sampled at every second from the trajectory of 8 seconds in total.
 						</p>
-						<img width=100% height=auto src="images/legends1.png" alt="" />
+						<span class="image main"><img src="images/qualitative.png" alt=""></span>
+<!--						<img width=80% height=auto src="images/qualitative.png" alt="" />-->
 					</div>
-					<div class="spotlight onscroll-fade-in">
-						<span class="video">
-							<video controls autoplay muted loop class="html-video" width=100% height=auto>
-								<source src="videos/demo_compress_2.mp4" type="video/mp4">
-								</video>
-							</span>
-					</div>
+<!--					<div class="spotlight onscroll-fade-in">-->
+<!--						<span class="video">-->
+<!--							<video controls autoplay muted loop class="html-video" width=100% height=auto>-->
+<!--								<source src="videos/demo_compress_2.mp4" type="video/mp4">-->
+<!--								</video>-->
+<!--							</span>-->
+<!--					</div>-->
 				</section>
 
+				<!--
 				<section class="wrapper style1 align-left">
 					<div class="inner">
 						<h2>Play with More Demos</h2>
@@ -184,23 +212,21 @@
 						</div>					
 					</div>					
 				</section>
+				-->
 
 				<section class="wrapper style1 align-center">
 					<div class="inner">
 						<h2>Citing</h2>
 						<blockquote style="text-align:left; background-color:#EEEEEE">
-							@inproceedings{sun2022intersim,<br>
-								title={{InterSim}: Interactive Traffic Simulation via Explicit Relation Modeling},<br>
-								author={Sun, Qiao and Huang, Xin and Williams, Brian and Zhao, Hang},<br>
-								booktitle={2022 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},<br>
-								year={2022},<br>
-								organization={IEEE}<br>
-								}
+							@article{sun2023large,<br>
+							  title={Large Trajectory Models are Scalable Motion Predictors and Planners},<br>
+							  author={Sun, Qiao and Zhang, Shiduo and Ma, Danjiao and Shi, Jingzhe and Li, Derun and Luo, Simian and Wang, Yu and Xu, Ningyi and Cao, Guangzhi and Zhao, Hang},<br>
+							  journal={arXiv preprint arXiv:2310.19620},<br>
+							  year={2023}<br>
+							}
 							</blockquote>						
 					</div>					
 				</section>
-				-->
-
 			</div>
 
 		<!-- Scripts -->
