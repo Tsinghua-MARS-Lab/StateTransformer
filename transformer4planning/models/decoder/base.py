@@ -209,6 +209,8 @@ class KeyPointMLPDeocder(nn.Module):
         super().__init__()
         self.config = config
         out_features = 4 if self.config.predict_yaw else 2
+        if 'denoise_kp' in self.config.use_key_points:
+            out_features = 2
         self.model = DecoderResCat(config.n_inner,
                                    config.n_embd,
                                    out_features=out_features)
@@ -248,7 +250,7 @@ class KeyPointMLPDeocder(nn.Module):
         pred the next key point conditioned on all the previous points are ground truth, and then compute the correspond loss
         param:
             hidden_output: the whole hidden_state output from transformer backbone
-            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
+            info_dict: dict contains additional information, such as context length/input length, pred length, etc.
         """
         if device is None:
             device = hidden_output.device

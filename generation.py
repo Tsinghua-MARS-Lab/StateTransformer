@@ -13,6 +13,8 @@ import numpy as np
 
 import random
 
+from datasets import Image
+
 # from visulization.checkraster import *
 intention_label_data_counter = [0] * 5
 
@@ -24,7 +26,28 @@ def main(args):
         'NUPLAN_DB_FILES': os.path.join(args.dataset_root, "nuplan-v1.1", args.data_path),
     }
     road_path = args.road_dic_path
-    
+
+    # print('validating image meta data')
+    # meta_path = args.sensor_meta_path
+    # sensor_path = args.sensor_blob_path
+    # with open(meta_path, 'rb') as f:
+    #     meta_folders = f.read()
+    #     # split the meta folders string by \n string
+    #     folders_from_meta = meta_folders.decode('utf-8').split('\n')[:-1]
+    #     for each_folder_path in folders_from_meta:
+    #         if 'File group' in each_folder_path:
+    #             continue
+    #         # fill complete path
+    #         each_folder_path_global = os.path.join(sensor_path, each_folder_path)
+    #         # check if the folder path is exist
+    #         if not os.path.exists(each_folder_path_global):
+    #             print(f"folder {each_folder_path_global} is not exist")
+    #             exit()
+    #         elif len(os.listdir(each_folder_path_global)) == 0:
+    #             print(f"folder {each_folder_path_global} is empty")
+    #             exit()
+    #     exit()
+
     if args.city is not None:
         with open(args.vehicle_pickle_path, 'rb') as f:
             vehicle_sets = pickle.load(f)
@@ -146,8 +169,8 @@ def main(args):
                                             map_name=args.map_name,
                                             scenarios_to_keep=scenarios_to_keep,
                                             filter_still=args.filter_still,
-                                            sensor_meta_path=args.sensor_meta_path,)
-                                            # sensor_blob_path=args.sensor_blob_path)
+                                            sensor_meta_path=args.sensor_meta_path,
+                                            sensor_blob_path=args.sensor_blob_path)
                 if loaded_dic is None:
                     continue
                 if args.keep_future_steps:
