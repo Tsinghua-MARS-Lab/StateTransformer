@@ -148,6 +148,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             print(f"Error: cannot load map {map} from all_maps_dic, {list(all_maps_dic.keys())}")
             return None
 
+
     # load agent and traffic dictionaries
     # WARNING: load some pickles can be extremely slow costs about 500-1000 seconds for las vegas map
     if agent_dic is not None:
@@ -180,6 +181,11 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             #     print('loading data from disk done ', split, map, filename, 'total frames: ', agent_dic['ego']['pose'].shape[0])
     else:
         assert False, 'either filename or agent_dic should be provided for online process'
+
+    augment_frame_id = kwargs.get('augment_index', 0)
+    if augment_frame_id != 0 and 'train' in split:
+        frame_id += random.randint(-augment_frame_id - 1, augment_frame_id)
+        frame_id = max(frame_id, past_seconds * frame_rate)
 
     # if new version of data, using relative frame_id
     relative_frame_id = True if 'starting_frame' in agent_dic['ego'] else False
@@ -453,7 +459,62 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["context_actions"] = np.array(context_actions, dtype=np.float32)
     result_to_return['trajectory_label'] = trajectory_label.astype(np.float32)
 
+    del rasters_high_res_channels
+    del rasters_low_res_channels
+    del rasters_high_res
+    del rasters_low_res
+    del trajectory_label
+
     # print('inspect: ', result_to_return["context_actions"].shape)
+
+    camera_image_encoder = kwargs.get('camera_image_encoder', None)
+    if camera_image_encoder is not None and 'test' not in split:
+        import PIL.Image
+        # load images
+        if 'train' in split:
+            images_folder = kwargs.get('train_camera_image_folder', None)
+        elif 'val' in split:
+            images_folder = kwargs.get('val_camera_image_folder', None)
+        else:
+            raise ValueError('split not recognized: ', split)
+
+        images_paths = sample['images_path']
+        if images_folder is None or len(images_paths) == 0:
+            print('images_folder or images_paths not valid', images_folder, images_paths, filename, map, split, frame_id)
+            return None
+        if len(images_paths) != 8:
+            # clean duplicate cameras
+            camera_dic = {}
+            for each_image_path in images_paths:
+                camera_key = each_image_path.split('/')[1]
+                camera_dic[camera_key] = each_image_path
+            if len(list(camera_dic.keys())) != 8 or len(list(camera_dic.values())) != 8:
+                print('images_paths length not valid, short? ', camera_dic, images_paths, camera_dic, filename, map, split, frame_id)
+                return None
+            else:
+                images_paths = list(camera_dic.values())
+            assert len(images_paths) == 8, images_paths
+
+        # check if image exists
+        one_image_path = os.path.join(images_folder, images_paths[0])
+        if not os.path.exists(one_image_path):
+            print('image folder not exist: ', one_image_path)
+            return None
+        else:
+            images = []
+            for image_path in images_paths:
+                image = PIL.Image.open(os.path.join(images_folder, image_path))
+                image.thumbnail((1080 // 4, 1920 // 4))
+                # image = image.resize((1080//4, 1920//4))
+                # image = cv2.imread(os.path.join(images_folder, image_path))
+                # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                if image is None:
+                    print('image is None: ', os.path.join(images_folder, image_path))
+                images.append(np.array(image, dtype=np.float32))
+
+            # shape: 8(cameras), 1080, 1920, 3
+            result_to_return['camera_images'] = np.array(images, dtype=np.float32)
+            del images
 
     if debug_raster_path is not None:
         # check if path not exist, create
@@ -462,8 +523,14 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
         # if split == 'test':
         if map == 'sg-one-north':
-            save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past), image_file_name, split,
-                        high_res_scale, low_res_scale)
+            save_result = save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past),
+                                      image_file_name, split, high_res_scale, low_res_scale)
+            if save_result and 'images_path' in sample:
+                # copy camera images
+                for camera in sample['images_path']:
+                    import shutil
+                    path_to_save = split + '_' + image_file_name + '_' + str(os.path.basename(camera))
+                    shutil.copy(os.path.join(images_folder, camera), os.path.join(debug_raster_path, path_to_save))
 
     result_to_return["file_name"] = sample['file_name']
     result_to_return["map"] = sample['map']

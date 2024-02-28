@@ -419,7 +419,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             input_embeds = torch.cat([input_embeds,
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
         else:
-            future_key_points, selected_indices, indices = self.select_keypoints(trajectory_label)
+            future_key_points = self.select_keypoints(trajectory_label)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
@@ -433,7 +433,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
                                       torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             
             info_dict["future_key_points"] = future_key_points
-            info_dict["selected_indices"] = selected_indices
+            info_dict["selected_indices"] = self.selected_indices
             info_dict["key_points_mask"] = trajectory_label_mask[:, self.selected_indices, :]
 
         return input_embeds, info_dict

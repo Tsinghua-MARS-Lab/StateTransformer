@@ -50,3 +50,24 @@ class DataAugmentation(nn.Module):
 
     def raster_augmentation(self, raster):
         raise NotImplementedError
+
+    def kp_denoising(self, future_key_points):
+        if not self.training:
+            return future_key_points
+        device = future_key_points.device
+        noise_scale = []
+
+        # linear
+        # batch_size = future_key_points.shape[0]
+        # for i in range(10):
+        #     noise = torch.FloatTensor(batch_size, 2).uniform_(0.1*i, 2-0.1*i).to(device)
+        #     # element wise multiply
+        #     future_key_points[:, i, :] *= noise
+
+        # exponential
+        for i in range(10):
+            noise_scale.append(0.8 ** i)
+        noise_scale = torch.tensor(noise_scale).unsqueeze(-1).repeat(1, 2).to(device)
+        kp_to_add_noise = future_key_points[:, :10, :]
+        future_key_points[:, :10, :] += (torch.randn_like(kp_to_add_noise) * noise_scale * 2 - noise_scale) * kp_to_add_noise
+        return future_key_points

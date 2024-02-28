@@ -290,6 +290,7 @@ if not st.session_state.scenario_ids_by_file:
 
 agent_dic = None
 road_dic = None
+model = None
 
 if st.session_state.scenario_ids_by_file:
     if not st.session_state.scenario_ids_by_file_readable:
@@ -334,10 +335,11 @@ if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
             model_args = json.load(f)
         print('loaded model args: ', model_args)
 
-        model_args = LoadedModelArguments(model_args)
-        model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
-        model_args.model_pretrain_name_or_path = args.model_checkpoint_path
-        model = build_models(model_args)
+        if model is None:
+            model_args = LoadedModelArguments(model_args)
+            model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
+            model_args.model_pretrain_name_or_path = args.model_checkpoint_path
+            model = build_models(model_args)
 
         # init prediction keys in data
         if 'prediction_generation' not in st.session_state.data:
@@ -365,7 +367,9 @@ if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
                                                   data_path=args.saved_dataset_folder,
                                                   agent_dic=agent_dic,
                                                   all_maps_dic={map_name: road_dic},
-                                                  use_proposal=True)
+                                                  use_proposal=True,)
+                                                  # selected_exponential_past=model_args.selected_exponential_past,)
+                                                  # use_speed=model_args.use_speed,)  # WARNING: need to be updated if new model args are used
             prepared_data = np_to_tensor(prepared_data)
             prepared_data.update({'road_dic': road_dic,
                                   'route_ids': current_data['route_ids'],
@@ -385,13 +389,13 @@ if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
                 st.session_state.data['pred_kp_generation'][current_frame // 2] = ego_to_global(
                     prediction_generation['key_points_logits'][0].numpy(),
                     agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
-                if model.use_proposal:
+                if model.use_proposal and i == len(indices_to_predict) - 1:
                     with st.sidebar.expander('Proposal Prediction', expanded=True):
                         print('proposal prediction result: ', prediction_generation['proposal'].numpy().tolist()[0])
                         print('proposal prediction scores: ', prediction_generation['proposal_scores'].numpy().tolist()[0])
                         st.session_state.data['proposal_generation'][current_frame // 2] = prediction_generation['proposal'].numpy().tolist()[0]
                         chart_data = {'scores': prediction_generation['proposal_scores'].numpy()[0],
-                                      "index": np.array(['Left', 'Right', 'Fwd', 'Bwd', 'Same'])}
+                                      "index": np.array(['Left', 'Right', 'Fwd', 'Bwd', 'Same']) if prediction_generation['proposal_scores'].numpy()[0].shape[0] == 5 else np.array(['Speed Up', 'Speed Down', 'Same'])}
                         st.bar_chart(chart_data, x='index', y='scores')
                 if i == len(indices_to_predict) - 1:
                     with st.sidebar.expander('Raster Visualization', expanded=True):
@@ -411,3 +415,4 @@ if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
 # Render the component with given data, and it will return a new timestamp if animating
 st.session_state.new_frame = planning_map(data=st.session_state.data, key="planning_map")  # in 10Hz or None
 print('loop finished: ', st.session_state.new_frame, list(st.session_state.data.keys()), st.session_state.data['current_scenario_id'])
+
