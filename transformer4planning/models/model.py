@@ -351,7 +351,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                     off_road_checking = True
                     if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
                         from transformer4planning.utils import nuplan_utils
-                        if i == 0 and self.use_key_points == 'specified_backward':
+                        if i == 0 and 'backward' in self.use_key_points:
                             # Check key points with map_api
                             # WARNING: WIP, do not use
                             y_inverse = -1 if map_name == 'sg-one-north' else 1
@@ -373,7 +373,7 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                                 pred_key_point[0, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
                                 print('Off Road Detected! Replace 8s key point')
 
-                    if idm_reference_global is not None and self.use_key_points == 'specified_backward':
+                    if idm_reference_global is not None and 'backward' in self.use_key_points:
                         # replace last key point with IDM reference
                         ego_state_global = idm_reference_global[selected_indices[i]]
                         idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
@@ -408,9 +408,6 @@ class TrajectoryGPT(GPT2PreTrainedModel):
             # expected shape for pred trajectory is (b, pred_length, 4)
             if self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
-                if self.config.predict_yaw:
-                    traj_logits = interpolate_yaw(traj_logits, mode=self.config.postprocess_yaw)
-
                 traj_logits_k.append(traj_logits)
             else:
                 raise NotImplementedError
@@ -812,7 +809,7 @@ class TrajectoryMamba(TrajectoryGPT):
                     off_road_checking = True
                     if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
                         from transformer4planning.utils import nuplan_utils
-                        if i == 0 and self.use_key_points == 'specified_backward':
+                        if i == 0 and 'backward' in self.use_key_points:
                             # Check key points with map_api
                             # WARNING: WIP, do not use
                             y_inverse = -1 if map_name == 'sg-one-north' else 1
@@ -876,9 +873,6 @@ class TrajectoryMamba(TrajectoryGPT):
             # expected shape for pred trajectory is (b, pred_length, 4)
             if self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
-                if self.config.predict_yaw:
-                    traj_logits = interpolate_yaw(traj_logits, mode=self.config.postprocess_yaw)
-
                 traj_logits_k.append(traj_logits)
             else:
                 raise NotImplementedError

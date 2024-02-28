@@ -66,8 +66,11 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
     # But for waymo dataset, index directory is just the datset, so load directory directly to build dataset. 
     if len(datasets) > 0: 
         dataset = _concatenate_map_style_datasets(datasets)
+        for each in datasets:
+            each.cleanup_cache_files()
     else: 
         dataset = Dataset.load_from_disk(index_root_folders)
+
     # add split column
     dataset.features.update({'split': Value('string')})
     try:
@@ -190,21 +193,27 @@ def main():
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
 
+    if model_args.camera_image_encoder is not None:
+        train_dataset = train_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
+
     if training_args.do_test and 'test' in root_folders:
         # TODO: compatible with older training args
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
         logger.warning('Using training set as test set')
         test_dataset = train_dataset
-    
+
     if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
         val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False)
+        if model_args.camera_image_encoder is not None:
+            val_dataset = val_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
     else:
         logger.warning('Validation set not found, using training set as val set')
         val_dataset = test_dataset
         # val_dataset = train_dataset
 
     if data_args.do_closed_loop_simulation and 'val1k' in root_folders:
+        # WIP
         val1k_dataset = load_dataset(index_root, "val1k", data_args.dataset_scale, data_args.agent_type, False)
         val1k_dataset = val1k_dataset.suffle(seed=training_args.seed)
 
@@ -235,6 +244,19 @@ def main():
             else:
                 logger.warning('Image not found: ' + src_fpath)
 
+    def save_smaller_images(each):
+        import PIL
+        for each_image in each['images_path']:
+            src_fpath = os.path.join(data_args.camera_images_path, each_image)
+            if os.path.exists(src_fpath):
+                dest_fpath = os.path.join(training_args.images_cleaning_to_folder, each_image)
+                os.makedirs(os.path.dirname(dest_fpath), exist_ok=True)
+                img = PIL.Image.open(src_fpath)
+                img = img.resize((1080 // 4, 1920 // 4))
+                img.save(dest_fpath)
+            else:
+                logger.warning('Image not found: ' + src_fpath)
+
     if training_args.images_cleaning_to_folder is not None:
         if data_args.camera_images_path is None:
             raise ValueError("Must provide camera_images_path to clean images")
@@ -247,15 +269,18 @@ def main():
             if len(os.listdir(os.path.join(data_args.camera_images_path, each_folder))) != 8:
                 logger.error(f'invalid folder: {each_folder}, with: {os.listdir(os.path.join(data_args.camera_images_path, each_folder))}')
                 raise ValueError('invalid folder: ', each_folder)
-        logger.info('Cleaning training set')
+        logger.info('Cleaning training/val set')
         if not os.path.isdir(training_args.images_cleaning_to_folder):
             os.mkdir(training_args.images_cleaning_to_folder)
-        datasets_list = [train_dataset]
+        datasets_list = [val_dataset]
         for dataset in datasets_list:
             success = 0
             fail = 0
+            logger.info('Checking training/val set')
             dataset = dataset.map(check_images, num_proc=120)
-            dataset = dataset.map(clean_images, num_proc=120)
+            logger.info('Moving Files')
+            # dataset = dataset.map(clean_images, num_proc=120)
+            dataset.map(save_smaller_images, num_proc=120)
             logger.info('Success: ' + str(success) + ' Fail: ' + str(fail))
             # Val: Success:  15218  Fail:  127560
         logger.info('Image clean finished')

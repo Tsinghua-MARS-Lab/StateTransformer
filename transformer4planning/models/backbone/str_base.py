@@ -30,7 +30,8 @@ class STRConfig(PretrainedConfig):
                      "autoregressive_proposals", "selected_exponential_past",
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
-                     "camera_image_encoder", "use_speed"]
+                     "camera_image_encoder", "use_speed",
+                     "denoise_kp"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
@@ -41,6 +42,7 @@ class STR(PreTrainedModel):
         self.config = config
         self.encoder = None
         self.traj_decoder = None
+        self.camera_image_encoder = None
         self.k = int(self.config.k)
 
         self.use_proposal = self.config.use_proposal
@@ -179,8 +181,14 @@ class STR(PreTrainedModel):
             else:
                 kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
                 # kp_loss will be 10x larger than traj_loss when converged
+
             loss += kp_loss
-            traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
+            if 'denoise_kp' in self.encoder.use_key_points:
+                # pad zero to the shape from 2 to 4 on the last dimension
+                kp_pad_logits = torch.cat([kp_logits, torch.zeros(kp_logits.shape[0], kp_logits.shape[1], 2).to(kp_logits.device)], dim=-1)
+                traj_logits = torch.cat([kp_pad_logits, traj_logits], dim=1)
+            else:
+                traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
             pred_dict["kp_logits"] = kp_logits
             loss_items["kp_loss"] = kp_loss
 
@@ -288,7 +296,7 @@ class STR(PreTrainedModel):
                         input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
             if self.use_key_points != "no":
                 pred_length = info_dict["pred_length"]
-                selected_indices = info_dict["selected_indices"]
+                selected_indices = self.encoder.selected_indices
                 kp_start_index = context_length
                 if self.use_proposal:
                     if self.config.autoregressive_proposals:
@@ -304,13 +312,15 @@ class STR(PreTrainedModel):
                 trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
                 if 'specified' in self.use_key_points:
                     future_key_points = trajectory_label_dummy[:, selected_indices, :]
+                elif 'denoise_kp' in self.encoder.use_key_points:
+                    future_key_points = trajectory_label_dummy[:, selected_indices, :2]
                 else:
                     ar_future_interval = 20
                     future_key_points = trajectory_label_dummy[:, ar_future_interval - 1::ar_future_interval, :]
 
                 assert future_key_points.shape[1] > 0, 'future points not enough to sample'
 
-                if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                if self.config.task == "nuplan" and not self.config.separate_kp_encoder and 'denoise_kp' not in self.use_key_points:
                     if self.config.use_speed:
                         # padding speed, padding the last dimension from 4 to 7
                         future_key_points = torch.cat([future_key_points, torch.zeros_like(future_key_points)[:, :, :3]], dim=-1)
@@ -336,16 +346,19 @@ class STR(PreTrainedModel):
                                                     :].reshape(batch_size, 1, -1)
 
                     key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
-                    pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
-                    if self.config.predict_yaw:
-                        pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
+                    if 'denoise_kp' in self.encoder.use_key_points:
+                        pred_key_point = key_points_logit.reshape(batch_size, 1, 2)
                     else:
-                        pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+                        pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
+                        if self.config.predict_yaw:
+                            pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
+                        else:
+                            pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
                     off_road_checking = True
                     if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
                         from transformer4planning.utils import nuplan_utils
-                        if i == 0 and self.use_key_points == 'specified_backward':
+                        if i in [0, 1] and 'backward' in self.use_key_points:
                             # Check key points with map_api
                             # WARNING: WIP, do not use
                             y_inverse = -1 if map_name == 'sg-one-north' else 1
@@ -365,9 +378,9 @@ class STR(PreTrainedModel):
                                                                                       ego_to_global=False)
                                 pred_key_point_ego[1] *= y_inverse
                                 pred_key_point[0, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
-                                print('Off Road Detected! Replace 8s key point')
+                                print(f'Off Road Detected! Replace {i}th key point')
 
-                    if idm_reference_global is not None and self.use_key_points == 'specified_backward':
+                    if idm_reference_global is not None and 'backward' in self.use_key_points:
                         # replace last key point with IDM reference
                         ego_state_global = idm_reference_global[selected_indices[i]]
                         idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
@@ -378,16 +391,19 @@ class STR(PreTrainedModel):
                         pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
                         pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
 
-                    if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
-                        if self.config.use_speed:
-                            # padding speed, padding the last dimension from 4 to 7
-                            pred_key_point = torch.cat([pred_key_point, torch.zeros_like(pred_key_point)[:, :, :3]], dim=-1)
-                        key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
-                    else:
+                    if 'denoise_kp' in self.encoder.use_key_points:
                         key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    else:
+                        if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
+                            if self.config.use_speed:
+                                # padding speed, padding the last dimension from 4 to 7
+                                pred_key_point = torch.cat([pred_key_point, torch.zeros_like(pred_key_point)[:, :, :3]], dim=-1)
+                            key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                        else:
+                            key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     # replace embed at the next position
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
-                    if self.config.predict_yaw:
+                    if self.config.predict_yaw and 'denoise_kp' not in self.encoder.use_key_points:
                         pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
                     else:
                         pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
@@ -399,9 +415,6 @@ class STR(PreTrainedModel):
             # expected shape for pred trajectory is (b, pred_length, 4)
             if self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
-                if self.config.predict_yaw:
-                    traj_logits = interpolate_yaw(traj_logits, mode=self.config.postprocess_yaw)
-
                 traj_logits_k.append(traj_logits)
             else:
                 raise NotImplementedError
@@ -632,6 +645,7 @@ def build_models(model_args):
 
 
 def interpolate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
+    # deprecated
     if mode == "normal":
         return pred_traj
     elif mode == "interplate" or mode == "hybrid":

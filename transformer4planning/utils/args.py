@@ -83,29 +83,24 @@ class ModelArguments:
         default=False
     )
 
-    ######## begin of navigation args ########
-    use_navigation: Optional[bool] = field(
-        default=False
-    )
-
     ######## begin of proposal args ########
     use_proposal: Optional[int] = field(
         default=0,
         metadata={"help": "number of proposal candidates. 0: not using proposal"}
     )
     ######## end of proposal args ########
-
     use_speed: Optional[bool] = field(
         default=False
     )
-
     ######## begin of key points args ########
     use_key_points: Optional[str] = field(
         default='specified_backward',
         metadata={"help": "no: not using key points,"
                           "universal: using universal key points, with interval of 20 frames."
                           "specified_forward: using specified key points, with exponentially growing frame indices."
-                          "specified_backward: using specified key points, with exponentially growing frame indices."}
+                          "specified_backward: using specified key points, with exponentially growing frame indices."
+                          "specified_two_backward: 8s, and 0.5s only"
+                          "denoise_kp: de-noising 8s x 10 and 0.5s"}
     )
     separate_kp_encoder: Optional[bool] = field(
         default=False
@@ -148,6 +143,12 @@ class ModelArguments:
     camera_image_encoder: Optional[str] = field(
         default=None, metadata={"help": "choose from [dinov2], set None to not use camera images"}
     )
+    train_camera_image_folder: Optional[str] = field(
+        default=None, metadata={"help": "The folder of camera images for training. Set None to not use camera images."}
+    )
+    val_camera_image_folder: Optional[str] = field(
+        default=None, metadata={"help": "The folder of camera images for validation. Set None to not use camera images."}
+    )
     ####### end of camera images args ########
 
     ######## begin of nuplan args ########
@@ -162,9 +163,6 @@ class ModelArguments:
     )
     future_sample_interval: Optional[int] = field(
         default=2
-    )
-    postprocess_yaw: Optional[str] = field(
-        default="normal", metadata={"help": "choose from hybrid, interplate or normal"}
     )
     augment_current_pose_rate: Optional[float] = field(
         # currently this only works for raster preprocess, and aug_x, aug_y are default to 1.0
@@ -218,6 +216,16 @@ class ModelArguments:
     num_local_experts: Optional[int] = field(
         default=8, metadata={"help": "The number of local experts."}
     )
+
+    debug_raster_path: Optional[str] = field(
+        default=None, metadata={"help": "The path of raster image for debugging."}
+    )
+
+    # WIP args
+    augment_index: Optional[int] = field(
+        default=0, metadata={"help": "The index of augmenting current pose in the preprocess"}
+    )
+
 
 @dataclass
 class DataTrainingArguments:
