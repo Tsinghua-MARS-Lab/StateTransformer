@@ -174,6 +174,12 @@ class ModelArguments:
     diffusion_feature_save_dir: Optional[str] = field(
         default = None, metadata = {"help":"where to save diffusion dataset."}
     )
+    use_offroad_loss: Optional[bool] = field(
+        default=False
+    )
+    map_path: Optional[str] = field(
+        default = "/localdata_ssd/nuplan/online_s6/map",
+    )
     ######## end of nuplan args ########
 
     ######## begin of WOMD args ########

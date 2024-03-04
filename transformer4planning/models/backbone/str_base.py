@@ -355,7 +355,7 @@ class STR(PreTrainedModel):
                         else:
                             pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
 
-                    off_road_checking = True
+                    off_road_checking = False
                     if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
                         from transformer4planning.utils import nuplan_utils
                         if i in [0, 1] and 'backward' in self.use_key_points:

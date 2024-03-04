@@ -565,6 +565,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["aug_current"] = aug_current
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)
 
+    result_to_return["ego_pose"] = origin_ego_pose
+
     del agent_dic
     del road_dic
 

@@ -298,5 +298,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 info_dict["intentions"] = intentions
             else:
                 info_dict["halfs_intention"] = halfs_intention
+        
+        if self.config.use_offroad_loss:
+            info_dict["route_ids"] = kwargs.get("route_ids", None)
+            info_dict["ego_pose"] = kwargs.get("ego_pose", None)
+            info_dict["map"] = kwargs.get("map", None)
 
         return input_embeds, info_dict
