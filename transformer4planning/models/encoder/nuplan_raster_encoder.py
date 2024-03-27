@@ -3,6 +3,9 @@ import torch
 from torch import nn
 from transformer4planning.models.utils import *
 from transformer4planning.models.encoder.base import TrajectoryEncoder
+from transformers.utils import logging
+logging.set_verbosity_info()
+logger = logging.get_logger("transformers")
 
 class CNNDownSamplingResNet(nn.Module):
     def __init__(self, d_embed, in_channels, resnet_type='resnet18', pretrain=False):
@@ -74,7 +77,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             vit_config.num_attention_heads = self.config.n_head
             vit_config.return_dict = True
             self.image_downsample = ViTModel(vit_config)
-            print('Building ViT encoder')
+            logger.info(f'Building ViT encoder with key points indices of {self.selected_indices}')
         else:
             try:
                 cnn_kwargs = dict(
@@ -94,7 +97,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                         in_channels=cnn_kwargs.get("in_channels", None),
                                                         resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                         pretrain=cnn_kwargs.get("pretrain", False))
-            print('Building ResNet encoder')
+            logger.info(f'Building ResNet encoder with key points indices of {self.selected_indices}')
         # separate key point encoder is hard to train with larger models due to sparse signals
         if self.config.use_speed:
             self.action_m_embed = nn.Sequential(nn.Linear(7, action_kwargs.get("d_embed")), nn.Tanh())
@@ -120,8 +123,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 self.camera_image_encoder = Dinov2Model.from_pretrained("facebook/dinov2-base")
             except:
                 # using local checkpoints due to the GFW blocking of China
-                self.image_processor = AutoImageProcessor.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
-                self.camera_image_encoder = Dinov2Model.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
+                # self.image_processor = AutoImageProcessor.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
+                # self.camera_image_encoder = Dinov2Model.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
+                self.image_processor = AutoImageProcessor.from_pretrained("/cephfs/sunq/dinov2", local_files_only=True)
+                self.camera_image_encoder = Dinov2Model.from_pretrained("/cephfs/sunq/dinov2", local_files_only=True)
             # self.camera_image_m_embed = nn.Sequential(nn.Linear(257*768, action_kwargs.get("d_embed")), nn.Tanh())
             # self.camera_image_m_embed = nn.Sequential(nn.Linear(768, action_kwargs.get("d_embed")), nn.Tanh())
             # self.camera_image_m_embed = nn.Sequential(nn.Linear(768, action_kwargs.get("d_embed"), bias=False))
@@ -170,36 +175,36 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         assert c == self.config.raster_channels, "raster channel number should be {}, but got {}".format(self.config.raster_channels, c)
 
         if self.config.raster_encoder_type == 'vit':
-            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
-            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
             # batch_size * context_length, 196 (14*14), embed_dim//2
             _, sequence_length, half_embed = high_res_embed.shape
             high_res_embed = high_res_embed.reshape(batch_size, action_seq_length, sequence_length, half_embed)
             low_res_embed = low_res_embed.reshape(batch_size, action_seq_length, sequence_length, half_embed)
 
-            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)  # batch_size, action_seq_length, sequence_length, embed_dim
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(action_embeds.dtype)  # batch_size, action_seq_length, sequence_length, embed_dim
             n_embed = action_embeds.shape[-1]
             context_length = action_seq_length + action_seq_length * sequence_length
             input_embeds = torch.zeros(
                 (batch_size, context_length, n_embed),
-                dtype=torch.float32,
+                dtype=action_embeds.dtype,
                 device=device
             )
             for j in range(action_seq_length):
                 input_embeds[:, j * (1 + sequence_length): j * (1 + sequence_length) + sequence_length, :] = state_embeds[:, j, :, :]
             input_embeds[:, sequence_length::1 + sequence_length, :] = action_embeds
         else:
-            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w))
-            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w))
+            high_res_embed = self.cnn_downsample(high_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w))
+            low_res_embed = self.cnn_downsample(low_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w))
             high_res_embed = high_res_embed.reshape(batch_size, action_seq_length, -1)
             low_res_embed = low_res_embed.reshape(batch_size, action_seq_length, -1)
 
-            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(action_embeds.dtype)
             n_embed = action_embeds.shape[-1]
             context_length = action_seq_length * 2
             input_embeds = torch.zeros(
                 (batch_size, context_length, n_embed),
-                dtype=torch.float32,
+                dtype=action_embeds.dtype,
                 device=device
             )
             input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
@@ -261,7 +266,9 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
             input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+                                      torch.zeros((batch_size, pred_length, n_embed),
+                                                  device=device,
+                                                  dtype=action_embeds.dtype)], dim=1)
             info_dict['future_key_points'] = None
             future_key_points = None
         else:
@@ -289,7 +296,9 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                         future_key_embeds = self.action_m_embed(future_key_points_aug)
 
             input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+                                      torch.zeros((batch_size, pred_length, n_embed),
+                                                  device=device,
+                                                  dtype=action_embeds.dtype)], dim=1)
             info_dict['future_key_points'] = future_key_points
 
         info_dict['selected_indices'] = self.selected_indices

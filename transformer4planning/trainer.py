@@ -5,6 +5,8 @@ import numpy as np
 import copy
 import os
 import re
+import time
+import math
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers.trainer_pt_utils import  nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
@@ -15,6 +17,11 @@ from typing import List, Optional, Dict, Any, Tuple, Union
 from transformer4planning.utils.nuplan_utils import compute_scores
 from transformer4planning.utils.nuplan_utils import normalize_angle
 from sklearn.metrics import accuracy_score
+from torch.utils.data import Dataset
+
+from transformers.trainer_utils import (
+    speed_metrics,
+)
 
 FDE_THRESHHOLD = 8 # keep same with nuplan simulation
 ADE_THRESHHOLD = 8 # keep same with nuplan simulation
@@ -50,8 +57,6 @@ def compute_metrics(prediction: EvalPrediction):
     """
     All inputs are finalized and gathered, should run only one time.
     """
-    # TODO: Adapt to waymo
-    # TODO: Add classification metrics (clf_metrics) for scoring
     eval_result = {}
     item_to_save = {}
 
@@ -423,6 +428,9 @@ class PlanningTrainer(Trainer):
             logits and labels (each being optional).
         """
         global EVAL_LOG_SAVING_PATH
+        # check if log_dir exists, create one if not exist
+        if not os.path.exists(self.args.logging_dir):
+            os.makedirs(self.args.logging_dir)
         EVAL_LOG_SAVING_PATH = os.path.join(self.args.logging_dir, 'eval_log.pickle')
         if inputs is None:
             return None, None, None
@@ -521,6 +529,40 @@ class PlanningTrainer(Trainer):
                 })
 
         return (loss, logits_dict, labels)
+
+    def analyze(self, target_dataset: Dataset, result_saving_path: str, ignore_keys: Optional[List[str]] = None):
+        """
+        Run analyze to inference on the target dataset, and save results as json files to the target path
+        """
+        # memory metrics - must set up as early as possible
+        self._memory_tracker.start()
+
+        prev_logging_dir = self.args.logging_dir
+        self.args.logging_dir = result_saving_path  # log will be saved to self.args.logging_dir/eval_log.pickle
+
+        target_dataloader = self.get_eval_dataloader(target_dataset)
+        start_time = time.time()
+
+        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+        output = eval_loop(
+            target_dataloader, description="Prediction", ignore_keys=ignore_keys, metric_key_prefix="analyze"
+        )
+        total_batch_size = self.args.eval_batch_size * self.args.world_size
+        if f"analyze_jit_compilation_time" in output.metrics:
+            start_time += output.metrics[f"analyze_jit_compilation_time_jit_compilation_time"]
+        output.metrics.update(
+            speed_metrics(
+                'analyze',
+                start_time,
+                num_samples=output.num_samples,
+                num_steps=math.ceil(output.num_samples / total_batch_size),
+            )
+        )
+
+        self.control = self.callback_handler.on_predict(self.args, self.state, self.control, output.metrics)
+        self._memory_tracker.stop_and_update_metrics(output.metrics)
+
+        self.args.logging_dir = prev_logging_dir
 
     def do_closed_loop_simulation(self,
                                   val1k_datasest,

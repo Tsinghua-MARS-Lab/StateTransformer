@@ -44,6 +44,7 @@ from transformer4planning.trainer import compute_metrics
 from datasets import Dataset, Value
 
 # os.environ["WANDB_DISABLED"] = "true"
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,15 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
-    model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, config_args, training_args = parser.parse_args_into_dataclasses()
+
+    if training_args.gradient_checkpointing:
+        """
+        Gradient checkpointing is going to crush your training for unknown reasons of the transformers library.
+        This problem bugs universally over all backbones and types of encoders!
+        See https://discuss.huggingface.co/t/enabling-gradient-checkpointing-and-deepspeed-zero3-raise-train-failure/53789
+        """
+        logger.warning("Gradient checkpointing is likely going to crush your training for unknown reasons!!!!!")
 
     # set default label names
     training_args.label_names = ['trajectory_label']
@@ -212,12 +221,12 @@ def main():
         val_dataset = test_dataset
         # val_dataset = train_dataset
 
-    if data_args.do_closed_loop_simulation and 'val1k' in root_folders:
-        # WIP
-        val1k_dataset = load_dataset(index_root, "val1k", data_args.dataset_scale, data_args.agent_type, False)
-        val1k_dataset = val1k_dataset.suffle(seed=training_args.seed)
+    # if 'val1k' in root_folders:
+    #     # WIP
+    #     val1k_dataset = load_dataset(index_root, "val1k", data_args.dataset_scale, data_args.agent_type, False)
+    #     val1k_dataset = val1k_dataset.suffle(seed=training_args.seed)
 
-    # clean image fodler
+    # clean image folders
     def check_images(each):
         if 'images_path' not in each:
             logger.error('images_path not found in dataset')
@@ -252,7 +261,7 @@ def main():
                 dest_fpath = os.path.join(training_args.images_cleaning_to_folder, each_image)
                 os.makedirs(os.path.dirname(dest_fpath), exist_ok=True)
                 img = PIL.Image.open(src_fpath)
-                img = img.resize((1080 // 4, 1920 // 4))
+                img = img.resize((1920 // 4, 1080 // 4))
                 img.save(dest_fpath)
             else:
                 logger.warning('Image not found: ' + src_fpath)
@@ -308,6 +317,7 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
+
     # clf_metrics = dict(
     #     accuracy=evaluate.load("accuracy"),
     #     f1=evaluate.load("f1"),
@@ -316,7 +326,7 @@ def main():
     # )
     # if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token
     #     model.clf_metrics = clf_metrics
-    if training_args.do_train:
+    if training_args.do_train or training_args.do_predict:
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
             # os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / training_args.dataloader_num_workers))
@@ -326,7 +336,7 @@ def main():
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
 
-    if training_args.do_eval:
+    if training_args.do_eval or training_args.do_predict:
         eval_dataset = dataset_dict["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
@@ -409,7 +419,7 @@ def main():
 
     # Evaluation
     results = {}
-    if training_args.do_eval:
+    if training_args.do_eval and not training_args.do_predict:
         if not training_args.do_train and training_args.resume_from_checkpoint is not None:
             assert 'pretrain' in model_args.model_name, 'resume_from_checkpoint is only for training, use pretrain model to load for eval only'
         result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
@@ -419,14 +429,31 @@ def main():
         # evaluate.save("./results/", ** result, ** hyperparams)
         # logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
-    if data_args.do_closed_loop_simulation:
-        """
-        Will save closed loop simulation results
-        """
-        logger.info("*** Closed Loop Simulation ***")
-
 
     if training_args.do_predict:
+        """
+        Use this to inference on specific dataset and output the worst or best cases for visualizations and analysis
+        """
+        # compute predictions
+        # compute metrics
+        if config_args.save_analyze_result_to_path is not None and config_args.analyze_dataset_target is not None:
+            logger.info("*** Analyze ***")
+            with torch.no_grad():
+                if config_args.analyze_dataset_target == 'train':
+                    target_dataset = train_dataset
+                elif config_args.analyze_dataset_target == 'val':
+                    target_dataset = val_dataset
+                elif config_args.analyze_dataset_target == 'test':
+                    target_dataset = test_dataset
+                else:
+                    assert False, f'Unknown target dataset to analyze, got {config_args.analyze_dataset_target}'
+                trainer.analyze(target_dataset=target_dataset,
+                                result_saving_path=config_args.save_analyze_result_to_path)
+            logger.info("*** Analyze Finished ***")
+        else:
+            assert False, f'Pass result path and target dataset to analyze'
+
+    if False:
         # Currently only supports single GPU predict outputs
         """
         Will save prediction results, and dagger results if dagger is enabled

@@ -32,7 +32,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
         agent = each_img[:, :, 25:]
         # generate a color pallet of 20 in RGB space
         color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
-        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float32)
+        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3])
         image_shape = target_image.shape
         for i in list(range(21))[::-1]:
             road_per_channel = road[:, :, i].copy()
@@ -68,7 +68,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
     for each_key in ['context_actions', 'trajectory_label']:
         pts = result_dic[each_key]
         for scale in [high_scale, low_scale]:
-            target_image = np.zeros(image_shape, dtype=np.float32)
+            target_image = np.zeros(image_shape)
             for i in range(pts.shape[0]):
                 x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(pts[i, 1] * scale) + target_image.shape[1] // 2

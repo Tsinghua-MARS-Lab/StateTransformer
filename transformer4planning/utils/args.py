@@ -226,6 +226,13 @@ class ModelArguments:
         default=0, metadata={"help": "The index of augmenting current pose in the preprocess"}
     )
 
+    use_cache: Optional[bool] = field(
+        default=True, metadata={"help": "Whether to use cache in the model"}
+    )
+    attn_implementation: Optional[str] = field(
+        default=None, metadata={"help": "The implementation of attention layers."}
+    )
+
 
 @dataclass
 class DataTrainingArguments:
@@ -287,9 +294,6 @@ class DataTrainingArguments:
                                         "3: cyclist on WOMD"
                                         "any combination of numbers will be decoded into list of int (1 2;2 3;1 3)"}
     )
-    do_closed_loop_simulation: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to do closed loop simulation, This is a seperate process. Do not use with training."}
-    )
 
 
 @dataclass
@@ -297,17 +301,11 @@ class ConfigArguments:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
-    save_model_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current model config to a json file if not None"}
+    analyze_dataset_target: Optional[str] = field(
+        default=None, metadata={"help": "choose from train/val/test to choose which dataset to analyze"}
     )
-    save_data_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current data config to a json file if not None"}
-    )
-    load_model_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load model config from a json file if not None"}
-    )
-    load_data_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load data config to a json file if not None"}
+    save_analyze_result_to_path: Optional[str] = field(
+        default=None, metadata={"help": "save analyze result to path if not None"}
     )
 
 

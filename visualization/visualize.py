@@ -2,6 +2,7 @@ import copy
 import math
 import multiprocessing as mp
 import streamlit as st
+
 from planning_map import planning_map
 import argparse
 import pickle
@@ -27,6 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser('Parse configuration file')
     parser.add_argument('-f', '--saved_dataset_folder', help='Dataset Directory', required=True)
     parser.add_argument('--task', help='nuplan or waymo', default='nuplan')
+    parser.add_argument('--split', help='train, val or test', default='val')
     parser.add_argument('--agent_type', help='agent type filer for waymo', default='all')
     parser.add_argument('-c', '--model_checkpoint_path', help='path of the model checkpoint', default=None)
     parser.add_argument('-l', '--training_log_path', help='path of the log', default=None)
@@ -96,6 +98,8 @@ if 'running_conditions' not in st.session_state:
     st.session_state.running_conditions = 'initializating'
 if 'dataset' not in st.session_state:
     st.session_state.dataset = 'undefined'
+if 'model' not in st.session_state:
+    st.session_state.model = None
 
 
 def nested_numpy_to_list_for_json(dic):
@@ -134,7 +138,7 @@ def load_dictionary_for_file(root_path, split, _sample):
             st.session_state.all_map_dic[map] = road_dic
         else:
             print(f"Error: cannot load map {map} from {root_path}")
-            return None
+            return None, None
     else:
         road_dic = st.session_state.all_map_dic[map]
     if split == 'val':
@@ -153,7 +157,7 @@ def load_dictionary_for_file(root_path, split, _sample):
                 agent_dic = add_intention_to_agent_dic(agent_dic)
         else:
             print(f"Error: cannot load {pickle_path} from {root_path} with {map}")
-            return None
+            return None, None
     else:
         assert False, 'either filename or agent_dic should be provided for online process'
     if 'data_dic' not in st.session_state:
@@ -258,17 +262,22 @@ st.sidebar.title("STR Scenario Visualization")
 # Initialize data in the app state
 if not st.session_state.scenario_ids_by_file:
     st.session_state.new_frame = 'Initializating...'
-    target_split = 'val'
-    if target_split in root_folders:
+    target_split = args.split
+    if target_split in root_folders and st.session_state.dataset == 'undefined':
         st.session_state.dataset = load_data(root=index_root, split=target_split, agent_type=args.agent_type, select=False)
         if args.training_log_path is not None:
             # load training log from pickle
+            print('loading training log')
             with open(args.training_log_path, 'rb') as f:
                 training_log = pickle.load(f)
-            # st.session_state.dataset = st.session_state.dataset.filter(lambda example: convert_names_to_ids(
-            #     file_names=[example['file_name']],t0_frame_ids=[example['frame_id']]
-            # )[0] in training_log['miss_scenarios'], num_proc=mp.cpu_count())
-        for i, each_sample in enumerate(st.session_state.dataset):
+            print('training log loaded', len(training_log['miss_scenarios']), training_log['miss_scenarios'][:10])
+            st.session_state.dataset = st.session_state.dataset.filter(lambda example: convert_names_to_ids(
+                file_names=[example['file_name']],t0_frame_ids=[example['frame_id']]
+            )[0] in training_log['miss_scenarios'], num_proc=mp.cpu_count())
+            print('after filter: ', len(st.session_state.dataset))
+        from tqdm import tqdm
+        for i, each_sample in enumerate(tqdm(st.session_state.dataset)):
+        # for i, each_sample in enumerate(st.session_state.dataset):
             file_name = each_sample['file_name']
             if args.training_log_path is not None:
                 # filter
@@ -285,12 +294,10 @@ if not st.session_state.scenario_ids_by_file:
                 'route_ids': each_sample['route_ids'],
                 'dataset_index': i
             })
-        print('after filter: ', len(st.session_state.dataset))
     print('Updating data', st.session_state.running_conditions)
 
 agent_dic = None
 road_dic = None
-model = None
 
 if st.session_state.scenario_ids_by_file:
     if not st.session_state.scenario_ids_by_file_readable:
@@ -309,19 +316,20 @@ if st.session_state.scenario_ids_by_file:
 
     st.session_state.data['selected_index'] = selected_scenario_dic['dataset_index']
     st.session_state.data['current_scenario_id'] = st.session_state.dataset[st.session_state.data['selected_index']]['scenario_id']
-    agent_dic, road_dic = load_dictionary_for_file(args.saved_dataset_folder, 'val', st.session_state.dataset[st.session_state.data['selected_index']])
+    agent_dic, road_dic = load_dictionary_for_file(args.saved_dataset_folder, args.split, st.session_state.dataset[st.session_state.data['selected_index']])
 else:
     st.sidebar.write('Current Scenario: ', st.session_state.data['current_scenario_id'])
 
 
 make_prediction_1frame = st.sidebar.button('Predict - Single Frame')
 make_prediction_15s = st.sidebar.button('Predict(Open-Loop) - 15s')
+path_gen_15s = st.sidebar.button('Path Gen')
 # Experimental
 # make_prediction_CL_15s = st.sidebar.button('Predict(Close Loop) - 15s')
 make_prediction_CL_15s = False
 st.sidebar.write('Prediction frame: ', st.session_state.new_frame)
 
-if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
+if make_prediction_1frame or make_prediction_15s or path_gen_15s or make_prediction_CL_15s:
     print('making prediction')
     import json, torch
     from transformer4planning.models.backbone.str_base import build_models
@@ -335,19 +343,24 @@ if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
             model_args = json.load(f)
         print('loaded model args: ', model_args)
 
-        if model is None:
+        if not path_gen_15s:
             model_args = LoadedModelArguments(model_args)
             model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
             model_args.model_pretrain_name_or_path = args.model_checkpoint_path
-            model = build_models(model_args)
+            if st.session_state.model is None:
+                model = build_models(model_args)
+                print('model built')
+                st.session_state.model = model
+            else:
+                model = st.session_state.model
+            if model.use_proposal and 'proposal_generation' not in st.session_state.data:
+                st.session_state.data['proposal_generation'] = {}
 
         # init prediction keys in data
         if 'prediction_generation' not in st.session_state.data:
             st.session_state.data['prediction_generation'] = {}
         if 'pred_kp_generation' not in st.session_state.data:
             st.session_state.data['pred_kp_generation'] = {}
-        if model.use_proposal and 'proposal_generation' not in st.session_state.data:
-            st.session_state.data['proposal_generation'] = {}
 
         current_data = st.session_state.dataset[st.session_state.data['selected_index']]
         # update frame index
@@ -355,7 +368,7 @@ if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
             current_data['frame_id'] = st.session_state.new_frame * 2
         current_frame = int(current_data['frame_id'])
 
-        if make_prediction_1frame:
+        if make_prediction_1frame or path_gen_15s:
             indices_to_predict = [current_frame]
         elif make_prediction_15s or make_prediction_CL_15s:
             indices_to_predict = list(range(current_frame, current_frame + 150, 10))
@@ -367,46 +380,73 @@ if make_prediction_1frame or make_prediction_15s or make_prediction_CL_15s:
                                                   data_path=args.saved_dataset_folder,
                                                   agent_dic=agent_dic,
                                                   all_maps_dic={map_name: road_dic},
-                                                  use_proposal=True,)
-                                                  # selected_exponential_past=model_args.selected_exponential_past,)
-                                                  # use_speed=model_args.use_speed,)  # WARNING: need to be updated if new model args are used
+                                                  use_proposal=True,
+                                                  selected_exponential_past=model_args.selected_exponential_past,
+                                                  use_speed=model_args.use_speed,)  # WARNING: need to be updated if new model args are used
+            print('data prepared')
             prepared_data = np_to_tensor(prepared_data)
             prepared_data.update({'road_dic': road_dic,
                                   'route_ids': current_data['route_ids'],
                                   'ego_pose': agent_dic['ego']['pose'][current_frame // 2],
                                   'map_name': map_name,})
+            if 'key_points_logits' not in st.session_state.data:
+                st.session_state.data['key_points_logits'] = {}
+            if path_gen_15s:
+                from transformer4planning.path_finder.nuplan_path_base import MultiPathFinder
+                from transformer4planning.utils import nuplan_utils as util
+                path_finder = MultiPathFinder()
+                v_per_step = util.euclidean_distance(agent_dic['ego']['pose'][current_frame // 2][:2],
+                                                     agent_dic['ego']['pose'][current_frame // 2 - 1][:2])
+                planning_results = path_finder.plan_marginal_trajectories(
+                    current_state=current_data,
+                    road_dic=road_dic,
+                    my_current_pose=agent_dic['ego']['pose'][current_frame // 2],
+                    my_current_v_per_step=v_per_step
+                )
 
-            with torch.no_grad():
-                prediction_generation = model.generate(**prepared_data)
-                print('prediction_generation: ', list(prediction_generation.keys()), st.session_state.data['selected_index'], current_frame)
-                from transformer4planning.trainer import save_raster
-                image_dictionary = save_raster(inputs=prepared_data, sample_index=0,
-                                               prediction_trajectory_by_gen=prediction_generation['traj_logits'][0],
-                                               prediction_key_point_by_gen=prediction_generation['key_points_logits'][0])
-                st.session_state.data['prediction_generation'][current_frame // 2] = ego_to_global(
-                    prediction_generation['traj_logits'][0].numpy(),
-                    agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
-                st.session_state.data['pred_kp_generation'][current_frame // 2] = ego_to_global(
-                    prediction_generation['key_points_logits'][0].numpy(),
-                    agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
-                if model.use_proposal and i == len(indices_to_predict) - 1:
-                    with st.sidebar.expander('Proposal Prediction', expanded=True):
-                        print('proposal prediction result: ', prediction_generation['proposal'].numpy().tolist()[0])
-                        print('proposal prediction scores: ', prediction_generation['proposal_scores'].numpy().tolist()[0])
-                        st.session_state.data['proposal_generation'][current_frame // 2] = prediction_generation['proposal'].numpy().tolist()[0]
-                        chart_data = {'scores': prediction_generation['proposal_scores'].numpy()[0],
-                                      "index": np.array(['Left', 'Right', 'Fwd', 'Bwd', 'Same']) if prediction_generation['proposal_scores'].numpy()[0].shape[0] == 5 else np.array(['Speed Up', 'Speed Down', 'Same'])}
-                        st.bar_chart(chart_data, x='index', y='scores')
-                if i == len(indices_to_predict) - 1:
-                    with st.sidebar.expander('Raster Visualization', expanded=True):
-                        for each_key in image_dictionary:
-                            image = image_dictionary[each_key]
-                            st.image(image/255, caption=each_key, use_column_width=True, clamp=True, channels='BGR')
-                if make_prediction_CL_15s:
-                    # update the current frame to the last frame
-                    prediction_np = np.array(st.session_state.data['prediction_generation'][current_frame // 2])
-                    agent_dic['ego']['pose'][current_frame // 2: current_frame // 2 + 40: 2, :] = prediction_np[:20, :]
-                    agent_dic['ego']['pose'][current_frame // 2 + 1: current_frame // 2 + 40 + 1: 2, :] = prediction_np[:20, :]
+                interpolators, marginal_trajectories, routes, key_points = planning_results
+                print('inspect: ', marginal_trajectories, key_points)
+                st.session_state.data['prediction_generation'][current_frame // 2] = marginal_trajectories[0].tolist()
+                st.session_state.data['key_points_logits'][current_frame // 2] = np.array(key_points).tolist()
+            else:
+                with torch.no_grad():
+                    prediction_generation = model.generate(**prepared_data)
+                    from transformer4planning.trainer import save_raster
+                    if 'key_points_logits' not in prediction_generation:
+                        image_dictionary = save_raster(inputs=prepared_data, sample_index=0,
+                                                       prediction_trajectory_by_gen=
+                                                       prediction_generation['traj_logits'][0],)
+                    else:
+                        image_dictionary = save_raster(inputs=prepared_data, sample_index=0,
+                                                       prediction_trajectory_by_gen=
+                                                       prediction_generation['traj_logits'][0],
+                                                       prediction_key_point_by_gen=prediction_generation['key_points_logits'][0])
+                    print('prediction_generation: ', list(prediction_generation.keys()), st.session_state.data['selected_index'], current_frame)
+                    st.session_state.data['prediction_generation'][current_frame // 2] = ego_to_global(
+                        prediction_generation['traj_logits'][0].numpy(),
+                        agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
+                    if 'key_points_logits' in prediction_generation:
+                        st.session_state.data['pred_kp_generation'][current_frame // 2] = ego_to_global(
+                            prediction_generation['key_points_logits'][0].numpy(),
+                            agent_dic['ego']['pose'][current_frame // 2], y_reverse=-1 if map_name == 'sg-one-north' else 1).tolist()
+                    if model.use_proposal and i == len(indices_to_predict) - 1:
+                        with st.sidebar.expander('Proposal Prediction', expanded=True):
+                            print('proposal prediction result: ', prediction_generation['proposal'].numpy().tolist()[0])
+                            print('proposal prediction scores: ', prediction_generation['proposal_scores'].numpy().tolist()[0])
+                            st.session_state.data['proposal_generation'][current_frame // 2] = prediction_generation['proposal'].numpy().tolist()[0]
+                            chart_data = {'scores': prediction_generation['proposal_scores'].numpy()[0],
+                                          "index": np.array(['Left', 'Right', 'Fwd', 'Bwd', 'Same']) if prediction_generation['proposal_scores'].numpy()[0].shape[0] == 5 else np.array(['Speed Up', 'Speed Down', 'Same'])}
+                            st.bar_chart(chart_data, x='index', y='scores')
+                    if i == len(indices_to_predict) - 1:
+                        with st.sidebar.expander('Raster Visualization', expanded=True):
+                            for each_key in image_dictionary:
+                                image = image_dictionary[each_key]
+                                st.image(image/255, caption=each_key, use_column_width=True, clamp=True, channels='BGR')
+                    if make_prediction_CL_15s:
+                        # update the current frame to the last frame
+                        prediction_np = np.array(st.session_state.data['prediction_generation'][current_frame // 2])
+                        agent_dic['ego']['pose'][current_frame // 2: current_frame // 2 + 40: 2, :] = prediction_np[:20, :]
+                        agent_dic['ego']['pose'][current_frame // 2 + 1: current_frame // 2 + 40 + 1: 2, :] = prediction_np[:20, :]
 
         if make_prediction_CL_15s:
             st.session_state.agent_dic = nested_numpy_to_list_for_json(copy.deepcopy(agent_dic))

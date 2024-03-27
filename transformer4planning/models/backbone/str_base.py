@@ -8,6 +8,10 @@ from transformer4planning.models.decoder.base import TrajectoryDecoder
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
+from transformers.utils import logging
+logging.set_verbosity_info()
+logger = logging.get_logger("transformers")
+
 
 @dataclass
 class LTMOutput(CausalLMOutputWithCrossAttentions):
@@ -35,6 +39,7 @@ class STRConfig(PretrainedConfig):
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
+
 
 class STR(PreTrainedModel):
     def __init__(self, config, **kwargs):
@@ -98,12 +103,12 @@ class STR(PreTrainedModel):
                 from transformer4planning.models.decoder.diffusion_decoder import KeyPointDiffusionDecoder
                 self.key_points_decoder = KeyPointDiffusionDecoder(self.config)
                 if self.config.key_points_diffusion_decoder_load_from is not None:
-                    print(f"Now loading pretrained key_points_diffusion_decoder from {self.config.key_points_diffusion_decoder_load_from}.")
+                    logger.info(f"Now loading pretrained key_points_diffusion_decoder from {self.config.key_points_diffusion_decoder_load_from}.")
                     state_dict = torch.load(self.config.key_points_diffusion_decoder_load_from)
                     self.key_points_decoder.model.load_state_dict(state_dict)
-                    print("Pretrained keypoint decoder has been loaded!")
+                    logger.info("Pretrained keypoint decoder has been loaded!")
                 else:
-                    print("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
+                    logger.info("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
             elif self.kp_decoder_type == "mlp":
                 from transformer4planning.models.decoder.base import KeyPointMLPDeocder
                 self.key_points_decoder = KeyPointMLPDeocder(self.config)
@@ -131,7 +136,7 @@ class STR(PreTrainedModel):
         transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds, return_dict=return_dict)
         trajectory_label = info_dict["trajectory_label"]
 
-        loss = torch.tensor(0, dtype=torch.float32, device=transformer_outputs_hidden_state.device)
+        loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
         traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
                                                                      trajectory_label,
                                                                      info_dict)
@@ -139,7 +144,6 @@ class STR(PreTrainedModel):
         loss_items = dict(
             traj_loss=traj_loss,
         )
-
         pred_dict = {"traj_logits": traj_logits}
 
         if self.use_proposal:
@@ -195,7 +199,6 @@ class STR(PreTrainedModel):
         # if not return_dict:
         #     output = (traj_logits,) + transformer_outputs[1:]
         #     return ((loss,) + output) if loss is not None else output
-
         return LTMOutput(
             loss=loss,
             logits=traj_logits,  # deprecated, use pred_dict for evaluation instead
@@ -513,7 +516,7 @@ def build_models(model_args):
             config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 25
         else:
-            print('Warning: using default GPT2 config')
+            logger.warning('Using default GPT2 config')
             config_p.n_layer = model_args.n_layers
             config_p.n_embd = model_args.d_embed
             config_p.n_inner = model_args.d_inner
@@ -534,8 +537,8 @@ def build_models(model_args):
             if model_args.key_points_diffusion_decoder_load_from is not None:
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
                 model.load_state_dict(state_dict)
-                print("Pretrained keypoint decoder has been loaded!")
-            print("Only diffusion decoder will be trained singlely!")
+                logger.info("Pretrained keypoint decoder has been loaded!")
+            logger.info("Only diffusion decoder will be trained!")
             return model
         # whole model training
     elif 'mamba' in model_args.model_name:
@@ -602,7 +605,7 @@ def build_models(model_args):
             config_p.num_attention_heads = 8
         elif 'mixtral-medium' in model_args.model_name:
             """
-            Number of parameters: 40M (ViT)
+            Number of parameters: 1.5B (ViT)
             """
             config_p.n_layer = 16
             config_p.n_embd = config_p.d_model = 1024
@@ -615,32 +618,104 @@ def build_models(model_args):
         elif 'mixtral-large' in model_args.model_name:
             """
             WARNING: Gradient WILL CRUSH DURING TRAINING
-            Number of parameters: 1.3B
+            Number of parameters: 350M x 8 -> 2,2B (ViT)
             """
-            config_p.n_layer = 32
+            config_p.n_layer = 24
+            config_p.n_embd = config_p.d_model = 1024
+            config_p.n_inner = 3584
+            config_p.n_head = 16
+            config_p.num_hidden_layers = 24
+            config_p.hidden_size = 1024
+            config_p.intermediate_size = 3584
+            config_p.num_attention_heads = 16
+        elif 'mixtral-xl' in model_args.model_name:
+            """
+            WARNING: Gradient WILL CRUSH DURING TRAINING
+            Number of parameters: 350M x 8 -> 2,2B (ViT)
+            """
+            config_p.n_layer = 24
+            config_p.n_embd = config_p.d_model = 1536
+            config_p.n_inner = 4096
+            config_p.n_head = 16
+            config_p.num_hidden_layers = 24
+            config_p.hidden_size = 1536
+            config_p.intermediate_size = 4096
+            config_p.num_attention_heads = 16
+    elif 'stablelm' in model_args.model_name:
+        from transformer4planning.models.backbone.stablelm import STR_StableLM, STRStableLMConfig
+        config_p = STRStableLMConfig()
+        config_p.update_by_model_args(model_args)
+        ModelCls = STR_StableLM
+        tag = 'StableLMTrajectory'
+        if 'stablelm-small' in model_args.model_name:
+            """
+            Number of parameters: 22M (ViT)
+            """
+            config_p.n_layer = 4
+            config_p.n_embd = config_p.d_model = 256
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 8
+            config_p.num_hidden_layers = 4
+            config_p.hidden_size = 256
+            config_p.intermediate_size = config_p.n_embd * 4
+            config_p.num_key_value_heads = config_p.num_attention_heads = 8
+            attn_implementation = "flash_attention_2"
+        elif 'stablelm-medium' in model_args.model_name:
+            """
+            Number of parameters: 300M (ViT)
+            """
+            config_p.n_layer = 16
+            config_p.n_embd = config_p.d_model = 1024
+            config_p.n_inner = 4096
+            config_p.n_head = 16
+            config_p.num_hidden_layers = 16
+            config_p.hidden_size = 1024
+            config_p.intermediate_size = 4096
+            config_p.num_key_value_heads = config_p.num_attention_heads = 16
+        elif 'stablelm-large' in model_args.model_name:
+            """
+            WARNING: Gradient WILL CRUSH DURING TRAINING
+            Number of parameters: 350M x 8 -> 2,2B (ViT)
+            """
+            config_p.n_layer = 24
+            config_p.n_embd = config_p.d_model = 1024
+            config_p.n_inner = 3584
+            config_p.n_head = 16
+            config_p.num_hidden_layers = 24
+            config_p.hidden_size = 1024
+            config_p.intermediate_size = 3584
+            config_p.num_key_value_heads = config_p.num_attention_heads = 16
+        elif 'stablelm-xl' in model_args.model_name:
+            """
+            WARNING: Gradient WILL CRUSH DURING TRAINING
+            Number of parameters: 350M x 8 -> 2,2B (ViT)
+            """
+            config_p.n_layer = 24
             config_p.n_embd = config_p.d_model = 2048
-            config_p.n_inner = 8192
-            config_p.n_head = 32
-            config_p.num_hidden_layers = 32
+            config_p.n_inner = 7168
+            config_p.n_head = 16
+            config_p.num_hidden_layers = 24
             config_p.hidden_size = 2048
-            config_p.intermediate_size = 8192
-            config_p.num_attention_heads = 32
+            config_p.intermediate_size = 7168
+            config_p.num_key_value_heads = config_p.num_attention_heads = 16
     else:
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
 
     if 'scratch' in model_args.model_name:
         model = ModelCls(config_p)
-        print('Scratch ' + tag + ' Initialized!')
+        logger.info('Scratch ' + tag + ' Initialized!')
     elif 'pretrain' in model_args.model_name:
+        # from transformers import AqlmConfig
+        # quantization_config = AqlmConfig(weights="int8", pre_quantized=False)
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, config=config_p)
-        print('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
+        logger.info('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
         if model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)
                 model.key_points_decoder.model.load_state_dict(state_dict)
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p)
-        print('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
+        logger.info('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
     return model
 
 

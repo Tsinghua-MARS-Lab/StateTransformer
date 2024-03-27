@@ -138,7 +138,7 @@ class ProposalDecoder(nn.Module):
         pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed) # (bs, 1, 64)
         pred_proposal_logits = self.proposal_logits_decoder(pred_proposal_embed)
 
-        loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
+        loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())
         loss_proposal = (loss_proposal * gt_proposal_mask.view(-1)).sum()/ (gt_proposal_mask.sum()+1e-7)
         
         bs = gt_proposal_cls.shape[0]
@@ -177,7 +177,7 @@ class ProposalDecoderCLS(nn.Module):
             context_length = info_dict["context_length"]
             pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + int(self.config.proposal_num), :]  # (bs, 16, n_embed)
             pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 16, 5)
-            loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())  # (bs * 16)
+            loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())  # (bs * 16)
             return loss_proposal.mean(), pred_proposal_cls
         else:
             if 'halfs_intention' in info_dict:
@@ -190,7 +190,7 @@ class ProposalDecoderCLS(nn.Module):
             context_length = info_dict["context_length"]
             pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
             pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 5)
-            loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
+            loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())
             return loss_proposal.mean(), pred_proposal_cls
 
         # if 'halfs_intention' not in info_dict and self.config.use_proposal:
