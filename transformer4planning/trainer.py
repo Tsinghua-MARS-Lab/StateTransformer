@@ -59,15 +59,16 @@ def compute_metrics(prediction: EvalPrediction):
     labels = prediction.label_ids  # nparray: sample_num, 80, 4
     prediction_horizon = labels.shape[1]
 
-    # select gt key points from gt trajectories
-    selected_indices = predictions['selected_indices'][0]  # 5
-
     prediction_by_generation = predictions['prediction_generation']  # sample_num, 85, 2/4
     prediction_by_forward = predictions['prediction_forward']  # sample_num, 85, 2/4
     frame_id = predictions['frame_id']
     scenario15s_id = predictions['scenario15s_id']
     item_to_save["scenario15s_id"] = scenario15s_id
     item_to_save["frame_id"] = frame_id
+
+    # select gt key points from gt trajectories
+    if 'key_points_logits' in prediction_by_generation:
+        selected_indices = predictions['selected_indices'][0]  # 5
 
     loss_items = predictions['loss_items']
     # check loss items are dictionary
@@ -90,8 +91,13 @@ def compute_metrics(prediction: EvalPrediction):
     if 'key_points_logits' in prediction_by_generation:
         assert len(selected_indices) > 1, selected_indices
         label_key_points = labels[:, selected_indices, :]
-        ade_x_error_key_points_gen = prediction_key_points_by_generation[:, :, 0] - label_key_points[:, :, 0]
-        ade_y_error_key_points_gen = prediction_key_points_by_generation[:, :, 1] - label_key_points[:, :, 1]
+        # WIP
+        if len(selected_indices) > 10:
+            ade_x_error_key_points_gen = prediction_key_points_by_generation[:, 10:, 0] - label_key_points[:, 10:, 0]
+            ade_y_error_key_points_gen = prediction_key_points_by_generation[:, 10:, 1] - label_key_points[:, 10:, 1]
+        else:
+            ade_x_error_key_points_gen = prediction_key_points_by_generation[:, :, 0] - label_key_points[:, :, 0]
+            ade_y_error_key_points_gen = prediction_key_points_by_generation[:, :, 1] - label_key_points[:, :, 1]
         if selected_indices[0] > selected_indices[-1]:
             # backward
             fde_x_error_key_points_gen = prediction_key_points_by_generation[:, 0, 0] - label_key_points[:, 0, 0]
@@ -150,7 +156,7 @@ def compute_metrics(prediction: EvalPrediction):
 
     # heading error
     if prediction_trajectory_by_generation.shape[-1] == 4:
-        # average heading error comutation
+        # average heading error computation
         # heading_error_gen = abs(batch_angle_normalize(prediction_trajectory_by_generation[:, :, -1] - labels[:, :, -1]))
         heading_diff_gen = normalize_angles(prediction_trajectory_by_generation[:, :, -1]) - normalize_angles(labels[:, :, -1])
         # normalized_angles = np.fmod(heading_diff_gen + 2 * np.pi, 2 * np.pi)  # normalize to 0, 2pi
@@ -216,8 +222,12 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['fde_forward'] = fde_for
     if 'key_points_logits' in prediction_by_generation:
         assert len(selected_indices) > 1, selected_indices
-        ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
-        ade_y_error_key_points_for = prediction_key_points_by_forward[:, :, 1] - label_key_points[:, :, 1]
+        if len(selected_indices) > 10:
+            ade_x_error_key_points_for = prediction_key_points_by_forward[:, 10:, 0] - label_key_points[:, 10:, 0]
+            ade_y_error_key_points_for = prediction_key_points_by_forward[:, 10:, 1] - label_key_points[:, 10:, 1]
+        else:
+            ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
+            ade_y_error_key_points_for = prediction_key_points_by_forward[:, :, 1] - label_key_points[:, :, 1]
         if selected_indices[0] > selected_indices[-1]:
             # forward
             fde_x_error_key_points_for = prediction_key_points_by_forward[:, 0, 0] - label_key_points[:, 0, 0]
@@ -259,26 +269,27 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result["miss_score"] = miss_score
 
     # include inputs by passing args.include_inputs_for_metrics = True to save eval result to pickle
-    # if EVAL_LOG_SAVING_PATH is not None:
-    #     eval_result_to_save = {}
-    #     # get miss scenarios
-    #     miss_indices = np.where(miss == 1)[0]
-    #     scenario15s_id_miss = scenario15s_id[miss_indices]
-    #     # [(file_name, frame_id), ...]
-    #     eval_result_to_save["miss_scenarios"] = scenario15s_id_miss
-    #     # get top fde scenarios (about 10%)
-    #     total_num = len(fde8_gen)
-    #     fde_indices = np.argsort(fde8_gen)[::-1][:int(total_num/10)]
-    #     scenario15s_id_high_fde = scenario15s_id[fde_indices]
-    #     fde8s_value = fde8_gen[fde_indices]
-    #     # [(file_name, frame_id, fde8s_value), ...]
-    #     eval_result_to_save["top_fde_scenarios"] = list(zip(scenario15s_id_high_fde, fde8s_value))
-    #     # save eval result
-    #     with open(EVAL_LOG_SAVING_PATH, "wb") as f:
-    #         pickle.dump(eval_result_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
-    #     print(f'eval result saved to {EVAL_LOG_SAVING_PATH} with {scenario15s_id_miss.shape[0]} miss scenarios and {scenario15s_id_high_fde.shape[0]} top fde scenarios')
-    # else:
-    #     assert False, "EVAL_LOG_SAVING_PATH is None"
+    if EVAL_LOG_SAVING_PATH is not None:
+        print('Saving eval result to pickle file: ', EVAL_LOG_SAVING_PATH)
+        eval_result_to_save = {}
+        # get miss scenarios
+        miss_indices = np.where(miss == 1)[0]
+        scenario15s_id_miss = scenario15s_id[miss_indices]
+        # [(file_name, frame_id), ...]
+        eval_result_to_save["miss_scenarios"] = scenario15s_id_miss
+        # get top fde scenarios (about 10%)
+        total_num = len(fde8_gen)
+        fde_indices = np.argsort(fde8_gen)[::-1][:int(total_num/10)]
+        scenario15s_id_high_fde = scenario15s_id[fde_indices]
+        fde8s_value = fde8_gen[fde_indices]
+        # [(file_name, frame_id, fde8s_value), ...]
+        eval_result_to_save["top_fde_scenarios"] = list(zip(scenario15s_id_high_fde, fde8s_value))
+        # save eval result
+        with open(EVAL_LOG_SAVING_PATH, "wb") as f:
+            pickle.dump(eval_result_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f'Eval result saved to {EVAL_LOG_SAVING_PATH} with {scenario15s_id_miss.shape[0]} miss scenarios and {scenario15s_id_high_fde.shape[0]} top fde scenarios')
+    else:
+        assert False, "EVAL_LOG_SAVING_PATH is None"
 
     return eval_result
 
@@ -459,11 +470,11 @@ class PlanningTrainer(Trainer):
                     raise NotImplementedError
 
         pred_dict = outputs['pred_dict'] if 'pred_dict' in outputs else logits[-1]
+
         logits = nested_detach(logits)
         if len(logits) >= 1:
             logits = logits[0]
         logits = torch.as_tensor(logits)
-
         prediction_generation = self.model.generate(**inputs)
 
         if logits.shape[0] != self.args.per_device_eval_batch_size:
@@ -503,8 +514,11 @@ class PlanningTrainer(Trainer):
             logits_dict.update({
                 "frame_id": inputs["frame_id"],
                 "scenario15s_id": torch.tensor(scenario15s_ids, device=logits.device),
-                "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
             })
+            if len(self.model.encoder.selected_indices) != 0:
+                logits_dict.update({
+                    "selected_indices": torch.tensor(self.model.encoder.selected_indices, device=logits.device).repeat(logits.shape[0], 1),
+                })
 
         return (loss, logits_dict, labels)
 

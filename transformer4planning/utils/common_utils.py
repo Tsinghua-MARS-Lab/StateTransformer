@@ -13,7 +13,7 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
     else:
         file_number = len(os.listdir(path_to_save))
         if file_number > 200:
-            return
+            return False
     image_shape = None
     for each_key in ['high_res_raster', 'low_res_raster']:
         """
@@ -77,3 +77,4 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
             cv2.imwrite(os.path.join(path_to_save, split + '_' + image_file_name + '_' + str(each_key) + '_' + str(scale) +'.png'), target_image)
     print('length of action and labels: ', result_dic['context_actions'].shape, result_dic['trajectory_label'].shape)
     print('debug images saved to: ', path_to_save, file_number, each_img.shape)
+    return True

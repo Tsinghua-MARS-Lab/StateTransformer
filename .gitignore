@@ -7,3 +7,5 @@ wandb
 src/
 .venv
 node_modules
+.vscode
+commands

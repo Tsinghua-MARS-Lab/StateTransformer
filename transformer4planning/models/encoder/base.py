@@ -11,7 +11,24 @@ class TrajectoryEncoder(nn.Module):
         self.config = config
 
         self.augmentation = DataAugmentation()
-        self.selected_indices = []  # dummy value, give None or [] will cause error
+
+        # config selected indices
+        if 'specified' in self.use_key_points:
+            # 80, 40, 20, 10, 5
+            if self.use_key_points == 'specified_forward':
+                self.selected_indices = [4, 9, 19, 39, 79]
+            elif self.use_key_points == 'specified_backward':
+                self.selected_indices = [79, 39, 19, 9, 4]
+            elif self.use_key_points == 'specified_two_backward':
+                self.selected_indices = [79, 4]
+            else:
+                assert False, f"specified key points should be either specified_forward or specified_backward {self.use_key_points}"
+        elif 'universal' in self.use_key_points:
+            self.selected_indices = [15, 31, 47, 63, 79]
+        elif 'denoise_kp' in self.use_key_points:
+            self.selected_indices = [79] * 10 + [39, 19, 9, 4]
+        else:
+            self.selected_indices = []
 
     def forward(self, **kwargs):  
         """
@@ -21,31 +38,30 @@ class TrajectoryEncoder(nn.Module):
         """
         raise NotImplementedError
 
-    def select_keypoints(self, trajectory_label):
+    def select_keypoints(self, info_dict):
         """
         Universal keypoints selection function.
         return  `future_key_points`: torch.Tensor, the key points selected
                 `selected_indices`: List
                 `indices`: List
         """
+        trajectory_label = info_dict['trajectory_label']
         device = trajectory_label.device
+
         # use autoregressive future interval
         if 'specified' in self.use_key_points:
             # 80, 40, 20, 10, 5
-            if self.use_key_points == 'specified_forward':
-                self.selected_indices = [4, 9, 19, 39, 79]
-            elif self.use_key_points == 'specified_backward':
-                self.selected_indices = [79, 39, 19, 9, 4]
-            else:
-                assert False, "specified key points should be either specified_forward or specified_backward"
             future_key_points = trajectory_label[:, self.selected_indices, :]
-            indices = torch.tensor(self.selected_indices, device=device, dtype=float) / 80.0
+            # indices = torch.tensor(self.selected_indices, device=device, dtype=float) / 80.0
         elif 'universal' in self.use_key_points:
             ar_future_interval = 20
             future_key_points = trajectory_label[:, ar_future_interval - 1::ar_future_interval, :]
-            indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
-            self.selected_indices = [15, 31, 47, 63, 79]
+            # indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
+            # self.selected_indices = [15, 31, 47, 63, 79]
+        elif 'denoise_kp' in self.use_key_points:
+            # WIP
+            future_key_points = trajectory_label[:, self.selected_indices, :2]
         else:
             assert False, "key points should be either specified or universal"
         
-        return future_key_points, self.selected_indices, indices
+        return future_key_points

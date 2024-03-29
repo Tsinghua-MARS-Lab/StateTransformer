@@ -53,6 +53,20 @@ class TrajectoryDecoder(nn.Module):
             print(self.config.loss_fn)
             assert False, "loss fn not supported"
 
+        if self.config.use_offroad_loss:
+            import pickle
+            assert self.config.task == "nuplan"
+
+            self.all_maps_dic = {}
+            map_folder = config.map_path
+            for each_map in os.listdir(map_folder):
+                if each_map.endswith('.pkl'):
+                    map_path = os.path.join(map_folder, each_map)
+                    with open(map_path, 'rb') as f:
+                        map_dic = pickle.load(f)
+                    map_name = each_map.split('.')[0]
+                    self.all_maps_dic[map_name] = map_dic
+
     
     def compute_traj_loss(self, 
                           hidden_output,
@@ -92,6 +106,74 @@ class TrajectoryDecoder(nn.Module):
                 else:
                     traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.config.predict_yaw else \
                                 self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+
+                if self.config.use_offroad_loss:
+                    from shapely import geometry
+                    
+                    assert "route_ids" in info_dict and info_dict["route_ids"] is not None 
+                    assert "ego_pose" in info_dict and info_dict["ego_pose"] is not None
+                    
+                    route_ids_batch = info_dict["route_ids"]
+                    ego_pose_batch = info_dict["ego_pose"]
+                    map_batch = info_dict["map"]
+                    
+                    cos_, sin_ = torch.cos(ego_pose_batch[:, -1]).unsqueeze(1), torch.sin(ego_pose_batch[:, -1]).unsqueeze(1)
+                    # ego to global
+                    traj_logits_global_x = traj_logits[:, :, 0] * cos_ - traj_logits[:, :, 1] * sin_
+                    traj_logits_global_y = traj_logits[:, :, 0] * sin_ + traj_logits[:, :, 1] * cos_
+                    traj_logits_global_batch = torch.stack((traj_logits_global_x, traj_logits_global_y), dim=-1) + ego_pose_batch[:, :2].unsqueeze(1)
+
+                    offroad_loss_batch = []
+                    for i, map in enumerate(map_batch):
+                        road_dic = self.all_maps_dic[map]
+                        route_ids = route_ids_batch[i]
+                        traj_logits_global = traj_logits_global_batch[i]
+                        
+                        route_lanes = []
+                        for each_route_block in route_ids:
+                            if each_route_block > -1:
+                                route_lanes += road_dic[each_route_block.item()]['lower_level']
+                                
+                        route_lane_pts = []
+                        lane_ids = []
+                        for each_lane in route_lanes:
+                            if road_dic[each_lane]['type'] not in [0, 11]:
+                                continue
+                            route_lane_pts.append(torch.tensor(road_dic[each_lane]['xyz'][:, :2], device=device))
+                            lane_ids += [each_lane] * road_dic[each_lane]['xyz'].shape[0]
+                        
+                        if len(route_lane_pts) == 0:
+                            continue
+                        
+                        route_lane_pts = torch.cat(route_lane_pts, axis=0)
+                        # get the closest point over all of the selected lanes
+                        dist = torch.norm(route_lane_pts.unsqueeze(1).repeat(1, traj_logits_global.shape[0], 1) - traj_logits_global, dim=-1)
+                        closest_index = torch.argmin(dist, dim=0)
+                        
+                        for t, index in enumerate(closest_index):
+                            pred_point = traj_logits_global[t].detach().cpu().numpy()
+
+                            # check if point in route road block
+                            closest_lane_id = lane_ids[index]
+                            closest_road_block = None
+                            for each_route_block in road_dic[closest_lane_id]['upper_level']:
+                                if each_route_block in route_ids:
+                                    closest_road_block = each_route_block
+                                    break
+                                
+                            assert closest_road_block is not None, 'closest_road_block is None'
+                            line = geometry.LineString(road_dic[closest_road_block]['xyz'][:, :2])
+                            point = geometry.Point(pred_point)
+                            polygon = geometry.Polygon(line)
+                            on_road = polygon.contains(point)
+                            
+                            if on_road: continue
+
+                            offroad_loss_batch.append(dist[index, t])
+
+                    if len(offroad_loss_batch) > 0:
+                        traj_loss += torch.mean(torch.stack(offroad_loss_batch))
+                    
             traj_loss *= self.config.trajectory_loss_rescale
         else:
             traj_logits = torch.zeros_like(label[..., :2])
@@ -209,6 +291,8 @@ class KeyPointMLPDeocder(nn.Module):
         super().__init__()
         self.config = config
         out_features = 4 if self.config.predict_yaw else 2
+        if 'denoise_kp' in self.config.use_key_points:
+            out_features = 2
         self.model = DecoderResCat(config.n_inner,
                                    config.n_embd,
                                    out_features=out_features)
@@ -248,7 +332,7 @@ class KeyPointMLPDeocder(nn.Module):
         pred the next key point conditioned on all the previous points are ground truth, and then compute the correspond loss
         param:
             hidden_output: the whole hidden_state output from transformer backbone
-            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
+            info_dict: dict contains additional information, such as context length/input length, pred length, etc.
         """
         if device is None:
             device = hidden_output.device
