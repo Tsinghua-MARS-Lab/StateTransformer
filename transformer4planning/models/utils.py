@@ -110,7 +110,8 @@ def exp_positional_embedding(key_point_num, feat_dim):
 
 def uniform_positional_embedding(key_point_num, feat_dim):
     point_num = key_point_num
-    position = torch.tensor([6 * (point_num - i)] for i in range(point_num))
+    position = torch.tensor([[6 * (point_num - i)] for i in range(point_num)])
+
     # Create a table of divisors to divide each position. This will create a sequence of values for the divisor.
     div_term = torch.exp(torch.arange(0, feat_dim, 2).float() * (-math.log(100.0) / feat_dim))
 

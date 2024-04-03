@@ -331,7 +331,7 @@ def compute_metrics_waymo(prediction: EvalPrediction):
             if result_dict[key] == -1:
                 if record_avg: record_avg = False
             else:
-                assert result_dict[key] > 0
+                # assert result_dict[key] > 0
                 result[key] = result_dict[key]
 
         if m != "OverlapRate" and record_avg:

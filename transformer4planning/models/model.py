@@ -105,7 +105,11 @@ class TrajectoryGPT(GPT2PreTrainedModel):
                 from transformer4planning.models.decoder.base import KeyPointMLPDeocder
                 self.key_points_decoder = KeyPointMLPDeocder(self.config)
 
-        self.traj_decoder = TrajectoryDecoder(self.config)
+        if self.config.decoder_type == "mlp":
+            self.traj_decoder = TrajectoryDecoder(self.config)
+        elif self.config.decoder_type == "diffusion":
+            from transformer4planning.models.decoder.diffusion_decoder import DiffusionDecoder
+            self.traj_decoder = DiffusionDecoder(self.config)
 
 
     def _prepare_attention_mask_for_generation(self, input_embeds):

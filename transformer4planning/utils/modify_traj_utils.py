@@ -33,7 +33,7 @@ def farthest_point_sample_PointCloud(xy, npoint):
     return centroids
 
 def modify_func(output:dict,nms_method='fde',num_mods_out:int = 36, init_threshold: float = INIT_THRESHOLD, nms_or_fps = 'nms', EM_Iter = 50, org_sigma = 1e-1, init_sigma = 1e-1,):
-    print("We are now using modifyTraj function defined in traj_modify_from_MultiPathPP.py.")
+    # print("We are now using modifyTraj function defined in traj_modify_from_MultiPathPP.py.")
     """Modify the output trajectory using NMS.
 
     Args:
@@ -166,7 +166,7 @@ def _compute_EM_algorithm(targs):
     return (current_q, current_mu, current_sigma)
 
 def run_EM_algorithm(ireg_lst, icls_lst, oreg_lst, ocls_lst, EM_Iter, org_sigma, init_sigma):
-    print("Now we run for {} iterations of EM algorithm.".format(EM_Iter))
+    # print("Now we run for {} iterations of EM algorithm.".format(EM_Iter))
     # ireg_lst: list of length #scene, each element is a tensor of shape #agent_in_current_scene * in_mods * #pred_length * 2
     # icls_lst: list of length #scene,                          of shape #agent_in_current_scene * in_mods
     # oreg_lst:                #scene                                    #agent_in_current_scene * out_mods * #pred_length * 2

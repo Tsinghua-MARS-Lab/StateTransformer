@@ -189,7 +189,7 @@ class DiffusionWrapper(nn.Module):
         print("We are now using diffusion model for decoder.")
         print("When training, the forward method of the diffusion decoder returns loss, and while testing the forward method returns predicted trajectory.")
 
-        self.loss_fn = nn.MSELoss(reduction='mean')
+        self.loss_fn = nn.MSELoss(reduction='none')
     
     def forward(self, hidden_state, label=None, **kwargs):
         if self.training:
@@ -199,7 +199,6 @@ class DiffusionWrapper(nn.Module):
 
     # ------------------------- Train -------------------------
     def train_forward(self, hidden_state, trajectory_label):
-        trajectory_label = trajectory_label.float()
         trajectory_label = normalize(trajectory_label)
         return self.train_loss(trajectory_label, hidden_state)
 
@@ -265,16 +264,18 @@ class DiffusionWrapper(nn.Module):
             shape = tuple([batch_size * mc_num] + list(shape[1:]))
             assert not determin, 'It does not make sense to use deterministic sampling with mc_num > 1'
             x = torch.randn(shape, device=device)
-            total_cls = -(torch.mean(x.detach()**2, dim=1))         # Consider the prior score
+
+            total_cls = -(torch.mean(x.detach()**2, dim=(1, 2)))         # Consider the prior score
+
             # repeat state in dim 0 for mc_num times.
             # we don't know the shape of state, so we use torch.repeat_interleave
             state = torch.repeat_interleave(state, mc_num, dim=0)
             # then we reshape state into shape()
             for i in reversed(range(0,self.n_timesteps)):
-                timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
+                timesteps = torch.full((batch_size * mc_num,), i, device=device, dtype=torch.long)
                 x, cls = self.p_sample(x, timesteps, state, determin=determin)
                 total_cls = total_cls + cls
-
+                
             # reshape x into shape (batch_size, mc_num, ...)
             x = x.reshape(batch_size, mc_num, *x.shape[1:])
             total_cls = total_cls.reshape(batch_size, mc_num)
@@ -292,7 +293,7 @@ class DiffusionWrapper(nn.Module):
             noise = torch.zeros(x.shape).to(device)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise, -(torch.mean(noise.detach()**2, dim=1))
+        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise, -(torch.mean(noise.detach()**2, dim=(1, 2)))
     
     def p_mean_variance(self, x, t, s):
         x_recon = self.predict_start_from_noise(x, t=t, noise=self.model(x, t, s))
@@ -422,5 +423,76 @@ class KeyPointDiffusionDecoder(nn.Module):
             scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
         return key_points_logits, scores 
 
+class DiffusionDecoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.out_features = 4 if config.predict_yaw else 2
+        self.k = config.k
+        self.use_key_points = config.use_key_points
+        diffusion_model = KeypointDiffusionModel(config.n_inner,
+                                                 config.n_embd,
+                                                 out_features=self.out_features,
+                                                 key_point_num=80,
+                                                 feat_dim=self.config.key_points_diffusion_decoder_feat_dim,
+                                                 input_feature_seq_lenth=self.config.diffusion_condition_sequence_lenth,
+                                                 use_key_points=config.use_key_points,)
+
+        self.model = DiffusionWrapper(diffusion_model, num_key_points=80,)
+
+    def compute_traj_loss(self, 
+                          hidden_output,
+                          label, 
+                          info_dict,
+                          device=None):
+        """
+        pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
+        params:
+            hidden_output: whole hidden state output from transformer backbone
+            label: ground truth trajectory in future 8-s
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
+        """
+        pred_length = info_dict.get("pred_length", label.shape[1])
+        traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
+        if device is None:
+            device = traj_hidden_state.device
+        
+        traj_logits = torch.zeros_like(label[..., :2])
+        traj_loss = None
+        # compute trajectory loss conditioned on gt keypoints
+        if not self.config.pred_key_points_only:
+            if self.config.task == "waymo":
+                trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
+                assert trajectory_label_mask is not None, "trajectory_label_mask is None"
+                traj_loss = self.model.train_forward(traj_hidden_state, label[..., :2])
+                traj_loss = (traj_loss * trajectory_label_mask).sum() / (trajectory_label_mask.sum() + 1e-7)
+                
+            elif self.config.task == "nuplan":
+                raise NotImplementedError
+                    
+            traj_loss *= self.config.trajectory_loss_rescale
+        
+        return traj_loss, traj_logits
     
+    def generate_trajs(self, hidden_output, info_dict):
+        pred_length = info_dict.get("pred_length", 0)
+        assert pred_length > 0
+        traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
+
+        if self.k == 1:
+            traj_logits, scores = self.model(traj_hidden_state, determin = True)
+        else:
+            traj_logits, scores = self.model(traj_hidden_state, determin = False, mc_num = self.config.mc_num)
+            reg_sigma_cls_dict = modify_func(
+                output = dict(
+                    reg = [traj_p for traj_p in traj_logits.detach().unsqueeze(1)],
+                    cls = [cls for cls in scores.detach().unsqueeze(1)],
+                ),
+                num_mods_out = self.k,
+                EM_Iter = 25,
+            )
+            traj_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
+            scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
+            
+        return traj_logits, scores 
 
