@@ -5,7 +5,10 @@ import os
 import argparse
 import pickle
 import numpy as np
+import tensorflow as tf
+
 from waymo_open_dataset.protos import scenario_pb2
+from waymo_open_dataset.utils.sim_agents import submission_specs
 
 polyline_type = {
     # for lane
@@ -184,6 +187,46 @@ def decode_dynamic_map_states_from_proto(dynamic_map_states):
 
     return dynamic_map_infos
 
+def index_gather(
+    tensor: tf.Tensor, reference_tensor: tf.Tensor) -> tf.Tensor:
+  """Finds corresponding idxs in `tensor` for each element in `reference_tensor.
+
+  This function returns the arguments for a gather op such that:
+    tf.gather(tensor, indices=_arg_gather(tensor, reference_tensor))
+    == reference_tensor.
+
+  Note: All the items in `tensor` must be present in `reference_tensor`,
+    otherwise the 0-indexed element of `tensor` will be returned, invalidating
+    the expected equivalence above. Moreover, `tensor` must be without
+    repetitions to guarantee the correct result.
+
+  Args:
+    tensor: The tensor to map. Must be a 1D tensor because the logic used here
+      does not apply to multi-dimensional gather ops.
+    reference_tensor: A 1D tensor containing items from `tensor`, each of which
+      will be searched for in `tensor`.
+
+  Returns:
+    The list of indices on `tensor` which, if taken, maps directly to
+    `reference_tensor`. Specifically, if we apply tf.gather(tensor, indices) we
+    obtain the reference tensor back.
+  """
+  tf.assert_rank(tensor, 1)
+  tf.assert_rank(reference_tensor, 1)
+  # Create the comparison matrix and verify matching items.
+  bit_mask = tensor[tf.newaxis, :] == reference_tensor[:, tf.newaxis]
+  bit_mask_sum = tf.reduce_sum(tf.cast(bit_mask, tf.int32), axis=1)
+  if tf.reduce_any(bit_mask_sum < 1):
+    raise ValueError(
+        'Some items in `reference_tensor` are missing from `tensor`:'
+        f' \n{reference_tensor} \nvs. \n{tensor}.'
+    )
+  if tf.reduce_any(bit_mask_sum > 1):
+    raise ValueError('Some items in `tensor` are repeated.')
+  return tf.matmul(
+      tf.cast(bit_mask, tf.int32),
+      tf.range(0, tensor.shape[0], dtype=tf.int32)[:, tf.newaxis])[:, 0]
+
 def main(args):
     data_path = args.data_path
 
@@ -198,24 +241,31 @@ def main(args):
                 scenario = scenario_pb2.Scenario()
                 scenario.ParseFromString(bytearray(data.numpy()))
                 track_infos = decode_tracks_from_proto(scenario.tracks)
-
-                object_type_to_predict, track_index_to_predict, difficulty_to_predict = [], [], []
-                for cur_pred in scenario.tracks_to_predict:
-                    cur_idx = cur_pred.track_index
-                    if track_infos['object_type'][cur_idx] in args.agent_type:
-                        object_type_to_predict.append(track_infos['object_type'][cur_idx])
-                        track_index_to_predict.append(cur_idx)
-                        difficulty_to_predict.append(cur_pred.difficulty)
+                
+                if args.task == "MP":
+                    object_type_to_predict, track_index_to_predict, difficulty_to_predict = [], [], []
+                    for cur_pred in scenario.tracks_to_predict:
+                        cur_idx = cur_pred.track_index
+                        if track_infos['object_type'][cur_idx] in args.agent_type:
+                            object_type_to_predict.append(track_infos['object_type'][cur_idx])
+                            track_index_to_predict.append(cur_idx)
+                            difficulty_to_predict.append(cur_pred.difficulty)
+                elif args.task == "SA":
+                    track_ids_simagents = tf.convert_to_tensor(submission_specs.get_sim_agent_ids(scenario))
+                    track_index_to_predict = index_gather(tf.convert_to_tensor(track_infos['object_id']), track_ids_simagents)
+                else:
+                    raise NotImplementedError
                 
                 if len(track_index_to_predict) == 0: continue
                 
                 if save_dict:
                     info = {}
-                    info['tracks_to_predict'] = {
-                        'object_type': object_type_to_predict,
-                        'track_index': track_index_to_predict,
-                        'difficulty': difficulty_to_predict,
-                    }
+                    info['tracks_to_predict'] = {'track_index': track_index_to_predict,}
+                    if args.task == "MP":
+                        info['tracks_to_predict'].update({
+                            'object_type': object_type_to_predict,
+                            'difficulty': difficulty_to_predict,
+                        })
 
                     # decode map related data
                     map_infos = decode_map_features_from_proto(scenario.map_features)
@@ -239,12 +289,20 @@ def main(args):
                     #     pickle.dump(info, f)
                     #     f.close()
 
-                for i, index in enumerate(track_index_to_predict):
+                if args.task == "MP":
+                    for i, index in enumerate(track_index_to_predict):
+                        yield {
+                                "scenario_id": scenario.scenario_id,
+                                "track_index_to_predict": index,
+                                "object_type": object_type_to_predict[i]
+                            }
+                elif args.task == "SA":
                     yield {
-                            "scenario_id": scenario.scenario_id,
-                            "track_index_to_predict": index,
-                            "object_type": object_type_to_predict[i]
-                        }
+                                "scenario_id": scenario.scenario_id,
+                                "track_index_to_predict": track_index_to_predict,
+                            }
+                else:
+                    raise NotImplementedError
                     
             if len(dict_to_save.keys()) > 0:
                 with open(os.path.join(output_path, file_name + ".pkl"), "wb") as f:
@@ -258,8 +316,9 @@ def main(args):
         file_indices += range(data_loader.total_file_num)[i::args.num_proc]
 
     total_file_number = len(file_indices)
-    print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}\n Agent type:', args.agent_type)
-
+    print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}\n Task: {args.task}\n Agent type:', args.agent_type)
+    if args.task == "SA": print("Your agent_type argument does not work for Sim Agents task.")
+    
     waymo_dataset = Dataset.from_generator(yield_data,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader, 'save_dict':
                                                         args.save_dict, 'output_path': args.output_path},
@@ -282,6 +341,7 @@ if __name__ == '__main__':
         })
     
     parser.add_argument('--mode', type=str, default="train")  
+    parser.add_argument("--task", type=str, default="MP", help="Different tasks on WOMD. MP for Motion Prediction and SA for Sim Agents.")
     parser.add_argument('--agent_type', type=int, nargs="+", default=[3])
     parser.add_argument('--save_dict', default=False, action='store_true')
     parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_tmp/data_dict')
