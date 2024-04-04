@@ -618,7 +618,7 @@ def build_models(model_args):
         elif 'mixtral-large' in model_args.model_name:
             """
             WARNING: Gradient WILL CRUSH DURING TRAINING
-            Number of parameters: 350M x 8 -> 2,2B (ViT)
+            Number of parameters: 350M x 8 -> 3B (ViT)
             """
             config_p.n_layer = 18
             config_p.n_embd = config_p.d_model = 1280
@@ -631,16 +631,28 @@ def build_models(model_args):
         elif 'mixtral-xl' in model_args.model_name:
             """
             WARNING: Gradient WILL CRUSH DURING TRAINING
-            Number of parameters: 350M x 8 -> 2,2B (ViT)
+            Number of parameters: 350M x 8 -> 6B (ViT)
             """
-            config_p.n_layer = 24
+            config_p.n_layer = 25
             config_p.n_embd = config_p.d_model = 1536
-            config_p.n_inner = 4096
+            config_p.n_inner = 6144
             config_p.n_head = 16
-            config_p.num_hidden_layers = 24
-            config_p.hidden_size = 1536
-            config_p.intermediate_size = 4096
-            config_p.num_attention_heads = 16
+            config_p.num_hidden_layers = config_p.n_layer
+            config_p.hidden_size = config_p.n_embd
+            config_p.intermediate_size = config_p.n_inner
+            config_p.num_attention_heads = config_p.n_head
+        elif 'mixtral-5b' in model_args.model_name:
+            """
+            WARNING: Gradient WILL CRUSH DURING TRAINING
+            Number of parameters: 350M x 8 -> 5.2B (ViT)
+            """
+            config_p.n_layer = 16
+            config_p.n_embd = config_p.d_model = 1280
+            config_p.n_inner = 5120
+            config_p.n_head = 32
+            config_p.hidden_size = config_p.n_embd
+            config_p.intermediate_size = config_p.n_inner
+            config_p.num_attention_heads = config_p.n_head
     elif 'stablelm' in model_args.model_name:
         from transformer4planning.models.backbone.stablelm import STR_StableLM, STRStableLMConfig
         config_p = STRStableLMConfig()
