@@ -615,6 +615,18 @@ def build_models(model_args):
             config_p.hidden_size = 1024
             config_p.intermediate_size = 4096
             config_p.num_attention_heads = 16
+        elif 'mixtral-3b' in model_args.model_name:
+            """
+            WARNING: Gradient WILL CRUSH DURING TRAINING
+            Number of parameters: 350M x 8 -> B (ViT)
+            """
+            config_p.n_layer = 16
+            config_p.n_embd = config_p.d_model = 1024
+            config_p.n_inner = 4096
+            config_p.n_head = 32
+            config_p.hidden_size = config_p.n_embd
+            config_p.intermediate_size = config_p.n_inner
+            config_p.num_attention_heads = config_p.n_head
         elif 'mixtral-large' in model_args.model_name:
             """
             WARNING: Gradient WILL CRUSH DURING TRAINING
