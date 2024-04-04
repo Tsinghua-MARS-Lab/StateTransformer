@@ -38,6 +38,40 @@ def waymo_collate_func(batch, dic_path=None):
     
     return result
 
+def simagents_collate_func(batch, dic_path=None):
+    raise NotImplementedError
+    map_func = partial(waymo_preprocess, data_path=dic_path)
+
+    new_batch = list()
+    for i, d in enumerate(batch):
+        rst = map_func(d)
+        if rst is None:
+            continue
+        new_batch.append(rst)
+    
+    # process as data dictionary
+    result = dict()
+    for key in new_batch[0].keys():
+        if key is None:
+            continue
+        list_of_dvalues = []
+        for d in new_batch:
+            if d[key] is not None:
+                list_of_dvalues.append(d[key])
+            else:
+                print("Error: None value", key, d[key])   # scenario_type might be none for older dataset
+        if key in ["scenario_id", "obj_types", "obj_ids", "center_objects_type", "center_objects_id"]:
+            result[key] = np.concatenate(list_of_dvalues, axis=0).reshape(-1)
+        elif key in ["obj_trajs", "obj_trajs_mask", "map_polylines", "map_polylines_mask", "map_polylines_center",
+                "obj_trajs_pos", "obj_trajs_last_pos", "obj_trajs_future_state", "obj_trajs_future_mask"]:
+            list_of_dvalues = [torch.from_numpy(x) for x in list_of_dvalues]
+            result[key] = merge_batch_by_padding_2nd_dim(list_of_dvalues)
+        else:
+            list_of_dvalues = [torch.from_numpy(x) if isinstance(x, np.ndarray) else x for x in list_of_dvalues]
+            result[key] = torch.cat(list_of_dvalues, dim=0)
+    
+    return result
+
 def waymo_preprocess(sample, data_path):
     scene_id = sample["scenario_id"]
     track_index_to_predict = sample["track_index_to_predict"].view(-1)

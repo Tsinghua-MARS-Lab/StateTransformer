@@ -43,6 +43,10 @@ from transformer4planning.trainer import compute_metrics
 
 from datasets import Dataset, Value
 
+compute_metrics_func = {
+    "nuplan": compute_metrics,
+}
+
 # os.environ["WANDB_DISABLED"] = "true"
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
@@ -176,7 +180,7 @@ def main():
     # loop all datasets
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
-    if model_args.task == "nuplan" or model_args.task == "waymo": # nuplan datasets are stored in index format
+    if model_args.task == "nuplan" or model_args.task == "waymo" or model_args.task == "simagents": # nuplan datasets are stored in index format
         index_root = os.path.join(data_args.saved_dataset_folder, 'index')
     elif model_args.task == "train_diffusion_decoder":
         index_root = data_args.saved_dataset_folder
@@ -366,6 +370,16 @@ def main():
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
         from transformer4planning.trainer import compute_metrics_waymo
+        compute_metrics_func.update({"waymo": compute_metrics_waymo})
+    elif model_args.task == "simagents":
+        from transformer4planning.preprocess.waymo_vectorize import simagents_collate_func
+        if model_args.encoder_type == "vector":
+            collate_fn = partial(simagents_collate_func,
+                                 dic_path=data_args.saved_dataset_folder)
+        elif model_args.encoder_type == "raster":
+            raise NotImplementedError
+        from transformer4planning.trainer import compute_metrics_simagents
+        compute_metrics_func.update({"simagents": compute_metrics_simagents})
     elif model_args.task == "train_diffusion_decoder":
         from torch.utils.data._utils.collate import default_collate
         def feat_collate_func(batch, predict_yaw):
@@ -383,7 +397,7 @@ def main():
         collate_fn = partial(feat_collate_func, predict_yaw=model_args.predict_yaw)
     else:
         raise AttributeError("task must be nuplan or waymo or train_diffusion_decoder")
-
+        
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -391,7 +405,7 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         callbacks=[CustomCallback,],
         data_collator=collate_fn,
-        compute_metrics=compute_metrics_waymo if model_args.task == "waymo" else compute_metrics
+        compute_metrics=compute_metrics_func[model_args.task]
     )
     trainer.pop_callback(DefaultFlowCallback)
 

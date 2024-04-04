@@ -346,7 +346,8 @@ def compute_metrics_waymo(prediction: EvalPrediction):
             result[each_key] = np.mean(loss_items[each_key])
 
     return result
-
+def compute_metrics_simagents(prediction: EvalPrediction):
+    raise NotImplementedError
 
 class CustomCallback(DefaultFlowCallback):
     """

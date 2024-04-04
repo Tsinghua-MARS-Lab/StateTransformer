@@ -461,7 +461,7 @@ class DiffusionDecoder(nn.Module):
         traj_loss = None
         # compute trajectory loss conditioned on gt keypoints
         if not self.config.pred_key_points_only:
-            if self.config.task == "waymo":
+            if self.config.task == "waymo" or self.config.task == "simagents":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
                 traj_loss = self.model.train_forward(traj_hidden_state, label[..., :2])
