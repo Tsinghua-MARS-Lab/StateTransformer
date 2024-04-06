@@ -233,7 +233,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # 23-26: traffic raster
     # 27-91: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
     route_channel = 2
-    route_channel += 1 if ego_point is not None else 0
+    route_channel += 1 if kwargs.get('use_mission_goal', False) else 0
 
     total_raster_channels = route_channel + road_types + traffic_types + agent_types * len(sample_frames_in_past)
     rasters_high_res = np.zeros([raster_shape[0],
@@ -292,7 +292,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                          tuple(low_res_route[j + 1, :2]), (255, 255, 255), 2)
 
         # raster ego point
-        if ego_point is not None:
+        if ego_point is not None and random.random() <= kwargs.get("mission_goal_dropout", 1):
             ego_point[:2] -= origin_ego_pose[:2]
             ego_point[0], ego_point[1] = ego_point[0].copy() * cos_ - ego_point[1].copy() * sin_, ego_point[0].copy() * sin_ + ego_point[1].copy() * cos_
             ego_point[1] *= -1

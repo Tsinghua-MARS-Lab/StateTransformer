@@ -653,18 +653,6 @@ def build_models(model_args):
             config_p.hidden_size = config_p.n_embd
             config_p.intermediate_size = config_p.n_inner
             config_p.num_attention_heads = config_p.n_head
-        elif 'mixtral-5b' in model_args.model_name:
-            """
-            WARNING: Gradient WILL CRUSH DURING TRAINING
-            Number of parameters: 350M x 8 -> 5.2B (ViT)
-            """
-            config_p.n_layer = 16
-            config_p.n_embd = config_p.d_model = 1280
-            config_p.n_inner = 5120
-            config_p.n_head = 32
-            config_p.hidden_size = config_p.n_embd
-            config_p.intermediate_size = config_p.n_inner
-            config_p.num_attention_heads = config_p.n_head
     elif 'stablelm' in model_args.model_name:
         from transformer4planning.models.backbone.stablelm import STR_StableLM, STRStableLMConfig
         config_p = STRStableLMConfig()

@@ -208,6 +208,9 @@ class ModelArguments:
     use_mission_goal: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use mission goal in the model"}
     )
+    mission_goal_dropout: Optional[float] = field(
+        default=1.0, metadata={"help": "Rate to dropout the mission goal, 1 is no dropout"}
+    )
 
     ######## temporal model args, check your model config before using it! ########
     attention_dropout: Optional[float] = field(
