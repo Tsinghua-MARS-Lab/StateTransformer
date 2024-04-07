@@ -39,8 +39,7 @@ def waymo_collate_func(batch, dic_path=None):
     return result
 
 def simagents_collate_func(batch, dic_path=None):
-    raise NotImplementedError
-    map_func = partial(waymo_preprocess, data_path=dic_path)
+    map_func = partial(simagents_preprocess, data_path=dic_path)
 
     new_batch = list()
     for i, d in enumerate(batch):
@@ -60,7 +59,11 @@ def simagents_collate_func(batch, dic_path=None):
                 list_of_dvalues.append(d[key])
             else:
                 print("Error: None value", key, d[key])   # scenario_type might be none for older dataset
-        if key in ["scenario_id", "obj_types", "obj_ids", "center_objects_type", "center_objects_id"]:
+        
+        if key in ["scenario_id"]:
+            result["scene_length"] = [len(v) for v in list_of_dvalues]
+            result[key] = np.concatenate(list_of_dvalues, axis=0).reshape(-1)
+        elif key in ["center_objects_type", "center_objects_id"]:
             result[key] = np.concatenate(list_of_dvalues, axis=0).reshape(-1)
         elif key in ["obj_trajs", "obj_trajs_mask", "map_polylines", "map_polylines_mask", "map_polylines_center",
                 "obj_trajs_pos", "obj_trajs_last_pos", "obj_trajs_future_state", "obj_trajs_future_mask"]:
@@ -496,3 +499,74 @@ def check_numpy_to_torch(x):
     if isinstance(x, np.ndarray):
         return torch.from_numpy(x).float(), True
     return x, False
+
+def simagents_preprocess(sample, data_path):
+    scene_id = sample["scenario_id"]
+    track_index_to_predict = sample["track_index_to_predict"].view(-1)
+    split = sample["split"]
+    with open(os.path.join(data_path, f"{split}", scene_id + ".pkl"), "rb") as f:
+        info = pickle.load(f)
+
+    sdc_track_index = info["sdc_track_index"]
+    current_time_index = info["current_time_index"]
+    timestamps = np.array(info["timestamps_seconds"][:current_time_index + 1], dtype=np.float32)
+
+    track_infos = info["track_infos"]
+
+    obj_types = np.array(track_infos["object_type"])
+    obj_ids = np.array(track_infos["object_id"])
+    obj_trajs_full = track_infos["trajs"]  # (num_objects, num_timestamp, 10)
+    
+    center_objects, _, track_index_to_predict = get_interested_agents(
+        track_index_to_predict=track_index_to_predict,
+        obj_trajs_full=obj_trajs_full,
+        current_time_index=current_time_index,
+        obj_types=obj_types, scene_id=scene_id
+    )
+    
+    obj_trajs_past = obj_trajs_full[:, :current_time_index + 1]
+    obj_trajs_future = obj_trajs_full[:, current_time_index + 1:]
+
+    (obj_trajs_data, obj_trajs_mask, obj_trajs_pos, obj_trajs_last_pos, obj_trajs_future_state, obj_trajs_future_mask, center_gt_past_trajs, _, center_gt_trajs_labels,
+        center_gt_trajs_mask, _,
+        track_index_to_predict_new, sdc_track_index_new, obj_types, obj_ids) = create_agent_data_for_center_objects(
+        center_objects=center_objects, obj_trajs_past=obj_trajs_past, obj_trajs_future=obj_trajs_future,
+        track_index_to_predict=track_index_to_predict, sdc_track_index=sdc_track_index,
+        timestamps=timestamps, obj_types=obj_types, obj_ids=obj_ids
+    )
+    
+    sdc_mask = track_index_to_predict_new == sdc_track_index_new
+    assert sdc_mask.sum() == 1
+
+    ret_dict = {
+        "scenario_id": np.array([scene_id] * len(track_index_to_predict)),
+
+        "obj_trajs": obj_trajs_data[sdc_mask],
+        "obj_trajs_mask": obj_trajs_mask[sdc_mask],
+        "obj_trajs_pos": obj_trajs_pos[sdc_mask],
+        'obj_trajs_last_pos': obj_trajs_last_pos[sdc_mask],
+
+        "track_index_to_predict": track_index_to_predict_new,  # used to select center-features
+        "center_objects_world": center_objects,
+        "center_objects_past": center_gt_past_trajs, # (x, y, z, rot, vx, vy)
+        "trajectory_label": center_gt_trajs_labels, # ( x, y, z, heading)
+        "center_objects_id": np.array(track_infos["object_id"])[track_index_to_predict],
+        "center_objects_type": np.array(track_infos["object_type"])[track_index_to_predict],
+
+        "obj_trajs_future_state": obj_trajs_future_state[sdc_mask],
+        "obj_trajs_future_mask": obj_trajs_future_mask[sdc_mask],
+        "center_gt_trajs_mask": center_gt_trajs_mask,
+        "center_gt_trajs_src": obj_trajs_full[track_index_to_predict]
+    }
+
+    map_polylines_data, map_polylines_mask, map_polylines_center = create_map_data_for_center_objects(
+                center_objects=center_objects[sdc_mask], map_infos=info["map_infos"],
+                center_offset=(30.0, 0),
+            )   # (num_center_objects, num_topk_polylines, num_points_each_polyline, 9), (num_center_objects, num_topk_polylines, num_points_each_polyline)
+
+    ret_dict["map_polylines"] = map_polylines_data
+    ret_dict["map_polylines_mask"] = (map_polylines_mask > 0)
+    ret_dict["map_polylines_center"] = map_polylines_center
+
+    return ret_dict
+    

@@ -90,7 +90,10 @@ class TrajectoryDecoder(nn.Module):
             if self.config.task == "waymo" or self.config.task == "simagents":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
-                traj_loss = (self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
+                if not self.config.predict_yaw: 
+                    traj_logits = traj_logits[..., :2]
+                    label = label[..., :2].clone()
+                traj_loss = (self.loss_fct(traj_logits, label.to(device)) * trajectory_label_mask).sum() / (
                     trajectory_label_mask.sum() + 1e-7)
             elif self.config.task == "nuplan":
                 aug_current = 1 - info_dict['aug_current']
@@ -186,7 +189,7 @@ class TrajectoryDecoder(nn.Module):
         assert pred_length > 0
         traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
         traj_logits = self.model(traj_hidden_state)
-
+        
         return traj_logits
     
 class ProposalDecoder(nn.Module):

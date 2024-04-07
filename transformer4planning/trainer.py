@@ -337,7 +337,6 @@ def compute_metrics_waymo(prediction: EvalPrediction):
         if m != "OverlapRate" and record_avg:
             result[m] = result_dict[m]
 
-
     loss_items = prediction.predictions['loss_items']
     # check loss items are dictionary
     if isinstance(loss_items, dict):
@@ -346,8 +345,25 @@ def compute_metrics_waymo(prediction: EvalPrediction):
             result[each_key] = np.mean(loss_items[each_key])
 
     return result
+
 def compute_metrics_simagents(prediction: EvalPrediction):
-    raise NotImplementedError
+    from transformer4planning.utils.waymo_utils import tensor_to_str, simagents_evaluation
+    pred_dicts = prediction.predictions['prediction_generation']
+    
+    pred_dict_list = []
+    for idx in range(len(pred_dicts["object_id"])):
+        single_pred_dict = {}
+        for key in pred_dicts.keys():
+            if key == "scenario_id":
+                single_pred_dict[key] = tensor_to_str(torch.from_numpy(pred_dicts[key][idx]).unsqueeze(0))[0]
+            else:
+                single_pred_dict[key] = pred_dicts[key][idx]
+                
+        pred_dict_list.append(single_pred_dict)
+    
+    result_dict = simagents_evaluation(pred_dicts=pred_dict_list)
+
+    return result_dict
 
 class CustomCallback(DefaultFlowCallback):
     """

@@ -254,7 +254,7 @@ class STR(PreTrainedModel):
             else:
                 if self.config.task == "nuplan":
                     dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 1), device=device)).unsqueeze(1)
-                elif self.config.task == 'waymo':
+                elif self.config.task == 'waymo' or self.config.task == 'simagents':
                     dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
                 input_embeds[:, context_length:context_length+1, :] = dummy_proposal_embedding
 
@@ -276,7 +276,7 @@ class STR(PreTrainedModel):
                     proposal_result = topk_indx
                     proposal_scores = proposal_pred_score[:, 0, :]
                     # proposal_pred_embed: (bs, k, n_embed)
-                elif self.config.task == 'waymo':
+                elif self.config.task == 'waymo' or self.config.task == 'simagents':
                     proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
                     topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
                     proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
@@ -459,23 +459,29 @@ class STR(PreTrainedModel):
             num_center_objects, num_modes, num_timestamps, num_feat = traj_pred_logits.shape
 
             from transformer4planning.utils.waymo_utils import rotate_points_along_z, str_to_tensor
-
             pred_trajs_world = rotate_points_along_z(
                 points=traj_pred_logits.view(num_center_objects, num_modes * num_timestamps, num_feat),
                 angle=center_objects_world[:, 6].view(num_center_objects)
             ).view(num_center_objects, num_modes, num_timestamps, num_feat)
-            pred_trajs_world[:, :, :, 0:2] += center_objects_world[:, None, None, 0:2]
-
+            if not self.config.predict_yaw: 
+                pred_trajs_world = pred_trajs_world[..., 0:2] + center_objects_world[:, None, None, 0:2]
+            else: 
+                pred_trajs_world[..., 0:3] = pred_trajs_world[..., 0:3] + center_objects_world[:, None, None, 0:3]
+                pred_trajs_world[..., -1] = pred_trajs_world[..., -1] + center_objects_world[:, None, None, 6]
+            
             pred_dict = {
                 'scenario_id': str_to_tensor(kwargs['scenario_id']).to(device),
-                'pred_trajs': pred_trajs_world[:, :, :, 0:2],
-                'pred_scores': topk_score,
+                'pred_trajs': pred_trajs_world,
                 'object_id': torch.tensor(kwargs['center_objects_id']).to(device),
-                'object_type': torch.tensor(kwargs['center_objects_type']).to(device),
-                'gt_trajs': kwargs['center_gt_trajs_src'],
-                'track_index_to_predict': kwargs['track_index_to_predict'],
             }
-
+            if self.config.task == "waymo":
+                pred_dict.update({
+                    'pred_scores': topk_score,
+                    'object_type': torch.tensor(kwargs['center_objects_type']).to(device),
+                    'gt_trajs': kwargs['center_gt_trajs_src'],
+                    'track_index_to_predict': kwargs['track_index_to_predict'],
+                })
+            
         return pred_dict
 
 

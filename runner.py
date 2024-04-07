@@ -304,10 +304,15 @@ def main():
     # loop split info and update for test set
     logger.info('TrainingSet: '+ str(train_dataset) + '\nValidationSet' + str(val_dataset) + '\nTestingSet' + str(test_dataset))
 
+    # dataset_dict = dict(
+    #     train=train_dataset.shuffle(seed=training_args.seed),
+    #     validation=val_dataset.shuffle(seed=training_args.seed),
+    #     test=test_dataset.shuffle(seed=training_args.seed),
+    # )
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
-        validation=val_dataset.shuffle(seed=training_args.seed),
-        test=test_dataset.shuffle(seed=training_args.seed),
+        validation=val_dataset,
+        test=test_dataset,
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
@@ -362,6 +367,7 @@ def main():
                                  dic_path=data_args.saved_dataset_folder, 
                                  map_api=map_api,
                                  use_centerline=model_args.use_centerline)
+            
     elif model_args.task == "waymo":
         from transformer4planning.preprocess.waymo_vectorize import waymo_collate_func
         if model_args.encoder_type == "vector":
@@ -369,17 +375,24 @@ def main():
                                  dic_path=data_args.saved_dataset_folder)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
+        
         from transformer4planning.trainer import compute_metrics_waymo
         compute_metrics_func.update({"waymo": compute_metrics_waymo})
+        
     elif model_args.task == "simagents":
-        from transformer4planning.preprocess.waymo_vectorize import simagents_collate_func
-        if model_args.encoder_type == "vector":
+        from transformer4planning.preprocess.waymo_vectorize import simagents_collate_func, waymo_collate_func
+        if model_args.encoder_type == "vector" and model_args.decoder_type == "diffusion":
             collate_fn = partial(simagents_collate_func,
+                                 dic_path=data_args.saved_dataset_folder)
+        elif model_args.encoder_type == "vector" and model_args.decoder_type == "mlp":
+            collate_fn = partial(waymo_collate_func,
                                  dic_path=data_args.saved_dataset_folder)
         elif model_args.encoder_type == "raster":
             raise NotImplementedError
+        
         from transformer4planning.trainer import compute_metrics_simagents
         compute_metrics_func.update({"simagents": compute_metrics_simagents})
+        
     elif model_args.task == "train_diffusion_decoder":
         from torch.utils.data._utils.collate import default_collate
         def feat_collate_func(batch, predict_yaw):

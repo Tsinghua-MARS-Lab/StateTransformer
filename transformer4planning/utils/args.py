@@ -128,12 +128,6 @@ class ModelArguments:
     mc_num: Optional[int] = field(
         default=200, metadata={"help": "The number of sampled KP trajs the diffusionKPdecoder is going to generate. After generating this many KP trajs, they go through the EM algorithm and give a group of final KP trajs of number k. This arg only works when we use diffusionKPdecoder and set k > 1."}
     )
-    key_points_diffusion_decoder_feat_dim: Optional[int] = field(
-        default=256, metadata={"help": "The feature dimension for key_poins_diffusion_decoder. 256 for a diffusion KP decoder of #parameter~10M and 1024 for #parameter~100M."}
-    )
-    diffusion_condition_sequence_lenth: Optional[int] = field(
-        default=80, metadata={"help": "Lenth of condition input into diffusion KP decoder. It should be equal to: 1."}
-    )
     key_points_diffusion_decoder_load_from: Optional[str] = field(
         default=None, metadata={"help": "From which file to load the pretrained key_points_diffusion_decoder."}
     )
@@ -230,6 +224,10 @@ class ModelArguments:
     # WIP args
     augment_index: Optional[int] = field(
         default=0, metadata={"help": "The index of augmenting current pose in the preprocess"}
+    )
+    
+    attn_implementation: Optional[str] = field(
+        default=None, metadata={"help": "The implementation of attention layers."}
     )
 
 

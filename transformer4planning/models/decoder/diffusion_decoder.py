@@ -27,15 +27,14 @@ class SinusoidalPosEmb(nn.Module):
 
 class BaseDiffusionModel(nn.Module):
     def __init__(self,
-                 hidden_size,
-                 in_features,
-                 out_features=4,
-                 layer_num=7,
-                 feat_dim=1024):
+                 config,
+                 out_features=4,):
         # TODO: use argments to manage model layer dimension.
         super().__init__()
         self.out_features = out_features
+        feat_dim = config.n_embd
         self.t_dim = feat_dim
+        
         if feat_dim == 512:
             connect_dim = 800
         elif feat_dim == 1024:
@@ -44,7 +43,7 @@ class BaseDiffusionModel(nn.Module):
             connect_dim = int(feat_dim * 1.5)
             
         self.state_encoder = nn.Sequential(
-            DecoderResCat(hidden_size, in_features, connect_dim),
+            DecoderResCat(config.n_inner, config.n_embd, connect_dim),
             DecoderResCat(2 * connect_dim, connect_dim, feat_dim)
         ) 
 
@@ -63,13 +62,19 @@ class BaseDiffusionModel(nn.Module):
             DecoderResCat(1024, 512, 768),
             DecoderResCat(2048, 768, feat_dim),
         )
-        self.backbone = nn.ModuleList()
-        for i in range(layer_num):
-            self.backbone.append(nn.TransformerEncoderLayer(d_model=feat_dim, 
-                                                            nhead=8,
-                                                            dim_feedforward=4 * feat_dim,
-                                                            batch_first=True))
-        self.backbone = nn.Sequential(*self.backbone)
+        # self.backbone = nn.ModuleList()
+        # for i in range(layer_num):
+        #     self.backbone.append(nn.TransformerEncoderLayer(d_model=feat_dim, 
+        #                                                     nhead=8,
+        #                                                     dim_feedforward=4 * feat_dim,
+        #                                                     batch_first=True))
+        # self.backbone = nn.Sequential(*self.backbone)
+        # Use transformer decoder backbone for cross attention between scenarios and trajectories.
+        transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim, batch_first=True)
+        self.self_attn = nn.TransformerEncoder(transformer_encoder_layer, num_layers=config.n_layer)
+        transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim)
+        self.cross_attn = nn.TransformerDecoder(transformer_decoder_layer, num_layers=config.n_layer)
+        
         self.x_decoder = nn.Sequential(
             DecoderResCat(2 * feat_dim, feat_dim, 512),
             DecoderResCat(1024, 512, 256),
@@ -87,35 +92,21 @@ class BaseDiffusionModel(nn.Module):
         """
         raise NotImplementedError
 
-class KeypointDiffusionModel(BaseDiffusionModel):
-    """
-    Keypoints are low-dimension representation.
-    """
+class TrajDiffusionModel(BaseDiffusionModel):
     def __init__(self,
-                hidden_size,
-                in_features,
+                config,
                 out_features=4,
-                layer_num=7,
-                feat_dim=1024,
-                input_feature_seq_lenth=40,
-                key_point_num=5,
-                use_key_points='no',):
-                # specified_key_points=True, 
-                # forward_specified_key_points=False):
-        super().__init__(hidden_size, in_features, out_features, layer_num, feat_dim)
-        if 'specified' in use_key_points:
-            if 'forward' in use_key_points:
-                key_points_position_embedding = torch.flip(exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0), [-2])
+                predict_range=80):
+        super().__init__(config, out_features)
+        if 'specified' in config.use_key_points:
+            if 'forward' in config.use_key_points:
+                position_embedding = torch.flip(exp_positional_embedding(predict_range, config.n_embd).unsqueeze(0), [-2])
             else:
-                key_points_position_embedding = exp_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
+                position_embedding = exp_positional_embedding(predict_range, config.n_embd).unsqueeze(0)
         else:
-            key_points_position_embedding = uniform_positional_embedding(key_point_num, feat_dim).unsqueeze(0)
+            position_embedding = uniform_positional_embedding(predict_range, config.n_embd).unsqueeze(0)
             
         # trainable positional embedding, initialized by cos/sin positional embedding.
-        position_embedding = torch.cat([
-            torch.zeros([1,input_feature_seq_lenth, feat_dim]), 
-            key_points_position_embedding
-        ], dim=-2)
         self.position_embedding = torch.nn.Parameter(position_embedding, requires_grad=True)
     
     def forward(self, x, t, state):
@@ -124,12 +115,17 @@ class KeypointDiffusionModel(BaseDiffusionModel):
         x_embedding = self.x_encoder(x) # B * seq_len * feat_dim
         t_embedding = self.time_encoder(t) # B * feat_dim
         t_embedding = t_embedding.unsqueeze(1) # -> B * 1 * feat_dim
+        
         # concat input embedding
-        seq = torch.cat([state_embedding, x_embedding], dim=-2) # B * (2*seq_len) * feat_dim
-        seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
+        # seq = torch.cat([state_embedding, x_embedding], dim=-2) # B * (2*seq_len) * feat_dim
+        # seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
 
-        feature = self.backbone(seq)
-        feature = feature[..., -x.shape[-2]:, :]
+        # feature = self.backbone(seq)
+        # feature = feature[..., -x.shape[-2]:, :]
+        x_embedding = x_embedding + t_embedding + self.position_embedding
+        feature = self.self_attn(x_embedding)
+        feature = self.cross_attn(feature, state_embedding)
+        
         output = self.x_decoder(feature)
         return output
 
@@ -143,7 +139,7 @@ class DiffusionWrapper(nn.Module):
                  clip_denoised=True,
                  predict_epsilon=True,
                  max_action=100,
-                 num_key_points=None, 
+                 predict_range=None, 
                  model_args=None
                  ):
         super(DiffusionWrapper, self).__init__()
@@ -151,7 +147,7 @@ class DiffusionWrapper(nn.Module):
         self.model_args = model_args
         self.n_timesteps = int(n_timesteps)
         self.action_dim = model.out_features
-        self.num_key_points = num_key_points
+        self.predict_range = predict_range
         assert clip_denoised, ''
         assert predict_epsilon, ''
         assert beta_schedule == 'linear', ''
@@ -191,11 +187,12 @@ class DiffusionWrapper(nn.Module):
 
         self.loss_fn = nn.MSELoss(reduction='none')
     
-    def forward(self, hidden_state, label=None, **kwargs):
+    def forward(self, hidden_state, batch_size=0, label=None, **kwargs):
         if self.training:
             return self.train_forward(hidden_state, label)
         else:
-            return self.sample_forward(hidden_state, **kwargs)
+            assert batch_size > 0
+            return self.sample_forward(hidden_state, batch_size, **kwargs)
 
     # ------------------------- Train -------------------------
     def train_forward(self, hidden_state, trajectory_label):
@@ -204,7 +201,7 @@ class DiffusionWrapper(nn.Module):
 
     def train_loss(self, x, state):
         batch_size=len(x)
-        t = torch.randint(0,self.n_timesteps,(batch_size,), device = x.device).long()
+        t = torch.randint(0, self.n_timesteps, (batch_size,), device = x.device).long()
         return self.p_losses(x, state, t)
 
     def p_losses(self, x_start, state, t):
@@ -229,16 +226,15 @@ class DiffusionWrapper(nn.Module):
         return sample
 
     # ------------------------- Sample -------------------------
-    def sample_forward(self, state, **kwargs):
+    def sample_forward(self, state, batch_size, **kwargs):
         assert not self.training, 'sample_forward should not be called directly during training.'
-        batch_size = state.shape[0]
-        seq_len = self.num_key_points if self.num_key_points is not None else state.shape[-2]
-        shape = (batch_size, seq_len,self.action_dim)
+        seq_len = self.predict_range if self.predict_range is not None else state.shape[-2]
+        shape = (batch_size, seq_len, self.action_dim)
         action, cls = self.p_sample_loop(state, shape, **kwargs)
         action = denormalize(action)
         return action, cls
 
-    def p_sample_loop(self,state, shape, verbose=False, return_diffusion=False, cal_elbo=False, mc_num=1, determin=True):
+    def p_sample_loop(self, state, shape, verbose=False, return_diffusion=False, cal_elbo=False, mc_num=1, determin=True):
         if mc_num == 1:
             device = self.betas.device
             batch_size = shape[0]
@@ -259,27 +255,56 @@ class DiffusionWrapper(nn.Module):
 
             return x, total_cls
         else:
-            device = self.betas.device
-            batch_size = shape[0]
-            shape = tuple([batch_size * mc_num] + list(shape[1:]))
-            assert not determin, 'It does not make sense to use deterministic sampling with mc_num > 1'
-            x = torch.randn(shape, device=device)
+            # device = self.betas.device
+            # batch_size = shape[0]
+            # shape = tuple([batch_size * mc_num] + list(shape[1:]))
+            # assert not determin, 'It does not make sense to use deterministic sampling with mc_num > 1'
+            # x = torch.randn(shape, device=device)
 
-            total_cls = -(torch.mean(x.detach()**2, dim=(1, 2)))         # Consider the prior score
+            # total_cls = -(torch.mean(x.detach()**2, dim=(1, 2)))         # Consider the prior score
 
-            # repeat state in dim 0 for mc_num times.
-            # we don't know the shape of state, so we use torch.repeat_interleave
-            state = torch.repeat_interleave(state, mc_num, dim=0)
-            # then we reshape state into shape()
-            for i in reversed(range(0,self.n_timesteps)):
-                timesteps = torch.full((batch_size * mc_num,), i, device=device, dtype=torch.long)
-                x, cls = self.p_sample(x, timesteps, state, determin=determin)
-                total_cls = total_cls + cls
+            # # repeat state in dim 0 for mc_num times.
+            # # we don't know the shape of state, so we use torch.repeat_interleave
+            # state = torch.repeat_interleave(state, mc_num, dim=0)
+            # # then we reshape state into shape()
+            # for i in reversed(range(0,self.n_timesteps)):
+            #     timesteps = torch.full((batch_size * mc_num,), i, device=device, dtype=torch.long)
+            #     x, cls = self.p_sample(x, timesteps, state, determin=determin)
+            #     total_cls = total_cls + cls
                 
-            # reshape x into shape (batch_size, mc_num, ...)
-            x = x.reshape(batch_size, mc_num, *x.shape[1:])
-            total_cls = total_cls.reshape(batch_size, mc_num)
-            return x, total_cls
+            # # reshape x into shape (batch_size, mc_num, ...)
+            # x = x.reshape(batch_size, mc_num, *x.shape[1:])
+            # total_cls = total_cls.reshape(batch_size, mc_num)
+            # return x, total_cls
+            
+            # Try loop implementation to avoid OOM
+            x_mc, cls_mc = [], []
+            for _ in range(mc_num):
+                device = self.betas.device
+                batch_size = shape[0]
+                shape = tuple([batch_size] + list(shape[1:]))
+                assert not determin, 'It does not make sense to use deterministic sampling with mc_num > 1'
+                x = torch.randn(shape, device=device)
+
+                total_cls = -(torch.mean(x.detach()**2, dim=(1, 2)))         # Consider the prior score
+
+                # repeat state in dim 0 for mc_num times.
+                # we don't know the shape of state, so we use torch.repeat_interleave
+                state = torch.repeat_interleave(state, mc_num, dim=0)
+                # then we reshape state into shape()
+                for i in reversed(range(0,self.n_timesteps)):
+                    timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
+                    x, cls = self.p_sample(x, timesteps, state, determin=determin)
+                    total_cls = total_cls + cls
+                
+                x_mc.append(x)
+                cls_mc.append(total_cls)
+            
+            x_result = torch.stack(x_mc, dim=1)
+            cls_result = torch.stack(cls_mc, dim=1)
+            
+            return x_result, cls_result
+                
 
     def p_sample(self, x, t, s, determin=True):
         b, *_, device = *x.shape, x.device
@@ -328,117 +353,18 @@ class DiffusionWrapper(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-class T4PTrainDiffWrapper(DiffusionWrapper):
-    def __init__(self, 
-                 model,
-                 beta_schedule='linear', 
-                 linear_start=0.01,
-                 linear_end=0.9,
-                 n_timesteps=10,
-                 clip_denoised=True,
-                 predict_epsilon=True,
-                 max_action=100,
-                 num_key_points=None,
-                 model_args=None 
-                 ):
-        super(T4PTrainDiffWrapper, self).__init__(model=model,
-                                                beta_schedule=beta_schedule, 
-                                                linear_start=linear_start,
-                                                linear_end=linear_end,
-                                                n_timesteps=n_timesteps,
-                                                clip_denoised=clip_denoised,
-                                                predict_epsilon=predict_epsilon,
-                                                max_action=max_action,
-                                                num_key_points=num_key_points,
-                                                model_args=model_args)
-    
-    def forward(self, hidden_state, label=None, **kwargs):
-        value = super().forward(hidden_state, label=label, **kwargs)
-        if self.training:
-            return dict(loss=value)
-        else:
-            return dict(logits=value[0], scores=value[1])
-
-class KeyPointDiffusionDecoder(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.out_features = 4 if config.predict_yaw else 2
-        self.k = config.k
-        self.use_key_points = config.use_key_points
-        diffusion_model = KeypointDiffusionModel(config.n_inner,
-                                                 config.n_embd,
-                                                 out_features=self.out_features * self.config.k,
-                                                 key_point_num=1,
-                                                 feat_dim=self.config.key_points_diffusion_decoder_feat_dim,
-                                                 input_feature_seq_lenth=self.config.diffusion_condition_sequence_lenth,
-                                                 use_key_points=config.use_key_points,)
-
-        self.model = DiffusionWrapper(diffusion_model, num_key_points=1,)# self.model_args.key_points_num)
-        if 'mse' in self.config.loss_fn:
-            self.loss_fct = nn.MSELoss(reduction="mean")
-        elif 'l1' in self.config.loss_fn:
-            self.loss_fct = nn.SmoothL1Loss()
-        else:
-            raise NotImplementedError
-
-
-    
-    def generate_keypoints(self, 
-                            hidden_output,
-                            info_dict:Dict=None):
-        '''
-            Input:
-                hidden_output: batch_size *1 * n_embd
-                info_dict: Dict
-            Output:
-                tuple of key_points_logits and scores
-                    key_points_logits: batch_size * self.k * num_key_points * 2/4
-                    scores: batch_size * self.k. assert torch.sum(scores, dim=1) == 1, ''
-                    
-        '''
-        assert self.use_key_points != 'no'
-        assert not self.training
-        # hidden state to predict future kp is different from mlp decoder
-        # context_length = info_dict.get("context_length", None)
-        # if context_length is None: # pdm encoder
-        #    input_length = info_dict.get("input_length", None)
-        # kp_end_index = scenario_type_len + context_length * 2 if context_length is not None \
-        #             else scenario_type_len + input_length
-        # future_key_points_hidden_state = hidden_output[:, :kp_end_index, :]
-        future_key_points_hidden_state = hidden_output
-        if self.k == 1:
-            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = True)
-        else:
-            key_points_logits, scores = self.model(future_key_points_hidden_state, determin = False, mc_num = self.config.mc_num)
-            reg_sigma_cls_dict = modify_func(
-                output = dict(
-                    reg = [traj_p for traj_p in key_points_logits.detach().unsqueeze(1)],
-                    cls = [cls for cls in scores.detach().unsqueeze(1)],
-                ),
-                num_mods_out = self.k,
-                EM_Iter = 25,
-            )
-            key_points_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
-            scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
-        return key_points_logits, scores 
-
 class DiffusionDecoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.out_features = 4 if config.predict_yaw else 2
         self.k = config.k
-        self.use_key_points = config.use_key_points
-        diffusion_model = KeypointDiffusionModel(config.n_inner,
-                                                 config.n_embd,
-                                                 out_features=self.out_features,
-                                                 key_point_num=80,
-                                                 feat_dim=self.config.key_points_diffusion_decoder_feat_dim,
-                                                 input_feature_seq_lenth=self.config.diffusion_condition_sequence_lenth,
-                                                 use_key_points=config.use_key_points,)
+        self.predict_range = 80
+        diffusion_model = TrajDiffusionModel(config,
+                                            out_features=self.out_features,
+                                            predict_range=self.predict_range)
 
-        self.model = DiffusionWrapper(diffusion_model, num_key_points=80,)
+        self.model = DiffusionWrapper(diffusion_model, predict_range=self.predict_range)
 
     def compute_traj_loss(self, 
                           hidden_output,
@@ -457,14 +383,16 @@ class DiffusionDecoder(nn.Module):
         if device is None:
             device = traj_hidden_state.device
         
-        traj_logits = torch.zeros_like(label[..., :2])
+        if not self.config.predict_yaw: label = label[..., :2].clone
+        
+        traj_logits = torch.zeros_like(label)
         traj_loss = None
         # compute trajectory loss conditioned on gt keypoints
         if not self.config.pred_key_points_only:
             if self.config.task == "waymo" or self.config.task == "simagents":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
-                traj_loss = self.model.train_forward(traj_hidden_state, label[..., :2])
+                traj_loss = self.model.train_forward(traj_hidden_state, label)
                 traj_loss = (traj_loss * trajectory_label_mask).sum() / (trajectory_label_mask.sum() + 1e-7)
                 
             elif self.config.task == "nuplan":
@@ -476,13 +404,15 @@ class DiffusionDecoder(nn.Module):
     
     def generate_trajs(self, hidden_output, info_dict):
         pred_length = info_dict.get("pred_length", 0)
-        assert pred_length > 0
+        pred_traj_num = info_dict.get("trajectory_label", None).shape[0]
+        assert pred_length > 0 and pred_traj_num > 0
         traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
-
+        
         if self.k == 1:
-            traj_logits, scores = self.model(traj_hidden_state, determin = True)
+            traj_logits, scores = self.model(traj_hidden_state, batch_size=pred_traj_num, determin=True)
         else:
-            traj_logits, scores = self.model(traj_hidden_state, determin = False, mc_num = self.config.mc_num)
+            traj_logits, scores = self.model(traj_hidden_state, batch_size=pred_traj_num, determin=False, mc_num=self.config.mc_num)
+
             reg_sigma_cls_dict = modify_func(
                 output = dict(
                     reg = [traj_p for traj_p in traj_logits.detach().unsqueeze(1)],
@@ -492,7 +422,6 @@ class DiffusionDecoder(nn.Module):
                 EM_Iter = 25,
             )
             traj_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
-            scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
-            
-        return traj_logits, scores 
+
+        return traj_logits, scores
 

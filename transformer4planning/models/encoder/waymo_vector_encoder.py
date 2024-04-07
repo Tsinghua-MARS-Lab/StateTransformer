@@ -222,6 +222,10 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             nn.ReLU(),
             nn.Linear(config.d_model, config.d_model),
         )
+        
+        if self.config.task == "simagents" and self.config.decoder_type == "diffusion": 
+            transformer_encoder_layer = nn.TransformerEncoderLayer(encoder_model_dim, nhead=config.n_head, batch_first=False)
+            self.action_aggregator = nn.TransformerEncoder(transformer_encoder_layer, self.config.n_layer)
 
         self.load_intention_proposals(config.proposal_path, 
                                     ['TYPE_VEHICLE', 'TYPE_PEDESTRIAN', 'TYPE_CYCLIST'])
@@ -362,6 +366,19 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.config.x_random_walk, self.config.y_random_walk)
 
         action_embeds = self.action_m_embed(context_actions)
+        if self.config.task == "simagents" and self.config.decoder_type == "diffusion":
+            action_scene_batch = []
+            scene_length = input_dict["scene_length"]
+            scene_start_index = 0
+            for b in range(batch_size):
+                scene_end_index = scene_start_index + scene_length[b]
+                action_scene_embed = action_embeds[scene_start_index:scene_end_index]
+                action_scene_embed = self.action_aggregator(action_scene_embed).max(dim=0)[0]
+                action_scene_batch.append(action_scene_embed)
+                scene_start_index = scene_end_index
+            
+            action_embeds = torch.stack(action_scene_batch, dim=0)
+            
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
 
         # create OAOAOA..

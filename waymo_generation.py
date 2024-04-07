@@ -250,7 +250,7 @@ def main(args):
                             object_type_to_predict.append(track_infos['object_type'][cur_idx])
                             track_index_to_predict.append(cur_idx)
                             difficulty_to_predict.append(cur_pred.difficulty)
-                elif args.task == "SA":
+                elif "SA" in args.task:
                     track_ids_simagents = tf.convert_to_tensor(submission_specs.get_sim_agent_ids(scenario))
                     track_index_to_predict = index_gather(tf.convert_to_tensor(track_infos['object_id']), track_ids_simagents)
                 else:
@@ -301,6 +301,12 @@ def main(args):
                                 "scenario_id": scenario.scenario_id,
                                 "track_index_to_predict": track_index_to_predict,
                             }
+                elif args.task == "SA_indiv":
+                    for index in track_index_to_predict:
+                        yield {
+                                "scenario_id": scenario.scenario_id,
+                                "track_index_to_predict": index,
+                            }
                 else:
                     raise NotImplementedError
                     
@@ -317,7 +323,7 @@ def main(args):
 
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}\n Task: {args.task}\n Agent type:', args.agent_type)
-    if args.task == "SA": print("Your agent_type argument does not work for Sim Agents task.")
+    if "SA" in args.task: print("Your agent_type argument does not work for Sim Agents task.")
     
     waymo_dataset = Dataset.from_generator(yield_data,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader, 'save_dict':

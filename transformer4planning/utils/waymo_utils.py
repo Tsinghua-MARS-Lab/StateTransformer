@@ -429,3 +429,84 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
     result_dict.update(object_type_cnt_dict)
 
     return result_dict, result_format_str
+
+
+def simagents_evaluation(pred_dicts):
+    from waymo_open_dataset.wdl_limited.sim_agents_metrics import metrics
+    from waymo_open_dataset.protos import scenario_pb2
+    from waymo_open_dataset.protos import sim_agents_submission_pb2
+
+    from waymo_open_dataset.utils.sim_agents import submission_specs
+            
+    tf.config.set_visible_devices([], "GPU")
+    config = metrics.load_metrics_config()
+
+    VALIDATION_FILES = "/public/MARS/datasets/waymo_prediction_v1.2.0/scenario/validation/validation.tfrecord*"
+                    
+    def joint_scene_from_states(
+        states, object_ids
+        ) -> sim_agents_submission_pb2.JointScene:
+        # States shape: (num_objects, num_steps, 4).
+        # Objects IDs shape: (num_objects,).
+        states = states
+        simulated_trajectories = []
+        for i_object in range(len(object_ids)):
+            simulated_trajectories.append(sim_agents_submission_pb2.SimulatedTrajectory(
+                center_x=states[i_object, :, 0], center_y=states[i_object, :, 1],
+                center_z=states[i_object, :, 2], heading=states[i_object, :, 3],
+                object_id=object_ids[i_object]
+            ))
+        return sim_agents_submission_pb2.JointScene(
+            simulated_trajectories=simulated_trajectories)
+        
+    def scenario_rollouts_from_states(
+        scenario: scenario_pb2.Scenario,
+        states, object_ids
+        ) -> sim_agents_submission_pb2.ScenarioRollouts:
+        # States shape: (num_rollouts, num_objects, num_steps, 4).
+        # Objects IDs shape: (num_objects,).
+        joint_scenes = []
+        for i_rollout in range(states.shape[0]):
+            joint_scenes.append(joint_scene_from_states(states[i_rollout], object_ids))
+        return sim_agents_submission_pb2.ScenarioRollouts(
+            # Note: remember to include the Scenario ID in the proto message.
+            joint_scenes=joint_scenes, scenario_id=scenario.scenario_id)
+
+    # Define the dataset from the TFRecords.
+    filenames = tf.io.matching_files(VALIDATION_FILES)
+    dataset = tf.data.TFRecordDataset(filenames)
+    dataset_iterator = dataset.as_numpy_iterator()
+    metrics_list = []
+    for bytes_example in dataset_iterator:
+        scenario = scenario_pb2.Scenario.FromString(bytes_example)
+        scenario_id = scenario.scenario_id
+        
+        pred_per_scene, obj_id_per_scene = [], []
+        for pred in pred_dicts:
+            if pred["scenario_id"] == scenario_id:
+                obj_id = pred["object_id"]
+                if obj_id not in obj_id_per_scene:
+                    pred_per_scene.append(pred["pred_trajs"])
+                    obj_id_per_scene.append(obj_id)
+        
+        if len(obj_id_per_scene) != len(submission_specs.get_sim_agent_ids(scenario)): continue
+        simulated_states = np.stack(pred_per_scene, axis=1)
+        pred_object_id = np.stack(obj_id_per_scene, axis=0)
+
+        scenario_rollouts = scenario_rollouts_from_states(
+            scenario, simulated_states, pred_object_id)
+
+        scenario_metrics = metrics.compute_scenario_metrics_for_bundle(
+            config, scenario, scenario_rollouts)
+        
+        metrics_list.append(scenario_metrics)
+    
+    assert len(metrics_list) > 0, "No valid scenarios!!!"
+    
+    result_dict = {}
+    for key in metrics_list[0].keys():
+        if key == "scenario_id": continue
+        
+        result_dict[key] = np.mean([m[key] for m in metrics_list])
+
+    return result_dict
