@@ -51,7 +51,7 @@ run `pip install waymo-open-dataset-tf-2-11-0==1.6.0` to install WOMD-Devkit fol
 
 ## Dataset
 
-We process the dataset into the Hugging Face Dataset format. Click [here](http://180.167.251.46:880/NuPlanSTR/nuplan-v1.1_STR.zip) to download the NuPlan dataset.
+We process the dataset into the Hugging Face Dataset format. Click [here](http://180.167.251.46:880/NuPlanSTR/nuplan-v1.1_STR.zip) to download the NuPlan dataset. And [here](http://180.167.251.46:880/WOMDSTR/t4p_waymo_full.tar.gz) to download the Waymo Motion Open Dataset.
 Unzip the file and pass the path to the '--saved_dataset_folder' argument to use it.
 This dataset contains the training, validation, and the test set.
 
