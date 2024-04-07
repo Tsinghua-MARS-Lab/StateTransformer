@@ -211,20 +211,15 @@ class ModelArguments:
     mission_goal_dropout: Optional[float] = field(
         default=1.0, metadata={"help": "Rate to dropout the mission goal, 1 is no dropout"}
     )
-
-    ######## temporal model args, check your model config before using it! ########
     attention_dropout: Optional[float] = field(
         default=0.0, metadata={"help": "The dropout ratio for attention layers."}
     )
     num_local_experts: Optional[int] = field(
         default=8, metadata={"help": "The number of local experts."}
     )
-
     debug_raster_path: Optional[str] = field(
         default=None, metadata={"help": "The path of raster image for debugging."}
     )
-
-    # WIP args
     augment_index: Optional[int] = field(
         default=0, metadata={"help": "The index of augmenting current pose in the preprocess"}
     )
@@ -234,6 +229,10 @@ class ModelArguments:
     )
     attn_implementation: Optional[str] = field(
         default=None, metadata={"help": "The implementation of attention layers."}
+    )
+    ######## temporal model args, check your model config before using it! ########
+    sync_norm: Optional[bool] = field(
+        default=False, metadata={"help": "use SyncBatchNorm over all GPUs."}
     )
 
 

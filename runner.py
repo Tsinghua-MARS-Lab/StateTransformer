@@ -317,6 +317,10 @@ def main():
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
+    
+    # use sync normal
+    if model_args.sync_norm:
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     # clf_metrics = dict(
     #     accuracy=evaluate.load("accuracy"),
