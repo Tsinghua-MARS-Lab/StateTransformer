@@ -3,11 +3,7 @@ import torch
 import einops
 import math
 import time
-INIT_THRESHOLD = 0.5
-
-
-    
-    
+INIT_THRESHOLD = 0.5  
 
 def farthest_point_sample_PointCloud(xy, npoint):
     """
@@ -19,13 +15,14 @@ def farthest_point_sample_PointCloud(xy, npoint):
     """
     device = xy.device
     B, N, C = xy.shape
+    
     centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
     distance = torch.ones(B, N).to(device) * 1e10
     farthest = torch.zeros((B,), dtype=torch.long).to(device) # modified so that the zeroth point with max confidence is always sampled.
     batch_indices = torch.arange(B, dtype=torch.long).to(device)
     for i in range(npoint):
         centroids[:, i] = farthest
-        centroid = xy[batch_indices, farthest, :].view(B, 1, 2)
+        centroid = xy[batch_indices, farthest, :].view(B, 1, C)
         dist = torch.sum((xy - centroid) ** 2, -1)
         mask = dist < distance
         distance[mask] = dist[mask]
@@ -161,8 +158,8 @@ def _compute_EM_algorithm(targs):
     current_q, indices = torch.sort(current_q, descending=True, dim=1)  # shape: (agent, out_mods)
 
     # Use indices to rearrange current_mu and current_sigma
-    current_mu = torch.gather(current_mu, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], 2))  # shape: (agent, out_mods, length, 2)
-    current_sigma = torch.gather(current_sigma, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], 2))  # shape: (agent, out_mods, length, 2)
+    current_mu = torch.gather(current_mu, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], current_mu.shape[-1]))  # shape: (agent, out_mods, length, 2)
+    current_sigma = torch.gather(current_sigma, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], current_mu.shape[-1]))  # shape: (agent, out_mods, length, 2)
     return (current_q, current_mu, current_sigma)
 
 def run_EM_algorithm(ireg_lst, icls_lst, oreg_lst, ocls_lst, EM_Iter, org_sigma, init_sigma):

@@ -183,6 +183,11 @@ class ModelArguments:
     dense_pred: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use dense prediction in MTR model"}
     )
+    future_select: Optional[str] = field(
+        default="no", metadata={"help": "How to select future predicted points.\
+                                'no' for whole 80 frames;\
+                                'next_n' for next n frames;"}
+    )
     ######## end of WOMD args ########
 
     # WIP args

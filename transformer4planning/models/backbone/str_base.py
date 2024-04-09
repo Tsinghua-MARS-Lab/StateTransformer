@@ -73,7 +73,7 @@ class STR(PreTrainedModel):
                 self.encoder = PDMEncoder(pdm_kwargs, self.config)
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
-        elif self.config.task == "waymo" or self.config.task == "simagents":
+        elif self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
             from transformer4planning.models.encoder.waymo_vector_encoder import WaymoVectorizeEncoder
             action_kwargs = dict(
                 d_embed=self.config.n_embd
@@ -89,7 +89,7 @@ class STR(PreTrainedModel):
             if self.config.task == "nuplan":
                 from transformer4planning.models.decoder.base import ProposalDecoderCLS
                 self.proposal_decoder = ProposalDecoderCLS(self.config, proposal_num=self.use_proposal)
-            elif self.config.task == "waymo" or self.config.task == "simagents":
+            elif self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
                 from transformer4planning.models.decoder.base import ProposalDecoder
                 self.proposal_decoder = ProposalDecoder(self.config)
 
@@ -157,7 +157,7 @@ class STR(PreTrainedModel):
                 # print('test inspect model.py forward: ', self.training, info_dict['halfs_intention'], topk_score, topk_indx,
                 #       proposal_loss, pred_proposal_score)
 
-            elif self.config.task == "waymo" or self.config.task == "simagents":
+            elif self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
                 proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
                 loss += proposal_loss
                 loss += proposal_loss_logits
@@ -165,7 +165,7 @@ class STR(PreTrainedModel):
                 pred_dict["proposal"] = proposal_loss_logits
 
         if self.config.dense_pred:
-            assert self.config.task == "waymo" or self.config.task == "simagents"
+            assert self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents"
             loss += info_dict["dense_pred_loss"]
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
 
@@ -224,7 +224,7 @@ class STR(PreTrainedModel):
         batch_size, _, _ = input_embeds.shape
         device = input_embeds.device
         context_length = info_dict["context_length"]
-
+        
         if self.use_proposal:
             if self.config.autoregressive_proposals:
                 # TODO: Training for debugging results
@@ -454,7 +454,7 @@ class STR(PreTrainedModel):
             elif self.config.task == 'nuplan' and 'intentions' in info_dict:
                 pred_dict.update({'intentions': info_dict['intentions']})
 
-        if self.config.task == "waymo" or self.config.task == "simagents":
+        if self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
             center_objects_world = kwargs['center_objects_world'].type_as(traj_pred_logits)
             num_center_objects, num_modes, num_timestamps, num_feat = traj_pred_logits.shape
 
@@ -474,7 +474,8 @@ class STR(PreTrainedModel):
                 'pred_trajs': pred_trajs_world,
                 'object_id': torch.tensor(kwargs['center_objects_id']).to(device),
             }
-            if self.config.task == "waymo":
+            
+            if self.config.task == "waymo" or self.config.task == "interaction":
                 pred_dict.update({
                     'pred_scores': topk_score,
                     'object_type': torch.tensor(kwargs['center_objects_type']).to(device),

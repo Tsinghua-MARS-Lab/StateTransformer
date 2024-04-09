@@ -223,7 +223,7 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             nn.Linear(config.d_model, config.d_model),
         )
         
-        if self.config.task == "simagents" and self.config.decoder_type == "diffusion": 
+        if (self.config.task == "simagents" or self.config.task == "interaction") and self.config.decoder_type == "diffusion": 
             transformer_encoder_layer = nn.TransformerEncoderLayer(encoder_model_dim, nhead=config.n_head, batch_first=False)
             self.action_aggregator = nn.TransformerEncoder(transformer_encoder_layer, self.config.n_layer)
 
@@ -356,17 +356,13 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
         state_embeds = state_embeds.max(dim=1)[0]
         
-        # traj
-        trajectory_label = input_dict['trajectory_label']
-        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
-        
         # action context
         context_actions = input_dict['center_objects_past']
         # add noise to context actions
         context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.config.x_random_walk, self.config.y_random_walk)
 
         action_embeds = self.action_m_embed(context_actions)
-        if self.config.task == "simagents" and self.config.decoder_type == "diffusion":
+        if (self.config.task == "simagents" or self.config.task == "interaction") and self.config.decoder_type == "diffusion":
             action_scene_batch = []
             scene_length = input_dict["scene_length"]
             scene_start_index = 0
@@ -391,6 +387,16 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
         
         # future trajectory
+        trajectory_label = input_dict['trajectory_label']
+        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
+        
+        if self.config.future_select == "next_1":
+            trajectory_label = trajectory_label[:, :1, ...]
+            trajectory_label_mask = trajectory_label_mask[:, :1, ...]
+        if self.config.future_select == "next_10":
+            trajectory_label = trajectory_label[:, :10, ...]
+            trajectory_label_mask = trajectory_label_mask[:, :10, ...]
+            
         pred_length = trajectory_label.shape[1]
         info_dict = {
             "trajectory_label": trajectory_label,

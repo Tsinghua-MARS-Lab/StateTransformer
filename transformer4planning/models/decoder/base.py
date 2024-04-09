@@ -42,7 +42,7 @@ class TrajectoryDecoder(nn.Module):
                                    config.n_embd, 
                                    out_features=out_features)
         
-        if self.config.task == "waymo" or self.config.task == "simagents": loss_reduction = "none"
+        if self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents": loss_reduction = "none"
         else: loss_reduction = "mean"
 
         if 'mse' in self.config.loss_fn:
@@ -87,7 +87,7 @@ class TrajectoryDecoder(nn.Module):
         # compute trajectory loss conditioned on gt keypoints
         if not self.config.pred_key_points_only:
             traj_logits = self.model(traj_hidden_state)
-            if self.config.task == "waymo" or self.config.task == "simagents":
+            if self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
                 if not self.config.predict_yaw: 
@@ -300,7 +300,7 @@ class KeyPointMLPDeocder(nn.Module):
                                    config.n_embd,
                                    out_features=out_features)
         
-        if self.config.task == "waymo" or self.config.task == "simagents": loss_reduction = "none"
+        if self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents": loss_reduction = "none"
         else: loss_reduction = "mean"
 
         if 'mse' in self.config.loss_fn:
@@ -355,7 +355,7 @@ class KeyPointMLPDeocder(nn.Module):
         if self.config.task == "nuplan":
             kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
                         self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
-        elif self.config.task == "waymo" or self.config.task == "simagents":
+        elif self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
             kp_mask = info_dict["key_points_mask"]
             assert kp_mask is not None, "key_points_mask is None"
             kp_loss = (self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device)) * kp_mask).sum() / (

@@ -536,7 +536,10 @@ def simagents_preprocess(sample, data_path):
     )
     
     sdc_mask = track_index_to_predict_new == sdc_track_index_new
-    assert sdc_mask.sum() == 1
+    if sdc_mask.sum() != 1: 
+        # If no sdc in the track to predict, randomly pick one.
+        sdc_mask = np.zeros_like(track_index_to_predict_new, dtype=bool)
+        sdc_mask[np.random.randint(0, len(sdc_mask)-1)] = True
 
     ret_dict = {
         "scenario_id": np.array([scene_id] * len(track_index_to_predict)),

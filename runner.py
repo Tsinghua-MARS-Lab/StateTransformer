@@ -180,7 +180,7 @@ def main():
     # loop all datasets
     logger.info("Loading full set of datasets from {}".format(data_args.saved_dataset_folder))
     assert os.path.isdir(data_args.saved_dataset_folder)
-    if model_args.task == "nuplan" or model_args.task == "waymo" or model_args.task == "simagents": # nuplan datasets are stored in index format
+    if model_args.task == "nuplan" or model_args.task == "waymo" or model_args.task == "interaction" or model_args.task == "simagents": # nuplan datasets are stored in index format
         index_root = os.path.join(data_args.saved_dataset_folder, 'index')
     elif model_args.task == "train_diffusion_decoder":
         index_root = data_args.saved_dataset_folder
@@ -379,6 +379,20 @@ def main():
         from transformer4planning.trainer import compute_metrics_waymo
         compute_metrics_func.update({"waymo": compute_metrics_waymo})
         
+    elif model_args.task == "interaction":
+        from transformer4planning.preprocess.waymo_vectorize import simagents_collate_func, waymo_collate_func
+        if model_args.encoder_type == "vector" and model_args.decoder_type == "diffusion":
+            collate_fn = partial(simagents_collate_func,
+                                 dic_path=data_args.saved_dataset_folder)
+        elif model_args.encoder_type == "vector" and model_args.decoder_type == "mlp":
+            collate_fn = partial(waymo_collate_func,
+                                 dic_path=data_args.saved_dataset_folder)
+        elif model_args.encoder_type == "raster":
+            raise NotImplementedError
+        
+        from transformer4planning.trainer import compute_metrics_waymo
+        compute_metrics_func.update({"interaction": compute_metrics_waymo})
+          
     elif model_args.task == "simagents":
         from transformer4planning.preprocess.waymo_vectorize import simagents_collate_func, waymo_collate_func
         if model_args.encoder_type == "vector" and model_args.decoder_type == "diffusion":

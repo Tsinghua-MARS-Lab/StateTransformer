@@ -255,57 +255,28 @@ class DiffusionWrapper(nn.Module):
 
             return x, total_cls
         else:
-            # device = self.betas.device
-            # batch_size = shape[0]
-            # shape = tuple([batch_size * mc_num] + list(shape[1:]))
+            device = self.betas.device
+            batch_size = shape[0]
+            shape = tuple([batch_size * mc_num] + list(shape[1:]))
             # assert not determin, 'It does not make sense to use deterministic sampling with mc_num > 1'
-            # x = torch.randn(shape, device=device)
+            x = torch.randn(shape, device=device)
 
-            # total_cls = -(torch.mean(x.detach()**2, dim=(1, 2)))         # Consider the prior score
+            total_cls = -(torch.mean(x.detach()**2, dim=(1, 2)))         # Consider the prior score
 
-            # # repeat state in dim 0 for mc_num times.
-            # # we don't know the shape of state, so we use torch.repeat_interleave
-            # state = torch.repeat_interleave(state, mc_num, dim=0)
-            # # then we reshape state into shape()
-            # for i in reversed(range(0,self.n_timesteps)):
-            #     timesteps = torch.full((batch_size * mc_num,), i, device=device, dtype=torch.long)
-            #     x, cls = self.p_sample(x, timesteps, state, determin=determin)
-            #     total_cls = total_cls + cls
+            # repeat state in dim 0 for mc_num times.
+            # we don't know the shape of state, so we use torch.repeat_interleave
+            state = torch.repeat_interleave(state, mc_num, dim=0)
+            # then we reshape state into shape()
+            for i in reversed(range(0,self.n_timesteps)):
+                timesteps = torch.full((batch_size * mc_num,), i, device=device, dtype=torch.long)
+                x, cls = self.p_sample(x, timesteps, state, determin=determin)
+                total_cls = total_cls + cls
                 
-            # # reshape x into shape (batch_size, mc_num, ...)
-            # x = x.reshape(batch_size, mc_num, *x.shape[1:])
-            # total_cls = total_cls.reshape(batch_size, mc_num)
-            # return x, total_cls
-            
-            # Try loop implementation to avoid OOM
-            x_mc, cls_mc = [], []
-            for _ in range(mc_num):
-                device = self.betas.device
-                batch_size = shape[0]
-                shape = tuple([batch_size] + list(shape[1:]))
-                assert not determin, 'It does not make sense to use deterministic sampling with mc_num > 1'
-                x = torch.randn(shape, device=device)
-
-                total_cls = -(torch.mean(x.detach()**2, dim=(1, 2)))         # Consider the prior score
-
-                # repeat state in dim 0 for mc_num times.
-                # we don't know the shape of state, so we use torch.repeat_interleave
-                state = torch.repeat_interleave(state, mc_num, dim=0)
-                # then we reshape state into shape()
-                for i in reversed(range(0,self.n_timesteps)):
-                    timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
-                    x, cls = self.p_sample(x, timesteps, state, determin=determin)
-                    total_cls = total_cls + cls
-                
-                x_mc.append(x)
-                cls_mc.append(total_cls)
-            
-            x_result = torch.stack(x_mc, dim=1)
-            cls_result = torch.stack(cls_mc, dim=1)
-            
-            return x_result, cls_result
-                
-
+            # reshape x into shape (batch_size, mc_num, ...)
+            x = x.reshape(batch_size, mc_num, *x.shape[1:])
+            total_cls = total_cls.reshape(batch_size, mc_num)
+            return x, total_cls
+        
     def p_sample(self, x, t, s, determin=True):
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, s=s)
@@ -359,7 +330,13 @@ class DiffusionDecoder(nn.Module):
         self.config = config
         self.out_features = 4 if config.predict_yaw else 2
         self.k = config.k
-        self.predict_range = 80
+        if config.future_select == "no":
+            self.predict_range = 80
+        elif config.future_select == "next_1":
+            self.predict_range = 1
+        elif config.future_select == "next_10":
+            self.predict_range = 10
+        else: raise NotImplementedError
         diffusion_model = TrajDiffusionModel(config,
                                             out_features=self.out_features,
                                             predict_range=self.predict_range)
@@ -383,13 +360,13 @@ class DiffusionDecoder(nn.Module):
         if device is None:
             device = traj_hidden_state.device
         
-        if not self.config.predict_yaw: label = label[..., :2].clone
+        if not self.config.predict_yaw: label = label[..., :2].clone()
         
         traj_logits = torch.zeros_like(label)
         traj_loss = None
         # compute trajectory loss conditioned on gt keypoints
         if not self.config.pred_key_points_only:
-            if self.config.task == "waymo" or self.config.task == "simagents":
+            if self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
                 traj_loss = self.model.train_forward(traj_hidden_state, label)
@@ -413,15 +390,17 @@ class DiffusionDecoder(nn.Module):
         else:
             traj_logits, scores = self.model(traj_hidden_state, batch_size=pred_traj_num, determin=False, mc_num=self.config.mc_num)
 
-            reg_sigma_cls_dict = modify_func(
-                output = dict(
-                    reg = [traj_p for traj_p in traj_logits.detach().unsqueeze(1)],
-                    cls = [cls for cls in scores.detach().unsqueeze(1)],
-                ),
-                num_mods_out = self.k,
-                EM_Iter = 25,
-            )
-            traj_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
+            if self.config.mc_num > self.k:
+                reg_sigma_cls_dict = modify_func(
+                    output = dict(
+                        reg = [traj_p for traj_p in traj_logits.detach().unsqueeze(1)],
+                        cls = [cls for cls in scores.detach().unsqueeze(1)],
+                    ),
+                    num_mods_out = self.k,
+                    EM_Iter = 25,
+                )
+                traj_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
+                scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
 
         return traj_logits, scores
 
