@@ -85,14 +85,17 @@ print_verbose_comments: bool = True) -> tf.Tensor:
 
     return logged_trajectories, simulated_states
 
+import time
+
 # Since these are raw Scenario protos, we need to parse them in eager mode.
 dataset_iterator = dataset.as_numpy_iterator()
+bytes_example = next(dataset_iterator)
 bytes_example = next(dataset_iterator)
 scenario = scenario_pb2.Scenario.FromString(bytes_example)
 print(f'Checking type: {type(scenario)}')
 logged_trajectories, simulated_states = simulate_with_extrapolation(
     scenario, print_verbose_comments=True)
-                                                                                                    
+cur_time = time.time()                                                                                       
 def joint_scene_from_states(
     states: tf.Tensor, object_ids: tf.Tensor
     ) -> sim_agents_submission_pb2.JointScene:
@@ -134,5 +137,7 @@ scenario_rollouts = scenario_rollouts_from_states(
 
 scenario_metrics = metrics.compute_scenario_metrics_for_bundle(
     config, scenario, scenario_rollouts)
+
 print(scenario_metrics)
+print("Used time:", time.time() - cur_time)
 exit()

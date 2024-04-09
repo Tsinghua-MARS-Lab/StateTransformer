@@ -252,7 +252,12 @@ def main(args):
                             difficulty_to_predict.append(cur_pred.difficulty)
                 elif "SA" in args.task:
                     track_ids_simagents = tf.convert_to_tensor(submission_specs.get_sim_agent_ids(scenario))
+                    if len(track_ids_simagents) == 0: continue
                     track_index_to_predict = index_gather(tf.convert_to_tensor(track_infos['object_id']), track_ids_simagents)
+                elif "JP" in args.task:
+                    track_ids_interaction = tf.convert_to_tensor(scenario.objects_of_interest)
+                    if len(track_ids_interaction) == 0: continue
+                    track_index_to_predict = index_gather(tf.convert_to_tensor(track_infos['object_id']), track_ids_interaction)
                 else:
                     raise NotImplementedError
                 
@@ -296,7 +301,7 @@ def main(args):
                                 "track_index_to_predict": index,
                                 "object_type": object_type_to_predict[i]
                             }
-                elif args.task == "SA":
+                elif args.task == "SA" or args.task == "JP":
                     yield {
                                 "scenario_id": scenario.scenario_id,
                                 "track_index_to_predict": track_index_to_predict,
@@ -323,7 +328,7 @@ def main(args):
 
     total_file_number = len(file_indices)
     print(f'Loading Dataset,\n  File Directory: {data_path}\n  Total File Number: {total_file_number}\n Task: {args.task}\n Agent type:', args.agent_type)
-    if "SA" in args.task: print("Your agent_type argument does not work for Sim Agents task.")
+    if "SA" in args.task or "JP" in args.task: print("Your agent_type argument does not work for Joint Prediciton and Sim Agents tasks.")
     
     waymo_dataset = Dataset.from_generator(yield_data,
                                             gen_kwargs={'shards': file_indices, 'dl': data_loader, 'save_dict':
@@ -347,7 +352,7 @@ if __name__ == '__main__':
         })
     
     parser.add_argument('--mode', type=str, default="train")  
-    parser.add_argument("--task", type=str, default="MP", help="Different tasks on WOMD. MP for Motion Prediction and SA for Sim Agents.")
+    parser.add_argument("--task", type=str, default="MP", help="Different tasks on WOMD. MP for Motion Prediction, JP for Joint Prediction and SA for Sim Agents.")
     parser.add_argument('--agent_type', type=int, nargs="+", default=[3])
     parser.add_argument('--save_dict', default=False, action='store_true')
     parser.add_argument('--output_path', type=str, default='/public/MARS/datasets/waymo_motion_cache/t4p_tmp/data_dict')

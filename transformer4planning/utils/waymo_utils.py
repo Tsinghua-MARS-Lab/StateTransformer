@@ -432,11 +432,10 @@ def waymo_evaluation(pred_dicts, top_k=-1, eval_second=8, num_modes_for_eval=6):
 
 
 def simagents_evaluation(pred_dicts):
+    # pred_dicts is a dict grouped by scenarios: {scenario_id: {"pred_trajs": 32*N*80*4, "object_id": N}}
     from waymo_open_dataset.wdl_limited.sim_agents_metrics import metrics
     from waymo_open_dataset.protos import scenario_pb2
     from waymo_open_dataset.protos import sim_agents_submission_pb2
-
-    from waymo_open_dataset.utils.sim_agents import submission_specs
             
     tf.config.set_visible_devices([], "GPU")
     config = metrics.load_metrics_config()
@@ -477,36 +476,41 @@ def simagents_evaluation(pred_dicts):
     dataset = tf.data.TFRecordDataset(filenames)
     dataset_iterator = dataset.as_numpy_iterator()
     metrics_list = []
+    
     for bytes_example in dataset_iterator:
         scenario = scenario_pb2.Scenario.FromString(bytes_example)
         scenario_id = scenario.scenario_id
-        
-        pred_per_scene, obj_id_per_scene = [], []
-        for pred in pred_dicts:
-            if pred["scenario_id"] == scenario_id:
-                obj_id = pred["object_id"]
-                if obj_id not in obj_id_per_scene:
-                    pred_per_scene.append(pred["pred_trajs"])
-                    obj_id_per_scene.append(obj_id)
-        
-        if len(obj_id_per_scene) != len(submission_specs.get_sim_agent_ids(scenario)): continue
-        simulated_states = np.stack(pred_per_scene, axis=1)
-        pred_object_id = np.stack(obj_id_per_scene, axis=0)
 
-        scenario_rollouts = scenario_rollouts_from_states(
-            scenario, simulated_states, pred_object_id)
+        if scenario_id in pred_dicts.keys():
+            scenario_rollouts = scenario_rollouts_from_states(
+                scenario, pred_dicts[scenario_id]["pred_trajs"], pred_dicts[scenario_id]["object_id"])
 
-        scenario_metrics = metrics.compute_scenario_metrics_for_bundle(
-            config, scenario, scenario_rollouts)
+            try:
+                scenario_metrics = metrics.compute_scenario_metrics_for_bundle(
+                    config, scenario, scenario_rollouts)
+            except:
+                break
+            
+            metrics_list.append(scenario_metrics)
         
-        metrics_list.append(scenario_metrics)
+            if len(metrics_list) == len(pred_dicts.keys()) - 1: break
     
     assert len(metrics_list) > 0, "No valid scenarios!!!"
+    print("Evaluate", len(metrics_list), "scenarios.")
     
-    result_dict = {}
-    for key in metrics_list[0].keys():
-        if key == "scenario_id": continue
-        
-        result_dict[key] = np.mean([m[key] for m in metrics_list])
-
+    result_dict = {
+        "metametric": np.mean([m.metametric for m in metrics_list]),
+        "average_displacement_error": np.mean([m.average_displacement_error for m in metrics_list]),
+        "linear_speed_likelihood": np.mean([m.linear_speed_likelihood for m in metrics_list]),
+        "linear_acceleration_likelihood": np.mean([m.linear_acceleration_likelihood for m in metrics_list]),
+        "angular_speed_likelihood": np.mean([m.angular_speed_likelihood for m in metrics_list]),
+        "angular_acceleration_likelihood": np.mean([m.angular_acceleration_likelihood for m in metrics_list]),
+        "distance_to_nearest_object_likelihood": np.mean([m.distance_to_nearest_object_likelihood for m in metrics_list]),
+        "collision_indication_likelihood": np.mean([m.collision_indication_likelihood for m in metrics_list]),
+        "time_to_collision_likelihood": np.mean([m.time_to_collision_likelihood for m in metrics_list]),
+        "distance_to_road_edge_likelihood": np.mean([m.distance_to_road_edge_likelihood for m in metrics_list]),
+        "offroad_indication_likelihood": np.mean([m.offroad_indication_likelihood for m in metrics_list]),
+        "min_average_displacement_error": np.mean([m.min_average_displacement_error for m in metrics_list]),
+    }
+    
     return result_dict

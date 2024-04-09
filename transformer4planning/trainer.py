@@ -350,18 +350,29 @@ def compute_metrics_simagents(prediction: EvalPrediction):
     from transformer4planning.utils.waymo_utils import tensor_to_str, simagents_evaluation
     pred_dicts = prediction.predictions['prediction_generation']
     
-    pred_dict_list = []
+    pred_by_scenarios = {}
     for idx in range(len(pred_dicts["object_id"])):
-        single_pred_dict = {}
+        scene_id = tensor_to_str(torch.from_numpy(pred_dicts["scenario_id"][idx]).unsqueeze(0))[0]
+        if scene_id not in pred_by_scenarios.keys():
+            pred_by_scenarios[scene_id] = {}
+        
         for key in pred_dicts.keys():
             if key == "scenario_id":
-                single_pred_dict[key] = tensor_to_str(torch.from_numpy(pred_dicts[key][idx]).unsqueeze(0))[0]
-            else:
-                single_pred_dict[key] = pred_dicts[key][idx]
+                continue
+            if key not in pred_by_scenarios[scene_id].keys():
+                pred_by_scenarios[scene_id][key] = []
+            
+            pred_by_scenarios[scene_id][key].append(pred_dicts[key][idx])
                 
-        pred_dict_list.append(single_pred_dict)
+    for id in pred_by_scenarios.keys():
+        for key in pred_by_scenarios[id].keys():
+            if key == "object_id":
+                pred_by_scenarios[id][key] = np.stack(pred_by_scenarios[id][key], axis=0)
+            elif key == "pred_trajs":
+                pred_by_scenarios[id][key] = np.stack(pred_by_scenarios[id][key], axis=1)
     
-    result_dict = simagents_evaluation(pred_dicts=pred_dict_list)
+    print("We generate", len(pred_by_scenarios.keys()), "predictions for scenarios")
+    result_dict = simagents_evaluation(pred_dicts=pred_by_scenarios)
 
     return result_dict
 
