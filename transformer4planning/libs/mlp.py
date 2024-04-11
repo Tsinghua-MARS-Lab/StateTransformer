@@ -48,3 +48,59 @@ class DecoderResCat(nn.Module):
         hidden_states = torch.cat([hidden_states, self.mlp(hidden_states)], dim=-1)
         hidden_states = self.fc(hidden_states)
         return hidden_states
+
+
+def modulate(x, shift, scale):
+    return x * (1 + scale) + shift
+    # return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+
+class DiTBlock(nn.Module):
+    """
+    A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
+    """
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.attn = nn.TransformerEncoderLayer(d_model=hidden_size, 
+                                          nhead=num_heads, 
+                                          dim_feedforward=4 * hidden_size, 
+                                          batch_first=True)
+        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        self.mlp = nn.Sequential( 
+                                    nn.Linear(hidden_size, mlp_hidden_dim),
+                                    nn.GELU(approximate="tanh"),
+                                    nn.Linear(mlp_hidden_dim, hidden_size),
+                                    nn.GELU(approximate="tanh"),
+                                )
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
+        )
+
+    def forward(self, x, c):
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=2)
+        x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
+        x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        return x
+
+
+class DiT_FinalLayer(nn.Module):
+    """
+    The final layer of DiT.
+    """
+    def __init__(self, hidden_size, out_size):
+        super().__init__()
+        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.linear = nn.Linear(hidden_size, out_size, bias=True)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 2 * hidden_size, bias=True)
+        )
+
+    def forward(self, x, c):
+        shift, scale = self.adaLN_modulation(c).chunk(2, dim=2)
+        x = modulate(self.norm_final(x), shift, scale)
+        x = self.linear(x)
+        return x
