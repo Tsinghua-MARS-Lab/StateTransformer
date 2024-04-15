@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 import math
 from typing import Dict
-from transformer4planning.libs.mlp import DecoderResCat
+from transformer4planning.libs.mlp import DecoderResCat, DiTBlock, DiT_FinalLayer
 from transformer4planning.models.utils import *
 
 from transformer4planning.utils.modify_traj_utils import modify_func
@@ -62,6 +62,10 @@ class BaseDiffusionModel(nn.Module):
             DecoderResCat(1024, 512, 768),
             DecoderResCat(2048, 768, feat_dim),
         )
+
+        '''
+        Transformer based backbone
+        '''
         # self.backbone = nn.ModuleList()
         # for i in range(layer_num):
         #     self.backbone.append(nn.TransformerEncoderLayer(d_model=feat_dim, 
@@ -69,20 +73,35 @@ class BaseDiffusionModel(nn.Module):
         #                                                     dim_feedforward=4 * feat_dim,
         #                                                     batch_first=True))
         # self.backbone = nn.Sequential(*self.backbone)
-        # Use transformer decoder backbone for cross attention between scenarios and trajectories.
-        transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim, batch_first=True)
-        self.self_attn = nn.TransformerEncoder(transformer_encoder_layer, num_layers=config.n_layer)
-        transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim)
-        self.cross_attn = nn.TransformerDecoder(transformer_decoder_layer, num_layers=config.n_layer)
+
+        '''
+        CrossAttention: Use transformer decoder backbone for cross attention between scenarios and trajectories
+        '''
+        # transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim, batch_first=True)
+        # self.self_attn = nn.TransformerEncoder(transformer_encoder_layer, num_layers=config.n_layer)
+        # transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim)
+        # self.cross_attn = nn.TransformerDecoder(transformer_decoder_layer, num_layers=config.n_layer)
+
+        '''
+        MLP based x_decoder
+        '''
+        # self.x_decoder = nn.Sequential(
+        #     DecoderResCat(2 * feat_dim, feat_dim, 512),
+        #     DecoderResCat(1024, 512, 256),
+        #     DecoderResCat(512, 256, 128),
+        #     DecoderResCat(256, 128, 64),
+        #     DecoderResCat(128, 64, 32),
+        #     DecoderResCat(64, 32, out_features),
+        # )
+
+        '''
+        DiT Block
+        '''
+        self.blocks = nn.ModuleList([
+            DiTBlock(feat_dim, config.n_head, mlp_ratio=4) for _ in range(config.n_layer)
+        ])
+        self.final_layer = DiT_FinalLayer(feat_dim, out_features)
         
-        self.x_decoder = nn.Sequential(
-            DecoderResCat(2 * feat_dim, feat_dim, 512),
-            DecoderResCat(1024, 512, 256),
-            DecoderResCat(512, 256, 128),
-            DecoderResCat(256, 128, 64),
-            DecoderResCat(128, 64, 32),
-            DecoderResCat(64, 32, out_features),
-        )
     
     def forward(self, x, t, state):
         """
@@ -108,7 +127,40 @@ class TrajDiffusionModel(BaseDiffusionModel):
             
         # trainable positional embedding, initialized by cos/sin positional embedding.
         self.position_embedding = torch.nn.Parameter(position_embedding, requires_grad=True)
+        self.initialize_weights()
     
+    
+    def initialize_weights(self):
+        # Initialize transformer layers:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+        self.apply(_basic_init)
+
+        # Initialize state embedding table:
+        nn.init.normal_(self.state_encoder[0].mlp.linear.weight, std=0.02)
+        nn.init.normal_(self.state_encoder[0].fc.weight, std=0.02)
+        nn.init.normal_(self.state_encoder[1].mlp.linear.weight, std=0.02)
+        nn.init.normal_(self.state_encoder[1].fc.weight, std=0.02)
+
+        # Initialize timestep embedding MLP:
+        nn.init.normal_(self.time_encoder[1].weight, std=0.02)
+        nn.init.normal_(self.time_encoder[3].weight, std=0.02)
+        nn.init.normal_(self.time_encoder[5].weight, std=0.02)
+
+        # Zero-out adaLN modulation layers in DiT blocks:
+        for block in self.blocks:
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+
+        # Zero-out output layers:
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.linear.weight, 0)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
+
     def forward(self, x, t, state):
         # input encoding
         state_embedding = self.state_encoder(state) # B * seq_len * feat_dim
@@ -116,17 +168,36 @@ class TrajDiffusionModel(BaseDiffusionModel):
         t_embedding = self.time_encoder(t) # B * feat_dim
         t_embedding = t_embedding.unsqueeze(1) # -> B * 1 * feat_dim
         
+        '''
+        TransformerEncoder based backbone
+        '''
         # concat input embedding
         # seq = torch.cat([state_embedding, x_embedding], dim=-2) # B * (2*seq_len) * feat_dim
         # seq = seq + t_embedding + self.position_embedding # B * (2*seq_len) * feat_dim
 
         # feature = self.backbone(seq)
         # feature = feature[..., -x.shape[-2]:, :]
-        x_embedding = x_embedding + t_embedding + self.position_embedding
-        feature = self.self_attn(x_embedding)
-        feature = self.cross_attn(feature, state_embedding)
+
+        '''
+        CrossAttention
+        '''
+        # x_embedding = x_embedding + t_embedding + self.position_embedding
+        # feature = self.self_attn(x_embedding)
+        # feature = self.cross_attn(feature, state_embedding)
         
-        output = self.x_decoder(feature)
+        '''
+        MLP based x_decoder
+        '''
+        # output = self.x_decoder(feature)
+
+        '''
+        DiT
+        '''
+        c = t_embedding + state_embedding
+        x = x_embedding + self.position_embedding
+        for block in self.blocks:
+            x = block(x, c)
+        output = self.final_layer(x, c)
         return output
 
 class DiffusionWrapper(nn.Module):
