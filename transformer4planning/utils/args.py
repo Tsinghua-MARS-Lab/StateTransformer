@@ -188,6 +188,9 @@ class ModelArguments:
                                 'no' for whole 80 frames;\
                                 'next_n' for next n frames;"}
     )
+    autoregressive: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use autoregressive generation manner. Bounded to future_select for task simagents."}
+    )
     ######## end of WOMD args ########
 
     # WIP args

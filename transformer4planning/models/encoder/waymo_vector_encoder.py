@@ -5,6 +5,7 @@
 import torch
 import torch.nn as nn
 import pickle
+import math
 
 from transformer4planning.libs.mtr.transformer import (transformer_encoder_layer, position_encoding_utils)
 from transformer4planning.libs.mtr import polyline_encoder
@@ -199,17 +200,16 @@ class MTREncoder(nn.Module):
         return batch_dict
 
 class WaymoVectorizeEncoder(TrajectoryEncoder):
-    def __init__(self, 
-                 action_kwargs:Dict,
+    def __init__(self,
                  config,
                  ):
         super().__init__(config)
         self.config = config
         encoder_model_dim = min(config.d_model, 768)
         self.context_encoder = MTREncoder(encoder_model_dim)
-        self.action_m_embed = nn.Sequential(nn.Linear(10, action_kwargs.get("d_embed")), nn.Tanh())
-        self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-        self.proposal_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
+        self.action_m_embed = nn.Sequential(nn.Linear(4, config.d_model), nn.Tanh(), nn.Linear(config.d_model, config.d_model))
+        self.kps_m_embed = nn.Sequential(nn.Linear(4, config.d_model), nn.Tanh(), nn.Linear(config.d_model, config.d_model))
+        self.proposal_m_embed = nn.Sequential(nn.Linear(2, config.d_model), nn.Tanh(), nn.Linear(config.d_model, config.d_model))
 
         self.in_proj_obj = nn.Sequential(
             nn.Linear(self.context_encoder.num_out_channels, config.d_model),
@@ -328,6 +328,20 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         loss_reg = loss_reg.mean()
 
         return loss_reg
+    
+    def aggregate_agents_by_scenario(self, action_embeds, input_dict):
+        batch_size = input_dict['obj_trajs'].shape[0]
+        action_scene_batch = []
+        scene_length = input_dict["scene_length"]
+        scene_start_index = 0
+        for b in range(batch_size):
+            scene_end_index = scene_start_index + scene_length[b]
+            action_scene_embed = action_embeds[scene_start_index:scene_end_index]
+            action_scene_embed = self.action_aggregator(action_scene_embed).max(dim=0)[0]
+            action_scene_batch.append(action_scene_embed)
+            scene_start_index = scene_end_index
+        
+        return torch.stack(action_scene_batch, dim=0)
 
     def forward(self, **kwargs):
         input_dict = kwargs
@@ -361,19 +375,10 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
         # add noise to context actions
         context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.config.x_random_walk, self.config.y_random_walk)
 
-        action_embeds = self.action_m_embed(context_actions)
-        if (self.config.task == "simagents" or self.config.task == "interaction") and self.config.decoder_type == "diffusion":
-            action_scene_batch = []
-            scene_length = input_dict["scene_length"]
-            scene_start_index = 0
-            for b in range(batch_size):
-                scene_end_index = scene_start_index + scene_length[b]
-                action_scene_embed = action_embeds[scene_start_index:scene_end_index]
-                action_scene_embed = self.action_aggregator(action_scene_embed).max(dim=0)[0]
-                action_scene_batch.append(action_scene_embed)
-                scene_start_index = scene_end_index
-            
-            action_embeds = torch.stack(action_scene_batch, dim=0)
+        # x,y,z,yaw input
+        action_embeds = self.action_m_embed(context_actions[..., [0, 1, 2, 6]])
+        # if (self.config.task == "simagents" or self.config.task == "interaction") and self.config.decoder_type == "diffusion":
+        #     action_embeds = self.aggregate_agents_by_scenario(action_embeds, input_dict)
             
         context_length = context_actions.shape[1]  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
 
@@ -458,5 +463,176 @@ class WaymoVectorizeEncoder(TrajectoryEncoder):
             info_dict["future_key_points"] = future_key_points
             info_dict["selected_indices"] = self.selected_indices
             info_dict["key_points_mask"] = trajectory_label_mask[:, self.selected_indices, :]
+
+        return input_embeds, info_dict
+
+class SinusoidalPosEmb(nn.Module):
+    """
+    Sin positional embedding, where the noisy time step are encoded as an pos embedding.
+    """
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x[..., None] * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
+
+class WaymoScenarioEncoder(WaymoVectorizeEncoder):
+    def __init__(self,
+                 config,
+                 ):
+        super().__init__(config)
+        # transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=config.n_embd, nhead=config.n_head, dim_feedforward=config.n_inner)
+        # self.obj_attn = nn.TransformerDecoder(transformer_decoder_layer, num_layers=config.n_layer)
+        # self.map_attn = nn.TransformerDecoder(transformer_decoder_layer, num_layers=config.n_layer)
+        self.relapos_embedding = nn.Sequential( 
+            SinusoidalPosEmb(config.n_embd // 2,),
+            nn.Linear(config.n_embd // 2, config.n_embd),
+            nn.LeakyReLU(),
+            nn.Linear(config.n_embd, config.n_embd),
+            nn.LeakyReLU(),
+            nn.Linear(config.n_embd, config.n_embd // 2),
+        )
+        
+    def forward(self, **kwargs):
+        input_dict = kwargs
+        device = input_dict['obj_trajs'].device
+
+        batch_dict = self.context_encoder({'input_dict': input_dict})
+
+        # prepare O (observation)
+        obj_feature = batch_dict['obj_feature']
+        map_feature = batch_dict['map_feature']
+        
+        obj_mask = batch_dict['obj_mask']
+        num_center_objects, num_objects, n_timestamp, _ = obj_feature.shape
+        num_polylines = map_feature.shape[1]
+        map_mask = batch_dict['map_mask']
+
+        obj_feature_valid = self.in_proj_obj(obj_feature[obj_mask])
+        obj_feature = obj_feature.new_zeros(num_center_objects, num_objects, n_timestamp, obj_feature_valid.shape[-1])
+        obj_feature[obj_mask] = obj_feature_valid
+
+        map_feature_valid = self.in_proj_map(map_feature[map_mask])
+        map_feature = map_feature.new_zeros(num_center_objects, num_polylines, n_timestamp, map_feature_valid.shape[-1])
+        map_feature[map_mask] = map_feature_valid
+        
+        state_embeds = torch.cat((map_feature, obj_feature), dim=1) # (bs, num_poly+num_obj, num_timestamp, 256)
+        state_embeds = state_embeds.max(dim=1)[0]
+        
+        # action context
+        context_actions = input_dict['center_objects_past']
+        # add noise to context actions
+        context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.config.x_random_walk, self.config.y_random_walk)
+
+        # x,y,z,yaw input
+        action_embeds = self.action_m_embed(context_actions[..., [0, 1, 2, 6]])
+        # if (self.config.task == "simagents" or self.config.task == "interaction") and self.config.decoder_type == "diffusion":
+        #     action_embeds = self.aggregate_agents_by_scenario(action_embeds, input_dict)
+        
+        batch_size, context_length, _ = action_embeds.shape  # past_interval=10, past_frames=2 * 20, context_length = 40/10=4
+
+        # create OAOAOA..
+        input_embeds = torch.zeros(
+            (batch_size, context_length * 2, action_embeds.shape[-1]),
+            dtype=torch.float32,
+            device=device
+        )
+        
+        scene_length = input_dict["scene_length"]
+        scene_start = 0
+        for s in range(obj_feature.shape[0]):
+            length = scene_length[s]
+            scene_end = scene_start + length
+            relative_pos = batch_dict['obj_pos'][s, input_dict["track_index_to_predict"][scene_start:scene_end], :2]
+            pos_embedding = self.relapos_embedding(relative_pos).flatten(1, 2).unsqueeze(1)
+            
+            input_embeds[scene_start:scene_end, ::2, :] = state_embeds[s].repeat(length, 1, 1) + pos_embedding # index: 0, 2, 4, .., 18
+            scene_start = scene_end
+            
+        input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
+        
+        # future trajectory
+        trajectory_label = input_dict['trajectory_label']
+        trajectory_label_mask = input_dict['center_gt_trajs_mask'].unsqueeze(-1)
+        
+        if self.config.future_select == "next_1":
+            trajectory_label = trajectory_label[:, :1, ...]
+            trajectory_label_mask = trajectory_label_mask[:, :1, ...]
+        if self.config.future_select == "next_10":
+            trajectory_label = trajectory_label[:, :10, ...]
+            trajectory_label_mask = trajectory_label_mask[:, :10, ...]
+            
+        pred_length = trajectory_label.shape[1]
+        info_dict = {
+            "trajectory_label": trajectory_label,
+            "trajectory_label_mask": trajectory_label_mask,
+            "pred_length": pred_length,
+            "context_length": context_length * 2,
+            "obj_feature": obj_feature,
+            "map_feature": map_feature[:, :, 0, :]
+        }
+
+        # dense prediction
+        if self.config.dense_pred:
+            _, ret_pred_dense_future_trajs = self.apply_dense_future_prediction(obj_feature, obj_mask, batch_dict['obj_pos'])
+            loss_pred_future = self.get_dense_future_prediction_loss(ret_pred_dense_future_trajs, input_dict['obj_trajs_future_state'], input_dict['obj_trajs_future_mask'])
+        
+            info_dict["dense_pred_loss"] = loss_pred_future
+
+        # prepare proposals
+        if self.use_proposal:
+            raise NotImplementedError
+            # gt_proposal_mask = trajectory_label_mask[:, -1, :] # (bs, 1)
+            # type_idx_str = {
+            #     1: 'TYPE_VEHICLE',
+            #     2: 'TYPE_PEDESTRIAN',
+            #     3: 'TYPE_CYCLIST',
+            # }
+            # center_obj_types = input_dict['center_objects_type']
+            
+            # center_obj_proposal_pts = [self.intention_points[type_idx_str[center_obj_types[i]]].unsqueeze(0) for i in range(batch_size)]
+            # center_obj_proposal_pts = torch.cat(center_obj_proposal_pts, dim=0) # (bs, 64, 2)
+            # dist2GT = torch.norm(trajectory_label[:, [-1], :2] - center_obj_proposal_pts, dim=2)
+            # proposal_GT_cls = dist2GT[:, :].argmin(dim = 1) # (bs, )
+
+            # proposal_GT_logits = center_obj_proposal_pts[torch.arange(batch_size), proposal_GT_cls, :] * gt_proposal_mask # (bs, 2)
+            # proposal_embedding = self.proposal_m_embed(proposal_GT_logits).unsqueeze(1)
+            # input_embeds = torch.cat([input_embeds, proposal_embedding], dim=1)
+
+            # info_dict["gt_proposal_cls"] = proposal_GT_cls
+            # info_dict["gt_proposal_mask"] = gt_proposal_mask
+            # info_dict["gt_proposal_logits"] = proposal_GT_logits
+            # info_dict["center_obj_proposal_pts"] = center_obj_proposal_pts
+
+        # prepare keypoints
+        n_embed = action_embeds.shape[-1]
+        if self.use_key_points == 'no':
+            input_embeds = torch.cat([input_embeds,
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+        else:
+            raise NotImplementedError
+            # future_key_points = self.select_keypoints(trajectory_label)
+            # assert future_key_points.shape[1] != 0, 'future points not enough to sample'
+            # # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
+            # # argument future trajectory
+            # future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk)
+            # if not self.config.predict_yaw:
+            #     # keep the same information when generating future points
+            #     future_key_points_aug[:, :, 2:] = 0
+
+            # future_key_embeds = self.kps_m_embed(future_key_points_aug)
+            # input_embeds = torch.cat([input_embeds, future_key_embeds,
+            #                           torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
+            
+            # info_dict["future_key_points"] = future_key_points
+            # info_dict["selected_indices"] = self.selected_indices
+            # info_dict["key_points_mask"] = trajectory_label_mask[:, self.selected_indices, :]
 
         return input_embeds, info_dict

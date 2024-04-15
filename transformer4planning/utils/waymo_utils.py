@@ -476,12 +476,13 @@ def simagents_evaluation(pred_dicts):
     dataset = tf.data.TFRecordDataset(filenames)
     dataset_iterator = dataset.as_numpy_iterator()
     metrics_list = []
-    
+    scenario_iters = 0
     for bytes_example in dataset_iterator:
         scenario = scenario_pb2.Scenario.FromString(bytes_example)
         scenario_id = scenario.scenario_id
 
         if scenario_id in pred_dicts.keys():
+            scenario_iters += 1
             scenario_rollouts = scenario_rollouts_from_states(
                 scenario, pred_dicts[scenario_id]["pred_trajs"], pred_dicts[scenario_id]["object_id"])
 
@@ -489,11 +490,12 @@ def simagents_evaluation(pred_dicts):
                 scenario_metrics = metrics.compute_scenario_metrics_for_bundle(
                     config, scenario, scenario_rollouts)
             except:
-                break
+                print("Fail to compute the scenarios metric for", scenario_id)
+                continue
             
             metrics_list.append(scenario_metrics)
         
-            if len(metrics_list) == len(pred_dicts.keys()) - 1: break
+        if scenario_iters == len(pred_dicts.keys()): break
     
     assert len(metrics_list) > 0, "No valid scenarios!!!"
     print("Evaluate", len(metrics_list), "scenarios.")

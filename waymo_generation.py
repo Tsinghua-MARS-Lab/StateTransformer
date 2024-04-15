@@ -306,6 +306,7 @@ def main(args):
                                 "scenario_id": scenario.scenario_id,
                                 "track_index_to_predict": track_index_to_predict,
                             }
+                    
                 elif args.task == "SA_indiv":
                     for index in track_index_to_predict:
                         yield {

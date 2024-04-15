@@ -551,7 +551,7 @@ def simagents_preprocess(sample, data_path):
 
         "track_index_to_predict": track_index_to_predict_new,  # used to select center-features
         "center_objects_world": center_objects,
-        "center_objects_past": center_gt_past_trajs, # (x, y, z, rot, vx, vy)
+        "center_objects_past": center_gt_past_trajs,
         "trajectory_label": center_gt_trajs_labels, # ( x, y, z, heading)
         "center_objects_id": np.array(track_infos["object_id"])[track_index_to_predict],
         "center_objects_type": np.array(track_infos["object_type"])[track_index_to_predict],

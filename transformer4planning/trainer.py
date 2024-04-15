@@ -349,7 +349,7 @@ def compute_metrics_waymo(prediction: EvalPrediction):
 def compute_metrics_simagents(prediction: EvalPrediction):
     from transformer4planning.utils.waymo_utils import tensor_to_str, simagents_evaluation
     pred_dicts = prediction.predictions['prediction_generation']
-    
+
     pred_by_scenarios = {}
     for idx in range(len(pred_dicts["object_id"])):
         scene_id = tensor_to_str(torch.from_numpy(pred_dicts["scenario_id"][idx]).unsqueeze(0))[0]
@@ -372,6 +372,7 @@ def compute_metrics_simagents(prediction: EvalPrediction):
                 pred_by_scenarios[id][key] = np.stack(pred_by_scenarios[id][key], axis=1)
     
     print("We generate", len(pred_by_scenarios.keys()), "predictions for scenarios")
+    
     result_dict = simagents_evaluation(pred_dicts=pred_by_scenarios)
 
     return result_dict

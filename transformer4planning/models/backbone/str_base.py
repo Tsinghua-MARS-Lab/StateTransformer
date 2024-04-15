@@ -74,11 +74,12 @@ class STR(PreTrainedModel):
             else:
                 raise AttributeError("encoder_type should be either raster or vector")
         elif self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
-            from transformer4planning.models.encoder.waymo_vector_encoder import WaymoVectorizeEncoder
-            action_kwargs = dict(
-                d_embed=self.config.n_embd
-            )
-            self.encoder = WaymoVectorizeEncoder(action_kwargs, self.config)
+            from transformer4planning.models.encoder.waymo_vector_encoder import WaymoVectorizeEncoder, WaymoScenarioEncoder
+            if (self.config.task == "simagents" or self.config.task == "interaction") and self.config.decoder_type == "diffusion":
+                self.encoder = WaymoScenarioEncoder(self.config)
+            else:
+                self.encoder = WaymoVectorizeEncoder(self.config)
+            
         else:
             raise NotImplementedError
 
@@ -224,6 +225,9 @@ class STR(PreTrainedModel):
         batch_size, _, _ = input_embeds.shape
         device = input_embeds.device
         context_length = info_dict["context_length"]
+        
+        if self.config.autoregressive:
+            return self.generate_autoregressive(input_embeds, info_dict)
         
         if self.use_proposal:
             if self.config.autoregressive_proposals:
@@ -484,7 +488,47 @@ class STR(PreTrainedModel):
                 })
             
         return pred_dict
+    
+    @torch.no_grad()
+    def generate_autoregressive(self, input_embeds, info_dict):
+        # Now we only use this for task 'simagents' and decoder_type 'diffusion'. TODO: support for other settings.
+        assert self.config.task == "simagents" and self.config.decoder_type == "diffusion", "Autoregressive generation now does not support this setting!"
+        
+        from transformer4planning.utils.modify_traj_utils import modify_func
+        
+        transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds)
+        traj_logits, scores = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
+        pred_length = info_dict["pred_length"]
+        for r in range(pred_length-1):
+            action_embed = self.encoder.action_m_embed(traj_logits[:, :, :r+1, :])
+            traj_pred_list, scores_list = [], []
+            for m in range(action_embed.shape[1]):
+                action_embed_m = action_embed[:, m, ...]
+                # input_embeds
+                input_embeds_m = input_embeds.clone()
+                input_embeds_m[:, -pred_length:-pred_length+r+1, :] = action_embed_m
+                transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds_m)
+                traj_pred_m, scores_m = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
+                
+                traj_pred_list.append(traj_pred_m)
+                scores_list.append(scores_m * scores[:, m].unsqueeze(1))
+                
+            traj_logits = torch.cat(traj_pred_list, dim=1)
+            scores = torch.cat(scores_list, dim=1)
+            reg_sigma_cls_dict = modify_func(
+                output = dict(
+                    reg = [traj_p for traj_p in traj_logits.detach().unsqueeze(1)],
+                    cls = [cls for cls in scores.detach().unsqueeze(1)],
+                ),
+                num_mods_out = self.k,
+                EM_Iter = 25,
+            )
+            traj_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
+            scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
 
+        print(traj_logits.shape, scores.shape, scores.sum())
+        exit()
+                
 
 def build_models(model_args):
     if 'gpt' in model_args.model_name:

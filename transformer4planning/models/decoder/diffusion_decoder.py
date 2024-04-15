@@ -72,7 +72,7 @@ class BaseDiffusionModel(nn.Module):
         # Use transformer decoder backbone for cross attention between scenarios and trajectories.
         transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim, batch_first=True)
         self.self_attn = nn.TransformerEncoder(transformer_encoder_layer, num_layers=config.n_layer)
-        transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim)
+        transformer_decoder_layer = nn.TransformerDecoderLayer(d_model=feat_dim, nhead=config.n_head, dim_feedforward=4 * feat_dim, batch_first=True)
         self.cross_attn = nn.TransformerDecoder(transformer_decoder_layer, num_layers=config.n_layer)
         
         self.x_decoder = nn.Sequential(
@@ -124,7 +124,7 @@ class TrajDiffusionModel(BaseDiffusionModel):
         # feature = feature[..., -x.shape[-2]:, :]
         x_embedding = x_embedding + t_embedding + self.position_embedding
         feature = self.self_attn(x_embedding)
-        feature = self.cross_attn(feature, state_embedding)
+        feature = self.cross_attn(feature, state_embedding + self.position_embedding)
         
         output = self.x_decoder(feature)
         return output
@@ -330,6 +330,7 @@ class DiffusionDecoder(nn.Module):
         self.config = config
         self.out_features = 4 if config.predict_yaw else 2
         self.k = config.k
+        
         if config.future_select == "no":
             self.predict_range = 80
         elif config.future_select == "next_1":
@@ -337,6 +338,7 @@ class DiffusionDecoder(nn.Module):
         elif config.future_select == "next_10":
             self.predict_range = 10
         else: raise NotImplementedError
+            
         diffusion_model = TrajDiffusionModel(config,
                                             out_features=self.out_features,
                                             predict_range=self.predict_range)
@@ -369,6 +371,7 @@ class DiffusionDecoder(nn.Module):
             if self.config.task == "waymo" or self.config.task == "interaction" or self.config.task == "simagents":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
                 assert trajectory_label_mask is not None, "trajectory_label_mask is None"
+                
                 traj_loss = self.model.train_forward(traj_hidden_state, label)
                 traj_loss = (traj_loss * trajectory_label_mask).sum() / (trajectory_label_mask.sum() + 1e-7)
                 
