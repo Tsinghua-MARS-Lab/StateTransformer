@@ -67,6 +67,11 @@ class DiTBlock(nn.Module):
                                           dim_feedforward=4 * hidden_size, 
                                           batch_first=True)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.cross_attn = nn.TransformerDecoderLayer(d_model=hidden_size, 
+                                          nhead=num_heads, 
+                                          dim_feedforward=4 * hidden_size, 
+                                          batch_first=True)
+        self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         self.mlp = nn.Sequential( 
                                     nn.Linear(hidden_size, mlp_hidden_dim),
@@ -74,6 +79,7 @@ class DiTBlock(nn.Module):
                                     nn.Linear(mlp_hidden_dim, hidden_size),
                                     nn.GELU(approximate="tanh"),
                                 )
+        
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
@@ -82,7 +88,8 @@ class DiTBlock(nn.Module):
     def forward(self, x, c):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=2)
         x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
-        x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        x = x + self.cross_attn(self.norm2(x))
+        x = x + gate_mlp * self.mlp(modulate(self.norm3(x), shift_mlp, scale_mlp))
         return x
 
 
