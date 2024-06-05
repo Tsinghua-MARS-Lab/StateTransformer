@@ -7,8 +7,13 @@ import os
 import re
 import time
 import math
-from transformers.utils import is_sagemaker_mp_enabled
-from transformers.trainer_pt_utils import  nested_detach
+
+from transformers.utils import (
+    is_sagemaker_mp_enabled,
+    is_torch_tpu_available,
+    logging,
+)
+from transformers.trainer_pt_utils import nested_detach
 from transformers.trainer_callback import TrainerState, TrainerControl, IntervalStrategy, DefaultFlowCallback
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
@@ -17,11 +22,45 @@ from typing import List, Optional, Dict, Any, Tuple, Union
 from transformer4planning.utils.nuplan_utils import compute_scores
 from transformer4planning.utils.nuplan_utils import normalize_angle
 from sklearn.metrics import accuracy_score
-from torch.utils.data import Dataset
 
 from transformers.trainer_utils import (
+    denumpify_detensorize,
+    has_length,
     speed_metrics,
+    EvalLoopOutput
 )
+
+from transformers.trainer_pt_utils import (
+    AcceleratorConfig,
+    DistributedTensorGatherer,
+    IterableDatasetShard,
+    LabelSmoother,
+    LengthGroupedSampler,
+    SequentialDistributedSampler,
+    distributed_broadcast_scalars,
+    distributed_concat,
+    find_batch_size,
+    get_dataloader_sampler,
+    get_model_param_count,
+    get_module_class_from_name,
+    get_parameter_names,
+    nested_concat,
+    nested_detach,
+    nested_numpify,
+    nested_xla_mesh_reduce,
+    reissue_pt_warnings,
+    remove_dummy_checkpoint,
+)
+
+from transformers.integrations.deepspeed import deepspeed_init, deepspeed_load_checkpoint, is_deepspeed_available
+from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampler
+import datetime
+
+if is_torch_tpu_available(check_device=False):
+    import torch_xla.core.xla_model as xm
+    import torch_xla.debug.metrics as met
+    import torch_xla.distributed.spmd as xs
+    import torch_xla.runtime as xr
 
 FDE_THRESHHOLD = 8 # keep same with nuplan simulation
 ADE_THRESHHOLD = 8 # keep same with nuplan simulation
@@ -31,6 +70,9 @@ MISS_THRESHHOLD = [6, 8, 16]
 DISPLACEMENT_WEIGHT = 1
 HEADING_WEIGHT = 2
 EVAL_LOG_SAVING_PATH = None
+PREFIX_CHECKPOINT_DIR = "checkpoint"
+
+logger = logging.get_logger(__name__)
 
 def convert_names_to_ids(file_names, t0_frame_ids):
     unique_scenario_ids = list()
@@ -61,6 +103,12 @@ def compute_metrics(prediction: EvalPrediction):
     item_to_save = {}
 
     predictions = prediction.predictions
+
+    if 'overall_score' in predictions:
+        for each_key in predictions:
+            eval_result[each_key] = np.mean(predictions[each_key])
+        return eval_result
+
     labels = prediction.label_ids  # nparray: sample_num, 80, 4
     prediction_horizon = labels.shape[1]
 
@@ -94,12 +142,15 @@ def compute_metrics(prediction: EvalPrediction):
 
     # calculate error for generation results
     if 'key_points_logits' in prediction_by_generation:
-        assert len(selected_indices) > 1, selected_indices
+        assert len(selected_indices) >= 1, selected_indices
         label_key_points = labels[:, selected_indices, :]
         # WIP
         if len(selected_indices) > 10:
             ade_x_error_key_points_gen = prediction_key_points_by_generation[:, 10:, 0] - label_key_points[:, 10:, 0]
             ade_y_error_key_points_gen = prediction_key_points_by_generation[:, 10:, 1] - label_key_points[:, 10:, 1]
+        elif len(selected_indices) == 1 and selected_indices[0] == 0:
+            ade_x_error_key_points_gen = prediction_key_points_by_generation[:, 0, 0] - label_key_points[:, 0, 0]
+            ade_y_error_key_points_gen = prediction_key_points_by_generation[:, 0, 1] - label_key_points[:, 0, 1]
         else:
             ade_x_error_key_points_gen = prediction_key_points_by_generation[:, :, 0] - label_key_points[:, :, 0]
             ade_y_error_key_points_gen = prediction_key_points_by_generation[:, :, 1] - label_key_points[:, :, 1]
@@ -111,6 +162,11 @@ def compute_metrics(prediction: EvalPrediction):
             # forward
             fde_x_error_key_points_gen = prediction_key_points_by_generation[:, -1, 0] - label_key_points[:, -1, 0]
             fde_y_error_key_points_gen = prediction_key_points_by_generation[:, -1, 1] - label_key_points[:, -1, 1]
+        elif selected_indices[0] == selected_indices[-1]:
+            fde_x_error_key_points_gen = prediction_key_points_by_generation[:, 0, 0] - label_key_points[:, 0, 0]
+            fde_y_error_key_points_gen = prediction_key_points_by_generation[:, 0, 1] - label_key_points[:, 0, 1]
+        else:
+            assert False, selected_indices
         ade_key_points_gen = np.sqrt(ade_x_error_key_points_gen ** 2 + ade_y_error_key_points_gen ** 2).mean()
         eval_result['ade_keypoints_gen'] = ade_key_points_gen
         fde_key_points_gen = np.sqrt(fde_x_error_key_points_gen ** 2 + fde_y_error_key_points_gen ** 2).mean()
@@ -123,6 +179,7 @@ def compute_metrics(prediction: EvalPrediction):
 
     # ADE metrics computation
     ade_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)
+    ade1_gen = copy.deepcopy(ade_gen[:, 0])
     ade3_gen = np.mean(copy.deepcopy(ade_gen[:, :30]), axis=1)
     ade5_gen = np.mean(copy.deepcopy(ade_gen[:, :50]), axis=1)
     ade8_gen = np.mean(copy.deepcopy(ade_gen[:, :80]), axis=1)
@@ -133,6 +190,7 @@ def compute_metrics(prediction: EvalPrediction):
     item_to_save['ade_horizon3_gen'] = ade3_gen
     item_to_save['ade_horizon5_gen'] = ade5_gen
     item_to_save['ade_horizon8_gen'] = ade8_gen
+    eval_result['ade_1_gen'] = ade1_gen.mean()
     eval_result['ade_horizon3_gen'] = ade3_gen.mean()
     eval_result['ade_horizon5_gen'] = ade5_gen.mean()
     eval_result['ade_horizon8_gen'] = ade8_gen.mean()
@@ -156,6 +214,15 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['metric_fde'] = avg_fde_gen.mean()
     eval_result['fde_score'] = fde_score.mean()
 
+    if 'next_step' in prediction_by_generation:
+        next_step = prediction_by_generation['next_step']
+        next_step_labels = prediction_by_generation['next_step_labels']
+        next_step_fde_x_error_gen = next_step[:, -1, 0] - next_step_labels[:, -1, 0]
+        next_step_fde_y_error_gen = next_step[:, -1, 1] - next_step_labels[:, -1, 1]
+        next_step_fde_gen = np.sqrt(next_step_fde_x_error_gen ** 2 + next_step_fde_y_error_gen ** 2)
+        item_to_save['convergence_rate'] = next_step_fde_gen / fde8_gen
+        eval_result['convergence_rate'] = (next_step_fde_gen / fde8_gen).mean()
+
     def normalize_angles(angles):
         return np.arctan2(np.sin(angles), np.cos(angles))
 
@@ -168,6 +235,7 @@ def compute_metrics(prediction: EvalPrediction):
         # normalized_angles = np.where(normalized_angles > np.pi, normalized_angles - 2 * np.pi, normalized_angles)  # normalize to -pi, pi
         heading_error_gen = abs(normalize_angles(heading_diff_gen))
 
+        ahe1_gen = copy.deepcopy(heading_error_gen[:, 0])
         ahe3_gen = np.mean(copy.deepcopy(heading_error_gen[:, :30]), axis=1)
         ahe5_gen = np.mean(copy.deepcopy(heading_error_gen[:, :50]), axis=1)
         ahe8_gen = np.mean(copy.deepcopy(heading_error_gen[:, :80]), axis=1)
@@ -178,6 +246,7 @@ def compute_metrics(prediction: EvalPrediction):
         item_to_save['ahe_horizon3_gen'] = ahe3_gen
         item_to_save['ahe_horizon5_gen'] = ahe5_gen
         item_to_save['ahe_horizon8_gen'] = ahe8_gen
+        eval_result['ahe_1_gen'] = ahe1_gen.mean()
         eval_result['ahe_horizon3_gen'] = ahe3_gen.mean()
         eval_result['ahe_horizon5_gen'] = ahe5_gen.mean()
         eval_result['ahe_horizon8_gen'] = ahe8_gen.mean()
@@ -226,13 +295,17 @@ def compute_metrics(prediction: EvalPrediction):
     fde_for = np.sqrt(fde_x_error_for ** 2 + fde_y_error_for ** 2).mean()
     eval_result['fde_forward'] = fde_for
     if 'key_points_logits' in prediction_by_generation:
-        assert len(selected_indices) > 1, selected_indices
+        assert len(selected_indices) >= 1, selected_indices
         if len(selected_indices) > 10:
             ade_x_error_key_points_for = prediction_key_points_by_forward[:, 10:, 0] - label_key_points[:, 10:, 0]
             ade_y_error_key_points_for = prediction_key_points_by_forward[:, 10:, 1] - label_key_points[:, 10:, 1]
+        elif len(selected_indices) == 1 and selected_indices[0] == 0:
+            ade_x_error_key_points_for = prediction_key_points_by_forward[:, 0, 0] - label_key_points[:, 0, 0]
+            ade_y_error_key_points_for = prediction_key_points_by_forward[:, 0, 1] - label_key_points[:, 0, 1]
         else:
             ade_x_error_key_points_for = prediction_key_points_by_forward[:, :, 0] - label_key_points[:, :, 0]
             ade_y_error_key_points_for = prediction_key_points_by_forward[:, :, 1] - label_key_points[:, :, 1]
+
         if selected_indices[0] > selected_indices[-1]:
             # forward
             fde_x_error_key_points_for = prediction_key_points_by_forward[:, 0, 0] - label_key_points[:, 0, 0]
@@ -241,6 +314,11 @@ def compute_metrics(prediction: EvalPrediction):
             # backward
             fde_x_error_key_points_for = prediction_key_points_by_forward[:, -1, 0] - label_key_points[:, -1, 0]
             fde_y_error_key_points_for = prediction_key_points_by_forward[:, -1, 1] - label_key_points[:, -1, 1]
+        elif selected_indices[0] == selected_indices[-1]:
+            fde_x_error_key_points_for = prediction_key_points_by_forward[:, 0, 0] - label_key_points[:, 0, 0]
+            fde_y_error_key_points_for = prediction_key_points_by_forward[:, 0, 1] - label_key_points[:, 0, 1]
+        else:
+            assert False, selected_indices
         ade_key_points_for = np.sqrt(ade_x_error_key_points_for ** 2 + ade_y_error_key_points_for ** 2).mean()
         eval_result['ade_keypoints_forward'] = ade_key_points_for
         fde_key_points_for = np.sqrt(fde_x_error_key_points_for ** 2 + fde_y_error_key_points_for ** 2).mean()
@@ -251,31 +329,28 @@ def compute_metrics(prediction: EvalPrediction):
             eval_result['heading_error_forward'] = heading_error_for.mean()
 
     if 'proposal' in prediction_by_generation:
-        if 'halfs_intention' in prediction_by_generation:
-            # TODO: add waymo proposal accuracy to eval result
-            # evaluate classification accuracy and log to eval_result
-            # print('debuging trainer compute metrics: ', prediction_by_generation['proposal'], prediction_by_forward['proposal'], prediction_by_generation['halfs_intention'])
-            prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 1
-            proposal_labels = prediction_by_generation['halfs_intention']
-            accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
-            # print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels.flatten(), prediction_proposal_class_by_generation.flatten())
-            eval_result['proposal_accuracy'] = accuracy_by_generation
-        elif 'intentions' in prediction_by_generation:
+        if 'intentions' in prediction_by_generation:
             prediction_proposal_class_by_generation = prediction_by_generation["proposal"]  # sample_num, 16
             proposal_labels = prediction_by_generation['intentions']  # sample_num, 16
             accuracy_by_generation = accuracy_score(y_true=proposal_labels.flatten(), y_pred=prediction_proposal_class_by_generation.flatten(), normalize=True)
             # print('inspect trainer compute_metrics: proposal accuracy: ', proposal_labels, prediction_proposal_class_by_generation)
             eval_result['proposal_accuracy'] = accuracy_by_generation
         else:
-            print('WARNING: no intention found in generation. ', list(prediction_by_generation.keys()))
+            logger.warning('No intention found in generation. ', list(prediction_by_generation.keys()))
 
-    score, miss_score = compute_scores(item_to_save)
-    eval_result["average_score"] = score
-    eval_result["miss_score"] = miss_score
+    try:
+        score, miss_score = compute_scores(item_to_save)
+        eval_result["average_score"] = score
+        eval_result["miss_score"] = miss_score
+    except:
+        # this might caused by bugs of accelerate's split batch gathering operations
+        eval_result["average_score"] = 0
+        eval_result["miss_score"] = 0
+        logger.warning('Error when computing scores, No scores available!')
 
     # include inputs by passing args.include_inputs_for_metrics = True to save eval result to pickle
     if EVAL_LOG_SAVING_PATH is not None:
-        print('Saving eval result to pickle file: ', EVAL_LOG_SAVING_PATH)
+        logger.info('Saving eval result to pickle file: ', EVAL_LOG_SAVING_PATH)
         eval_result_to_save = {}
         # get miss scenarios
         miss_indices = np.where(miss == 1)[0]
@@ -292,7 +367,7 @@ def compute_metrics(prediction: EvalPrediction):
         # save eval result
         with open(EVAL_LOG_SAVING_PATH, "wb") as f:
             pickle.dump(eval_result_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
-        print(f'Eval result saved to {EVAL_LOG_SAVING_PATH} with {scenario15s_id_miss.shape[0]} miss scenarios and {scenario15s_id_high_fde.shape[0]} top fde scenarios')
+        logger.info(f'Eval result saved to {EVAL_LOG_SAVING_PATH} with {scenario15s_id_miss.shape[0]} miss scenarios and {scenario15s_id_high_fde.shape[0]} top fde scenarios')
     else:
         assert False, "EVAL_LOG_SAVING_PATH is None"
 
@@ -399,6 +474,81 @@ class PlanningTrainer(Trainer):
             inputs["mems"] = self._past
         return inputs
 
+    def evaluate(
+        self,
+        eval_dataset: Optional[Union[Dataset, Dict[str, Dataset]]] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> Dict[str, float]:
+        """
+        Run evaluation and returns metrics.
+        """
+        # handle multipe eval datasets
+        eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        if isinstance(eval_dataset, dict):
+            metrics = {}
+            for eval_dataset_name, _eval_dataset in eval_dataset.items():
+                dataset_metrics = self.evaluate(
+                    eval_dataset=_eval_dataset,
+                    ignore_keys=ignore_keys,
+                    metric_key_prefix=f"{metric_key_prefix}_{eval_dataset_name}",
+                )
+                metrics.update(dataset_metrics)
+            return metrics
+
+        # memory metrics - must set up as early as possible
+        self._memory_tracker.start()
+
+        eval_dataloader = self.get_eval_dataloader(eval_dataset)
+
+        start_time = time.time()
+
+        eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
+        output = eval_loop(
+            eval_dataloader,
+            description="Evaluation",
+            # No point gathering the predictions if there are no metrics, otherwise we defer to
+            # self.args.prediction_loss_only
+            prediction_loss_only=True if self.compute_metrics is None else None,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+
+        if self.args.do_sim_val or self.args.do_sim_test:
+            # TODO: separate the simulation from evaluation loop
+            if self.args.sim_steps is None or self.state.global_step % self.args.sim_steps == 0:
+                val14_1k_dataset = self.val14_1k_dataset
+                val14_1k_dataloader = self.get_eval_dataloader(val14_1k_dataset)
+                sim_output = eval_loop(
+                    val14_1k_dataloader,
+                    description='CL-Simulation Evaluation',
+                    prediction_loss_only=True if self.compute_metrics is None else None,
+                    ignore_keys=ignore_keys,
+                    metric_key_prefix=metric_key_prefix+'_CLS',
+                )
+                sim_output.metrics.pop(metric_key_prefix+'_CLS_loss')
+                output.metrics.update(sim_output.metrics)
+
+        total_batch_size = self.args.eval_batch_size * self.args.world_size
+        if f"{metric_key_prefix}_jit_compilation_time" in output.metrics:
+            start_time += output.metrics[f"{metric_key_prefix}_jit_compilation_time"]
+        output.metrics.update(
+            speed_metrics(
+                metric_key_prefix,
+                start_time,
+                num_samples=output.num_samples,
+                num_steps=math.ceil(output.num_samples / total_batch_size),
+            )
+        )
+
+        self.log(output.metrics)
+
+        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output.metrics)
+
+        self._memory_tracker.stop_and_update_metrics(output.metrics)
+
+        return output.metrics
+
     def prediction_step(
             self,
             model: nn.Module,
@@ -435,21 +585,22 @@ class PlanningTrainer(Trainer):
         if inputs is None:
             return None, None, None
         has_labels = False if len(self.label_names) == 0 else all(inputs.get(k) is not None for k in self.label_names)
-        return_loss = inputs.get("return_loss", None)
-        if return_loss is None:
-            return_loss = self.can_return_loss
         # loss_without_labels = True if len(self.label_names) == 0 and return_loss else False
         loss_without_labels = True
 
         inputs = self._prepare_inputs(inputs)
         if len(inputs) == 0:
             return None, None, None
-        if ignore_keys is None:
-            if hasattr(self.model, "config"):
-                ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
-            else:
-                ignore_keys = []
-                
+
+        # if val14, run closed loop simulation instead
+        if inputs['split'][0] == 'val14_1k':
+            overall_score_dic = self.do_closed_loop_simulation(inputs)
+            loss = torch.tensor(0, device=self.model.device)
+            logits_dict = overall_score_dic
+            labels = torch.zeros([len(inputs), 80, 4], device=self.model.device)
+            # return (None, logits_dict, None)
+            return (loss, logits_dict, labels)  # just to trigger compute metrics in the loop
+
         ignore_keys = ['past_key_values', 'loss_items']
         # labels may be popped when computing the loss (label smoothing for instance) so we grab them first.
         if has_labels or loss_without_labels:
@@ -459,23 +610,23 @@ class PlanningTrainer(Trainer):
         else:
             labels = None
 
+        # making predictions without autoregressive generation
         with torch.no_grad():
             if is_sagemaker_mp_enabled():
                 raise NotImplementedError('Not implemented yet, check source code of Transformers Trainer to adapt it.')
-            else:
-                if has_labels or loss_without_labels:
-                    with self.compute_loss_context_manager():
-                        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
-                    loss = loss.mean().detach()
-                    loss_items = outputs['loss_items'] if 'loss_items' in outputs else None
-                    if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"] + ["loss_items"])  # (logits, pred_dict)
-                    else:
-                        raise NotImplementedError
-                        # logits = outputs[1:]
+            if has_labels or loss_without_labels:
+                with self.compute_loss_context_manager():
+                    loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+                loss = loss.mean().detach()
+                loss_items = outputs['loss_items'] if 'loss_items' in outputs else None
+                if isinstance(outputs, dict):
+                    logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"] + ["loss_items"])  # (logits, pred_dict)
                 else:
-                    # # TODO: this needs to be fixed and made cleaner later.
                     raise NotImplementedError
+                    # logits = outputs[1:]
+            else:
+                # # TODO: this needs to be fixed and made cleaner later.
+                raise NotImplementedError
 
         pred_dict = outputs['pred_dict'] if 'pred_dict' in outputs else logits[-1]
 
@@ -483,8 +634,63 @@ class PlanningTrainer(Trainer):
         if len(logits) >= 1:
             logits = logits[0]
         logits = torch.as_tensor(logits)
+
+        # making prediction with autorergressive generation
         prediction_generation = self.model.generate(**inputs)
 
+        # making prediction with closed-loop stepping
+        if self.model.config.closed_loop_eval:
+            from transformer4planning.preprocess.nuplan_rasterize import static_coor_rasterize
+            assert logits.shape[0] == inputs['road_ids'].shape[0], '{}, {}'.format(logits.shape[0], inputs['road_ids'].shape[0])
+            def fetch_ith_sample(inputs, i):
+                sample = {}
+                for key in inputs.keys():
+                    try:
+                        sample[key] = inputs[key][i]
+                    except:
+                        print('Error when fetching key: ', key, inputs[key], len(inputs['road_ids']), i)
+                return sample
+            def move_np_to_torch(nparray, device, dtype):
+                return torch.tensor(nparray, device=device, dtype=dtype)
+            def list_of_sample_dic_to_batch(list_of_sample_dic):
+                batch_size = len(list_of_sample_dic)
+                batched_dic = {}
+                for each_key in list_of_sample_dic[0]:
+                    if isinstance(list_of_sample_dic[0][each_key], np.ndarray):
+                        shape = list_of_sample_dic[0][each_key].shape
+                        batched_data = np.zeros((batch_size, *shape))
+                        for i in range(batch_size):
+                            batched_data[i] = list_of_sample_dic[i][each_key]
+                        batched_dic[each_key] = batched_data
+                    elif each_key in ['aug_current']:
+                        if each_key not in batched_dic:
+                            batched_dic[each_key] = []
+                        batched_dic[each_key] = np.array([list_of_sample_dic[i][each_key] for i in range(batch_size)])
+                return batched_dic
+
+            new_samples_in_list = []
+            for i in range(inputs['road_ids'].shape[0]):
+                ith_sample = fetch_ith_sample(inputs, i)
+                new_sample = static_coor_rasterize(ith_sample, ith_sample['data_path'],
+                                                   previous_prediction_to_step=prediction_generation['traj_logits'][i].detach().cpu().numpy().copy(),
+                                                   **self.model.config.__dict__)
+                new_samples_in_list.append(new_sample)
+
+            new_sample_batch = list_of_sample_dic_to_batch(new_samples_in_list)
+            del new_samples_in_list
+            new_sample_tensor = {}
+            for each_key in new_sample_batch:
+                if isinstance(new_sample_batch[each_key], np.ndarray):
+                    new_sample_tensor[each_key] = move_np_to_torch(
+                        new_sample_batch[each_key], device=logits.device, dtype=logits.dtype)
+                else:
+                    new_sample_tensor[each_key] = new_sample_batch[each_key]
+            del new_sample_batch
+            prediction_generation_next_step = self.model.generate(**new_sample_tensor)
+            prediction_generation['next_step'] = prediction_generation_next_step['traj_logits']
+            prediction_generation['next_step_labels'] = new_sample_tensor['trajectory_label']
+
+        # padding if the batch size is not the same as the eval batch size
         if logits.shape[0] != self.args.per_device_eval_batch_size:
             # must top to the eval batch size, or will cause error and stuck the whole pipeline
             incorrect_batch_size = logits.shape[0]
@@ -496,6 +702,10 @@ class PlanningTrainer(Trainer):
                     for key in prediction_generation.keys():
                         prediction_gen[key] = torch.cat([prediction_generation[key], prediction_generation[key][0].unsqueeze(0)], dim=0)
                     prediction_generation = prediction_gen
+                    prediction_for = {}
+                    for key in pred_dict.keys():
+                        prediction_for[key] = torch.cat([pred_dict[key], pred_dict[key][0].unsqueeze(0)], dim=0)
+                    pred_dict = prediction_for
                     labels = torch.cat([labels, labels[0].unsqueeze(0)], dim=0)
             else:
                 logits = logits[:self.args.per_device_eval_batch_size]
@@ -503,6 +713,10 @@ class PlanningTrainer(Trainer):
                 for key in prediction_generation.keys():
                     prediction_gen[key] = prediction_generation[key][:self.args.per_device_eval_batch_size]
                 prediction_generation = prediction_gen
+                prediction_for = {}
+                for key in pred_dict.keys():
+                    prediction_for[key] = pred_dict[key][:self.args.per_device_eval_batch_size]
+                pred_dict = prediction_for
                 labels = labels[:self.args.per_device_eval_batch_size]
             # print(f'topping to batch size from {incorrect_batch_size} to {self.args.per_device_eval_batch_size}')
         
@@ -529,6 +743,7 @@ class PlanningTrainer(Trainer):
                 })
 
         return (loss, logits_dict, labels)
+
 
     def analyze(self, target_dataset: Dataset, result_saving_path: str, ignore_keys: Optional[List[str]] = None):
         """
@@ -565,7 +780,7 @@ class PlanningTrainer(Trainer):
         self.args.logging_dir = prev_logging_dir
 
     def do_closed_loop_simulation(self,
-                                  val1k_datasest,
+                                  inputs,
                                   metric_key_prefix: str = "CLS",):
         """
         Run closed loop simulation and returns the metrics.
@@ -581,7 +796,66 @@ class PlanningTrainer(Trainer):
             A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
             dictionary also contains the epoch number which comes from the training state.
         """
-        pass
+        from nuplan_simulation.run_simulation import build_simulation, build_simulation_in_batch
+        from nuplan_simulation.planner_utils import build_metrics_aggregators
+        from nuplan.planning.simulation.main_callback.metric_aggregator_callback import MetricAggregatorCallback
+        from nuplan.planning.simulation.main_callback.multi_main_callback import MultiMainCallback
+        from nuplan.planning.simulation.main_callback.metric_file_callback import MetricFileCallback
+        from nuplan.planning.simulation.main_callback.metric_summary_callback import MetricSummaryCallback
+
+        experiment_name = self.args.sim_test_type  # [open_loop_boxes, closed_loop_nonreactive_agents, closed_loop_reactive_agents]
+        job_name = 'STR_planner'
+        experiment_time = datetime.datetime.now()
+        experiment = os.path.join(experiment_name, job_name, str(experiment_time))
+        output_dir = os.path.join(self.args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}", f"{experiment}")
+        simulation_dir = "simulation"
+        metric_dir = "metrics"
+        aggregator_metric_dir = "aggregator_metric"
+
+        # initialize main aggregator
+        metric_aggregators = build_metrics_aggregators(experiment_name, output_dir, aggregator_metric_dir)
+        metric_save_path = f"{output_dir}/{metric_dir}"
+        metric_aggregator_callback = MetricAggregatorCallback(metric_save_path, metric_aggregators)
+        metric_file_callback = MetricFileCallback(metric_file_output_path=f"{output_dir}/{metric_dir}",
+                                                  scenario_metric_paths=[f"{output_dir}/{metric_dir}"],
+                                                  delete_scenario_metric_files=True)
+        metric_summary_callback = MetricSummaryCallback(metric_save_path=f"{output_dir}/{metric_dir}",
+                                                        metric_aggregator_save_path=f"{output_dir}/{aggregator_metric_dir}",
+                                                        summary_output_path=f"{output_dir}/summary",
+                                                        num_bins=20, pdf_file_name='summary.pdf')
+        main_callbacks = MultiMainCallback([metric_aggregator_callback, metric_file_callback, metric_summary_callback])
+        main_callbacks.on_run_simulation_start()
+
+        # build simulation folder
+        # build_simulation_experiment_folder(output_dir, simulation_dir, metric_dir, aggregator_metric_dir)
+        # set a timer
+        start_time = time.perf_counter()
+        scenarios = self.scenarios
+
+        # filter scenarios
+        scenario_ids_in_batch = inputs['scenario_id']
+        filtered_scenarios = [each for each in scenarios if each.token in scenario_ids_in_batch]
+
+        # begin testing
+        print('Running simulations...')
+
+        if not hasattr(self, 'all_road_dic'):
+            self.all_road_dic = {}
+        _, overall_score_dic, overall_score = build_simulation_in_batch(experiment_name, filtered_scenarios, output_dir, simulation_dir, metric_dir,
+                                                                        batch_size=self.args.eval_batch_size,
+                                                                        model=self.model,
+                                                                        all_road_dic=self.all_road_dic,
+                                                                        save_reports=False,
+                                                                        controller=self.args.sim_controller)
+        main_callbacks.on_run_simulation_end()
+        overall_score_dic['overall_score'] = overall_score
+        print('Simulation Done')
+        for each_key in overall_score_dic:
+            overall_score_dic[each_key] = torch.tensor(overall_score_dic[each_key], device=self.model.device)
+
+        print(f'\nTime all: {time.perf_counter() - start_time:.3f} s')
+        return overall_score_dic
+
 
 def save_raster(inputs, sample_index, file_index=0,
                 prediction_trajectory=None, path_to_save=None,
@@ -606,14 +880,16 @@ def save_raster(inputs, sample_index, file_index=0,
         # 21-24: traffic raster
         # 25-56: agent raster (32=8 (agent_types) * 4 (sample_frames_in_past))
         """
-        each_img = inputs[each_key][sample_index].cpu().numpy()
+        each_img = inputs[each_key][sample_index]
+        if isinstance(each_img, torch.Tensor):
+            each_img = each_img.cpu().numpy()
         goal = each_img[:, :, 0]
         road = each_img[:, :, :21]
         traffic_lights = each_img[:, :, 21:25]
         agent = each_img[:, :, 25:]
         # generate a color pallet of 20 in RGB space
         color_pallet = np.random.randint(0, 255, size=(21, 3)) * 0.5
-        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=np.float)
+        target_image = np.zeros([each_img.shape[0], each_img.shape[1], 3], dtype=float)
         image_shape = target_image.shape
 
         for i in range(21):
@@ -653,43 +929,54 @@ def save_raster(inputs, sample_index, file_index=0,
         if 'high' in each_key:
             scale = high_scale
         elif 'low' in each_key:
-            scale = low_scale
+            scale = 300
+            # scale = low_scale
         # draw context actions, and trajectory label
-        # for each_traj_key in ['context_actions', 'trajectory_label']:
-        #     pts = inputs[each_traj_key][sample_index].cpu().numpy()
-        #     for i in range(pts.shape[0]):
-        #         x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
-        #         y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
-        #         if x < target_image.shape[0] and y < target_image.shape[1]:
-        #             if 'actions' in each_traj_key:
-        #                 target_image[x, y, :] = [255, 0, 0]
-        #             elif 'label' in each_traj_key:
-        #                 target_image[x, y, :] = [0, 255, 0]
+        for each_traj_key in ['context_actions', 'trajectory_label']:
+            if each_traj_key not in inputs:
+                continue
+            if isinstance(inputs[each_traj_key], torch.Tensor):
+                pts = inputs[each_traj_key][sample_index].cpu().numpy()
+            else:
+                pts = inputs[each_traj_key][sample_index]
+            for i in range(pts.shape[0]):
+                x = int(pts[i, 0] * scale) + target_image.shape[0] // 2
+                y = int(pts[i, 1] * scale) + target_image.shape[1] // 2
+                if 0 < x < target_image.shape[0] and 0 < y < target_image.shape[1]:
+                    if 'actions' in each_traj_key:
+                        target_image[x, y, :] = [255, 0, 255]
+                    elif 'label' in each_traj_key:
+                        target_image[x, y, :] = [255, 255, 0]
 
-        tray_point_size = int(0.75 * scale * 4 / 7)
-        key_point_size = int(3 * scale * 4 / 7)
+        tray_point_size = max(2, int(0.75 * scale * 4 / 7 / 20))
+        key_point_size = max(2, int(3 * scale * 4 / 7))
         # draw prediction trajectory
         if prediction_trajectory is not None:
             for i in range(prediction_trajectory.shape[0]):
                 x = int(prediction_trajectory[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_trajectory[i, 1] * scale) + target_image.shape[1] // 2
-                if x < target_image.shape[0] and y < target_image.shape[1]:
-                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, 0] += 200
+                if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:
+                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, 1:] += 200
+
+            x = int(0 * scale) + target_image.shape[0] // 2
+            y = int(0 * scale) + target_image.shape[1] // 2
+            if 0 < x < target_image.shape[0] and 0 < y < target_image.shape[1]:
+                target_image[x - tray_point_size:x + tray_point_size, y - tray_point_size:y + tray_point_size, 2] += 200
 
         # draw prediction trajectory by generation
         if prediction_trajectory_by_gen is not None:
             for i in range(prediction_trajectory_by_gen.shape[0]):
                 x = int(prediction_trajectory_by_gen[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_trajectory_by_gen[i, 1] * scale) + target_image.shape[1] // 2
-                if x < target_image.shape[0] and y < target_image.shape[1]:
-                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, :] += 100
+                if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:
+                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, :2] += 100
 
         # draw key points
         if prediction_key_point is not None:
             for i in range(prediction_key_point.shape[0]):
                 x = int(prediction_key_point[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_key_point[i, 1] * scale) + target_image.shape[1] // 2
-                if x < target_image.shape[0] and y < target_image.shape[1]:
+                if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:
                     target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 1] += 200
 
         # draw prediction key points during generation
@@ -697,7 +984,7 @@ def save_raster(inputs, sample_index, file_index=0,
             for i in range(prediction_key_point_by_gen.shape[0]):
                 x = int(prediction_key_point_by_gen[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_key_point_by_gen[i, 1] * scale) + target_image.shape[1] // 2
-                if x < target_image.shape[0] and y < target_image.shape[1]:
+                if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:
                     target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 2] += 200
 
         target_image = np.clip(target_image, 0, 255)
@@ -710,10 +997,10 @@ def save_raster(inputs, sample_index, file_index=0,
             #     caption=f"{file_index}-{each_key}"
             # )
             # self.log({"pred examples": images})
-            cv2.imwrite(os.path.join(path_to_save, 'test' + '_' + str(file_index) + '_' + str(each_key) + '.png'), image_to_save[each_key])
+            cv2.imwrite(os.path.join(path_to_save, 'test' + '_' + str(file_index) + '_' + str(sample_index) + '_' + str(each_key) + '.png'), image_to_save[each_key])
     else:
         return image_to_save
 
     print('length of action and labels: ',
-          inputs['context_actions'][sample_index].shape, inputs['trajectory_label'][sample_index].shape)
+          inputs['context_actions'][sample_index].shape)
     print('debug images saved to: ', path_to_save, file_index)

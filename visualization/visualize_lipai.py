@@ -24,18 +24,6 @@ iframe {
 </style>
 """
 
-def parse_args():
-    parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument('-f', '--saved_dataset_folder', help='Dataset Directory', required=True)
-    parser.add_argument('--task', help='nuplan or waymo', default='nuplan')
-    parser.add_argument('--split', help='train, val or test', default='val')
-    parser.add_argument('--agent_type', help='agent type filer for waymo', default='all')
-    parser.add_argument('-c', '--model_checkpoint_path', help='path of the model checkpoint', default=None)
-    parser.add_argument('-l', '--training_log_path', help='path of the log', default=None)
-    parser.add_argument('-m', '--mode', help='choose from {scenario}, {file}', default='scenario')
-    return parser.parse_args()
-
-
 class LoadedModelArguments(object):
     def __init__(self, my_dict):
         for key in my_dict:
@@ -49,30 +37,46 @@ def np_to_tensor(dic):
             dic[key] = torch.tensor(dic[key]).unsqueeze(0)
     return dic
 
+def nested_numpy_to_list_for_json(dic):
+    """Convert numpy array to list for json dump. Streamlit use json to communicate, so this is compulsory."""
+    for each_key in dic:
+        if isinstance(dic[each_key], dict):
+            nested_numpy_to_list_for_json(dic[each_key])
+        elif isinstance(dic[each_key], list):
+            for each_obj in dic[each_key]:
+                if isinstance(each_obj, dict):
+                    nested_numpy_to_list_for_json(each_obj)
+                elif isinstance(each_obj, np.ndarray):
+                    dic[each_key] = dic[each_key].tolist()
+        elif isinstance(dic[each_key], np.ndarray):
+            dic[each_key] = dic[each_key].tolist()
+    return dic
+
+def parse_args():
+    parser = argparse.ArgumentParser('Parse configuration file')
+    parser.add_argument('-f', '--saved_dataset_folder', help='Dataset Directory', required=True)
+    parser.add_argument('--split', help='train, val or test', default='val')
+    parser.add_argument('--agent_type', help='agent type filer for waymo', default='all')
+    parser.add_argument('-c', '--model_checkpoint_path', help='path of the model checkpoint', default=None)
+    parser.add_argument('-l', '--training_log_path', help='path of the log', default=None)
+    parser.add_argument('-m', '--mode', help='choose from {scenario}, {file}', default='scenario')
+    return parser.parse_args()
+
+
 sys.path.append('../')
 args = parse_args()
 disable_caching()
 # loop all datasets
 assert os.path.isdir(args.saved_dataset_folder), "Dataset folder {} does not exist".format(args.saved_dataset_folder)
-assert args.task in ["nuplan", "waymo"], "Task must be either nuplan or waymo"
 print("Loading full set of datasets from {}".format(args.saved_dataset_folder))
 index_root = os.path.join(args.saved_dataset_folder, 'index')
 root_folders = os.listdir(index_root)
-
-map_name_dic = {
-    'us-pa-pittsburgh-hazelwood': 'Pittsburgh',
-    'us-nv-las-vegas-strip': 'Las Vegas',
-    'us-ma-boston': 'Boston',
-    'sg-one-north': 'Singapore',
-}
 
 # Set basic page config and style
 st.set_page_config(layout="wide")
 st.markdown(css, unsafe_allow_html=True)
 
 # initialization of the python session cache data
-if 'all_map_dic' not in st.session_state:
-    st.session_state.all_map_dic = {}
 if 'road_dic' not in st.session_state:
     st.session_state.road_dic = {}
 if 'agent_dic' not in st.session_state:
@@ -102,21 +106,6 @@ if 'model' not in st.session_state:
     st.session_state.model = None
 
 
-def nested_numpy_to_list_for_json(dic):
-    """Convert numpy array to list for json dump. Streamlit use json to communicate, so this is compulsory."""
-    for each_key in dic:
-        if isinstance(dic[each_key], dict):
-            nested_numpy_to_list_for_json(dic[each_key])
-        elif isinstance(dic[each_key], list):
-            for each_obj in dic[each_key]:
-                if isinstance(each_obj, dict):
-                    nested_numpy_to_list_for_json(each_obj)
-                elif isinstance(each_obj, np.ndarray):
-                    dic[each_key] = dic[each_key].tolist()
-        elif isinstance(dic[each_key], np.ndarray):
-            dic[each_key] = dic[each_key].tolist()
-    return dic
-
 @st.cache_data
 def load_data(root, split='train', dataset_scale=1, agent_type="all", select=False):
     """Load data (the indices) from dataset folder."""
@@ -128,28 +117,22 @@ def load_data(root, split='train', dataset_scale=1, agent_type="all", select=Fal
 def load_dictionary_for_file(root_path, split, _sample):
     print('Processing Data Dic')
     file_name = _sample['file_name']
-    map = _sample['map']
-    if map not in st.session_state.all_map_dic:
-        if os.path.exists(os.path.join(root_path, "map", f"{map}.pkl")):
-            with open(os.path.join(root_path, "map", f"{map}.pkl"), "rb") as f:
-                road_dic = pickle.load(f)
-            st.session_state.all_map_dic[map] = road_dic
-        else:
-            print(f"Error: cannot load map {map} from {root_path}")
-            return None, None
-    else:
-        road_dic = st.session_state.all_map_dic[map]
-    if split == 'val':
-        map = 'all_cities'
+    scenario_idx = _sample['frame_id']
     if file_name is not None:
-        pickle_path = os.path.join(root_path, f"{split}", f"{map}", f"{file_name}.pkl")
+        pickle_path = os.path.join(root_path, f"{split}", f"{file_name}.pkl")
         if os.path.exists(pickle_path):
             with open(pickle_path, "rb") as f:
-                data_dic = pickle.load(f)
+                data_dic = pickle.load(f)[int(scenario_idx)]
                 if 'agent_dic' in data_dic:
                     agent_dic = data_dic["agent_dic"]
                 elif 'agent' in data_dic:
                     agent_dic = data_dic['agent']
+                else:
+                    raise ValueError(f'cannot find agent_dic or agent in pickle file, keys: {data_dic.keys()}')
+                if 'road_dic' in data_dic:
+                    road_dic = data_dic["road_dic"]
+                elif 'road' in data_dic:
+                    road_dic = data_dic['road']
                 else:
                     raise ValueError(f'cannot find agent_dic or agent in pickle file, keys: {data_dic.keys()}')
                 agent_dic = add_intention_to_agent_dic(agent_dic)
@@ -163,13 +146,27 @@ def load_dictionary_for_file(root_path, split, _sample):
     st.session_state.road_dic = nested_numpy_to_list_for_json(copy.deepcopy(road_dic))
     st.session_state.agent_dic = nested_numpy_to_list_for_json(copy.deepcopy(agent_dic))
     # init by default scenario
-    st.session_state.route_ids = _sample['route_ids'].tolist()
+    print('counting road elements: ', len(list(road_dic.keys())), len(list(agent_dic.keys())))
+
+    st.session_state.route_ids = data_dic['route_ids']
+
+    for each_key in data_dic['route_ids']:
+        if each_key in st.session_state.road_dic:
+            print('have', each_key, st.session_state.road_dic[each_key]['type'])
+
     st.session_state.data['road_dic'] = st.session_state.road_dic
     st.session_state.data['agent_dic'] = st.session_state.agent_dic
+
+
+    # for each_key in st.session_state.agent_dic:
+    #     if st.session_state.agent_dic[each_key]['starting_frame'] != 0:
+    #         print('test: ', st.session_state.agent_dic[each_key]['starting_frame'])
+
     st.session_state.data['route_ids'] = st.session_state.route_ids
     st.session_state.data['current_file_name'] = file_name
     st.session_state.data['frame_index'] = int(_sample['frame_id'])  # in 20hz
     st.session_state.data['current_scenario_id'] = str(_sample['scenario_id'])
+
     print('Data Dic Process Done', list(st.session_state.keys()), list(agent_dic['ego'].keys()), type(agent_dic['ego']['pose']))
     return agent_dic, road_dic
 
@@ -185,9 +182,7 @@ def turn_file_name_to_readable_string(dictionary):
     for file_name in dictionary:
         each_dic_list = dictionary[file_name]
         map_name = each_dic_list[0]['map']
-        if map_name not in map_name_dic:
-            print('Map name not found: ', map_name)
-        list_to_return.append(file_name.split('_')[0] + ' - ' + map_name_dic[map_name])
+        list_to_return.append(file_name)
     return list_to_return
 
 def ego_to_global(poses, ego_pose, y_reverse=1):
@@ -284,9 +279,7 @@ if not st.session_state.scenario_ids_by_file:
                     continue
             if file_name not in st.session_state.scenario_ids_by_file:
                 st.session_state.scenario_ids_by_file[file_name] = []
-            # generate a scenario_id if not exist
-            if 'scenario_id' not in each_sample:
-                each_sample['scenario_id'] = f"{file_name}_{each_sample['frame_id']}"
+            each_sample['scenario_id'] = f"{file_name}_{each_sample['frame_id']}"
 
             st.session_state.scenario_ids_by_file[file_name].append({
                 'scenario_id': each_sample['scenario_id'],
@@ -344,9 +337,9 @@ if make_prediction_1frame or make_prediction_15s or path_gen_15s or make_predict
         with open(config_path) as f:
             model_args = json.load(f)
         print('loaded model args: ', model_args)
-        model_args = LoadedModelArguments(model_args)
 
         if not path_gen_15s:
+            model_args = LoadedModelArguments(model_args)
             model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
             model_args.model_pretrain_name_or_path = args.model_checkpoint_path
             if st.session_state.model is None:
@@ -384,8 +377,7 @@ if make_prediction_1frame or make_prediction_15s or path_gen_15s or make_predict
                                                   all_maps_dic={map_name: road_dic},
                                                   use_proposal=True,
                                                   selected_exponential_past=model_args.selected_exponential_past,
-                                                  use_speed=model_args.use_speed,
-                                                  use_cv_planner=True)  # WARNING: need to be updated if new model args are used
+                                                  use_speed=model_args.use_speed,)  # WARNING: need to be updated if new model args are used
             print('data prepared')
             prepared_data = np_to_tensor(prepared_data)
             prepared_data.update({'road_dic': road_dic,
@@ -395,24 +387,22 @@ if make_prediction_1frame or make_prediction_15s or path_gen_15s or make_predict
             if 'key_points_logits' not in st.session_state.data:
                 st.session_state.data['key_points_logits'] = {}
             if path_gen_15s:
-                # from transformer4planning.rule_based_planner.nuplan_path_base import MultiPathFinder
-                # from transformer4planning.utils import nuplan_utils as util
-                # path_finder = MultiPathFinder()
-                # v_per_step = util.euclidean_distance(agent_dic['ego']['pose'][current_frame // 2][:2],
-                #                                      agent_dic['ego']['pose'][current_frame // 2 - 1][:2])
-                # planning_results = path_finder.plan_marginal_trajectories(
-                #     current_state=current_data,
-                #     road_dic=road_dic,
-                #     my_current_pose=agent_dic['ego']['pose'][current_frame // 2],
-                #     my_current_v_per_step=v_per_step
-                # )
-                #
-                # interpolators, marginal_trajectories, routes, key_points = planning_results
+                from transformer4planning.path_finder.nuplan_path_base import MultiPathFinder
+                from transformer4planning.utils import nuplan_utils as util
+                path_finder = MultiPathFinder()
+                v_per_step = util.euclidean_distance(agent_dic['ego']['pose'][current_frame // 2][:2],
+                                                     agent_dic['ego']['pose'][current_frame // 2 - 1][:2])
+                planning_results = path_finder.plan_marginal_trajectories(
+                    current_state=current_data,
+                    road_dic=road_dic,
+                    my_current_pose=agent_dic['ego']['pose'][current_frame // 2],
+                    my_current_v_per_step=v_per_step
+                )
 
-                marginal_trajectories = np.array(prepared_data['cv_planning'])
-
-                print('inspect: ', marginal_trajectories[0].shape)
+                interpolators, marginal_trajectories, routes, key_points = planning_results
+                print('inspect: ', marginal_trajectories, key_points)
                 st.session_state.data['prediction_generation'][current_frame // 2] = marginal_trajectories[0].tolist()
+                st.session_state.data['key_points_logits'][current_frame // 2] = np.array(key_points).tolist()
             else:
                 with torch.no_grad():
                     prediction_generation = model.generate(**prepared_data)

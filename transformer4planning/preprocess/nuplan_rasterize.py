@@ -6,8 +6,10 @@ import shapely.geometry
 import os
 import torch
 from functools import partial
+
 from torch.utils.data._utils.collate import default_collate
-from transformer4planning.utils.nuplan_utils import generate_contour_pts, normalize_angle
+from transformer4planning.utils.nuplan_utils import generate_contour_pts, normalize_angle, change_coordination
+from transformer4planning.utils import nuplan_utils
 from transformer4planning.utils.common_utils import save_raster
 
 def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
@@ -71,13 +73,16 @@ def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **
         result[key] = default_collate(list_of_dvalues)
     return result
 
+
 def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
                           frame_rate=20, past_seconds=2, future_seconds=8,
                           high_res_scale=4, low_res_scale=0.77,
                           road_types=20, agent_types=8, traffic_types=4,
                           past_sample_interval=2, future_sample_interval=2,
                           debug_raster_path=None, all_maps_dic=None, agent_dic=None,
-                          frequency_change_rate=2, **kwargs):
+                          frequency_change_rate=2,
+                          previous_prediction_to_step=None,
+                          **kwargs):
     """
     WARNING: frame_rate has been change to 10 as default to generate new dataset pickles, this is automatically processed by hard-coded logits
     :param sample: a dictionary containing the following keys:
@@ -99,6 +104,11 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     split = sample["split"]
     frame_id = sample["frame_id"]  # current frame of this sample
 
+    if split == 'val14_1k':
+        split = 'val'
+    elif split == 'test_hard14_index':
+        split = 'test'
+
     if "road_ids" not in sample.keys():
         assert False
     else:
@@ -106,17 +116,18 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         if not isinstance(road_ids, list):
             road_ids = road_ids.tolist()
 
-    if "agent_ids" not in sample.keys():
-        assert False
+    if "traffic_ids" not in sample.keys():
+        traffic_light_ids = []
     else:
-        agent_ids = sample["agent_ids"]  # list of strings
-
-    traffic_light_ids = sample["traffic_ids"]
-    if not isinstance(traffic_light_ids, list):
-        traffic_light_ids = traffic_light_ids.tolist()
-    traffic_light_states = sample["traffic_status"].tolist()
-    if not isinstance(traffic_light_states, list):
-        traffic_light_states = traffic_light_states.tolist()
+        traffic_light_ids = sample["traffic_ids"]
+        if not isinstance(traffic_light_ids, list):
+            traffic_light_ids = traffic_light_ids.tolist()
+    if "traffic_status" not in sample.keys():
+        traffic_light_states = []
+    else:
+        traffic_light_states = sample["traffic_status"].tolist()
+        if not isinstance(traffic_light_states, list):
+            traffic_light_states = traffic_light_states.tolist()
     route_ids = sample["route_ids"].tolist()
     if not isinstance(route_ids, list):
         route_ids = route_ids.tolist()
@@ -151,9 +162,9 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     # load agent and traffic dictionaries
     # WARNING: load some pickles can be extremely slow costs about 500-1000 seconds for las vegas map
-    if agent_dic is not None:
-        pass
-    elif filename is not None:
+    # if agent_dic is not None:
+    #     pass
+    if filename is not None:
         path_per_city = os.path.join(data_path, f"{split}", f"{map}", f"{filename}.pkl")
         path_all_city = os.path.join(data_path, f"{split}", f"all_cities", f"{filename}.pkl")
         if os.path.exists(path_per_city):
@@ -183,21 +194,89 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         assert False, 'either filename or agent_dic should be provided for online process'
 
     augment_frame_id = kwargs.get('augment_index', 0)
-    if augment_frame_id != 0 and 'train' in split:
+    if previous_prediction_to_step is not None:
+        if augment_frame_id != 0 and 'train' in split:
+            frame_id = sample['old_frame_id']  # keep frame id as augmented as previous step
+        if kwargs.get('finetuning_with_stepping_random_steps', False):
+            aug_frame_offset = random.randint(0, 20)
+        elif kwargs.get('finetuning_with_stepping_minimal_step', False):
+            aug_frame_offset = 2
+        else:
+            aug_frame_offset = 20
+        frame_id += aug_frame_offset
+    elif augment_frame_id != 0 and 'train' in split:
         frame_id += random.randint(-augment_frame_id - 1, augment_frame_id)
         frame_id = max(frame_id, past_seconds * frame_rate)
 
     # if new version of data, using relative frame_id
     relative_frame_id = True if 'starting_frame' in agent_dic['ego'] else False
 
+    if previous_prediction_to_step is not None or ("train" in split and kwargs.get('augment_current_pose_rate', 0) > 0):
+        # copy agent_dic before operating to it
+        ego_pose_agent_dic = agent_dic['ego']['pose'].copy()
+    else:
+        ego_pose_agent_dic = agent_dic['ego']['pose']
+
+    if previous_prediction_to_step is not None:
+        # WIP, about to give up in next submit
+        # updating agent_dic with previous prediction
+        # 1. turn prediction to global frame
+        assert sample['old_file_name'] == sample['file_name'], f'old file name {sample["old_file_name"]} is not same as current file name {sample["file_name"]}'
+        # assert abs(sample['old_frame_id'] - sample["frame_id"] + 20) == 0, f'old frame id {sample["old_frame_id"]} is not same as current frame id {frame_id}'
+        assert previous_prediction_to_step.shape[
+                   0] == 80, f'previous_prediction_to_step shape {previous_prediction_to_step.shape}'
+        if isinstance(previous_prediction_to_step, torch.Tensor):
+            previous_prediction_to_step = previous_prediction_to_step.cpu().detach().numpy()
+        global_previous_prediction_to_step = previous_prediction_to_step.copy()
+        # label y was reversed for y_inverse
+        global_previous_prediction_to_step[:, 1] *= y_inverse
+        assert relative_frame_id, 'previous prediction should be used with relative frame id'
+        agent_starting_frame = agent_dic['ego']['starting_frame']
+        previous_ego_pose_origin = ego_pose_agent_dic[
+                                   (frame_id - agent_starting_frame - 20) // frequency_change_rate,
+                                   :].copy()
+        global_previous_prediction_to_step[:11, :2] = nuplan_utils.rotate_array(
+            origin=np.array([0, 0]),
+            points=global_previous_prediction_to_step[:11, :2],
+            angle=previous_ego_pose_origin[-1]
+        )
+        global_previous_prediction_to_step += previous_ego_pose_origin
+        assert - np.pi <= previous_ego_pose_origin[-1] <= np.pi, f'{previous_ego_pose_origin[-1]}'
+        prediction_offset = global_previous_prediction_to_step[10, :] - ego_pose_agent_dic[
+                                   (frame_id - agent_starting_frame) // frequency_change_rate,
+                                   :].copy()
+        prediction_offset[-1] = nuplan_utils.normalize_angle(prediction_offset[-1])
+
+        # 2. update agent_dic with previous prediction
+        ego_pose_agent_dic[(frame_id - agent_starting_frame) // frequency_change_rate - aug_frame_offset // frequency_change_rate:
+        (frame_id - agent_starting_frame) // frequency_change_rate, :] = global_previous_prediction_to_step[:aug_frame_offset // frequency_change_rate, :]
+
+        if kwargs.get('finetuning_with_stepping', False):
+            # updating future poses for labels after stepping
+            # Note this will not work if we predict without involving dynamic models, the trajectory will fly everywhere
+            frames_left_in_prediction = 80 - aug_frame_offset // frequency_change_rate
+            decay = np.ones((frames_left_in_prediction, 4)) * np.linspace(1, 0, frames_left_in_prediction).reshape(-1, 1)
+            ego_pose_agent_dic[(frame_id - agent_starting_frame) // frequency_change_rate: (frame_id - agent_starting_frame) // frequency_change_rate + frames_left_in_prediction, :] += decay * prediction_offset[:]
+            # for i in range(70):
+            #     target_frame = (frame_id - agent_starting_frame) // frequency_change_rate + i
+            #     if i > 0:
+            #         scale = 1 - 70.0 / i
+            #     else:
+            #         scale = 1
+            #     ego_pose_agent_dic[target_frame, :2] += prediction_offset[:2] * scale
+            #     ego_pose_agent_dic[target_frame, -1] += prediction_offset[-1] * scale
+            #     ego_pose_agent_dic[target_frame, -1] = nuplan_utils.normalize_angle(ego_pose_agent_dic[target_frame, -1])
+
     # calculate frames to sample
     scenario_start_frame = frame_id - past_seconds * frame_rate
     scenario_end_frame = frame_id + future_seconds * frame_rate
     # for example,
-    if kwargs.get('selected_exponential_past', False):
+    if kwargs.get('selected_exponential_past', True):
         # 2s, 1s, 0.5s, 0s
         # sample_frames_in_past = [scenario_start_frame + 0, scenario_start_frame + 20, scenario_start_frame + 30]
         sample_frames_in_past = [scenario_start_frame + 0, scenario_start_frame + 20, scenario_start_frame + 30, frame_id]
+    elif kwargs.get('current_frame_only', False):
+        sample_frames_in_past = [frame_id]
     else:
         # [10, 11, ...., 10+(2+8)*20=210], past_interval=2, future_interval=2, current_frame=50
         # sample_frames_in_past = [10, 12, 14, ..., 48], number=(50-10)/2=20
@@ -212,16 +291,70 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     aug_current = 0
     aug_rate = kwargs.get('augment_current_pose_rate', 0)
     if "train" in split and aug_rate > 0 and random.random() < aug_rate:
-        aug_x = 1
-        aug_y = 1
-        aug_yaw = 0.1
-        agent_dic["ego"]["pose"][:frame_id//frequency_change_rate, 0] += (random.random() * 2 - 1) * aug_x
-        agent_dic["ego"]["pose"][:frame_id//frequency_change_rate, 1] += (random.random() * 2 - 1) * aug_y
-        agent_dic["ego"]["pose"][frame_id//frequency_change_rate, -1] += (random.random() * 2 * np.pi - np.pi) * aug_yaw
+        speed_per_step = nuplan_utils.euclidean_distance(
+            ego_pose_agent_dic[frame_id // frequency_change_rate, :2],
+            ego_pose_agent_dic[frame_id // frequency_change_rate - 5, :2]) / 5.0
+        aug_x = 0.3 * speed_per_step
+        aug_y = 0.3 * speed_per_step
+        aug_yaw = 0.05  # 360 * 0.05 = 18 degree
+        dx = (random.random() * 2 - 1) * aug_x
+        dy = (random.random() * 2 - 1) * aug_y
+        dyaw = (random.random() * 2 * np.pi - np.pi) * aug_yaw
+        ego_pose_agent_dic[frame_id//frequency_change_rate, 0] += dx
+        ego_pose_agent_dic[frame_id//frequency_change_rate, 1] += dy
+        ego_pose_agent_dic[frame_id//frequency_change_rate, -1] += dyaw
         aug_current = 1
+        # linearly project the past poses
+        # generate a numpy array decaying from 1 to 0 with shape of 80, 4
+        decay = np.ones((80, 4)) * np.linspace(1, 0, 80).reshape(-1, 1)
+        decay[:, 0] *= dx
+        decay[:, 1] *= dy
+        decay[:, 2] *= 0
+        decay[:, 3] *= dyaw
+        ego_pose_agent_dic[frame_id // frequency_change_rate: frame_id // frequency_change_rate + 80, :] += decay
+
+        # generate a numpy array raising from 0 to 1 with the shape of 20, 4
+        raising = np.ones((20, 4)) * np.linspace(0, 1, 20).reshape(-1, 1)
+        raising[:, 0] *= dx
+        raising[:, 1] *= dy
+        raising[:, 2] *= 0
+        raising[:, 3] *= dyaw
+        ego_pose_agent_dic[frame_id // frequency_change_rate - 21: frame_id // frequency_change_rate - 1, :] += raising
 
     # initialize rasters
-    origin_ego_pose = agent_dic["ego"]["pose"][frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
+    origin_ego_pose = ego_pose_agent_dic[frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
+
+    if "agent_ids" not in sample.keys():
+        if 'agent_ids_index' in sample.keys():
+            agent_ids = []
+            all_agent_ids = list(agent_dic.keys())
+            for each_agent_index in sample['agent_ids_index']:
+                if each_agent_index == -1:
+                    continue
+                if each_agent_index > len(all_agent_ids):
+                    print(f'Warning: agent_ids_index is larger than agent_dic {each_agent_index} {len(all_agent_ids)}')
+                    continue
+                agent_ids.append(all_agent_ids[each_agent_index])
+            assert 'ego' in agent_ids, 'ego should be in agent_ids'
+        else:
+            assert False
+        # print('Warning: agent_ids not in sample keys')
+        # agent_ids = []
+        # max_dis = 300
+        # for each_agent in agent_dic:
+        #     starting_frame = agent_dic[each_agent]['starting_frame']
+        #     target_frame = frame_id - starting_frame
+        #     if target_frame < 0 or frame_id >= agent_dic[each_agent]['ending_frame']:
+        #         continue
+        #     pose = agent_dic[each_agent]['pose'][target_frame//frequency_change_rate, :].copy()
+        #     if pose[0] < 0 and pose[1] < 0:
+        #         continue
+        #     pose -= origin_ego_pose
+        #     if abs(pose[0]) > max_dis or abs(pose[1]) > max_dis:
+        #         continue
+        #     agent_ids.append(each_agent)
+    else:
+        agent_ids = sample["agent_ids"]  # list of strings
 
     # num_frame = torch.div(frame_id, frequency_change_rate, rounding_mode='floor')
     # origin_ego_pose = agent_dic["ego"]["pose"][num_frame].copy()  # hard-coded resample rate 2
@@ -365,10 +498,10 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     cos_, sin_ = math.cos(-origin_ego_pose[3]), math.sin(-origin_ego_pose[3])
 
     for _, agent_id in enumerate(agent_ids):
-        if agent_id == "null":
+        if agent_id == "null" or agent_id == 'ego':
             continue
         if agent_id not in list(agent_dic.keys()):
-            print('unknown agent id', agent_id)
+            print('unknown agent id', agent_id, type(agent_id))
             continue
         for i, sample_frame in enumerate(sample_frames_in_past):
             if relative_frame_id:
@@ -412,13 +545,13 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # context action computation
     cos_, sin_ = math.cos(-origin_ego_pose[3]), math.sin(-origin_ego_pose[3])
     context_actions = list()
-    ego_poses = agent_dic["ego"]["pose"] - origin_ego_pose
+    ego_poses = ego_pose_agent_dic - origin_ego_pose
     rotated_poses = np.array([ego_poses[:, 0] * cos_ - ego_poses[:, 1] * sin_,
                               ego_poses[:, 0] * sin_ + ego_poses[:, 1] * cos_,
                               np.zeros(ego_poses.shape[0]), ego_poses[:, -1]]).transpose((1, 0))
     rotated_poses[:, 1] *= y_inverse
 
-    if kwargs.get('use_speed', False):
+    if kwargs.get('use_speed', True):
         # speed, old data dic does not have speed key
         speed = agent_dic['ego']['speed']  # v, a, angular_v
         if speed.shape[0] == ego_poses.shape[0] * 2:
@@ -438,13 +571,39 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # check if samples in the future is beyond agent_dic['ego']['pose'] length
     if relative_frame_id:
         sample_frames_in_future = (np.array(sample_frames_in_future, dtype=int) - agent_dic['ego']['starting_frame']) // frequency_change_rate
-    if sample_frames_in_future[-1] >= agent_dic['ego']['pose'].shape[0]:
+    if sample_frames_in_future[-1] >= ego_pose_agent_dic.shape[0]:
         # print('sample index beyond length of agent_dic: ', sample_frames_in_future[-1], agent_dic['ego']['pose'].shape[0])
         return None
 
-    trajectory_label = agent_dic['ego']['pose'][sample_frames_in_future, :].copy()
+    result_to_return = dict()
 
-    trajectory_label -= origin_ego_pose
+    trajectory_label = ego_pose_agent_dic[sample_frames_in_future, :].copy()
+
+    # get a planning trajectory from a CBC constant velocity planner
+    # if kwargs.get('use_cbc_planner', False):
+    #     from transformer4planning.rule_based_planner.nuplan_base_planner import MultiPathPlanner
+    #     planner = MultiPathPlanner(road_dic=road_dic)
+    #     planning_result = planner.plan_marginal_trajectories(
+    #         my_current_pose=origin_ego_pose,
+    #         my_current_v_mph=agent_dic['ego']['speed'][frame_id//frequency_change_rate, 0],
+    #         route_in_blocks=sample['route_ids'].numpy().tolist(),
+    #     )
+    #     _, marginal_trajectories, _ = planning_result
+    #     result_to_return['cbc_planning'] = marginal_trajectories
+    if kwargs.get('use_cv_planner', False):
+        from transformer4planning.rule_based_planner.nuplan_base_planner import MultiPathPlanner
+        planner = MultiPathPlanner(road_dic=road_dic)
+        planning_result = planner.plan_cv_trajectory(
+            my_current_pose=origin_ego_pose,
+            my_prev_step_pose=ego_pose_agent_dic[frame_id//frequency_change_rate - frequency_change_rate, :].copy()
+        )
+        result_to_return['cv_planning'] = planning_result
+        if kwargs.get('use_cv_planner_stage1', False):
+            trajectory_label -= origin_ego_pose
+        else:
+            trajectory_label -= result_to_return['cv_planning']
+    else:
+        trajectory_label -= origin_ego_pose
     traj_x = trajectory_label[:, 0].copy()
     traj_y = trajectory_label[:, 1].copy()
     trajectory_label[:, 0] = traj_x * cos_ - traj_y * sin_
@@ -454,7 +613,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
     rasters_low_res = cv2.merge(rasters_low_res_channels).astype(bool)
 
-    result_to_return = dict()
+
     result_to_return["high_res_raster"] = np.array(rasters_high_res, dtype=bool)
     result_to_return["low_res_raster"] = np.array(rasters_low_res, dtype=bool)
     result_to_return["context_actions"] = np.array(context_actions, dtype=np.float32)
@@ -517,7 +676,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             result_to_return['camera_images'] = np.array(images, dtype=np.float32)
             del images
 
-    if debug_raster_path is not None:
+    if debug_raster_path is not None and previous_prediction_to_step is not None:
+    # if debug_raster_path is not None:
         # check if path not exist, create
         if not os.path.exists(debug_raster_path):
             os.makedirs(debug_raster_path)
@@ -544,12 +704,6 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         result_to_return["scenario_id"] = sample['scenario_id']
     if 't0_frame_id' in sample:
         result_to_return["t0_frame_id"] = sample['t0_frame_id']
-    if 'halfs_intention' in sample and kwargs.get('use_proposal', False):
-        if sample['halfs_intention'].isnan():
-            if sample['split'] in ['train', 'val']:
-                print('No proposal loaded at preprocess: ', sample['map'], sample['split'], sample['file_name'], sample['scenario_type'])
-            return None
-        result_to_return["halfs_intention"] = sample['halfs_intention']
     if 'intentions' in sample and kwargs.get('use_proposal', False):
         result_to_return["intentions"] = sample['intentions']
     # try:
@@ -565,11 +719,54 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["route_ids"] = sample['route_ids']
     result_to_return["aug_current"] = aug_current
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)
+    if kwargs.get('closed_loop_eval', False) or kwargs.get('finetuning_with_stepping', False):
+        for each_key in sample:
+            # somehow the agent_ids in string will not be properly gathered across the batches
+            if each_key not in ['road_ids', 'old_file_name', 'old_frame_id']:
+                continue
+            if each_key in result_to_return:
+                continue
+            result_to_return[each_key] = sample[each_key]
+        result_to_return["data_path"] = data_path
+        result_to_return["old_file_name"] = sample['file_name']
+        result_to_return["old_frame_id"] = sample['frame_id']
+
+        if 'agent_ids' in sample:
+            size_of_agent_ids = len(sample['agent_ids'])
+            agent_ids_index = []
+            all_agent_ids = list(agent_dic.keys())
+            for each_agent_id in sample['agent_ids']:
+                if each_agent_id in all_agent_ids:
+                    agent_ids_index.append(all_agent_ids.index(each_agent_id))
+            short = size_of_agent_ids - len(agent_ids_index)
+            agent_ids_index += [-1] * short
+            # result_to_return["agent_ids_index"] = torch.tensor(agent_ids_index, dtype=torch.int64, device=sample['road_ids'].device)
+            result_to_return["agent_ids_index"] = torch.tensor(agent_ids_index, dtype=torch.int64, device='cpu')
 
     del agent_dic
     del road_dic
+    del ego_pose_agent_dic
 
     return result_to_return
+
+
+def step_and_rasterize(high_res, low_res, previous_offset):
+    """
+    previous_offset: the offset of the previous frame, in the form of [x, y, 0, yaw]
+    """
+    dx, dy, _, dyaw = previous_offset
+    # convert raster numpy array to cv2 image
+    # move
+    high_res_M = np.float32([[1, 0, -dx*4.0], [0, 1, -dy*4.0]])
+    low_res_M = np.float32([[1, 0, -dx*0.77], [0, 1, -dy*0.77]])
+    shifted_high_res = cv2.warpAffine(high_res, high_res_M, (high_res.shape[1], high_res.shape[0]))
+    shifted_low_res = cv2.warpAffine(low_res, low_res_M, (low_res.shape[1], low_res.shape[0]))
+    # rotate
+    high_res_M = cv2.getRotationMatrix2D((high_res.shape[1]//2, high_res.shape[0]//2), -dyaw, 1)
+    low_res_M = cv2.getRotationMatrix2D((low_res.shape[1]//2, low_res.shape[0]//2), -dyaw, 1)
+    rotated_high_res = cv2.warpAffine(shifted_high_res, high_res_M, (shifted_high_res.shape[1], shifted_high_res.shape[0]))
+    rotated_low_res = cv2.warpAffine(shifted_low_res, low_res_M, (shifted_low_res.shape[1], shifted_low_res.shape[0]))
+    return rotated_high_res, rotated_low_res
 
 
 def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),

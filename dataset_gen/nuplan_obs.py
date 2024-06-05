@@ -589,5 +589,7 @@ def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=
     # other infomation record
     for key in ["frame_id", "file_name", "map", "timestamp", "scenario_type", "scenario_id", "t0_frame_id",
                 "intentions", "expert_goal", "mission_goal", "navigation", "images_path"]:
+        if key not in data_dic:
+            continue
         data_to_return[key] = data_dic[key]
     return data_to_return

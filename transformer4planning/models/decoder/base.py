@@ -53,11 +53,11 @@ class TrajectoryDecoder(nn.Module):
             print(self.config.loss_fn)
             assert False, "loss fn not supported"
 
-    
     def compute_traj_loss(self, 
                           hidden_output,
                           label, 
                           info_dict,
+                          no_yaw_loss=False,
                           device=None):
         """
         pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
@@ -85,10 +85,38 @@ class TrajectoryDecoder(nn.Module):
                 # set traj_logits equal to label where aug_current is 0
                 traj_logits = traj_logits * aug_current + label.to(device) * (1 - aug_current) if self.config.predict_yaw else \
                     traj_logits[..., :2] * aug_current + label[..., :2].to(device) * (1 - aug_current)
+
                 if self.config.mean_circular_loss:
                     assert self.config.predict_yaw, "mean_circular_loss only works for yaw prediction"
-                    traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
-                    traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device)
+                    if self.config.trajectory_prediction_mode == 'start_frame':
+                        traj_loss = self.loss_fct(traj_logits[..., 0, :2], label[..., 0, :2].to(device)) * self.config.first_frame_scele
+                        if not no_yaw_loss:
+                            traj_loss += mean_circular_error(traj_logits[..., 0, -1], label[..., 0, -1]).to(device) * self.config.first_frame_scele
+                    elif self.config.trajectory_prediction_mode == 'both':
+                        assert not no_yaw_loss, "yaw loss must be included"
+                        traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+                        traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device)
+                        traj_loss += self.loss_fct(traj_logits[..., 0, :2], label[..., 0, :2].to(device)) * self.config.first_frame_scele
+                        traj_loss += mean_circular_error(traj_logits[..., 0, -1], label[..., 0, -1]).to(device) * self.config.first_frame_scele
+                        traj_loss += mean_circular_error(traj_logits[..., 0, -1], label[..., 0, -1]).to(device) * self.config.first_frame_scele
+                    elif self.config.trajectory_prediction_mode == 'rebalance':
+                        total_points = traj_logits.shape[1]
+                        # rebalance each point loss and then add them together
+                        point_losses = []
+                        # generate a linearly decreasing weight for each point from 1000 to 1 with length of 80
+                        weights = torch.linspace(1000, 1, total_points, device=device)
+                        for i in range(total_points):
+                            point_loss = self.loss_fct(traj_logits[..., i, :2], label[..., i, :2].to(device))
+                            if not no_yaw_loss:
+                                point_loss += mean_circular_error(traj_logits[..., i, -1], label[..., i, -1]).to(device)
+                            point_losses.append(point_loss * weights[i])
+                        # scale each point loss based on the last point loss
+                        point_losses = torch.stack(point_losses)
+                        traj_loss = point_losses.mean()
+                    else:
+                        traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+                        if not no_yaw_loss:
+                            traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device)
                 else:
                     traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.config.predict_yaw else \
                                 self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
@@ -104,8 +132,8 @@ class TrajectoryDecoder(nn.Module):
         assert pred_length > 0
         traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
         traj_logits = self.model(traj_hidden_state)
-
         return traj_logits
+
     
 class ProposalDecoder(nn.Module):
     def __init__(self, config, proposal_num=64):
@@ -180,12 +208,10 @@ class ProposalDecoderCLS(nn.Module):
             loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())  # (bs * 16)
             return loss_proposal.mean(), pred_proposal_cls
         else:
-            if 'halfs_intention' in info_dict:
-                gt_proposal_cls = info_dict["halfs_intention"]
-            elif 'intentions' in info_dict:
+            if 'intentions' in info_dict:
                 gt_proposal_cls = info_dict["intentions"][0]
             else:
-                print('WARNING: no halfs_intention or intentions in info_dict ', list(info_dict.keys()))
+                print('WARNING: no intentions in info_dict ', list(info_dict.keys()))
                 return torch.tensor(0.0, device=hidden_output.device), torch.tensor(0, device=hidden_output.device)
             context_length = info_dict["context_length"]
             pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
@@ -193,10 +219,6 @@ class ProposalDecoderCLS(nn.Module):
             loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())
             return loss_proposal.mean(), pred_proposal_cls
 
-        # if 'halfs_intention' not in info_dict and self.config.use_proposal:
-        #     print('WARNING: no halfs_intention in info_dict')
-        #     return torch.tensor(0.0, device=hidden_output.device)
-        # gt_proposal_cls = info_dict["halfs_intention"]
         # context_length = info_dict["context_length"]
         # pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
         #
@@ -204,15 +226,13 @@ class ProposalDecoderCLS(nn.Module):
         # loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
         # return loss_proposal.mean(), pred_proposal_cls
 
+
 class KeyPointMLPDeocder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
         out_features = 4 if self.config.predict_yaw else 2
-        if 'denoise_kp' in self.config.use_key_points:
-            out_features = 2
-        self.model = DecoderResCat(config.n_inner,
-                                   config.n_embd,
+        self.model = DecoderResCat(config.n_inner, config.n_embd,
                                    out_features=out_features)
         
         if self.config.task == "waymo": loss_reduction = "none"
@@ -223,11 +243,10 @@ class KeyPointMLPDeocder(nn.Module):
         elif 'l1' in self.config.loss_fn:
             self.loss_fct = nn.SmoothL1Loss(reduction=loss_reduction)
         else:
-            print(self.config.loss_fn)
-            assert False, "loss fn not supported"
+            assert False, f"loss fn not supported {self.config.loss_fn}"
         if self.config.generate_diffusion_dataset_for_key_points_decoder:
             self.save_training_diffusion_feature_dir = os.path.join(self.config.diffusion_feature_save_dir,'train/')
-            self.save_testing_diffusion_feature_dir  = os.path.join(self.config.diffusion_feature_save_dir,'val/')
+            self.save_testing_diffusion_feature_dir = os.path.join(self.config.diffusion_feature_save_dir,'val/')
             self.save_test_diffusion_feature_dir = os.path.join(self.config.diffusion_feature_save_dir,'test/')
             if not os.path.exists(self.save_training_diffusion_feature_dir):
                 os.makedirs(self.save_training_diffusion_feature_dir)
@@ -268,8 +287,19 @@ class KeyPointMLPDeocder(nn.Module):
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
 
         if self.config.task == "nuplan":
-            kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
-                        self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
+            if self.config.kp_loss_rescale:
+                # normalize each selected key point loss
+                number_of_future_key_points = future_key_points.shape[1]
+                for i in range(future_key_points.shape[1]):
+                    if i == 0:
+                        kp_loss = self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
+                    elif i == number_of_future_key_points - 1:
+                        kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device)) * 1000
+                    else:
+                        kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
+            else:
+                kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
+                            self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
         elif self.config.task == "waymo":
             kp_mask = info_dict["key_points_mask"]
             assert kp_mask is not None, "key_points_mask is None"

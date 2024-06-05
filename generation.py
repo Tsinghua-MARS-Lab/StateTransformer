@@ -23,7 +23,8 @@ def main(args):
     data_path = {
         'NUPLAN_DATA_ROOT': args.dataset_root,
         'NUPLAN_MAPS_ROOT': os.path.join(args.dataset_root, "maps"),
-        'NUPLAN_DB_FILES': os.path.join(args.dataset_root, "nuplan-v1.1", args.data_path),
+        # 'NUPLAN_DB_FILES': os.path.join(args.dataset_root, "nuplan-v1.1", args.data_path),
+        'NUPLAN_DB_FILES': os.path.join(args.dataset_root, args.data_path),
     }
     road_path = args.road_dic_path
 
@@ -210,7 +211,6 @@ def main(args):
                             continue
                         for each_intention in each_loaded_dic["intentions"]:
                             intention_label_data_counter[int(each_intention)] += 1
-                        # intention_label_data_counter[int(each_loaded_dic["halfs_intention"])] += 1
                         if shard % 200 == 0:
                             print('intention_label_data_counter', intention_label_data_counter)
                         yield data_to_return_filtered
@@ -255,7 +255,6 @@ def main(args):
                         continue
                     for each_intention in data_to_return["intentions"]:
                         intention_label_data_counter[int(each_intention)] += 1
-                    # intention_label_data_counter[int(data_to_return["halfs_intention"])] += 1
                     if shard % 200 == 0:
                         print('intention_label_data_counter', intention_label_data_counter)
                     yield data_to_return_filtered
@@ -424,7 +423,6 @@ def main(args):
                                                                    "scenario_type": Value("string"),
                                                                    "t0_frame_id": Value("int64"),
                                                                    "scenario_id": Value("string"),
-                                                                   # "halfs_intention": Value("int64"),
                                                                    "intentions": Sequence(Value("int64")),
                                                                    "mission_goal": Sequence(Value("float32")),
                                                                    "expert_goal": Sequence(Value("float32")),

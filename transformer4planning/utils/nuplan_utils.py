@@ -6,6 +6,7 @@ import pickle
 import pandas as pd
 from shapely import geometry
 
+
 def rotate_array(origin, points, angle, tuple=False):
     """
     Rotate a numpy array of points counter-clockwise by a given angle around a given origin.
@@ -76,6 +77,7 @@ def get_closest_lane_point_on_route(pred_key_point_global,
     # loop over all the route ids
     pred_key_point_global_copy = copy.deepcopy(pred_key_point_global)
     route_lanes = []
+    route_ids = route_ids[:10]
     for each_route_block in route_ids:
         route_lanes += road_dic[each_route_block]['lower_level']
     route_lane_pts = []
@@ -105,7 +107,7 @@ def get_closest_lane_point_on_route(pred_key_point_global,
     polygon = geometry.Polygon(line)
     on_road = polygon.contains(point)
 
-    return closest_lane_point, dist[closest_index], on_road
+    return closest_lane_point, dist[closest_index], closest_index, closest_lane_id, on_road
 
 
 def normalize_angle(angle):

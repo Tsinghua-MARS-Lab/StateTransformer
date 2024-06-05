@@ -53,10 +53,6 @@ class ModelArguments:
     vit_intermediate_size: Optional[int] = field(
         default=3072,
     )
-    # resnet_type: Optional[str] = field(
-    #     default="resnet18",
-    #     metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
-    # )
     pretrain_encoder: Optional[bool] = field(
         default=False,
     )
@@ -80,7 +76,7 @@ class ModelArguments:
         default=1.0
     )
     mean_circular_loss: Optional[bool] = field(
-        default=False
+        default=True
     )
 
     ######## begin of proposal args ########
@@ -88,7 +84,7 @@ class ModelArguments:
         default=0,
         metadata={"help": "number of proposal candidates. 0: not using proposal"}
     )
-    ######## end of proposal args ########
+    ######## end of speed args ########
     use_speed: Optional[bool] = field(
         default=False
     )
@@ -100,7 +96,7 @@ class ModelArguments:
                           "specified_forward: using specified key points, with exponentially growing frame indices."
                           "specified_backward: using specified key points, with exponentially growing frame indices."
                           "specified_two_backward: 8s, and 0.5s only"
-                          "denoise_kp: de-noising 8s x 10 and 0.5s"}
+                          "specified_first_frame: 0.1s only"}
     )
     separate_kp_encoder: Optional[bool] = field(
         default=False
@@ -159,6 +155,9 @@ class ModelArguments:
         default=2
     )
     selected_exponential_past: Optional[bool] = field(
+        default=True
+    )
+    current_frame_only: Optional[bool] = field(
         default=False
     )
     future_sample_interval: Optional[int] = field(
@@ -230,10 +229,65 @@ class ModelArguments:
     attn_implementation: Optional[str] = field(
         default=None, metadata={"help": "The implementation of attention layers."}
     )
-    ######## temporal model args, check your model config before using it! ########
     sync_norm: Optional[bool] = field(
         default=False, metadata={"help": "use SyncBatchNorm over all GPUs."}
     )
+    ######## temporal model args, check your model config before using it! ########
+    trajectory_prediction_mode: Optional[str] = field(
+        default='all_frames', metadata={"help": "choose from [all_frames, start_frame, both, rebalance]"}
+    )
+    use_cv_planner: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use cv planner as the optimization default"}
+    )
+    add_cv_path_to_encoder: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to add cv path to the encoder input"}
+    )
+    use_cv_planner_stage1: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use cv planner but original label"}
+    )
+    closed_loop_eval: Optional[bool] = field(  # about to delete
+        default=False, metadata={"help": "Whether to use closed loop evaluation"}
+    )
+    finetuning_with_stepping: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping"}
+    )
+    finetuning_gamma: Optional[float] = field(
+        default=1, metadata={"help": "Discount of loss from the next step"}
+    )
+    finetuning_with_stepping_random_steps: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping with random steps"}
+    )
+    finetuning_with_stepping_minimal_step: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping 0.1s"}
+    )
+    finetuning_with_stepping_without_first_step_loss: Optional[bool] = field(  # about to delete
+        default=False, metadata={"help": "Whether to use finetuning with stepping without first step loss"}
+    )
+    no_yaw_with_stepping: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping without yaw"}
+    )
+
+    first_frame_scele: Optional[float] = field(
+        default=1000.0, metadata={"help": "The scale of the first frame"}
+    )
+    kp_loss_rescale: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to rescale the key points loss"}
+    )
+
+    # WIP: training with the simulation scores as loss
+    finetuning_with_simulation_on_val: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with simulation on val"}
+    )
+    simulate_one_step_on_training: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to simulate one step on training"}
+    )
+    simulate_with_5f_smoothing: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to simulate with 5 frame smoothing"}
+    )
+    sim_eval_with_gt: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use gt for sim"}
+    )
+
 
 
 @dataclass
@@ -268,11 +322,20 @@ class DataTrainingArguments:
             )
         },
     )
-    max_predict_samples: Optional[int] = field(
+    max_test_samples: Optional[int] = field(
         default=None,
         metadata={
             "help": (
-                "For debugging purposes or quicker training, truncate the number of prediction examples to this "
+                "For debugging purposes or quicker training, truncate the number of test examples to this "
+                "value if set."
+            )
+        },
+    )
+    max_sim_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of simulation examples to this "
                 "value if set."
             )
         },
@@ -285,9 +348,6 @@ class DataTrainingArguments:
     )
     nuplan_map_path: Optional[str] = field(
         default=None, metadata={"help": "The root path of map file, to init map api used in nuplan package"}
-    )
-    use_full_training_set: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use the full training index from train_alltype"}
     )
     agent_type: Optional[str] = field(
         default="all", metadata={"help": "all: no filter on WOMD"
@@ -330,6 +390,40 @@ class PlanningTrainingArguments(TrainingArguments):
     images_cleaning_to_folder: Optional[str] = field(
         default=None, metadata={"help": "Pass a target folder to clean the raw image folder to the target folder."}
     )
+    do_sim_val: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to do simulation validation"}
+    )
+    do_sim_test: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to do simulation test"}
+    )
+    sim_test_type: Optional[str] = field(
+        default='closed_loop_nonreactive_agents', metadata={"help": "choose from test/val to choose which simulation dataset to use"}
+    )
+    nuplan_sim_data_path: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan simulation raw db data"}
+    )
+    nuplan_sim_map_folder: Optional[str] = field(
+        default=None, metadata={"help": "The folder of nuplan simulation raw map"}
+    )
+    nuplan_sim_exp_root: Optional[str] = field(
+        default=None, metadata={"help": "The root path of nuplan simulation experiment data"}
+    )
+    nuplan_sim_split_filter_yaml: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan simulation split filter yaml"}
+    )
+    nuplan_train_data_path: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan training raw db data"}
+    )
+    nuplan_train_split_filter_yaml: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan train split filter yaml"}
+    )
+    sim_steps: Optional[int] = field(
+        default=None, metadata={"help": "The number of simulation steps"}
+    )
+    sim_controller: Optional[str] = field(
+        default='two_stage_controller', metadata={"help": "The controller for simulation, choose from [perfect_controller, two_stage_controller]"}
+    )
+
 
     # label_names: Optional[List[str]] = field(
     #     default=lambda: ['trajectory_label']

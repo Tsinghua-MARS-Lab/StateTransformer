@@ -168,6 +168,24 @@ root-
             --*.arrow    
 ```
 
+
+
+
+```
+root-
+ |--train
+     --*.pkl
+    ...
+ |--test
+    --*.pkl
+     ...
+ |--index (can be organized dynamically)
+    |--train
+        --*.arrow
+    |--test
+        --*.arrow    
+```
+
 ## Load checkpoints and evaluate:
 
 We provide the pretrained checkpoint for STR(CKS) - 16M. This is a checkpoint with a diffusion decoder. You can download via [this link](http://180.167.251.46:880/NuPlanSTR/checkpoints/small_state_dict_1by1_Decckpt_12e.pth) for STR(CKS)-16M-Diff.12e, and [this link](http://180.167.251.46:880/NuPlanSTR/checkpoints/Small_CKS_PI2.zip) for STR(CKS)-16M.
@@ -349,32 +367,6 @@ nohup python3 -m torch.distributed.run \
 --key_points_diffusion_decoder_load_from {KEY_POINT_DIFFUSION_CHECKPOINT_PATH}
 ```
 
-## To predict (Old):
-
-```
-export CUDA_VISIBLE_DEVICES=3; \
-python -m torch.distributed.run \
---nproc_per_node=1 \
---master_port 12345 \
-runner.py --model_name pretrain-gpt \
---model_pretrain_name_or_path data/example/training_results/checkpoint-xxxxx \
---saved_dataset_folder /localdata_ssd/nuplan/nsm_autoregressive_rapid \
---output_dir data/example/prediction_results/checkpoint-xxxxx \
---per_device_eval_batch_size 32 \
---dataloader_num_workers 16 \
---predict_trajectory True \
---do_predict \
---saved_valid_dataset_folder /localdata_ssd/nuplan/boston_test_byscenario/
---max_predict_samples 1000 \
---dataloader_drop_last True \
---with_traffic_light True \
---remove_unused_columns True \
---next_token_scorer True \
---trajectory_loss_rescale 1e-3 \
---pred_key_points_only False \
---specified_key_points True \
---forward_specified_key_points False \
-```
 
 ## Waymo Dataset Pipeline
 
@@ -447,16 +439,17 @@ Create a new yaml file for Hydra at: `script/config/simulation/planner/rule_base
 1. Install Transformer4Planning and NuPlan-Devkit
 2. (Optional) Copy the script folder from NuPlan's Official Repo to update
 3. Modify dataset path in the `run_simulation.py` and run it to evaluate the model with the STR planner
-`
+```
 python nuplan_garage/run_simulation.py 'planner=str_planner' \
 'scenario_filter=val14_split' \
 'job_name=closed_loop_nonreactive_agents' 'scenario_builder=nuplan' \
 'ego_controller=perfect_tracking_controller' 'observation=box_observation' \
 hydra.searchpath="[pkg://nuplan_garage.planning.script.config.common, pkg://nuplan_garage.planning.script.config.simulation, pkg://nuplan.planning.script.config.common, pkg://nuplan.planning.script.config.simulation, pkg://nuplan.planning.script.experiments]"
-`
-
+```
+To debug, add these arguments:
+```
 'scenario_filter.limit_total_scenarios=1' 'scenario_filter.num_scenarios_per_type=1' \
-
+```
 
 ### Or Modify yaml files and py scripts 
 #### Modify the following variables in yaml files
@@ -523,7 +516,9 @@ chanllenge choice: `+simulation=closed_loop_reactive_agents` Optional `[closed_l
 
 ### Launch nuboard for visualization
 
-``python script/run_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/test/2023.05.08.19.17.16]' 'scenario_builder=nuplan' 'port_number=5005'``
+```
+python script/run_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/test/2023.05.08.19.17.16]' 'scenario_builder=nuplan' 'port_number=5005'
+```
 
 or
 
@@ -538,7 +533,10 @@ The default transformer backbone is the [GPT2 model](https://huggingface.co/docs
 We also tried the recent Mamba backbone and it works even better (with some minor bugs to be fixed in the current version).
 Follow the instructions from the [official Mamba](https://github.com/state-spaces/mamba) repo to install and change the model name from `gpt` to `mamba` to use it.
 
+## Updates
 
+- 2024.04.09: Running NuPlan's simulation with LARGE models will cause a saving crash when each simulation ends. You need to verify the source code in the nuplan-devkit to fix this.
+Add this line `self.planner.model = None` of code to replace the model in the planner to the line 127 before calling the `on_simulation_end` function in the `simulations_runner.py` file.
 
 ## Citation
 If you find this work useful in your research, please consider cite:

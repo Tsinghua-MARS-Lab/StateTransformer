@@ -11,7 +11,3 @@ tqdm
 einops
 wandb
 scikit-learn
-aioboto3
-retry
-aiofiles
-bokeh

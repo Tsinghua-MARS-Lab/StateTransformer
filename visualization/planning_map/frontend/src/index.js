@@ -9,8 +9,11 @@ two.renderer.domElement.style.background = 'rgb(0, 128, 150)';
 
 var shape = new Two.Rectangle(0, 0, 1, 1);
 var offsets = [];
-const polyTypes = [17, 1];
+const polyTypes = [17, 18];
+// const polyTypes = [4, 5, 17, 18, 1];
 var lineTypes = [0, 11];
+// var lineTypes = [0, 11, 20, 21];
+// var lineTypes = [0, 2, 3, 6, 7, 8, 10, 11, 13, 20, 21];
 const rectTypes = [99];
 const scale = 5;
 const lineWidth = 1;
@@ -122,11 +125,12 @@ function drawPoly(dic, selected, colors, targetGroup, alpha = 1.0) {
     }
 }
 
-function drawALine(points, arrow, color, dash, targetGroup, continuous = false) {
+function drawALine(points, arrow, color, dash, targetGroup, continuous) {
     var ptCounter = 0;
     var prev_x = 0;
     var prev_y = 0;
     var interval = 0;
+    var lineWidth = 1;
     if (dash) {
         interval = 10;
     }
@@ -164,7 +168,7 @@ function drawALine(points, arrow, color, dash, targetGroup, continuous = false) 
     }
 }
 
-function drawLanes(roads, targetGroup) {
+function drawLanes(roads, targetGroup, route) {
     if (datasetName === 'NuPlan') {
         for (var key in roads) {
             const dic = roads[key];
@@ -176,13 +180,21 @@ function drawLanes(roads, targetGroup) {
             if (lineTypes.includes(roadType)) {
                 var to_mark = false;
                 var colorToGo = 'white';
-                var dashToGO = true;
+                var dashToGO = false;
+                var countinous = true;
+                if (roadType === 20) {
+                    colorToGo = 'red';
+                    countinous = false;
+                }
                 if (lanes_to_mark.includes(key)) {
                     to_mark = true;
                     colorToGo = 'black';
-                    dashToGO = true;
+                    // dashToGO = true;
                 }
-                drawALine(pointsToGo, to_mark, colorToGo, dashToGO, targetGroup);
+                if (route === true){
+                    colorToGo = 'green';
+                }
+                drawALine(pointsToGo, to_mark, colorToGo, dashToGO, targetGroup, countinous);
             }
         }
     }
@@ -197,17 +209,18 @@ function drawMap(roads) {
         17: '#A9A9A9',        // ROADBLOCK (dark gray)
         1: '#A9A9A9',          // INTERSECTION (default color, dark gray)
         18: 'green',
+        5: 'gray'
     };
     for (var key in roads) {
         drawPoly(roads[key], polyTypes, colorsForMap, mapGroup);  // 17=1
     }
     //console.log('here')
     // draw lanes
-    drawLanes(roads, mapGroup);
+    drawLanes(roads, mapGroup, false);
     // draw others
-    for (var key in roads) {
-        drawPoly(roads[key], [2, 4, 14, 15, 7, 8], colorsForMap, mapGroup);  // no 3, 5, 6
-    }
+    // for (var key in roads) {
+    //     drawPoly(roads[key], [2, 4, 14, 15, 7, 8], colorsForMap, mapGroup);  // no 3, 5, 6
+    // }
     // draw parking lots
     for (var key in roads) {
         //console.log('thre')
@@ -245,6 +258,7 @@ function drawMap(roads) {
 function drawRoute(route_ls, road_data) {
     for (var route_id of route_ls) {
         drawPoly(road_data[route_id], [17, 18], colorsForRoute, routeGroup, 0.4);  // 17=1
+        drawLanes(road_data[route_id], [20, 21, 0, 11], true);
     }
     stage.add(routeGroup);
     two.add(stage);
@@ -655,12 +669,18 @@ function initAgents(agentDic, frameId) {
     stage.add(agentGroup);
 }
 
-function drawTrajectory(poses, disc_size=0.35, interval=5) {
+function drawTrajectory(poses, disc_size=0.35, recenter=true, interval=5) {
     if (poses !== undefined) {
         for (var i = 0; i < poses.length; i = i + interval) {
             let [x, y, z, yaw] = poses[i];
             // console.log('check prediction generation: ', x, y, offsets, scale);
-            var circle = two.makeCircle((x + offsets[0]) * scale * xReverse, (y + offsets[1]) * scale, disc_size * scale);
+            if (recenter === true) {
+                var circle = two.makeCircle((x + offsets[0]) * scale * xReverse, (y + offsets[1]) * scale, disc_size * scale);
+            }
+            else{
+                var circle = two.makeCircle((x) * scale * xReverse, (y) * scale, disc_size * scale);
+            }
+
             circle.fill = 'purple';
             circle.opacity = 0.5;
             trajectoryGroup.add(circle);
@@ -748,7 +768,8 @@ function onRender(event) {
             console.log('closest frame: ', closestFrame, currentFrame);
 
             drawTrajectory(data.prediction_generation[closestFrame], 0.35);
-            drawTrajectory(data.pred_kp_generation[closestFrame], 1, 1);
+            drawTrajectory(agentDic['ego'][closestFrame], 0.35, false);
+            drawTrajectory(data.pred_kp_generation[closestFrame], 1, true, 1);
             two.add(btnGroup);
 
             predictionGeneration = data.prediction_generation;
