@@ -50,7 +50,6 @@ from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner
 
 from nuplan.planning.simulation.history.simulation_history import SimulationHistory, SimulationHistorySample
 
-
 # multiple proces
 import concurrent.futures
 import multiprocessing

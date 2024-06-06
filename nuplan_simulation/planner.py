@@ -16,7 +16,7 @@ from transformer4planning.utils.args import ModelArguments
 from transformers import (HfArgumentParser)
 from nuplan.common.actor_state.state_representation import Point2D
 from transformer4planning.utils.nuplan_utils import get_angle_of_a_line
-from nuplan_simulation.route_corrections import route_roadblock_ids_correction
+from nuplan_simulation.route_corrections.route_utils import route_roadblock_correction
 
 import os
 import cv2
@@ -374,7 +374,7 @@ class Planner(AbstractPlanner):
         agents = [observation.tracked_objects.get_agents() for observation in sampled_observation_buffer]
         statics = [observation.tracked_objects.get_static_objects() for observation in sampled_observation_buffer]
 
-        corrected_route_ids = route_roadblock_ids_correction(
+        corrected_route_ids = route_roadblock_correction(
             ego_states[-1],
             self._map_api,
             self._route_roadblock_ids,
