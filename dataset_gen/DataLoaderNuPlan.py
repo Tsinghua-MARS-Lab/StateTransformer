@@ -183,7 +183,8 @@ class NuPlanDL:
                  scenarios_to_keep=None,
                  filter_still=False,
                  sensor_blob_path=None,
-                 sensor_meta_path=None):
+                 sensor_meta_path=None,
+                 with_planner=False):
         """
         :param sample_interval:
         :param agent_only:
@@ -1090,9 +1091,9 @@ class NuPlanDL:
                     agent_only=False,
                     seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
                     routes_per_file=False,
-                    include_intentions=True,
+                    include_intentions=False,
                     include_navigation=True,
-                    filter_still=False,) -> dict:
+                    filter_still=False) -> dict:
 
         skip = False
         agent_dic = self.pack_scenario_to_agentdic(scenario=scenario, total_frames_future=seconds_in_future)

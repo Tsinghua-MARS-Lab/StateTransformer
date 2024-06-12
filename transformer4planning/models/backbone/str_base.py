@@ -53,23 +53,6 @@ def list_of_sample_dic_to_batch(list_of_sample_dic):
     return batched_dic
 
 
-def sample_to_dic(sample, data_path, prediction):
-    dic_to_return = {}
-    dic_to_return['sample'] = sample
-    dic_to_return['data_path'] = data_path
-    dic_to_return['previous_prediction_to_step'] = prediction
-    return dic_to_return
-
-
-def worker(map_func, i, kwargs, prediction):
-    ith_sample = fetch_ith_sample(kwargs, i)
-    ith_input_dic = sample_to_dic(ith_sample,
-                                  ith_sample['data_path'],
-                                  prediction[i])
-    new_sample = map_func(**ith_input_dic)
-    return new_sample
-
-
 class STRConfig(PretrainedConfig):
     def update_by_model_args(self, model_args):
         for each_key in model_args.__dict__:
@@ -79,7 +62,8 @@ class STRConfig(PretrainedConfig):
                      "autoregressive_proposals", "selected_exponential_past",
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
-                     "camera_image_encoder", "use_speed", "no_yaw_with_stepping"]
+                     "camera_image_encoder", "use_speed", "no_yaw_with_stepping",
+                     "skip_yaw_norm"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
@@ -115,8 +99,12 @@ class STR(PreTrainedModel):
     def build_encoder(self):
         if self.config.task == "nuplan":
             if "raster" in self.config.encoder_type:
-                from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
-                self.encoder = NuplanRasterizeEncoder(self.config)
+                if self.config.autoregressive:
+                    from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeAutoRegressiveEncoder
+                    self.encoder = NuplanRasterizeAutoRegressiveEncoder(self.config)
+                else:
+                    from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
+                    self.encoder = NuplanRasterizeEncoder(self.config)
             elif "vector" in self.config.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
@@ -183,18 +171,21 @@ class STR(PreTrainedModel):
 
         input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
         transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds, return_dict=return_dict)
-        trajectory_label = info_dict["trajectory_label"]
 
-        loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
-        traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
-                                                                     trajectory_label,
-                                                                     info_dict)
-        if self.config.finetuning_with_stepping:
-            if self.config.finetuning_with_stepping_without_first_step_loss:
-                pass
-            else:
-                loss += traj_loss
+        if self.config.autoregressive:
+            frames_length_to_predict = info_dict["pred_length"]
+            trajectory_label = info_dict['trajectory'][..., -frames_length_to_predict:, :]
+            loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
+            traj_loss, traj_logits = self.traj_decoder.compute_traj_loss_autoregressive(transformer_outputs_hidden_state,
+                                                                                        trajectory_label,
+                                                                                        info_dict)
+            loss += traj_loss
         else:
+            trajectory_label = info_dict["trajectory_label"]
+            loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
+            traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
+                                                                         trajectory_label,
+                                                                         info_dict)
             loss += traj_loss
 
         loss_items = dict(
@@ -248,72 +239,6 @@ class STR(PreTrainedModel):
             pred_dict["kp_logits"] = kp_logits
             loss_items["kp_loss"] = kp_loss
 
-        # WIP: training with stepping
-        if self.config.finetuning_with_stepping and self.training:
-            from transformer4planning.preprocess.nuplan_rasterize import static_coor_rasterize
-            # step and rasterize
-            # TODO: clean up if multiprocessing is not faster
-            def fetch_ith_sample(inputs, i):
-                sample = {}
-                for key in inputs.keys():
-                    sample[key] = inputs[key][i]
-                return sample
-            def move_np_to_torch(nparray, device, dtype):
-                return torch.tensor(nparray, device=device, dtype=dtype)
-            def list_of_sample_dic_to_batch(list_of_sample_dic):
-                batch_size = len(list_of_sample_dic)
-                batched_dic = {}
-                for each_key in list_of_sample_dic[0]:
-                    if isinstance(list_of_sample_dic[0][each_key], np.ndarray):
-                        shape = list_of_sample_dic[0][each_key].shape
-                        batched_data = np.zeros((batch_size, *shape))
-                        for i in range(batch_size):
-                            batched_data[i] = list_of_sample_dic[i][each_key]
-                        batched_dic[each_key] = batched_data
-                    elif each_key in ['aug_current']:
-                        if each_key not in batched_dic:
-                            batched_dic[each_key] = []
-                        batched_dic[each_key] = np.array([list_of_sample_dic[i][each_key] for i in range(batch_size)])
-                return batched_dic
-            def sample_to_dic(sample, data_path, prediction):
-                dic_to_return = {}
-                dic_to_return['sample'] = sample
-                dic_to_return['data_path'] = data_path
-                dic_to_return['previous_prediction_to_step'] = prediction
-                return dic_to_return
-
-            new_samples_in_list = []
-            for i in range(input_embeds.shape[0]):
-                ith_sample = fetch_ith_sample(kwargs, i)
-                new_sample = static_coor_rasterize(ith_sample, ith_sample['data_path'],
-                                                   previous_prediction_to_step=pred_dict['traj_logits'][i].detach().cpu().numpy().copy(),
-                                                   **self.config.__dict__)
-                new_samples_in_list.append(new_sample)
-
-            new_sample_batch = list_of_sample_dic_to_batch(new_samples_in_list)
-            del new_samples_in_list
-            new_sample_tensor = {}
-            for each_key in new_sample_batch:
-                if isinstance(new_sample_batch[each_key], np.ndarray):
-                    new_sample_tensor[each_key] = move_np_to_torch(
-                        new_sample_batch[each_key], device=traj_logits.device, dtype=traj_logits.dtype)
-                else:
-                    new_sample_tensor[each_key] = new_sample_batch[each_key]
-            del new_sample_batch
-
-            input_embeds, step_info_dict = self.encoder(is_training=self.training, **new_sample_tensor)
-            transformer_outputs_hidden_state_after_step = self.embedding_to_hidden(input_embeds, return_dict=return_dict)
-            trajectory_label_after_step = step_info_dict["trajectory_label"]
-
-            loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state_after_step.device)
-            traj_loss_after_step, traj_logits_after_step = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state_after_step,
-                                                                                               trajectory_label_after_step,
-                                                                                               step_info_dict,
-                                                                                               no_yaw_loss=self.config.no_yaw_with_stepping)
-            scale = self.config.finetuning_gamma
-            loss += traj_loss_after_step * scale
-            pred_dict["after_step_traj_logits"] = traj_logits_after_step
-
         # WIP: training with simulations
         if self.config.finetuning_with_simulation_on_val and self.training:
             sim_loss = self.do_closed_loop_simulation(kwargs)
@@ -358,7 +283,7 @@ class STR(PreTrainedModel):
             A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
             dictionary also contains the epoch number which comes from the training state.
         """
-        from nuplan_simulation.run_simulation import build_simulation_in_batch
+        from run_simulation import build_simulation_in_batch
         from nuplan_simulation.planner_utils import build_metrics_aggregators
         from nuplan.planning.simulation.main_callback.metric_aggregator_callback import MetricAggregatorCallback
         from nuplan.planning.simulation.main_callback.multi_main_callback import MultiMainCallback
@@ -598,7 +523,31 @@ class STR(PreTrainedModel):
 
             # generate remaining trajectory
             transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds)
-            # expected shape for pred trajectory is (b, pred_length, 4)
+            if self.config.autoregressive:
+                points_to_predict = info_dict["pred_length"]
+                raster_seq_length = info_dict["sequence_length"]
+                trajectory_label = torch.zeros((batch_size, points_to_predict, 4), device=device)
+                predicting_index = context_length - 1  # output space index
+                for i in range(points_to_predict):
+                    # 1. generate trajectory
+                    current_context_length = context_length + i * (1 + raster_seq_length)  # input space index
+                    context_embeds = input_embeds[:, :current_context_length, :]
+                    attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
+                    position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+                    transformer_outputs_hidden_state = self.embedding_to_hidden(
+                        context_embeds,
+                        attention_mask,
+                        position_ids,
+                    )
+                    trajectory_label[:, i, :] = self.traj_decoder.model(transformer_outputs_hidden_state)[:, predicting_index, :]
+                    predicting_index += (1 + raster_seq_length)
+                    # 2. update input_embeds with generated trajectory
+                    new_point_embed = self.encoder.action_m_embed(trajectory_label[:, i, :].unsqueeze(1))
+                    input_embeds[:, current_context_length, :] = new_point_embed[:, 0, :]
+                    # 3. generate observation
+                    
+
+            # expected shape for pred trajectory is (b, pred_length, 4/7)
             if self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
                 traj_logits_k.append(traj_logits)
@@ -661,6 +610,7 @@ class STR(PreTrainedModel):
 
 
 def build_models(model_args):
+    # TODO: refactor model building function into each model class
     if 'gpt' in model_args.model_name:
         from transformer4planning.models.backbone.gpt2 import STR_GPT2, STRGPT2Config
         config_p = STRGPT2Config()

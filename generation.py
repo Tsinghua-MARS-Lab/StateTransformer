@@ -171,7 +171,8 @@ def main(args):
                                             scenarios_to_keep=scenarios_to_keep,
                                             filter_still=args.filter_still,
                                             sensor_meta_path=args.sensor_meta_path,
-                                            sensor_blob_path=args.sensor_blob_path)
+                                            sensor_blob_path=args.sensor_blob_path,
+                                            with_planner=args.index_with_planner)
                 if loaded_dic is None:
                     continue
                 if args.keep_future_steps:
@@ -209,8 +210,9 @@ def main(args):
                                 print("WARNING: None data in ", each_key)
                         if error:
                             continue
-                        for each_intention in each_loaded_dic["intentions"]:
-                            intention_label_data_counter[int(each_intention)] += 1
+                        if 'intentions' in each_loaded_dic:
+                            for each_intention in each_loaded_dic["intentions"]:
+                                intention_label_data_counter[int(each_intention)] += 1
                         if shard % 200 == 0:
                             print('intention_label_data_counter', intention_label_data_counter)
                         yield data_to_return_filtered
@@ -253,8 +255,9 @@ def main(args):
                             print("WARNING: None data in ", each_key)
                     if error:
                         continue
-                    for each_intention in data_to_return["intentions"]:
-                        intention_label_data_counter[int(each_intention)] += 1
+                    if 'intentions' in data_to_return:
+                        for each_intention in data_to_return["intentions"]:
+                            intention_label_data_counter[int(each_intention)] += 1
                     if shard % 200 == 0:
                         print('intention_label_data_counter', intention_label_data_counter)
                     yield data_to_return_filtered
@@ -524,5 +527,6 @@ if __name__ == '__main__':
     parser.add_argument('--keep_future_steps', default=False, action='store_true')  # use with scenario_filter_yaml_path for val14
     parser.add_argument('--balance', default=False, action='store_true')
     parser.add_argument('--filter_still', default=False, action='store_true')
+    parser.add_argument('--index_with_planner', default=False, action='store_true')
     args_p = parser.parse_args()
     main(args_p)

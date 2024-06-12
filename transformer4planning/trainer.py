@@ -515,6 +515,9 @@ class PlanningTrainer(Trainer):
         )
 
         if self.args.do_sim_val or self.args.do_sim_test:
+            # TODO: add closed-loop simulation for auturegression
+            if self.model.config.autoregressive:
+                raise NotImplementedError('Not implemented yet for autoregressive generations')
             # TODO: separate the simulation from evaluation loop
             if self.args.sim_steps is None or self.state.global_step % self.args.sim_steps == 0:
                 val14_1k_dataset = self.val14_1k_dataset
@@ -637,58 +640,6 @@ class PlanningTrainer(Trainer):
 
         # making prediction with autorergressive generation
         prediction_generation = self.model.generate(**inputs)
-
-        # making prediction with closed-loop stepping
-        if self.model.config.closed_loop_eval:
-            from transformer4planning.preprocess.nuplan_rasterize import static_coor_rasterize
-            assert logits.shape[0] == inputs['road_ids'].shape[0], '{}, {}'.format(logits.shape[0], inputs['road_ids'].shape[0])
-            def fetch_ith_sample(inputs, i):
-                sample = {}
-                for key in inputs.keys():
-                    try:
-                        sample[key] = inputs[key][i]
-                    except:
-                        print('Error when fetching key: ', key, inputs[key], len(inputs['road_ids']), i)
-                return sample
-            def move_np_to_torch(nparray, device, dtype):
-                return torch.tensor(nparray, device=device, dtype=dtype)
-            def list_of_sample_dic_to_batch(list_of_sample_dic):
-                batch_size = len(list_of_sample_dic)
-                batched_dic = {}
-                for each_key in list_of_sample_dic[0]:
-                    if isinstance(list_of_sample_dic[0][each_key], np.ndarray):
-                        shape = list_of_sample_dic[0][each_key].shape
-                        batched_data = np.zeros((batch_size, *shape))
-                        for i in range(batch_size):
-                            batched_data[i] = list_of_sample_dic[i][each_key]
-                        batched_dic[each_key] = batched_data
-                    elif each_key in ['aug_current']:
-                        if each_key not in batched_dic:
-                            batched_dic[each_key] = []
-                        batched_dic[each_key] = np.array([list_of_sample_dic[i][each_key] for i in range(batch_size)])
-                return batched_dic
-
-            new_samples_in_list = []
-            for i in range(inputs['road_ids'].shape[0]):
-                ith_sample = fetch_ith_sample(inputs, i)
-                new_sample = static_coor_rasterize(ith_sample, ith_sample['data_path'],
-                                                   previous_prediction_to_step=prediction_generation['traj_logits'][i].detach().cpu().numpy().copy(),
-                                                   **self.model.config.__dict__)
-                new_samples_in_list.append(new_sample)
-
-            new_sample_batch = list_of_sample_dic_to_batch(new_samples_in_list)
-            del new_samples_in_list
-            new_sample_tensor = {}
-            for each_key in new_sample_batch:
-                if isinstance(new_sample_batch[each_key], np.ndarray):
-                    new_sample_tensor[each_key] = move_np_to_torch(
-                        new_sample_batch[each_key], device=logits.device, dtype=logits.dtype)
-                else:
-                    new_sample_tensor[each_key] = new_sample_batch[each_key]
-            del new_sample_batch
-            prediction_generation_next_step = self.model.generate(**new_sample_tensor)
-            prediction_generation['next_step'] = prediction_generation_next_step['traj_logits']
-            prediction_generation['next_step_labels'] = new_sample_tensor['trajectory_label']
 
         # padding if the batch size is not the same as the eval batch size
         if logits.shape[0] != self.args.per_device_eval_batch_size:

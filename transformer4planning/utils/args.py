@@ -236,18 +236,6 @@ class ModelArguments:
     trajectory_prediction_mode: Optional[str] = field(
         default='all_frames', metadata={"help": "choose from [all_frames, start_frame, both, rebalance]"}
     )
-    use_cv_planner: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use cv planner as the optimization default"}
-    )
-    add_cv_path_to_encoder: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to add cv path to the encoder input"}
-    )
-    use_cv_planner_stage1: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use cv planner but original label"}
-    )
-    closed_loop_eval: Optional[bool] = field(  # about to delete
-        default=False, metadata={"help": "Whether to use closed loop evaluation"}
-    )
     finetuning_with_stepping: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use finetuning with stepping"}
     )
@@ -286,6 +274,17 @@ class ModelArguments:
     )
     sim_eval_with_gt: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use gt for sim"}
+    )
+
+    skip_yaw_norm: Optional[bool] = field(
+        default=False, metadata={"help": "Skip rotation normalization during preprocess"}
+    )
+
+    autoregressive: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use autoregressive prediction"}
+    )
+    future_seconds: Optional[int] = field(
+        default=8, metadata={"help": "The number of seconds to predict in the future"}
     )
 
 

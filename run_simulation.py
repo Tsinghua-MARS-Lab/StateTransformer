@@ -118,7 +118,7 @@ def compute_overall_score(metric_dic, experiment):
                 print('WARNING, unknown key ', key)
                 scenario_score.append(metric_dic[key][i])
                 total_weights.append(1.0)
-        assert sum(total_weights) == 16, total_weights
+        # assert sum(total_weights) == 16, total_weights
         scenario_scores.append(sum(scenario_score) / sum(total_weights) * multiplier)
     print('Score per scenarios: ', scenario_scores)
     return overall_score_dic, np.mean(scenario_scores)

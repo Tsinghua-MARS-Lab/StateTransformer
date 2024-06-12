@@ -150,6 +150,14 @@ class Planner(AbstractPlanner):
                         pred_key_points = prediction_generation['key_points_logits'].numpy()[0]
                     else:
                         pred_key_points = None
+                if self._model.config.skip_yaw_norm:
+                    oriented_yaw = sample['oriented_point'][-1]
+                    # rotate prediction based on oriented yaw
+                    sin_, cos_ = np.sin(-oriented_yaw), np.cos(-oriented_yaw)
+                    rotated_pred_traj = pred_traj.copy()
+                    rotated_pred_traj[:, 0] = pred_traj[:, 0] * cos_ - pred_traj[:, 1] * sin_
+                    rotated_pred_traj[:, 1] = pred_traj[:, 0] * sin_ + pred_traj[:, 1] * cos_
+                    pred_traj = rotated_pred_traj
 
             # post-processing
             low_filter = False
@@ -298,6 +306,16 @@ class Planner(AbstractPlanner):
                 except:
                     pass
 
+                if self._model.config.skip_yaw_norm:
+                    oriented_yaws = model_samples['oriented_point'][:, -1]
+                    # rotate prediction based on oriented yaw
+                    sin_, cos_ = np.sin(-oriented_yaws - math.pi / 2), np.cos(-oriented_yaws - math.pi / 2)
+                    rotated_pred_traj = pred_traj.copy()
+                    for i in range(batch_size):
+                        rotated_pred_traj[i, :, 0] = pred_traj[i, :, 0] * cos_[i] - pred_traj[i, :, 1] * sin_[i]
+                        rotated_pred_traj[i, :, 1] = pred_traj[i, :, 0] * sin_[i] + pred_traj[i, :, 1] * cos_[i]
+                    pred_traj = rotated_pred_traj
+
             # post-processing
             relative_traj = pred_traj.copy()  # [batch_size, 80, 4]
 
@@ -359,6 +377,11 @@ class Planner(AbstractPlanner):
         oriented_point = np.array([ego_states[-1].rear_axle.x,
                                    ego_states[-1].rear_axle.y,
                                    ego_states[-1].rear_axle.heading]).astype(np.float32)
+
+        if self._model.config.skip_yaw_norm:
+            oriented_yaw = oriented_point[-1]
+            oriented_point[-1] = 0
+
         if self.road_dic is None:
             self.road_dic = get_road_dict(self._map_api, ego_pose_center=Point2D(oriented_point[0], oriented_point[1]),
                                           all_road_dic=self.all_road_dic)
@@ -374,12 +397,12 @@ class Planner(AbstractPlanner):
         agents = [observation.tracked_objects.get_agents() for observation in sampled_observation_buffer]
         statics = [observation.tracked_objects.get_static_objects() for observation in sampled_observation_buffer]
 
-        corrected_route_ids = route_roadblock_correction(
-            ego_states[-1],
-            self._map_api,
-            self._route_roadblock_ids,
-        )
-
+        # corrected_route_ids = route_roadblock_correction(
+        #     ego_states[-1],
+        #     self._map_api,
+        #     self._route_roadblock_ids,
+        # )
+        corrected_route_ids = self._route_roadblock_ids
         high_res_raster, low_res_raster, context_action = self.compute_raster_input(
             ego_trajectory, agents, statics, traffic_light_data, ego_shape,
             origin_ego_pose=oriented_point,
@@ -395,6 +418,9 @@ class Planner(AbstractPlanner):
                     current_ego_dynamic.acceleration,
                     current_ego_dynamic.angular_velocity]
             context_action = np.concatenate([context_action, speed], axis=1)
+
+        if self._model.config.skip_yaw_norm:
+            oriented_point[-1] = oriented_yaw
 
         return {
             'high_res_raster': high_res_raster,

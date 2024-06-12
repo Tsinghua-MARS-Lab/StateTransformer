@@ -384,8 +384,7 @@ if make_prediction_1frame or make_prediction_15s or path_gen_15s or make_predict
                                                   all_maps_dic={map_name: road_dic},
                                                   use_proposal=True,
                                                   selected_exponential_past=model_args.selected_exponential_past,
-                                                  use_speed=model_args.use_speed,
-                                                  use_cv_planner=True)  # WARNING: need to be updated if new model args are used
+                                                  use_speed=model_args.use_speed)  # WARNING: need to be updated if new model args are used
             print('data prepared')
             prepared_data = np_to_tensor(prepared_data)
             prepared_data.update({'road_dic': road_dic,

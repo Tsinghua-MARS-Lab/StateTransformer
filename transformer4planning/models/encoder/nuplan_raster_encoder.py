@@ -104,9 +104,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         else:
             self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 
-        if self.config.add_cv_path_to_encoder:
-            self.cv_path_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
-
         if self.config.separate_kp_encoder:
             self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 
@@ -211,16 +208,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
             input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
 
-
-        if self.config.add_cv_path_to_encoder:
-            cv_path = kwargs.get("cv_planning", None)
-            assert cv_path is not None, "cv_path should not be None"
-            cv_path = cv_path.to(device, dtype=input_embeds.dtype)
-            cv_path_embed = self.cv_path_m_embed(cv_path)
-            cv_path_length = cv_path.shape[1]
-            input_embeds = torch.cat([input_embeds, cv_path_embed], dim=1)
-            context_length += cv_path_length
-
         if self.camera_image_encoder is not None:
             camera_images = kwargs.get("camera_images", None)
             assert camera_images is not None, "camera_image should not be None"
@@ -298,4 +285,65 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             if self.config.autoregressive_proposals:
                 info_dict["intentions"] = intentions
 
+        return input_embeds, info_dict
+
+
+class NuplanRasterizeAutoRegressiveEncoder(NuplanRasterizeEncoder):
+    def forward(self, **kwargs):
+        high_res_raster = kwargs.get("high_res_raster", None)
+        low_res_raster = kwargs.get("low_res_raster", None)
+        trajectory = kwargs.get("trajectory", None)
+        aug_current = kwargs.get("aug_current", None)
+
+        is_training = kwargs.get("is_training", None)
+        assert is_training is not None, "is_training should not be None"
+        self.augmentation.training = is_training
+
+        assert trajectory is not None, "trajectory should not be None"
+        device = trajectory.device
+        _, trajectory_length = trajectory.shape[:2]
+
+        assert self.config.x_random_walk == 0 and self.config.y_random_walk == 0, "AutoRegressiveEncoder does not support random walk"
+        action_embeds = self.action_m_embed(trajectory)
+
+        high_res_seq = high_res_raster.permute(0, 1, 4, 2, 3).to(device)
+        low_res_seq = low_res_raster.permute(0, 1, 4, 2, 3).to(device)
+        batch_size, raster_seq_length, c, h, w = high_res_seq.shape
+        assert c == self.config.raster_channels, "raster channel number should be {}, but got {}".format(self.config.raster_channels, c)
+
+        if self.config.raster_encoder_type == 'vit':
+            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(action_embeds.dtype).reshape(batch_size * raster_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(action_embeds.dtype).reshape(batch_size * raster_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            # batch_size * context_length, 196 (14*14), embed_dim//2
+            _, sequence_length, half_embed = high_res_embed.shape
+            high_res_embed = high_res_embed.reshape(batch_size, raster_seq_length, sequence_length, half_embed)
+            low_res_embed = low_res_embed.reshape(batch_size, raster_seq_length, sequence_length, half_embed)
+
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(action_embeds.dtype)
+            n_embed = action_embeds.shape[-1]
+            embed_sequence_length = raster_seq_length + raster_seq_length * sequence_length  # each O occupy 196 states
+            input_embeds = torch.zeros(
+                (batch_size, embed_sequence_length, n_embed),
+                dtype=action_embeds.dtype,
+                device=device
+            )
+            for j in range(raster_seq_length):
+                # apply raster embedding to the input
+                input_embeds[:, j * (1 + sequence_length): j * (1 + sequence_length) + sequence_length, :] = state_embeds[:, j, :, :]
+            input_embeds[:, sequence_length::1 + sequence_length, :] = action_embeds
+        else:
+            assert False, "AutoRegressiveEncoder does not support ResNet encoder"
+
+        assert self.camera_image_encoder is None, "AutoRegressiveEncoder does not support camera image encoder"
+        assert not self.use_proposal, "AutoRegressiveEncoder does not support proposal"
+        assert self.use_key_points == 'no', "AutoRegressiveEncoder does not support key points"
+
+        info_dict = {
+            "trajectory": trajectory,
+            "context_length": kwargs.get('past_frame_num')[0] * (1 + sequence_length) + 1,  # OAOAO -> A
+            "aug_current": aug_current,
+            "selected_indices": self.selected_indices,
+            "pred_length": kwargs.get('future_frame_num')[0],
+            "sequence_length": sequence_length
+        }
         return input_embeds, info_dict
