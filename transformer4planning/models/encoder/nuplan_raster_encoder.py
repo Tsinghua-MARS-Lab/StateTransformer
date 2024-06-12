@@ -292,7 +292,7 @@ class NuplanRasterizeAutoRegressiveEncoder(NuplanRasterizeEncoder):
     def forward(self, **kwargs):
         high_res_raster = kwargs.get("high_res_raster", None)
         low_res_raster = kwargs.get("low_res_raster", None)
-        trajectory = kwargs.get("trajectory", None)
+        trajectory = kwargs.get("trajectory_label", None)
         aug_current = kwargs.get("aug_current", None)
 
         is_training = kwargs.get("is_training", None)
@@ -304,6 +304,7 @@ class NuplanRasterizeAutoRegressiveEncoder(NuplanRasterizeEncoder):
         _, trajectory_length = trajectory.shape[:2]
 
         assert self.config.x_random_walk == 0 and self.config.y_random_walk == 0, "AutoRegressiveEncoder does not support random walk"
+        assert not self.config.use_speed, "AutoRegressiveEncoder does not support speed, generating speed with autoregression is not reasonable"
         action_embeds = self.action_m_embed(trajectory)
 
         high_res_seq = high_res_raster.permute(0, 1, 4, 2, 3).to(device)
@@ -339,7 +340,7 @@ class NuplanRasterizeAutoRegressiveEncoder(NuplanRasterizeEncoder):
         assert self.use_key_points == 'no', "AutoRegressiveEncoder does not support key points"
 
         info_dict = {
-            "trajectory": trajectory,
+            "trajectory_label": trajectory,
             "context_length": kwargs.get('past_frame_num')[0] * (1 + sequence_length) + 1,  # OAOAO -> A
             "aug_current": aug_current,
             "selected_indices": self.selected_indices,

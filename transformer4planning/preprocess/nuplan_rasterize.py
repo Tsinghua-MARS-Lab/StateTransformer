@@ -870,7 +870,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
         low_res_rasters_list.append(rasters_low_res)
 
     result_to_return = {}
-    result_to_return['trajectory'] = np.array(trajectory_list, dtype=np.float32)  # sequence_length, 4
+    result_to_return['trajectory_label'] = np.array(trajectory_list, dtype=np.float32)  # sequence_length, 4
     result_to_return['high_res_raster'] = np.array(high_res_rasters_list, dtype=bool)  # sequence_length, 224, 224, total_raster_channels
     result_to_return['low_res_raster'] = np.array(low_res_rasters_list, dtype=bool)  # sequence_length, 224, 224, total_raster_channels
     result_to_return['past_frame_num'] = len(sample_frames_in_past)

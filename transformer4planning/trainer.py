@@ -110,6 +110,10 @@ def compute_metrics(prediction: EvalPrediction):
         return eval_result
 
     labels = prediction.label_ids  # nparray: sample_num, 80, 4
+    if labels.shape[1] == 10:
+        # autoregressive with 8 seconds to predict
+        # TODO: support dynamic intervals
+        labels = labels[:, 2:, :]
     prediction_horizon = labels.shape[1]
 
     prediction_by_generation = predictions['prediction_generation']  # sample_num, 85, 2/4
@@ -177,12 +181,18 @@ def compute_metrics(prediction: EvalPrediction):
     fde_x_error_gen = prediction_trajectory_by_generation[:, -1, 0] - labels[:, -1, 0]
     fde_y_error_gen = prediction_trajectory_by_generation[:, -1, 1] - labels[:, -1, 1]
 
+    # check if auturegressive generation
+    if labels.shape[1] < 80:
+        index_rescale = int(80 / labels.shape[1])  # scale = 10 when autoregressive with 1s interval (or 10 frames)
+    else:
+        index_rescale = 1
+
     # ADE metrics computation
     ade_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)
     ade1_gen = copy.deepcopy(ade_gen[:, 0])
-    ade3_gen = np.mean(copy.deepcopy(ade_gen[:, :30]), axis=1)
-    ade5_gen = np.mean(copy.deepcopy(ade_gen[:, :50]), axis=1)
-    ade8_gen = np.mean(copy.deepcopy(ade_gen[:, :80]), axis=1)
+    ade3_gen = np.mean(copy.deepcopy(ade_gen[:, :(30//index_rescale)]), axis=1)
+    ade5_gen = np.mean(copy.deepcopy(ade_gen[:, :(50//index_rescale)]), axis=1)
+    ade8_gen = np.mean(copy.deepcopy(ade_gen[:, :(80//index_rescale)]), axis=1)
     avg_ade_gen = (ade3_gen + ade5_gen + ade8_gen)/3
     ade_score = np.ones_like(avg_ade_gen) - avg_ade_gen/ADE_THRESHHOLD
     ade_score = np.where(ade_score < 0, np.zeros_like(ade_score), ade_score)
@@ -198,8 +208,8 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['ade_score'] = ade_score.mean()
 
     # FDE metrics computation
-    fde3_gen = copy.deepcopy(ade_gen[:, 29])
-    fde5_gen = copy.deepcopy(ade_gen[:, 49])
+    fde3_gen = copy.deepcopy(ade_gen[:, 29//index_rescale])
+    fde5_gen = copy.deepcopy(ade_gen[:, 49//index_rescale])
     fde8_gen = np.sqrt(fde_x_error_gen ** 2 + fde_y_error_gen ** 2)
     avg_fde_gen = (fde3_gen + fde5_gen + fde8_gen)/3
     fde_score = np.ones_like(avg_fde_gen) - avg_fde_gen/FDE_THRESHHOLD
@@ -236,9 +246,9 @@ def compute_metrics(prediction: EvalPrediction):
         heading_error_gen = abs(normalize_angles(heading_diff_gen))
 
         ahe1_gen = copy.deepcopy(heading_error_gen[:, 0])
-        ahe3_gen = np.mean(copy.deepcopy(heading_error_gen[:, :30]), axis=1)
-        ahe5_gen = np.mean(copy.deepcopy(heading_error_gen[:, :50]), axis=1)
-        ahe8_gen = np.mean(copy.deepcopy(heading_error_gen[:, :80]), axis=1)
+        ahe3_gen = np.mean(copy.deepcopy(heading_error_gen[:, :(30//index_rescale)]), axis=1)
+        ahe5_gen = np.mean(copy.deepcopy(heading_error_gen[:, :(50//index_rescale)]), axis=1)
+        ahe8_gen = np.mean(copy.deepcopy(heading_error_gen[:, :(80//index_rescale)]), axis=1)
         avg_ahe = (ahe3_gen + ahe5_gen + ahe8_gen)/3
         ahe_score = np.ones_like(avg_ahe) - avg_ahe/HEADING_ERROR_THRESHHOLD
         ahe_score = np.where(ahe_score < 0, np.zeros_like(ahe_score), ahe_score)
@@ -254,9 +264,9 @@ def compute_metrics(prediction: EvalPrediction):
         eval_result['ahe_score'] = ahe_score.mean()
 
         # final heading error computation
-        fhe3_gen = copy.deepcopy(heading_error_gen[:, 29])
-        fhe5_gen = copy.deepcopy(heading_error_gen[:, 49])
-        fhe8_gen = copy.deepcopy(heading_error_gen[:, 79])
+        fhe3_gen = copy.deepcopy(heading_error_gen[:, 29//index_rescale])
+        fhe5_gen = copy.deepcopy(heading_error_gen[:, 49//index_rescale])
+        fhe8_gen = copy.deepcopy(heading_error_gen[:, 79//index_rescale])
         avg_fhe = (fhe3_gen + fhe5_gen + fhe8_gen)/3
         fhe_score = np.ones_like(avg_fhe) - avg_fhe/HEADING_ERROR_THRESHHOLD
         fhe_score = np.where(fhe_score < 0, np.zeros_like(fhe_score), fhe_score)
@@ -271,9 +281,9 @@ def compute_metrics(prediction: EvalPrediction):
         eval_result['fhe_score'] = fhe_score.mean()
     
     # missing rate
-    max_displacement3 = np.max(ade_gen[:, :30], axis=1)
-    max_displacement5 = np.max(ade_gen[:, :50], axis=1)
-    max_displacement8 = np.max(ade_gen[:, :80], axis=1)
+    max_displacement3 = np.max(ade_gen[:, :(30//index_rescale)], axis=1)
+    max_displacement5 = np.max(ade_gen[:, :(50//index_rescale)], axis=1)
+    max_displacement8 = np.max(ade_gen[:, :(80//index_rescale)], axis=1)
     # miss = 1, not miss = 0
     miss3 = np.where(max_displacement3 > MISS_THRESHHOLD[0], np.ones_like(max_displacement3), np.zeros_like(max_displacement3))
     miss5 = np.where(max_displacement5 > MISS_THRESHHOLD[1], np.ones_like(max_displacement5), np.zeros_like(max_displacement5))
@@ -296,6 +306,8 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['fde_forward'] = fde_for
     if 'key_points_logits' in prediction_by_generation:
         assert len(selected_indices) >= 1, selected_indices
+        if index_rescale > 1:
+            logger.warning('Index rescale is not 1, probably because you are using autoregression with key points. This is not supported yet. Might cause error in key points evaluation')
         if len(selected_indices) > 10:
             ade_x_error_key_points_for = prediction_key_points_by_forward[:, 10:, 0] - label_key_points[:, 10:, 0]
             ade_y_error_key_points_for = prediction_key_points_by_forward[:, 10:, 1] - label_key_points[:, 10:, 1]

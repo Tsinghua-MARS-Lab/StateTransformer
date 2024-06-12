@@ -174,7 +174,7 @@ class STR(PreTrainedModel):
 
         if self.config.autoregressive:
             frames_length_to_predict = info_dict["pred_length"]
-            trajectory_label = info_dict['trajectory'][..., -frames_length_to_predict:, :]
+            trajectory_label = info_dict['trajectory_label'][..., -frames_length_to_predict:, :]
             loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
             traj_loss, traj_logits = self.traj_decoder.compute_traj_loss_autoregressive(transformer_outputs_hidden_state,
                                                                                         trajectory_label,
@@ -526,7 +526,7 @@ class STR(PreTrainedModel):
             if self.config.autoregressive:
                 points_to_predict = info_dict["pred_length"]
                 raster_seq_length = info_dict["sequence_length"]
-                trajectory_label = torch.zeros((batch_size, points_to_predict, 4), device=device)
+                traj_logits = torch.zeros((batch_size, points_to_predict, 4), device=device)
                 predicting_index = context_length - 1  # output space index
                 for i in range(points_to_predict):
                     # 1. generate trajectory
@@ -539,16 +539,30 @@ class STR(PreTrainedModel):
                         attention_mask,
                         position_ids,
                     )
-                    trajectory_label[:, i, :] = self.traj_decoder.model(transformer_outputs_hidden_state)[:, predicting_index, :]
+                    traj_logits[:, i, :] = self.traj_decoder.model(transformer_outputs_hidden_state)[:, predicting_index, :]
                     predicting_index += (1 + raster_seq_length)
                     # 2. update input_embeds with generated trajectory
-                    new_point_embed = self.encoder.action_m_embed(trajectory_label[:, i, :].unsqueeze(1))
+                    new_point_embed = self.encoder.action_m_embed(traj_logits[:, i, :].unsqueeze(1))
                     input_embeds[:, current_context_length, :] = new_point_embed[:, 0, :]
                     # 3. generate observation
-                    
-
+                    if i == points_to_predict - 1:
+                        # skip generating observations for the last point
+                        continue
+                    # TODO: change to generate observation
+                    next_state_embeds = torch.zeros((batch_size, raster_seq_length, 1, self.config.n_embd), device=device)
+                    for j in range(raster_seq_length):
+                        input_embeds[:, current_context_length + 1 + j, :] = next_state_embeds[:, j, 0, :]
+                traj_logits_k.append(traj_logits)
+                # # expand traj_logits from (b, 8, 4/7) to (b, 80, 4/7) with linear interpolation
+                # expanded_traj_logits = torch.zeros((batch_size, points_to_predict * 10, 4), device=device)
+                # # add padding 0 to the first point to the traj_logits for linear interpolation
+                # traj_logits = torch.cat([torch.zeros((batch_size, 1, 4), device=device), traj_logits], dim=1)
+                # for i in range(points_to_predict):
+                #     for j in range(10):
+                #         expanded_traj_logits[:, i * 10 + j, :] = traj_logits[:, i, :] + (traj_logits[:, i + 1, :] - traj_logits[:, i, :]) * j / 10
+                # traj_logits_k.append(expanded_traj_logits)
             # expected shape for pred trajectory is (b, pred_length, 4/7)
-            if self.traj_decoder is not None:
+            elif self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
                 traj_logits_k.append(traj_logits)
             else:
