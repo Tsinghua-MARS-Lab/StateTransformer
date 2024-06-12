@@ -53,6 +53,29 @@ class TrajectoryDecoder(nn.Module):
             print(self.config.loss_fn)
             assert False, "loss fn not supported"
 
+    def compute_traj_loss_autoregressive(self,
+                                         hidden_output,
+                                         label,
+                                         info_dict,
+                                         no_yaw_loss=False,
+                                         device=None):
+        pred_legth = info_dict.get("pred_length", label.shape[1])
+        raster_seq_len = info_dict.get("sequence_length")
+        traj_hidden_state = hidden_output[:, -2-(raster_seq_len+1)*(pred_legth-1):-1:(raster_seq_len+1), :]
+        assert traj_hidden_state.shape[1] == pred_legth, f"trajectory hidden state shape is {traj_hidden_state.shape} but pred_legth is {pred_legth}"
+        if device is None:
+            device = traj_hidden_state.device
+        # compute trajectory loss
+        traj_logits = self.model(traj_hidden_state)
+        assert self.config.task == "nuplan", "only support nuplan task"
+        assert self.config.mean_circular_loss, "only support mean circular loss"
+        assert self.config.predict_yaw, "only support yaw prediction"
+        traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+        if not no_yaw_loss:
+            traj_loss += mean_circular_error(traj_logits[..., 3], label[..., 3]).to(device)
+        return traj_loss, traj_logits
+
+
     def compute_traj_loss(self, 
                           hidden_output,
                           label, 
@@ -307,7 +330,7 @@ class KeyPointMLPDeocder(nn.Module):
                 kp_mask.sum() + 1e-7)
         else:
             raise NotImplementedError
-        
+
         return kp_loss, key_points_logits
 
     def generate_keypoints(self, hidden_state, info_dict:Dict=None):
