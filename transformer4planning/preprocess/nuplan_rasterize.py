@@ -564,7 +564,7 @@ def draw_rasters(data_dic, origin_ego_pose, agent_ids,
     route_channel += 1 if kwargs.get('use_mission_goal', False) else 0
 
     if autoregressive:
-        total_raster_channels = route_channel + road_types + traffic_types + agent_types
+        total_raster_channels = route_channel + road_types + traffic_types + agent_types  # 34
     else:
         total_raster_channels = route_channel + road_types + traffic_types + agent_types * len(sample_frames_in_past)
 
@@ -858,7 +858,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
         rasters_high_res, rasters_low_res = draw_rasters(
             data_dic, ego_pose, agent_ids,
             road_types, traffic_types, agent_types,
-            sample_frames_in_past, frequency_change_rate,
+            [frame], frequency_change_rate,
             autoregressive=True,
             raster_shape=raster_shape,
             high_res_scale=high_res_scale,
@@ -906,7 +906,21 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
     result_to_return["route_ids"] = sample['route_ids']
     result_to_return["aug_current"] = aug_current
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)
+
+    if debug_raster_path is not None:
+        if not os.path.exists(debug_raster_path):
+            os.makedirs(debug_raster_path)
+        image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
+        # if split == 'test':
+        # if map == 'sg-one-north':
+        if True:
+            save_result = save_raster(result_to_return, debug_raster_path, agent_types, 1,
+                                      image_file_name, split, high_res_scale, low_res_scale)
+
     del data_dic
+    del high_res_rasters_list
+    del low_res_rasters_list
+    del trajectory_list
     # del ego_pose_agent_dic
 
     return result_to_return
