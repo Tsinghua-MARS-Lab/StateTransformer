@@ -310,19 +310,17 @@ class KeyPointMLPDeocder(nn.Module):
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
 
         if self.config.task == "nuplan":
-            if self.config.kp_loss_rescale:
-                # normalize each selected key point loss
-                number_of_future_key_points = future_key_points.shape[1]
-                for i in range(future_key_points.shape[1]):
-                    if i == 0:
-                        kp_loss = self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
-                    elif i == number_of_future_key_points - 1:
-                        kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device)) * 1000
-                    else:
-                        kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
-            else:
-                kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
-                            self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device))
+            # # normalize each selected key point loss
+            # number_of_future_key_points = future_key_points.shape[1]
+            # for i in range(future_key_points.shape[1]):
+            #     if i == 0:
+            #         kp_loss = self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
+            #     elif i == number_of_future_key_points - 1:
+            #         kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device)) * 1000
+            #     else:
+            #         kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
+            kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
+                        self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device)) * self.config.kp_loss_rescale
         elif self.config.task == "waymo":
             kp_mask = info_dict["key_points_mask"]
             assert kp_mask is not None, "key_points_mask is None"

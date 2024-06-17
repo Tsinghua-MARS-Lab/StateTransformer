@@ -96,12 +96,15 @@ class ModelArguments:
                           "specified_forward: using specified key points, with exponentially growing frame indices."
                           "specified_backward: using specified key points, with exponentially growing frame indices."
                           "specified_two_backward: 8s, and 0.5s only"
-                          "specified_first_frame: 0.1s only"}
+                          "specified_first_second: 1s only"}
     )
     separate_kp_encoder: Optional[bool] = field(
         default=False
     )
     pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    pred_traj_only: Optional[bool] = field(
         default=False
     )
     arf_x_random_walk: Optional[float] = field(
@@ -258,8 +261,8 @@ class ModelArguments:
     first_frame_scele: Optional[float] = field(
         default=1000.0, metadata={"help": "The scale of the first frame"}
     )
-    kp_loss_rescale: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to rescale the key points loss"}
+    kp_loss_rescale: Optional[float] = field(
+        default=1.0, metadata={"help": "Whether to rescale the key points loss"}
     )
 
     # WIP: training with the simulation scores as loss
@@ -286,6 +289,11 @@ class ModelArguments:
     future_seconds: Optional[int] = field(
         default=8, metadata={"help": "The number of seconds to predict in the future"}
     )
+
+    # WIP
+    # reverse_traj_index_order: Optional[bool] = field(
+    #     default=False, metadata={"help": "Whether to reverse the trajectory index order"}
+    # )
 
 
 

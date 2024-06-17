@@ -759,7 +759,7 @@ class PlanningTrainer(Trainer):
             A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
             dictionary also contains the epoch number which comes from the training state.
         """
-        from nuplan_simulation.run_simulation import build_simulation, build_simulation_in_batch
+        from run_simulation import build_simulation, build_simulation_in_batch
         from nuplan_simulation.planner_utils import build_metrics_aggregators
         from nuplan.planning.simulation.main_callback.metric_aggregator_callback import MetricAggregatorCallback
         from nuplan.planning.simulation.main_callback.multi_main_callback import MultiMainCallback

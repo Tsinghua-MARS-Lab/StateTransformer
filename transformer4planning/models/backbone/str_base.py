@@ -150,6 +150,10 @@ class STR(PreTrainedModel):
                 from transformer4planning.models.decoder.base import KeyPointMLPDeocder
                 self.key_points_decoder = KeyPointMLPDeocder(self.config)
 
+        # create a model list of traj_decoder for each
+        # self.traj_decoders = nn.ModuleList()
+        # for i in range(80):
+        #     self.traj_decoders.append(TrajectoryDecoder(self.config))
         self.traj_decoder = TrajectoryDecoder(self.config)
 
     def _prepare_attention_mask_for_generation(self, input_embeds):
@@ -183,6 +187,7 @@ class STR(PreTrainedModel):
         else:
             trajectory_label = info_dict["trajectory_label"]
             loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
+            frames_length_to_predict = trajectory_label.shape[1]
             traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
                                                                          trajectory_label,
                                                                          info_dict)
@@ -218,7 +223,8 @@ class STR(PreTrainedModel):
             loss += info_dict["dense_pred_loss"]
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
 
-        if self.use_key_points != 'no':
+        if self.use_key_points != 'no' and not self.config.pred_traj_only:
+            # new: if pred_traj_only, no need to compute key points, this setting is for putting key point from other pretrained model later
             if self.config.generate_diffusion_dataset_for_key_points_decoder:
                 future_key_points = info_dict["future_key_points"] if self.config.predict_yaw else \
                             info_dict["future_key_points"][..., :2]

@@ -21,8 +21,8 @@ class TrajectoryEncoder(nn.Module):
                 self.selected_indices = [79, 39, 19, 9, 4]
             elif self.use_key_points == 'specified_two_backward':
                 self.selected_indices = [79, 4]
-            elif self.use_key_points == 'specified_first_frame':
-                self.selected_indices = [0]
+            elif self.use_key_points == 'specified_first_second':
+                self.selected_indices = [10]
             else:
                 assert False, f"specified key points should be either specified_forward or specified_backward {self.use_key_points}"
         elif 'universal' in self.use_key_points:

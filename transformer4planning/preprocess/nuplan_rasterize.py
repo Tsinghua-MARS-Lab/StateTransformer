@@ -695,7 +695,8 @@ def draw_rasters(data_dic, origin_ego_pose, agent_ids,
     # agent raster
     cos_, sin_ = math.cos(-origin_ego_pose[3]), math.sin(-origin_ego_pose[3])
     for _, agent_id in enumerate(agent_ids):
-        if agent_id == "null" or agent_id == 'ego':
+        if agent_id == "null":
+        # if agent_id == "null" or agent_id == 'ego':
             continue
         if agent_id not in list(agent_dic.keys()):
             print('unknown agent id', agent_id, type(agent_id))
