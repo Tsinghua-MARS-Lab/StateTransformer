@@ -294,6 +294,9 @@ class ModelArguments:
     reverse_traj_index_order: Optional[bool] = field(
         default=False, metadata={"help": "Whether to reverse the trajectory index order"}
     )
+    inspect_kp_loss: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
+    )
 
 
 

@@ -743,6 +743,8 @@ def draw_rasters(data_dic, origin_ego_pose, agent_ids,
     rasters_high_res = cv2.merge(rasters_high_res_channels).astype(bool)
     rasters_low_res = cv2.merge(rasters_low_res_channels).astype(bool)
 
+    del agent_dic
+    del road_dic
     del rasters_high_res_channels
     del rasters_low_res_channels
 
@@ -922,6 +924,7 @@ def autoregressive_rasterize(sample, data_path, raster_shape=(224, 224),
     del high_res_rasters_list
     del low_res_rasters_list
     del trajectory_list
+    del agent_dic
     # del ego_pose_agent_dic
 
     return result_to_return

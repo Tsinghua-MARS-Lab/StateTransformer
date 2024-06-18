@@ -92,8 +92,13 @@ class TrajectoryDecoder(nn.Module):
         pred_length = info_dict.get("pred_length", label.shape[1])
 
         context_length = info_dict.get("context_length", None)
+        selected_indices = info_dict.get("selected_indices", None)
+
         if context_length is not None:
-            traj_hidden_state = hidden_output[:, context_length - 1:context_length + pred_length - 1, :]
+            if selected_indices is None:
+                traj_hidden_state = hidden_output[:, context_length - 1:context_length + pred_length - 1, :]
+            else:
+                traj_hidden_state = hidden_output[:, context_length - 1 + len(selected_indices):context_length + pred_length - 1 + len(selected_indices), :]
         else:
             traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
         if device is None:
@@ -150,8 +155,9 @@ class TrajectoryDecoder(nn.Module):
                                 self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
             traj_loss *= self.config.trajectory_loss_rescale
         else:
-            traj_logits = torch.zeros_like(label[..., :2])
-            traj_loss = None
+            last_dimension = 4 if self.config.predict_yaw else 2
+            traj_logits = torch.zeros_like(label[..., :last_dimension])
+            traj_loss = torch.tensor(0, dtype=hidden_output.dtype, device=hidden_output.device)
         
         return traj_loss, traj_logits
     
@@ -315,8 +321,15 @@ class KeyPointMLPDeocder(nn.Module):
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
 
+        loss_per_kp = None
+
         if self.config.task == "nuplan":
             # # normalize each selected key point loss
+            if self.config.inspect_kp_loss:
+                loss_per_kp = []
+                for i in range(future_key_points.shape[1]):
+                    loss_per_kp.append(self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device)))
+                loss_per_kp = torch.stack(loss_per_kp)
             # number_of_future_key_points = future_key_points.shape[1]
             # for i in range(future_key_points.shape[1]):
             #     if i == 0:
@@ -335,7 +348,7 @@ class KeyPointMLPDeocder(nn.Module):
         else:
             raise NotImplementedError
 
-        return kp_loss, key_points_logits
+        return kp_loss, key_points_logits, loss_per_kp
 
     def generate_keypoints(self, hidden_state, info_dict:Dict=None):
         batch_size = hidden_state.shape[0]

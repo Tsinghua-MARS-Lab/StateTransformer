@@ -193,7 +193,8 @@ class STR(PreTrainedModel):
             traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
                                                                          trajectory_label,
                                                                          info_dict)
-            loss += traj_loss
+            if not self.config.pred_key_points_only:
+                loss += traj_loss
 
         loss_items = dict(
             traj_loss=traj_loss,
@@ -239,13 +240,15 @@ class STR(PreTrainedModel):
                 kp_logits = info_dict["future_key_points"].to(transformer_outputs_hidden_state.device) if self.config.predict_yaw else \
                             info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
             else:
-                kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
+                kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
                 # kp_loss will be 10x larger than traj_loss when converged
 
             loss += kp_loss
             traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
             pred_dict["kp_logits"] = kp_logits
             loss_items["kp_loss"] = kp_loss
+            if loss_per_kp is not None:
+                loss_items["loss_per_kp"] = loss_per_kp
 
         # WIP: training with simulations
         if self.config.finetuning_with_simulation_on_val and self.training:
