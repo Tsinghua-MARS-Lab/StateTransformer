@@ -273,11 +273,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                     future_key_embeds = self.action_m_embed(future_key_points_aug)
                 else:
                     future_key_embeds = self.action_m_embed(future_key_points_aug)
-
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed),
-                                                  device=device,
-                                                  dtype=action_embeds.dtype)], dim=1)
+                input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                          torch.zeros((batch_size, pred_length, n_embed),
+                                                      device=device,
+                                                      dtype=action_embeds.dtype)], dim=1)
             info_dict['future_key_points'] = future_key_points
 
         info_dict['selected_indices'] = self.selected_indices

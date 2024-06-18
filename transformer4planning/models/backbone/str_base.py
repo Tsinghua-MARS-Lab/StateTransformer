@@ -186,6 +186,8 @@ class STR(PreTrainedModel):
             loss += traj_loss
         else:
             trajectory_label = info_dict["trajectory_label"]
+            if self.config.reverse_traj_index_order:
+                trajectory_label = trajectory_label.flip(-2)
             loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
             frames_length_to_predict = trajectory_label.shape[1]
             traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
@@ -342,6 +344,7 @@ class STR(PreTrainedModel):
 
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
+        # first encode context
         input_embeds, info_dict = self.encoder(is_training=False, **kwargs)
         batch_size, _, _ = input_embeds.shape
         device = input_embeds.device
@@ -409,7 +412,6 @@ class STR(PreTrainedModel):
         traj_logits_k = []
         key_points_logits_k = []
         for mode in range(self.k):
-            # print('test generate 2: ', proposal_pred_embed.shape)
             if self.use_proposal:
                 if self.config.autoregressive_proposals:
                     # already updated in previous step
@@ -419,21 +421,24 @@ class STR(PreTrainedModel):
                         input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(1)
                     elif self.config.task == 'waymo':
                         input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
+
             if self.use_key_points != "no":
                 pred_length = info_dict["pred_length"]
                 selected_indices = self.encoder.selected_indices
-                kp_start_index = context_length
+                kp_start_index = int(context_length)
                 if self.use_proposal:
                     if self.config.autoregressive_proposals:
                         kp_start_index += int(self.config.proposal_num)
                     else:
                         kp_start_index += 1
+
                 # pass the following infos during generate for one sample (non-batch) generate with KP checking
                 map_name = kwargs.get("map", None)
                 route_ids = kwargs.get("route_ids", None)
                 ego_pose = kwargs.get("ego_pose", None)
                 road_dic = kwargs.get("road_dic", None)
                 idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
+
                 trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
                 if 'specified' in self.use_key_points:
                     future_key_points = trajectory_label_dummy[:, selected_indices, :]
@@ -570,6 +575,8 @@ class STR(PreTrainedModel):
             # expected shape for pred trajectory is (b, pred_length, 4/7)
             elif self.traj_decoder is not None:
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
+                if self.config.reverse_traj_index_order:
+                    traj_logits = traj_logits.flip(-2)
                 traj_logits_k.append(traj_logits)
             else:
                 raise NotImplementedError

@@ -90,7 +90,12 @@ class TrajectoryDecoder(nn.Module):
             info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
         """
         pred_length = info_dict.get("pred_length", label.shape[1])
-        traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
+
+        context_length = info_dict.get("context_length", None)
+        if context_length is not None:
+            traj_hidden_state = hidden_output[:, context_length - 1:context_length + pred_length - 1, :]
+        else:
+            traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
         if device is None:
             device = traj_hidden_state.device
         # compute trajectory loss conditioned on gt keypoints
@@ -299,13 +304,14 @@ class KeyPointMLPDeocder(nn.Module):
 
         context_length = info_dict.get("context_length", None)
         future_key_points = info_dict["future_key_points"]
-        
+
         kp_start_index = context_length - 1
         if self.config.use_proposal:
             if self.config.autoregressive_proposals:
                 kp_start_index += int(self.config.proposal_num)
             else:
                 kp_start_index += 1
+
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
 
@@ -333,6 +339,7 @@ class KeyPointMLPDeocder(nn.Module):
 
     def generate_keypoints(self, hidden_state, info_dict:Dict=None):
         batch_size = hidden_state.shape[0]
+        assert hidden_state.shape[1] == 1
         key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
         return key_points_logit, None
     

@@ -291,9 +291,9 @@ class ModelArguments:
     )
 
     # WIP
-    # reverse_traj_index_order: Optional[bool] = field(
-    #     default=False, metadata={"help": "Whether to reverse the trajectory index order"}
-    # )
+    reverse_traj_index_order: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to reverse the trajectory index order"}
+    )
 
 
 
