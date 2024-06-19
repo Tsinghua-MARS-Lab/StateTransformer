@@ -276,10 +276,10 @@ class Planner(AbstractPlanner):
                 if self._model.device != 'cpu':
                     device = self._model.device
                     prediction_generation = self._model.generate(
-                        context_actions=torch.tensor(model_samples['context_actions']).to(device),
-                        high_res_raster=torch.tensor(model_samples['high_res_raster']).to(device),
-                        low_res_raster=torch.tensor(model_samples['low_res_raster']).to(device),
-                        trajectory_label=torch.zeros((batch_size, self._N_points, 4)).to(device),
+                        context_actions=torch.tensor(model_samples['context_actions']),
+                        high_res_raster=torch.tensor(model_samples['high_res_raster']),
+                        low_res_raster=torch.tensor(model_samples['low_res_raster']),
+                        trajectory_label=torch.zeros((batch_size, self._N_points, 4)),
                     )
                     pred_traj = prediction_generation['traj_logits'].detach().cpu().float().numpy()
                     if 'key_points_logits' in prediction_generation:
