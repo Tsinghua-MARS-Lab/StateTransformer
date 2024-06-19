@@ -1,5 +1,7 @@
 from typing import List
 
+import copy
+import functools
 import yaml
 import datetime
 import torch
@@ -51,8 +53,8 @@ from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner
 from nuplan.planning.simulation.history.simulation_history import SimulationHistory, SimulationHistorySample
 
 # multiple proces
-import concurrent.futures
-import multiprocessing
+import torch.multiprocessing as mp
+
 def process_single_sample(i, planners, planner_inputs):
     return planners[i].inputs_to_model_sample(
         history=planner_inputs[i].history,
@@ -485,100 +487,60 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
         scenarios = scenarios[:-(len(scenarios) % batch_size)]
 
     scenario_groups = [scenarios[i:i + batch_size] for i in range(0, len(scenarios), batch_size)]
-    global_model = None
     over_all_metric_results = None
 
     assert len(scenario_groups) > 0, f'no scenarios after filtering, check folder and yaml file.'
+    
+    # multi-processing
+    rep_cnt = args.processes_repetition
+    gpu_cnt = torch.cuda.device_count()
+    process_cnt = gpu_cnt * rep_cnt
+
+    # processes resources
+    tasks_queue = mp.Queue()
+    results_queue = mp.Queue()
+    locks = [mp.Lock() for _ in range(gpu_cnt)]
+
+    # global model
+    model_planner = Planner(args.model_path, 'cpu')
+    model_planner._initialize_model()
+    global_model = model_planner._model
+    _time = time.time()
+    global_model_cuda = [copy.deepcopy(global_model).to(f'cuda:{i}') for i in range(gpu_cnt)]
+    global_model_with_lock =  [_inject_model(model, lock) for model, lock in zip(global_model_cuda, locks)]
+    print(f'Loading model time: {time.time()-_time:.2f} s.')
+
+    # process init
+    processes = []
+    for i in tqdm(list(range(process_cnt)), desc='Starting Multi-Processes'):
+        gpu_idx = i % gpu_cnt
+        p = mp.Process(target=Worker(global_model_with_lock[gpu_idx], gpu_idx, locks[gpu_idx]), args=(tasks_queue, results_queue))
+        p.start()
+        processes.append(p)
+
+    print('start putting tasks to queue')
 
     # Iterate through scenarios
-    for scenarios in tqdm(scenario_groups, desc='Running simulation'):
-        # running each batch of scenarios
-        # Initialize new planners for each scenario
-        if args is not None:
-            planners = [Planner(model_path=args.model_path, device=args.device, all_road_dic=all_road_dic, scenarios=scenarios) for _ in range(batch_size)]
-        else:
-            planners = [Planner(model_path=None, device=None, all_road_dic=all_road_dic, scenarios=scenarios) for _ in range(batch_size)]
-        # Initialize Ego Controller and Perception
-        if experiment == 'open_loop_boxes':
-            ego_controllers = [LogPlaybackController(scenario) for scenario in scenarios]
-            observations = [TracksObservation(scenario) for scenario in scenarios]
-        elif experiment == 'closed_loop_nonreactive_agents':
-            if controller == 'perfect_controller':
-                ego_controllers = [PerfectTrackingController(scenario) for scenario in scenarios]
-            else:
-                tracker = LQRTracker(q_longitudinal=[10.0], r_longitudinal=[1.0], q_lateral=[1.0, 10.0, 0.0],
-                                     r_lateral=[1.0], discretization_time=0.1, tracking_horizon=10,
-                                     jerk_penalty=1e-4, curvature_rate_penalty=1e-2,
-                                     stopping_proportional_gain=0.5, stopping_velocity=0.2)
-                motion_model = KinematicBicycleModel(get_pacifica_parameters())
-                ego_controllers = [TwoStageController(scenario, tracker, motion_model) for scenario in scenarios]
-            observations = [TracksObservation(scenario) for scenario in scenarios]
-        elif experiment == 'closed_loop_reactive_agents':
-            if controller == 'perfect_controller':
-                ego_controllers = [PerfectTrackingController(scenario) for scenario in scenarios]
-            else:
-                tracker = LQRTracker(q_longitudinal=[10.0], r_longitudinal=[1.0], q_lateral=[1.0, 10.0, 0.0],
-                                     r_lateral=[1.0], discretization_time=0.1, tracking_horizon=10,
-                                     jerk_penalty=1e-4, curvature_rate_penalty=1e-2,
-                                     stopping_proportional_gain=0.5, stopping_velocity=0.2)
-                motion_model = KinematicBicycleModel(get_pacifica_parameters())
-                ego_controllers = [TwoStageController(scenario, tracker, motion_model) for scenario in scenarios]
-            observations = [IDMAgents(target_velocity=10, min_gap_to_lead_agent=1.0, headway_time=1.5,
-                                      accel_max=1.0, decel_max=2.0, scenario=scenario,
-                                      open_loop_detections_types=["PEDESTRIAN", "BARRIER", "CZONE_SIGN", "TRAFFIC_CONE",
-                                                                  "GENERIC_OBJECT"]) for scenario in scenarios]
-        else:
-            raise ValueError(f"Invalid experiment type: {experiment}")
+    N = len(scenario_groups)
+    for scenarios in scenario_groups:
+        tasks_queue.put((scenarios, all_road_dic, batch_size, experiment, controller, output_dir, simulation_dir, metric_engine))
+    for _ in range(process_cnt):
+        tasks_queue.put(None)
+    
+    print('start fetching results from queue')
 
-        # print('Running on new batch scenario: ', len(scenarios), scenarios[0].token, scenarios[0].get_number_of_iterations())
-
-        # Simulation Manager
-        simulation_time_controllers = [StepSimulationTimeController(scenario) for scenario in scenarios]
-
-        # Stateful callbacks
-        metric_callbacks = [MetricCallback(metric_engine=metric_engine) for _ in range(batch_size)]
-        sim_log_callbacks = [SimulationLogCallback(output_dir, simulation_dir, "msgpack") for _ in range(batch_size)]
-
-        # Construct simulation and manager
-        simulation_setups = [SimulationSetup(
-            time_controller=simulation_time_controller,
-            observations=observation,
-            ego_controller=ego_controller,
-            scenario=scenario,
-        ) for simulation_time_controller, observation, ego_controller, scenario in zip(simulation_time_controllers, observations, ego_controllers, scenarios)
-        ]
-
-        simulations = [Simulation(
-            simulation_setup=simulation_setup,
-            callback=MultiCallback([metric_callback, sim_log_callback])
-        ) for simulation_setup, metric_callback, sim_log_callback in zip(simulation_setups, metric_callbacks, sim_log_callbacks)
-        ]
-
-        # Begin simulation
-        if model is not None:
-            global_model = model
-
-        if global_model is None:
-            simulation_runner = SimulationRunnerBatch(simulations, planners)
-            reports = simulation_runner.run()
-            global_model = simulation_runner._model
-        else:
-            simulation_runner = SimulationRunnerBatch(simulations, planners, global_model)
-            reports = simulation_runner.run()
-
-        # inspect reports
-        batch_metric_results = []
-        for i in range(len(reports)):
-            metric_callback = simulations[i].callback.callbacks[0]
-            metric_engine = metric_callback.metric_engine
-            metric_results = run_metric_engine(metric_engine, simulations[i].scenario, planners[i].name(), simulations[i].history)
-            batch_metric_results.append(metric_results)
+    # fetch results
+    for _ in tqdm(list(range(N)), desc='Fetch Results'):
+        batch_metric_results, reports = results_queue.get()
 
         over_all_metric_results = update_metric_results(
             metric_dic=over_all_metric_results,
             batch_metric_results=batch_metric_results
         )
         runner_reports += reports
+
+    # finish
+    [p.join() for p in processes]
 
     # compute overall score
     overall_score_dic, overall_score = compute_overall_score(over_all_metric_results, experiment)
@@ -610,6 +572,111 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
     print('Finished running simulations!')
 
     return runner_reports, overall_score_dic, overall_score
+
+
+class Worker():
+    def __init__(self, model, gpu_idx, lock):
+        self.device = torch.device(f'cuda:{gpu_idx}')
+        self.model = model
+    
+    def __call__(self, tasks_queue, results_queue):
+        while True:
+            task = tasks_queue.get()
+            if task is None:
+                break
+            result = _worker_func(*task, self.model)
+            results_queue.put(result)
+
+def _generate(self, func, lock, *args, **kwargs):
+    device = self.device
+    lock.acquire()
+    args = (arg.to(device) for arg in args)
+    kwargs = {k: v.to(device) for k, v in kwargs.items()}
+
+    try:
+        ret = func(*args, **kwargs)
+    finally:
+        lock.release()
+    return ret
+
+def _inject_model(model, lock):
+    model.generate = functools.partial(_generate, model, model.generate, lock)
+    return model
+
+
+def _worker_func(scenarios, all_road_dic, batch_size, experiment, controller, output_dir, simulation_dir, metric_engine, global_model):
+    # running each batch of scenarios
+    # Initialize new planners for each scenario
+    planners = [Planner(model_path=None, device=None, all_road_dic=all_road_dic, scenarios=scenarios) for _ in range(batch_size)]
+    # Initialize Ego Controller and Perception
+    if experiment == 'open_loop_boxes':
+        ego_controllers = [LogPlaybackController(scenario) for scenario in scenarios]
+        observations = [TracksObservation(scenario) for scenario in scenarios]
+    elif experiment == 'closed_loop_nonreactive_agents':
+        if controller == 'perfect_controller':
+            ego_controllers = [PerfectTrackingController(scenario) for scenario in scenarios]
+        else:
+            tracker = LQRTracker(q_longitudinal=[10.0], r_longitudinal=[1.0], q_lateral=[1.0, 10.0, 0.0],
+                                    r_lateral=[1.0], discretization_time=0.1, tracking_horizon=10,
+                                    jerk_penalty=1e-4, curvature_rate_penalty=1e-2,
+                                    stopping_proportional_gain=0.5, stopping_velocity=0.2)
+            motion_model = KinematicBicycleModel(get_pacifica_parameters())
+            ego_controllers = [TwoStageController(scenario, tracker, motion_model) for scenario in scenarios]
+        observations = [TracksObservation(scenario) for scenario in scenarios]
+    elif experiment == 'closed_loop_reactive_agents':
+        if controller == 'perfect_controller':
+            ego_controllers = [PerfectTrackingController(scenario) for scenario in scenarios]
+        else:
+            tracker = LQRTracker(q_longitudinal=[10.0], r_longitudinal=[1.0], q_lateral=[1.0, 10.0, 0.0],
+                                    r_lateral=[1.0], discretization_time=0.1, tracking_horizon=10,
+                                    jerk_penalty=1e-4, curvature_rate_penalty=1e-2,
+                                    stopping_proportional_gain=0.5, stopping_velocity=0.2)
+            motion_model = KinematicBicycleModel(get_pacifica_parameters())
+            ego_controllers = [TwoStageController(scenario, tracker, motion_model) for scenario in scenarios]
+        observations = [IDMAgents(target_velocity=10, min_gap_to_lead_agent=1.0, headway_time=1.5,
+                                    accel_max=1.0, decel_max=2.0, scenario=scenario,
+                                    open_loop_detections_types=["PEDESTRIAN", "BARRIER", "CZONE_SIGN", "TRAFFIC_CONE",
+                                                                "GENERIC_OBJECT"]) for scenario in scenarios]
+    else:
+        raise ValueError(f"Invalid experiment type: {experiment}")
+
+    # print('Running on new batch scenario: ', len(scenarios), scenarios[0].token, scenarios[0].get_number_of_iterations())
+
+    # Simulation Manager
+    simulation_time_controllers = [StepSimulationTimeController(scenario) for scenario in scenarios]
+
+    # Stateful callbacks
+    metric_callbacks = [MetricCallback(metric_engine=metric_engine) for _ in range(batch_size)]
+    sim_log_callbacks = [SimulationLogCallback(output_dir, simulation_dir, "msgpack") for _ in range(batch_size)]
+
+    # Construct simulation and manager
+    simulation_setups = [SimulationSetup(
+        time_controller=simulation_time_controller,
+        observations=observation,
+        ego_controller=ego_controller,
+        scenario=scenario,
+    ) for simulation_time_controller, observation, ego_controller, scenario in zip(simulation_time_controllers, observations, ego_controllers, scenarios)
+    ]
+
+    simulations = [Simulation(
+        simulation_setup=simulation_setup,
+        callback=MultiCallback([metric_callback, sim_log_callback])
+    ) for simulation_setup, metric_callback, sim_log_callback in zip(simulation_setups, metric_callbacks, sim_log_callbacks)
+    ]
+
+    # Begin simulation
+    simulation_runner = SimulationRunnerBatch(simulations, planners, global_model)
+    reports = simulation_runner.run()
+
+    # inspect reports
+    batch_metric_results = []
+    for i in range(len(reports)):
+        metric_callback = simulations[i].callback.callbacks[0]
+        metric_engine = metric_callback.metric_engine
+        metric_results = run_metric_engine(metric_engine, simulations[i].scenario, planners[i].name(), simulations[i].history)
+        batch_metric_results.append(metric_results)
+    
+    return batch_metric_results, reports
 
 
 def build_nuboard(scenario_builder, simulation_path):
@@ -698,6 +765,8 @@ def main(args):
 
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str)
     parser.add_argument('--map_path', type=str)
@@ -713,6 +782,8 @@ if __name__ == "__main__":
     parser.add_argument('--max_scenario_num', type=int, default=-1)
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--board_only_log_path', type=str, default=None)
+    parser.add_argument('--processes-repetition', type=int, default=1)
     args = parser.parse_args()
     os.environ['NUPLAN_EXP_ROOT'] = args.nuplan_exp_root
+
     main(args)
