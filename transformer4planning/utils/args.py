@@ -289,15 +289,13 @@ class ModelArguments:
     future_seconds: Optional[int] = field(
         default=8, metadata={"help": "The number of seconds to predict in the future"}
     )
-
-    # WIP
+    # end of auturegressive args
     reverse_traj_index_order: Optional[bool] = field(
         default=False, metadata={"help": "Whether to reverse the trajectory index order"}
     )
     inspect_kp_loss: Optional[bool] = field(
         default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
     )
-
 
 
 @dataclass
@@ -433,6 +431,11 @@ class PlanningTrainingArguments(TrainingArguments):
     sim_controller: Optional[str] = field(
         default='two_stage_controller', metadata={"help": "The controller for simulation, choose from [perfect_controller, two_stage_controller]"}
     )
+
+    # WIP
+    # long_model_ckpt_path: Optional[str] = field(
+    #     default=None, metadata={"help": "The path of the long model checkpoint"}
+    # )
 
 
     # label_names: Optional[List[str]] = field(

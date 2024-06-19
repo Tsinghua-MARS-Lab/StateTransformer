@@ -55,14 +55,18 @@ def list_of_sample_dic_to_batch(list_of_sample_dic):
 
 class STRConfig(PretrainedConfig):
     def update_by_model_args(self, model_args):
-        for each_key in model_args.__dict__:
-            self.__dict__[each_key] = model_args.__dict__[each_key]
+        if hasattr(model_args, "__dict__"):
+            for each_key in model_args.__dict__:
+                self.__dict__[each_key] = model_args.__dict__[each_key]
+        else:
+            for each_key in model_args:
+                self.__dict__[each_key] = model_args[each_key]
         # to be compatible with older models
         attr_list = ["use_key_points", "kp_decoder_type", "separate_kp_encoder", "use_proposal",
                      "autoregressive_proposals", "selected_exponential_past",
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
-                     "camera_image_encoder", "use_speed", "no_yaw_with_stepping",
+                     "camera_image_encoder", "use_speed", "no_yaw_with_stepping", "autoregressive",
                      "skip_yaw_norm"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
@@ -908,6 +912,25 @@ def build_models(model_args):
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p)
         logger.info('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
+    return model
+
+
+def build_model_from_path(model_path):
+    from transformer4planning.utils.args import ModelArguments
+    from transformers import (HfArgumentParser)
+    import os
+    parser = HfArgumentParser((ModelArguments))
+    # load model args from config.json
+    config_path = os.path.join(model_path, 'config.json')
+    if not os.path.exists(config_path):
+        print('WARNING config.json not found in checkpoint path, using default model args ', config_path)
+        model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
+    else:
+        model_args, = parser.parse_json_file(config_path, allow_extra_keys=True)
+        model_args.model_pretrain_name_or_path = model_path
+        model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
+    print('model loaded with args: ', model_args, model_args.model_name, model_path)
+    model = build_models(model_args=model_args)
     return model
 
 
