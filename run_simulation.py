@@ -530,14 +530,31 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
     print('start fetching results from queue')
 
     # fetch results
+    failed_scenarios = []
     for _ in tqdm(list(range(N)), desc='Fetch Results'):
-        batch_metric_results, reports = results_queue.get()
+        is_succ, ret_msg = results_queue.get()
 
+        if not is_succ:
+            error_str = (f'Exception caught in scenario: {_}\n'
+                         f'Error message: {ret_msg}')
+            print(error_str)
+            failed_scenarios.append(error_str)
+            continue
+
+        batch_metric_results, reports = ret_msg
         over_all_metric_results = update_metric_results(
             metric_dic=over_all_metric_results,
             batch_metric_results=batch_metric_results
         )
         runner_reports += reports
+
+    if failed_scenarios:
+        err_file = 'err_scenarios.log'
+        print(f'{len(failed_scenarios)} scenarios failed during simulation.\n'
+              f'writting to {err_file}.')
+        with open(err_file, 'w') as f:
+            for err_msg in failed_scenarios:
+                f.write(f"{err_msg}\n\n")
 
     # finish
     [p.join() for p in processes]
@@ -584,20 +601,24 @@ class Worker():
             task = tasks_queue.get()
             if task is None:
                 break
-            result = _worker_func(*task, self.model)
+            try:
+                result = (True, _worker_func(*task, self.model))
+            except Exception as e:
+                result = (False, str(e))
             results_queue.put(result)
 
 def _generate(self, func, lock, *args, **kwargs):
     device = self.device
     lock.acquire()
-    args = (arg.to(device) for arg in args)
-    kwargs = {k: v.to(device) for k, v in kwargs.items()}
 
     try:
-        ret = func(*args, **kwargs)
+        args = (arg.to(device) for arg in args)
+        kwargs = {k: v.to(device) for k, v in kwargs.items()}
+        return func(*args, **kwargs)
+    except Exception as e:
+        raise e
     finally:
         lock.release()
-    return ret
 
 def _inject_model(model, lock):
     model.generate = functools.partial(_generate, model, model.generate, lock)
