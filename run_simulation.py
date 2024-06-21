@@ -492,19 +492,22 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
     assert len(scenario_groups) > 0, f'no scenarios after filtering, check folder and yaml file.'
     
     # multi-processing
-    rep_cnt = args.processes_repetition
+    rep_cnt = args.processes_repetition if args else 1
     gpu_cnt = torch.cuda.device_count()
     process_cnt = gpu_cnt * rep_cnt
 
     # processes resources
-    tasks_queue = mp.Queue()
+    tasks_queue = mp.Queue(maxsize=process_cnt)
     results_queue = mp.Queue()
     locks = [mp.Lock() for _ in range(gpu_cnt)]
 
     # global model
-    model_planner = Planner(args.model_path, 'cpu')
-    model_planner._initialize_model()
-    global_model = model_planner._model
+    if model:
+        global_model = model
+    else:
+        model_planner = Planner(args.model_path, 'cpu')
+        model_planner._initialize_model()
+        global_model = model_planner._model
     _time = time.time()
     global_model_cuda = [copy.deepcopy(global_model).to(f'cuda:{i}') for i in range(gpu_cnt)]
     global_model_with_lock =  [_inject_model(model, lock) for model, lock in zip(global_model_cuda, locks)]
@@ -522,22 +525,23 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
 
     # Iterate through scenarios
     N = len(scenario_groups)
-    for scenarios in scenario_groups:
+    for scenarios in tqdm(scenario_groups, desc='Running simulation'):
         tasks_queue.put((scenarios, all_road_dic, batch_size, experiment, controller, output_dir, simulation_dir, metric_engine))
     for _ in range(process_cnt):
         tasks_queue.put(None)
-    
-    print('start fetching results from queue')
 
+    # finish
+    [p.join() for p in processes]
+    
     # fetch results
+    print('start fetching results from queue')
     failed_scenarios = []
-    for _ in tqdm(list(range(N)), desc='Fetch Results'):
+    while not results_queue.empty():
         is_succ, ret_msg = results_queue.get()
 
         if not is_succ:
             error_str = (f'Exception caught in scenario: {_}\n'
                          f'Error message: {ret_msg}')
-            print(error_str)
             failed_scenarios.append(error_str)
             continue
 
@@ -555,9 +559,10 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
         with open(err_file, 'w') as f:
             for err_msg in failed_scenarios:
                 f.write(f"{err_msg}\n\n")
-
-    # finish
-    [p.join() for p in processes]
+    
+    uncatchable_errors_num = N - len(runner_reports) - len(failed_scenarios)
+    if uncatchable_errors_num > 0:
+        print(f'{uncatchable_errors_num} scenarios failed due to uncatchable errors.')
 
     # compute overall score
     overall_score_dic, overall_score = compute_overall_score(over_all_metric_results, experiment)
