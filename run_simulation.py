@@ -473,27 +473,163 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
         scenarios = scenarios[:-(len(scenarios) % batch_size)]
 
     scenario_groups = [scenarios[i:i + batch_size] for i in range(0, len(scenarios), batch_size)]
+    global_model = None
+    over_all_metric_results = None
+
+    assert len(scenario_groups) > 0, f'no scenarios after filtering, check folder and yaml file.'
+
+    # Iterate through scenarios
+    for scenarios in tqdm(scenario_groups, desc='Running simulation'):
+        # running each batch of scenarios
+        # Initialize new planners for each scenario
+        if args is not None:
+            planners = [Planner(model_path=args.model_path, device=args.device, all_road_dic=all_road_dic, scenarios=scenarios) for _ in range(batch_size)]
+        else:
+            planners = [Planner(model_path=None, device=None, all_road_dic=all_road_dic, scenarios=scenarios) for _ in range(batch_size)]
+        # Initialize Ego Controller and Perception
+        if experiment == 'open_loop_boxes':
+            ego_controllers = [LogPlaybackController(scenario) for scenario in scenarios]
+            observations = [TracksObservation(scenario) for scenario in scenarios]
+        elif experiment == 'closed_loop_nonreactive_agents':
+            if controller == 'perfect_controller':
+                ego_controllers = [PerfectTrackingController(scenario) for scenario in scenarios]
+            else:
+                tracker = LQRTracker(q_longitudinal=[10.0], r_longitudinal=[1.0], q_lateral=[1.0, 10.0, 0.0],
+                                     r_lateral=[1.0], discretization_time=0.1, tracking_horizon=10,
+                                     jerk_penalty=1e-4, curvature_rate_penalty=1e-2,
+                                     stopping_proportional_gain=0.5, stopping_velocity=0.2)
+                motion_model = KinematicBicycleModel(get_pacifica_parameters())
+                ego_controllers = [TwoStageController(scenario, tracker, motion_model) for scenario in scenarios]
+            observations = [TracksObservation(scenario) for scenario in scenarios]
+        elif experiment == 'closed_loop_reactive_agents':
+            if controller == 'perfect_controller':
+                ego_controllers = [PerfectTrackingController(scenario) for scenario in scenarios]
+            else:
+                tracker = LQRTracker(q_longitudinal=[10.0], r_longitudinal=[1.0], q_lateral=[1.0, 10.0, 0.0],
+                                     r_lateral=[1.0], discretization_time=0.1, tracking_horizon=10,
+                                     jerk_penalty=1e-4, curvature_rate_penalty=1e-2,
+                                     stopping_proportional_gain=0.5, stopping_velocity=0.2)
+                motion_model = KinematicBicycleModel(get_pacifica_parameters())
+                ego_controllers = [TwoStageController(scenario, tracker, motion_model) for scenario in scenarios]
+            observations = [IDMAgents(target_velocity=10, min_gap_to_lead_agent=1.0, headway_time=1.5,
+                                      accel_max=1.0, decel_max=2.0, scenario=scenario,
+                                      open_loop_detections_types=["PEDESTRIAN", "BARRIER", "CZONE_SIGN", "TRAFFIC_CONE",
+                                                                  "GENERIC_OBJECT"]) for scenario in scenarios]
+        else:
+            raise ValueError(f"Invalid experiment type: {experiment}")
+
+        # print('Running on new batch scenario: ', len(scenarios), scenarios[0].token, scenarios[0].get_number_of_iterations())
+
+        # Simulation Manager
+        simulation_time_controllers = [StepSimulationTimeController(scenario) for scenario in scenarios]
+
+        # Stateful callbacks
+        metric_callbacks = [MetricCallback(metric_engine=metric_engine) for _ in range(batch_size)]
+        sim_log_callbacks = [SimulationLogCallback(output_dir, simulation_dir, "msgpack") for _ in range(batch_size)]
+
+        # Construct simulation and manager
+        simulation_setups = [SimulationSetup(
+            time_controller=simulation_time_controller,
+            observations=observation,
+            ego_controller=ego_controller,
+            scenario=scenario,
+        ) for simulation_time_controller, observation, ego_controller, scenario in zip(simulation_time_controllers, observations, ego_controllers, scenarios)
+        ]
+
+        simulations = [Simulation(
+            simulation_setup=simulation_setup,
+            callback=MultiCallback([metric_callback, sim_log_callback])
+        ) for simulation_setup, metric_callback, sim_log_callback in zip(simulation_setups, metric_callbacks, sim_log_callbacks)
+        ]
+
+        # Begin simulation
+        if model is not None:
+            global_model = model
+
+        if global_model is None:
+            simulation_runner = SimulationRunnerBatch(simulations, planners)
+            reports = simulation_runner.run()
+            global_model = simulation_runner._model
+        else:
+            simulation_runner = SimulationRunnerBatch(simulations, planners, global_model)
+            reports = simulation_runner.run()
+
+        # inspect reports
+        batch_metric_results = []
+        for i in range(len(reports)):
+            metric_callback = simulations[i].callback.callbacks[0]
+            metric_engine = metric_callback.metric_engine
+            metric_results = run_metric_engine(metric_engine, simulations[i].scenario, planners[i].name(), simulations[i].history)
+            batch_metric_results.append(metric_results)
+
+        over_all_metric_results = update_metric_results(
+            metric_dic=over_all_metric_results,
+            batch_metric_results=batch_metric_results
+        )
+        runner_reports += reports
+
+    # compute overall score
+    overall_score_dic, overall_score = compute_overall_score(over_all_metric_results, experiment)
+    print(f'Overall score: {overall_score}')
+
+    # save reports
+    if save_reports:
+        save_runner_reports(runner_reports, output_dir, 'runner_reports')
+
+    # Notify user about the result of simulations
+    failed_simulations = str()
+    number_of_successful = 0
+
+    for result in runner_reports:
+        if result.succeeded:
+            number_of_successful += 1
+        else:
+            print("Failed Simulation.\n '%s'", result.error_message)
+            failed_simulations += f"[{result.log_name}, {result.scenario_name}] \n"
+
+    number_of_failures = len(scenarios) - number_of_successful
+    print(f"Number of successful simulations: {number_of_successful}")
+    print(f"Number of failed simulations: {number_of_failures}")
+
+    # Print out all failed simulation unique identifier
+    if number_of_failures > 0:
+        print(f"Failed simulations [log, token]:\n{failed_simulations}")
+
+    print('Finished running simulations!')
+
+    return runner_reports, overall_score_dic, overall_score
+
+
+def build_simulation_in_batch_multiprocess(experiment, scenarios, output_dir, simulation_dir, metric_dir, batch_size=32, model=None, args=None,
+                              all_road_dic={}, save_reports=True, controller='two_stage_controller'):
+    runner_reports = []
+    # print(f'Building simulations from {len(scenarios)} scenarios...')
+    metric_engine = build_metrics_engine(experiment, output_dir, metric_dir)
+    # print('Building metric engines...DONE\n')
+
+    if len(scenarios) % batch_size > 0:
+        print(f"Batch size {batch_size} is not a divisor of the number of scenarios {len(scenarios)}, skipping the last batch.")
+        scenarios = scenarios[:-(len(scenarios) % batch_size)]
+
+    scenario_groups = [scenarios[i:i + batch_size] for i in range(0, len(scenarios), batch_size)]
     over_all_metric_results = None
 
     assert len(scenario_groups) > 0, f'no scenarios after filtering, check folder and yaml file.'
     
     # multi-processing
-    rep_cnt = args.processes_repetition if args else 1
+    rep_cnt = args.processes_repetition
     gpu_cnt = torch.cuda.device_count()
     process_cnt = gpu_cnt * rep_cnt
 
     # processes resources
-    tasks_queue = mp.Queue(maxsize=process_cnt)
+    tasks_queue = mp.Queue()
     results_queue = mp.Queue()
     locks = [mp.Lock() for _ in range(gpu_cnt)]
 
     # global model
-    if model:
-        global_model = model
-    else:
-        model_planner = Planner(args.model_path, 'cpu')
-        model_planner._initialize_model()
-        global_model = model_planner._model
+    model_planner = Planner(args.model_path, 'cpu')
+    model_planner._initialize_model()
+    global_model = model_planner._model
     _time = time.time()
     global_model_cuda = [copy.deepcopy(global_model).to(f'cuda:{i}') for i in range(gpu_cnt)]
     global_model_with_lock =  [_inject_model(model, lock) for model, lock in zip(global_model_cuda, locks)]
@@ -511,23 +647,22 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
 
     # Iterate through scenarios
     N = len(scenario_groups)
-    for scenarios in tqdm(scenario_groups, desc='Running simulation'):
+    for scenarios in scenario_groups:
         tasks_queue.put((scenarios, all_road_dic, batch_size, experiment, controller, output_dir, simulation_dir, metric_engine))
     for _ in range(process_cnt):
         tasks_queue.put(None)
-    print('start fetching results from queue')
-    # finish
-    [p.join() for p in processes]
     
-    # fetch results
     print('start fetching results from queue')
+
+    # fetch results
     failed_scenarios = []
-    while not results_queue.empty():
+    for _ in tqdm(list(range(N)), desc='Fetch Results'):
         is_succ, ret_msg = results_queue.get()
 
         if not is_succ:
             error_str = (f'Exception caught in scenario: {_}\n'
                          f'Error message: {ret_msg}')
+            print(error_str)
             failed_scenarios.append(error_str)
             continue
 
@@ -545,10 +680,9 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
         with open(err_file, 'w') as f:
             for err_msg in failed_scenarios:
                 f.write(f"{err_msg}\n\n")
-    
-    uncatchable_errors_num = N - len(runner_reports) - len(failed_scenarios)
-    if uncatchable_errors_num > 0:
-        print(f'{uncatchable_errors_num} scenarios failed due to uncatchable errors.')
+
+    # finish
+    [p.join() for p in processes]
 
     # compute overall score
     overall_score_dic, overall_score = compute_overall_score(over_all_metric_results, experiment)
@@ -584,7 +718,6 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
 
 class Worker():
     def __init__(self, model, gpu_idx, lock):
-        self.device = torch.device(f'cuda:{gpu_idx}')
         self.model = model
     
     def __call__(self, tasks_queue, results_queue):
@@ -599,12 +732,9 @@ class Worker():
             results_queue.put(result)
 
 def _generate(self, func, lock, *args, **kwargs):
-    device = self.device
     lock.acquire()
 
     try:
-        args = (arg.to(device) for arg in args)
-        kwargs = {k: v.to(device) for k, v in kwargs.items()}
         return func(*args, **kwargs)
     except Exception as e:
         raise e
@@ -764,7 +894,7 @@ def main(args):
         planner = Planner(model_path=args.model_path, device=args.device)
         build_simulation(experiment_name, planner, scenarios, output_dir, simulation_dir, metric_dir)
     else:
-        build_simulation_in_batch(experiment_name, scenarios, output_dir, simulation_dir, metric_dir, args.batch_size, args=args)
+        build_simulation_in_batch_multiprocess(experiment_name, scenarios, output_dir, simulation_dir, metric_dir, args.batch_size, args=args)
     main_callbacks.on_run_simulation_end()
     simulation_file = [str(file) for file in pathlib.Path(output_dir).iterdir() if
                        file.is_file() and file.suffix == '.nuboard']
