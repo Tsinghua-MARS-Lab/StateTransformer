@@ -61,14 +61,6 @@ def process_single_sample(i, planners, planner_inputs):
         traffic_light_data=list(planner_inputs[i].traffic_light_data),
     )
 
-def process_samples_in_parallel(batch_size, planners, planner_inputs, debug=False):
-    model_samples = []
-    with concurrent.futures.ProcessPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(process_single_sample, i, planners, planner_inputs) for i in range(batch_size)]
-        for f in tqdm(concurrent.futures.as_completed(futures), total=batch_size, desc='Step model inputs converting in batch', disable=not debug):
-            model_samples.append(f.result())
-    return model_samples
-
 
 def run_metric_engine(
     metric_engine: MetricsEngine, scenario: AbstractScenario, planner_name: str, history: SimulationHistory
@@ -294,19 +286,13 @@ class SimulationRunnerBatch(SimulationRunner):
                 self._simulations[i].callback.on_planner_start(self._simulations[i].setup, self.planners[i])
             model_sample_start_time = time.perf_counter()
 
-            use_multi_process = False
-            if use_multi_process:
-                # Ensure the correct start method is used
-                multiprocessing.set_start_method('spawn', force=True)
-                model_samples = process_samples_in_parallel(self._batch_size, self.planners, planner_inputs, debug)
-            else:
-                model_samples = []
-                for i in tqdm(range(self._batch_size), desc='Step model inputs converting in batch', disable=not debug):
-                    model_samples.append(self.planners[i].inputs_to_model_sample(
-                        history=planner_inputs[i].history,
-                        traffic_light_data=list(planner_inputs[i].traffic_light_data),
-                        map_name=self.planners[i]._map_api.map_name,
-                    ))
+            model_samples = []
+            for i in tqdm(range(self._batch_size), desc='Step model inputs converting in batch', disable=not debug):
+                model_samples.append(self.planners[i].inputs_to_model_sample(
+                    history=planner_inputs[i].history,
+                    traffic_light_data=list(planner_inputs[i].traffic_light_data),
+                    map_name=self.planners[i]._map_api.map_name,
+                ))
             # print(f'\nModel sample time: {time.perf_counter() - model_sample_start_time:.3f} s')
             # pack in batch
             samples_in_batch = {key: np.stack([sample[key] for sample in model_samples]) for key in model_samples[0].keys()}
@@ -529,7 +515,7 @@ def build_simulation_in_batch(experiment, scenarios, output_dir, simulation_dir,
         tasks_queue.put((scenarios, all_road_dic, batch_size, experiment, controller, output_dir, simulation_dir, metric_engine))
     for _ in range(process_cnt):
         tasks_queue.put(None)
-
+    print('start fetching results from queue')
     # finish
     [p.join() for p in processes]
     
