@@ -7,6 +7,11 @@ from transformers.utils import logging
 logging.set_verbosity_info()
 logger = logging.get_logger("transformers")
 
+
+def normalize_angles(angles):
+    return torch.atan2(torch.sin(angles), torch.cos(angles))
+
+
 class CNNDownSamplingResNet(nn.Module):
     def __init__(self, d_embed, in_channels, resnet_type='resnet18', pretrain=False):
         super(CNNDownSamplingResNet, self).__init__()
@@ -99,13 +104,15 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                         pretrain=cnn_kwargs.get("pretrain", False))
             logger.info(f'Building ResNet encoder with key points indices of {self.selected_indices}')
         # separate key point encoder is hard to train with larger models due to sparse signals
-        if self.config.use_speed:
-            self.action_m_embed = nn.Sequential(nn.Linear(7, action_kwargs.get("d_embed")), nn.Tanh())
-        else:
-            self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        input_dim = 7 if self.config.use_speed else 4
+        self.action_m_embed = nn.Sequential(nn.Linear(input_dim, action_kwargs.get("d_embed")), nn.Tanh())
 
-        if self.config.separate_kp_encoder:
-            self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        # For key points, only use x, and y
+        # currently forcing key point to be 2 dimension, with no speed and no yaw
+        # if self.config.separate_kp_encoder:
+        if self.config.use_key_points != 'no':
+            assert self.config.separate_kp_encoder
+            self.kps_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
 
         if self.use_proposal:
             self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())
@@ -259,24 +266,23 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
-            future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk)
-            if not self.config.predict_yaw:
-                # keep the same information when generating future points
-                future_key_points_aug[:, :, 2:] = 0
+            future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk)  # bs, seq, 4
+            future_key_points_aug = future_key_points_aug[:, :, :2]
 
             if self.config.separate_kp_encoder:
                 future_key_embeds = self.kps_m_embed(future_key_points_aug)
             else:
-                if self.config.use_speed:
-                    # padding speed, padding the last dimension from 4 to 7
-                    future_key_points_aug = torch.cat([future_key_points_aug, torch.zeros_like(future_key_points_aug)[:, :, :3]], dim=-1)
-                    future_key_embeds = self.action_m_embed(future_key_points_aug)
-                else:
-                    future_key_embeds = self.action_m_embed(future_key_points_aug)
-                input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                          torch.zeros((batch_size, pred_length, n_embed),
-                                                      device=device,
-                                                      dtype=action_embeds.dtype)], dim=1)
+                assert False, 'deprecated for clarity, use separate_kp_encoder instead'
+                # if self.config.use_speed:
+                #     # padding speed, padding the last dimension from 4 to 7
+                #     future_key_points_aug = torch.cat([future_key_points_aug, torch.zeros_like(future_key_points_aug)[:, :, :3]], dim=-1)
+                #     future_key_embeds = self.action_m_embed(future_key_points_aug)
+                # else:
+                #     future_key_embeds = self.action_m_embed(future_key_points_aug)
+            input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                      torch.zeros((batch_size, pred_length, n_embed),
+                                                  device=device,
+                                                  dtype=action_embeds.dtype)], dim=1)
             info_dict['future_key_points'] = future_key_points
 
         info_dict['selected_indices'] = self.selected_indices
@@ -303,7 +309,7 @@ class NuplanRasterizeAutoRegressiveEncoder(NuplanRasterizeEncoder):
         _, trajectory_length = trajectory.shape[:2]
 
         assert self.config.x_random_walk == 0 and self.config.y_random_walk == 0, "AutoRegressiveEncoder does not support random walk"
-        assert not self.config.use_speed, "AutoRegressiveEncoder does not support speed, generating speed with autoregression is not reasonable"
+        # assert not self.config.use_speed, "AutoRegressiveEncoder does not support speed, generating speed with autoregression is not reasonable"
         action_embeds = self.action_m_embed(trajectory)
 
         high_res_seq = high_res_raster.permute(0, 1, 4, 2, 3).to(device)

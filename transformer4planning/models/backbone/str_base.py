@@ -246,6 +246,11 @@ class STR(PreTrainedModel):
             else:
                 kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
                 # kp_loss will be 10x larger than traj_loss when converged
+                if self.k > 1:
+                    kp_logits = kp_logits['selected_logits']
+                if self.config.predict_yaw:
+                    # padding last dimension from 2 to 4
+                    kp_logits = torch.cat([kp_logits, torch.zeros_like(kp_logits)[:, :, :2]], dim=-1)
 
             loss += kp_loss
             traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
@@ -418,7 +423,9 @@ class STR(PreTrainedModel):
 
         traj_logits_k = []
         key_points_logits_k = []
-        for mode in range(self.k):
+        select_k = 1 if self.config.task == 'nuplan' else self.k
+
+        for mode in range(select_k):
             if self.use_proposal:
                 if self.config.autoregressive_proposals:
                     # already updated in previous step
@@ -455,13 +462,17 @@ class STR(PreTrainedModel):
 
                 assert future_key_points.shape[1] > 0, 'future points not enough to sample'
 
-                if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
-                    if self.config.use_speed:
-                        # padding speed, padding the last dimension from 4 to 7
-                        future_key_points = torch.cat([future_key_points, torch.zeros_like(future_key_points)[:, :, :3]], dim=-1)
-                    future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
+                if self.config.task == "nuplan":
+                    if not self.config.separate_kp_encoder:
+                        assert False, 'deprecated, use separate_kp_encoder instead'
+                        if self.config.use_speed:
+                            # padding speed, padding the last dimension from 4 to 7
+                            future_key_points = torch.cat([future_key_points, torch.zeros_like(future_key_points)[:, :, :3]], dim=-1)
+                        future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
+                    else:
+                        future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points[..., :2])
                 else:
-                    future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points)
+                    assert False, 'Key Point for waymo not implemented yet'
 
                 key_points_num = future_key_points.shape[1]
 
@@ -481,11 +492,22 @@ class STR(PreTrainedModel):
                                                     :].reshape(batch_size, 1, -1)
 
                     key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
-                    pred_key_point = torch.zeros((batch_size, 1, 4), device=device)
-                    if self.config.predict_yaw:
-                        pred_key_point[:, 0, :] = key_points_logit[:, 0, :]
-                    else:
-                        pred_key_point[:, 0, :2] = key_points_logit[:, 0, :]
+                    if self.k > 1:
+                        k_key_points_logit = key_points_logit['logits']  # (bs, 1, k, 2/4)
+                        k_key_points_scores = key_points_logit['scores']  # (bs, 1, k)
+                        _, seq_len, _, last_dim = k_key_points_logit.shape  # seq_len = 1 per key point
+                        selected_key_points = []
+                        for j in range(batch_size):
+                            selected_key_points_current_batch = []
+                            for k in range(seq_len):
+                                top_score, top_indx = torch.topk(k_key_points_scores[j, k, :], dim=-1, k=1)
+                                selected_key_points_current_batch.append(k_key_points_logit[j, k, top_indx[0], :])
+                            selected_key_points_current_batch = torch.stack(selected_key_points_current_batch, dim=0)
+                            selected_key_points.append(selected_key_points_current_batch)  # a list of (1, 2/4)
+                        key_points_logit = torch.stack(selected_key_points, dim=0)  # (bs, 1, 2/4)
+
+                    # pred_key_point = torch.zeros((batch_size, 1, 2), device=device)
+                    pred_key_point = key_points_logit
 
                     off_road_checking = True
                     if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
@@ -512,30 +534,20 @@ class STR(PreTrainedModel):
                                 pred_key_point[0, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
                                 print(f'Off Road Detected! Replace {i}th key point')
 
-                    if idm_reference_global is not None and 'backward' in self.use_key_points:
-                        # replace last key point with IDM reference
-                        ego_state_global = idm_reference_global[selected_indices[i]]
-                        idm_reference_lastpt_relative = nuplan_utils.change_coordination(np.array([ego_state_global.rear_axle.x,
-                                                                                                ego_state_global.rear_axle.y]),
-                                                                                        ego_pose,
-                                                                                        ego_to_global=False)
-                        print('replace key points with IDM reference, index: ', selected_indices[i], pred_key_point[0, 0, :2], idm_reference_lastpt_relative)  # idm relative has an unusual large negative y value?
-                        pred_key_point[0, 0, :2] = torch.tensor(idm_reference_lastpt_relative, device=pred_key_point.device)
-                        pred_key_point[0, 0, -1] = nuplan_utils.normalize_angle(ego_state_global.rear_axle.heading - ego_pose[-1])
-
-                    if self.config.task == "nuplan" and not self.config.separate_kp_encoder:
-                        if self.config.use_speed:
-                            # padding speed, padding the last dimension from 4 to 7
-                            pred_key_point = torch.cat([pred_key_point, torch.zeros_like(pred_key_point)[:, :, :3]], dim=-1)
-                        key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                    if self.config.task == "nuplan":
+                        if not self.config.separate_kp_encoder:
+                            assert False, 'deprecated, use separate_kp_encoder instead'
+                        # if self.config.use_speed:
+                        #     # padding speed, padding the last dimension from 4 to 7
+                        #     pred_key_point = torch.cat([pred_key_point, torch.zeros_like(pred_key_point)[:, :, :3]], dim=-1)
+                        # key_point_embed = self.encoder.action_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                        else:
+                            key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
                     else:
-                        key_point_embed = self.encoder.kps_m_embed(pred_key_point).reshape(batch_size, 1, -1)  # b, 1, n_embed
+                        assert False, 'Key Point for waymo not implemented yet'
                     # replace embed at the next position
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
-                    if self.config.predict_yaw:
-                        pred_key_points_during_generate.append(pred_key_point[:, 0, :].unsqueeze(1))
-                    else:
-                        pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
+                    pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
                 key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
                 key_points_logits_k.append(key_points_logits)
 
@@ -589,11 +601,11 @@ class STR(PreTrainedModel):
                 raise NotImplementedError
 
         key_points_pred_logits = None
-        if self.k == 1:
+        if select_k == 1:
             traj_pred_logits = traj_logits_k[0]
             if len(key_points_logits_k) > 0:
                 # WARNING, k select if not implemented for key points
-                assert len(key_points_logits_k) == self.k
+                assert len(key_points_logits_k) == select_k
                 key_points_pred_logits = key_points_logits_k[0]
         else:
             traj_pred_logits = torch.stack(traj_logits_k, dim=1)

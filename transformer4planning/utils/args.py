@@ -99,7 +99,7 @@ class ModelArguments:
                           "specified_first_second: 1s only"}
     )
     separate_kp_encoder: Optional[bool] = field(
-        default=False
+        default=True
     )
     pred_key_points_only: Optional[bool] = field(
         default=False
@@ -169,6 +169,15 @@ class ModelArguments:
     augment_current_pose_rate: Optional[float] = field(
         # currently this only works for raster preprocess, and aug_x, aug_y are default to 1.0
         default=0.0, metadata={"help": "The rate of augmenting current pose in the preprocess"}
+    )
+    augment_current_ratio: Optional[float] = field(
+        default=0.3, metadata={"help": "The ratio of augmenting current pose in the preprocess"}
+    )
+    augment_current_with_past_linear_changes: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to augment past poses with linear changes"}
+    )
+    augment_current_with_future_linear_changes: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to augment future poses with linear changes"}
     )
     generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
         default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}

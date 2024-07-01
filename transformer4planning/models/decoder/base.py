@@ -6,7 +6,7 @@ from torch.nn import CrossEntropyLoss, MSELoss
 import os
 
 
-def mean_circular_error(y_pred, y_true):
+def mean_circular_error(y_pred, y_true, mean=True):
     """
     Calculate Mean Circular Error for predicted and true angles.
 
@@ -28,9 +28,15 @@ def mean_circular_error(y_pred, y_true):
     angular_difference = torch.atan2(torch.sin(angular_difference), torch.cos(angular_difference))
 
     # Compute the mean squared error of the angular differences
-    loss = torch.mean(torch.square(angular_difference))
+    loss = torch.square(angular_difference)
+    if mean:
+        loss = torch.mean(loss)
 
     return loss
+
+
+def normalize_angles(angles):
+    return torch.atan2(torch.sin(angles), torch.cos(angles))
 
 
 class TrajectoryDecoder(nn.Module):
@@ -112,12 +118,12 @@ class TrajectoryDecoder(nn.Module):
                 traj_loss = (self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)) * trajectory_label_mask).sum() / (
                     trajectory_label_mask.sum() + 1e-7)
             elif self.config.task == "nuplan":
-                aug_current = 1 - info_dict['aug_current']
-                # expand aug_current to match traj_logits shape
-                aug_current = aug_current.unsqueeze(-1).unsqueeze(-1).expand_as(traj_logits)
-                # set traj_logits equal to label where aug_current is 0
-                traj_logits = traj_logits * aug_current + label.to(device) * (1 - aug_current) if self.config.predict_yaw else \
-                    traj_logits[..., :2] * aug_current + label[..., :2].to(device) * (1 - aug_current)
+                # aug_current = 1 - info_dict['aug_current']
+                # # expand aug_current to match traj_logits shape
+                # aug_current = aug_current.unsqueeze(-1).unsqueeze(-1).expand_as(traj_logits)
+                # # set traj_logits equal to label where aug_current is 0
+                # traj_logits = traj_logits * aug_current + label.to(device) * (1 - aug_current) if self.config.predict_yaw else \
+                #     traj_logits[..., :2] * aug_current + label[..., :2].to(device) * (1 - aug_current)
 
                 if self.config.mean_circular_loss:
                     assert self.config.predict_yaw, "mean_circular_loss only works for yaw prediction"
@@ -265,12 +271,21 @@ class KeyPointMLPDeocder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        out_features = 4 if self.config.predict_yaw else 2
-        self.model = DecoderResCat(config.n_inner, config.n_embd,
-                                   out_features=out_features)
-        
+        self.k = int(self.config.k)
+        # out_features = 4 if self.config.predict_yaw else 2
+        out_features = 2
         if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
+
+        if self.k > 1:
+            out_features *= self.k
+            self.logits_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+            self.score_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
+            self.cls_loss_fct = CrossEntropyLoss(reduction="none")
+            self.softmax = nn.Softmax(dim=-1)
+            loss_reduction = "none"
+        else:
+            self.model = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
 
         if 'mse' in self.config.loss_fn:
             self.loss_fct = nn.MSELoss(reduction=loss_reduction)
@@ -319,27 +334,77 @@ class KeyPointMLPDeocder(nn.Module):
                 kp_start_index += 1
 
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
-        key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
+
+        if self.k > 1:
+            hidden_dim = future_key_points_hidden_state.shape[-1]
+            key_points_logits = self.logits_decoder(future_key_points_hidden_state)  # b, s, 4*k
+            key_points_scores = self.score_decoder(future_key_points_hidden_state)  # b, s, k
+        else:
+            key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 4/2*k
 
         loss_per_kp = None
 
         if self.config.task == "nuplan":
             # # normalize each selected key point loss
-            if self.config.inspect_kp_loss:
+            if self.k > 1:
+                batch_size, seq_len, _ = key_points_logits.shape
+                key_points_logits = key_points_logits.view(batch_size, seq_len, self.k, -1)
+                loss_per_kp = []
+                select_logtis = []
+                for i in range(future_key_points.shape[1]):
+                    # repeat gt k times
+                    gt = future_key_points[:, i, :].unsqueeze(1).repeat(1, self.k, 1)
+                    # compute loss for k key points
+                    loss_kp_i = self.loss_fct(key_points_logits[:, i, :, :2], gt[..., :2].to(device))  # b, k, 2
+                    # if self.config.pred_key_point_yaw:
+                    #     if self.config.kp_mean_circular_loss:
+                    #         loss_kp_yaw = mean_circular_error(key_points_logits[:, i, :, -1], gt[..., -1].to(device), mean=False).unsqueeze(-1)
+                    #     else:
+                    #         loss_kp_yaw = self.loss_fct(key_points_logits[:, i, :, -1], gt[..., -1].to(device)).unsqueeze(-1)
+                    #     loss_kp_i = torch.cat([loss_kp_i, loss_kp_yaw], dim=-1)
+                    # sum last dimension
+                    loss_kp_i = loss_kp_i.sum(dim=-1)  # b, k
+                    # get minimal index of k predictions at last dimension
+                    # min_loss_idx = loss_kp_i.argmin(dim=-1)  # b, 1
+                    # min_loss = loss_kp_i.min(dim=-1)[0]
+                    min_loss, min_loss_idx = loss_kp_i.min(dim=-1)  # b, 1; b, 1
+                    # compute cross entropy loss
+                    score_hidden = self.softmax(key_points_scores[:, i, :])
+                    loss_per_kp_i = self.cls_loss_fct(score_hidden, min_loss_idx)
+                    # add loss (regression+classification) for each key point
+                    loss_per_kp.append(min_loss.mean() * 0.1**(4-i) + loss_per_kp_i.mean())
+                    selected_logits_at_i = []
+                    for j in range(batch_size):
+                        selected_logits_at_i.append(key_points_logits[j, i, int(min_loss_idx[j]), :].unsqueeze(0))
+                    stacked_selected_logits_at_i = torch.stack(selected_logits_at_i, dim=0)  # [batch_size, 1, 4/2]
+                    select_logtis.append(stacked_selected_logits_at_i)
+                loss_per_kp = torch.stack(loss_per_kp)  # [seq_len]
+                # stack the list of selected logits, each has a shape of [batch_size, 1, 4/2]
+                select_logtis_all = torch.stack(select_logtis, dim=1)[:, :, 0, :]  # [batch_size, seq_len, 4/2]
+                # pack key points logits and scores
+                key_points_logits = {
+                    "logits": key_points_logits,
+                    "scores": key_points_scores,
+                    "selected_logits": select_logtis_all,
+                }
+            else:
                 loss_per_kp = []
                 for i in range(future_key_points.shape[1]):
-                    loss_per_kp.append(self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device)))
-                loss_per_kp = torch.stack(loss_per_kp)
-            # number_of_future_key_points = future_key_points.shape[1]
-            # for i in range(future_key_points.shape[1]):
-            #     if i == 0:
-            #         kp_loss = self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
-            #     elif i == number_of_future_key_points - 1:
-            #         kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device)) * 1000
-            #     else:
-            #         kp_loss += self.loss_fct(key_points_logits[:, i, :], future_key_points[:, i, :].to(device))
-            kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
-                        self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device)) * self.config.kp_loss_rescale
+                    loss_this_kp = self.loss_fct(key_points_logits[:, i, :2], future_key_points[:, i, :2].to(device))
+                    # if self.config.pred_key_point_yaw:
+                    #     if self.config.kp_mean_circular_loss:
+                    #         loss_this_kp_yaw = mean_circular_error(key_points_logits[:, i, -1], future_key_points[:, i, -1].to(device), mean=False).unsqueeze(-1)
+                    #     else:
+                    #         loss_this_kp_yaw = self.loss_fct(key_points_logits[:, i, -1], future_key_points[:, i, -1].to(device))
+                    #     loss_this_kp = torch.cat([loss_this_kp, loss_this_kp_yaw], dim=-1)
+                    loss_this_kp = loss_this_kp.sum(dim=-1)
+                    # if i == 0 and self.training:
+                    #     loss_per_kp *= 0
+                    loss_per_kp.append(loss_this_kp)
+                loss_per_kp = torch.stack(loss_per_kp)  # [seq_len]
+            kp_loss = loss_per_kp.mean() * self.config.kp_loss_rescale
+            # kp_loss = self.loss_fct(key_points_logits, future_key_points.to(device)) if self.config.predict_yaw else \
+            #             self.loss_fct(key_points_logits[..., :2], future_key_points[..., :2].to(device)) * self.config.kp_loss_rescale
         elif self.config.task == "waymo":
             kp_mask = info_dict["key_points_mask"]
             assert kp_mask is not None, "key_points_mask is None"
@@ -351,9 +416,19 @@ class KeyPointMLPDeocder(nn.Module):
         return kp_loss, key_points_logits, loss_per_kp
 
     def generate_keypoints(self, hidden_state, info_dict:Dict=None):
-        batch_size = hidden_state.shape[0]
+        batch_size, seq_len, hidden_dim = hidden_state.shape
         assert hidden_state.shape[1] == 1
-        key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
+        if self.k > 1:
+            key_points_logit = self.logits_decoder(hidden_state).view(batch_size, seq_len, self.k, -1)  # b, s, k, 4/2
+            key_points_score = self.softmax(self.score_decoder(hidden_state))  # b, s, k
+            # if self.config.predict_yaw:
+            #     key_points_logit[:, :, :, -1] = normalize_angles(key_points_logit[:, :, :, -1])
+            key_points_logit = {
+                "logits": key_points_logit,
+                "scores": key_points_score,
+            }
+        else:
+            key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
         return key_points_logit, None
     
     def save_features(self,input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state):

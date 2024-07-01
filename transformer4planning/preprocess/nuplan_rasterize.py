@@ -154,12 +154,16 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     aug_current = 0
     aug_rate = kwargs.get('augment_current_pose_rate', 0)
     if "train" in split and aug_rate > 0 and random.random() < aug_rate:
+        augment_current_ratio = kwargs.get('augment_current_pose_ratio', 0.3)
+        augment_current_with_past_linear_changes = kwargs.get('augment_current_with_past_linear_changes', False)
+        augment_current_with_future_linear_changes = kwargs.get('augment_current_with_future_linear_changes', False)
         speed_per_step = nuplan_utils.euclidean_distance(
             ego_pose_agent_dic[frame_id // frequency_change_rate, :2],
             ego_pose_agent_dic[frame_id // frequency_change_rate - 5, :2]) / 5.0
-        aug_x = 0.3 * speed_per_step
-        aug_y = 0.3 * speed_per_step
-        aug_yaw = 0.05  # 360 * 0.05 = 18 degree
+        aug_x = augment_current_ratio * speed_per_step
+        aug_y = augment_current_ratio * speed_per_step
+        yaw_noise_scale = 0.05  # 360 * 0.05 = 18 degree
+        aug_yaw = (random.random() * 2 - 1) * yaw_noise_scale
         dx = (random.random() * 2 - 1) * aug_x
         dy = (random.random() * 2 - 1) * aug_y
         dyaw = (random.random() * 2 * np.pi - np.pi) * aug_yaw
@@ -167,22 +171,24 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         ego_pose_agent_dic[frame_id//frequency_change_rate, 1] += dy
         ego_pose_agent_dic[frame_id//frequency_change_rate, -1] += dyaw
         aug_current = 1
-        # linearly project the past poses
-        # generate a numpy array decaying from 1 to 0 with shape of 80, 4
-        decay = np.ones((80, 4)) * np.linspace(1, 0, 80).reshape(-1, 1)
-        decay[:, 0] *= dx
-        decay[:, 1] *= dy
-        decay[:, 2] *= 0
-        decay[:, 3] *= dyaw
-        ego_pose_agent_dic[frame_id // frequency_change_rate: frame_id // frequency_change_rate + 80, :] += decay
+        if augment_current_with_future_linear_changes:
+            # linearly project the past poses
+            # generate a numpy array decaying from 1 to 0 with shape of 80, 4
+            decay = np.ones((80, 4)) * np.linspace(1, 0, 80).reshape(-1, 1)
+            decay[:, 0] *= dx
+            decay[:, 1] *= dy
+            decay[:, 2] *= 0
+            decay[:, 3] *= dyaw
+            ego_pose_agent_dic[frame_id // frequency_change_rate: frame_id // frequency_change_rate + 80, :] += decay
 
-        # generate a numpy array raising from 0 to 1 with the shape of 20, 4
-        raising = np.ones((20, 4)) * np.linspace(0, 1, 20).reshape(-1, 1)
-        raising[:, 0] *= dx
-        raising[:, 1] *= dy
-        raising[:, 2] *= 0
-        raising[:, 3] *= dyaw
-        ego_pose_agent_dic[frame_id // frequency_change_rate - 21: frame_id // frequency_change_rate - 1, :] += raising
+        if augment_current_with_past_linear_changes:
+            # generate a numpy array raising from 0 to 1 with the shape of 20, 4
+            raising = np.ones((20, 4)) * np.linspace(0, 1, 20).reshape(-1, 1)
+            raising[:, 0] *= dx
+            raising[:, 1] *= dy
+            raising[:, 2] *= 0
+            raising[:, 3] *= dyaw
+            ego_pose_agent_dic[frame_id // frequency_change_rate - 21: frame_id // frequency_change_rate - 1, :] += raising
 
     # initialize rasters
     origin_ego_pose = ego_pose_agent_dic[frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
