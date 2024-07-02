@@ -273,6 +273,16 @@ class ModelArguments:
     kp_loss_rescale: Optional[float] = field(
         default=1.0, metadata={"help": "Whether to rescale the key points loss"}
     )
+    # end of auturegressive args
+    reverse_traj_index_order: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to reverse the trajectory index order"}
+    )
+    inspect_kp_loss: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
+    )
+    constant_v_dropout: Optional[float] = field(
+        default=0.0, metadata={"help": "The rate to dropout the constant v"}
+    )
 
     # WIP: training with the simulation scores as loss
     finetuning_with_simulation_on_val: Optional[bool] = field(
@@ -298,13 +308,7 @@ class ModelArguments:
     future_seconds: Optional[int] = field(
         default=8, metadata={"help": "The number of seconds to predict in the future"}
     )
-    # end of auturegressive args
-    reverse_traj_index_order: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to reverse the trajectory index order"}
-    )
-    inspect_kp_loss: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
-    )
+
 
 
 @dataclass

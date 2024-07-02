@@ -194,7 +194,7 @@ def compute_metrics(prediction: EvalPrediction):
 
     # ADE metrics computation
     ade_gen = np.sqrt(copy.deepcopy(ade_x_error_gen) ** 2 + copy.deepcopy(ade_y_error_gen) ** 2)
-    ade1_gen = copy.deepcopy(ade_gen[:, 0])
+    ade1_gen = np.mean(copy.deepcopy(ade_gen[:, :(10//index_rescale)]), axis=1)
     ade3_gen = np.mean(copy.deepcopy(ade_gen[:, :(30//index_rescale)]), axis=1)
     ade5_gen = np.mean(copy.deepcopy(ade_gen[:, :(50//index_rescale)]), axis=1)
     ade8_gen = np.mean(copy.deepcopy(ade_gen[:, :(80//index_rescale)]), axis=1)
@@ -202,10 +202,11 @@ def compute_metrics(prediction: EvalPrediction):
     ade_score = np.ones_like(avg_ade_gen) - avg_ade_gen/ADE_THRESHHOLD
     ade_score = np.where(ade_score < 0, np.zeros_like(ade_score), ade_score)
     item_to_save["ade_score"] = ade_score
+    item_to_save['ade_horizon1_gen'] = ade1_gen
     item_to_save['ade_horizon3_gen'] = ade3_gen
     item_to_save['ade_horizon5_gen'] = ade5_gen
     item_to_save['ade_horizon8_gen'] = ade8_gen
-    eval_result['ade_1_gen'] = ade1_gen.mean()
+    eval_result['ade_horizon1_gen'] = ade1_gen.mean()
     eval_result['ade_horizon3_gen'] = ade3_gen.mean()
     eval_result['ade_horizon5_gen'] = ade5_gen.mean()
     eval_result['ade_horizon8_gen'] = ade8_gen.mean()
@@ -213,6 +214,7 @@ def compute_metrics(prediction: EvalPrediction):
     eval_result['ade_score'] = ade_score.mean()
 
     # FDE metrics computation
+    fde1_gen = copy.deepcopy(ade_gen[:, 9 // index_rescale])
     fde3_gen = copy.deepcopy(ade_gen[:, 29//index_rescale])
     fde5_gen = copy.deepcopy(ade_gen[:, 49//index_rescale])
     fde8_gen = np.sqrt(fde_x_error_gen ** 2 + fde_y_error_gen ** 2)
@@ -220,9 +222,11 @@ def compute_metrics(prediction: EvalPrediction):
     fde_score = np.ones_like(avg_fde_gen) - avg_fde_gen/FDE_THRESHHOLD
     fde_score = np.where(fde_score < 0, np.zeros_like(fde_score), fde_score)
     item_to_save["fde_score"] = fde_score
+    item_to_save['fde_horizon1_gen'] = fde1_gen
     item_to_save['fde_horizon3_gen'] = fde3_gen
     item_to_save['fde_horizon5_gen'] = fde5_gen
     item_to_save['fde_horizon8_gen'] = fde8_gen
+    eval_result['fde_horizon1_gen'] = fde1_gen.mean()
     eval_result['fde_horizon3_gen'] = fde3_gen.mean()
     eval_result['fde_horizon5_gen'] = fde5_gen.mean()
     eval_result['fde_horizon8_gen'] = fde8_gen.mean()
