@@ -280,9 +280,6 @@ class ModelArguments:
     inspect_kp_loss: Optional[bool] = field(
         default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
     )
-    constant_v_dropout: Optional[float] = field(
-        default=0.0, metadata={"help": "The rate to dropout the constant v"}
-    )
 
     # WIP: training with the simulation scores as loss
     finetuning_with_simulation_on_val: Optional[bool] = field(

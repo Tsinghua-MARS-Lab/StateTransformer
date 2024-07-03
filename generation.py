@@ -230,6 +230,11 @@ def main(args):
                         if random.random() > 1.0 / balance_dic[loaded_dic["scenario_type"]]:
                             continue
                     data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
+                    if args.constant_v_dropout > 0:
+                        # check if ego speed is constant
+                        cv_scenario = check_if_constant_v(observation_kwargs, loaded_dic)
+                        if cv_scenario and random.random() < args.constant_v_dropout:
+                            continue
                     # legitimacy check
                     data_to_return_filtered = {}
                     error = False
@@ -371,7 +376,7 @@ def main(args):
             else:
                 print(f'file {each_file} not found in evaluation result pkl')
         print(
-            f'Filtered {len(file_indices_filtered)} files from {total_file_number} files and {len(list(filter_dic.keys()))} keys')
+            f'Filtered {len(file_indices_filtered)} files and {len(list(filter_dic.keys()))} keys')
         file_indices = file_indices_filtered
         print(file_indices)
         total_file_number = len(file_indices)
@@ -528,5 +533,7 @@ if __name__ == '__main__':
     parser.add_argument('--balance', default=False, action='store_true')
     parser.add_argument('--filter_still', default=False, action='store_true')
     parser.add_argument('--index_with_planner', default=False, action='store_true')
+
+    parser.add_argument('--constant_v_dropout', type=float, default=0.0)  # 0=no dropout, 1=drop all
     args_p = parser.parse_args()
     main(args_p)
