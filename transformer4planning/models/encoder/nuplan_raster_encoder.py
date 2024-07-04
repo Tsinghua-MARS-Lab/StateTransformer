@@ -103,9 +103,12 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                         resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                         pretrain=cnn_kwargs.get("pretrain", False))
             logger.info(f'Building ResNet encoder with key points indices of {self.selected_indices}')
+
         # separate key point encoder is hard to train with larger models due to sparse signals
         input_dim = 7 if self.config.use_speed else 4
         self.action_m_embed = nn.Sequential(nn.Linear(input_dim, action_kwargs.get("d_embed")), nn.Tanh())
+
+        self.kp_tokenizer = None
 
         # For key points, only use x, and y
         # currently forcing key point to be 2 dimension, with no speed and no yaw
@@ -270,7 +273,21 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             future_key_points_aug = future_key_points_aug[:, :, :2]
 
             if self.config.separate_kp_encoder:
-                future_key_embeds = self.kps_m_embed(future_key_points_aug)
+                if self.config.kp_tokenizer is None:
+                    future_key_embeds = self.kps_m_embed(future_key_points_aug)
+                else:
+                    assert self.kp_tokenizer is not None, 'key point tokenizer should not be None'
+                    assert future_key_points.shape[1] == 5, 'future key points should be 5'
+                    future_key_points_ids = []
+                    future_key_points_after = []
+                    for i in range(5):
+                        future_key_points_ids.append(self.kp_tokenizer[i].encode(future_key_points_aug[:, i, :], dtype=action_embeds.dtype, device=device))
+                        future_key_points_after.append(self.kp_tokenizer[i].decode(future_key_points_ids[i], dtype=action_embeds.dtype, device=device))
+                    future_key_points_after = torch.stack(future_key_points_after, dim=1)
+                    future_key_points_ids = torch.stack(future_key_points_ids, dim=1)
+                    future_key_embeds = self.kps_m_embed(future_key_points_after)
+                    info_dict['future_key_points_ids'] = future_key_points_ids.to(device)
+                    info_dict['future_key_points_after'] = future_key_points_after.to(device)
             else:
                 assert False, 'deprecated for clarity, use separate_kp_encoder instead'
                 # if self.config.use_speed:

@@ -9,6 +9,7 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
+
 logging.set_verbosity_info()
 logger = logging.get_logger("transformers")
 
@@ -91,6 +92,12 @@ class STR(PreTrainedModel):
         self.model_parallel = False
         self.device_map = None
         self.clf_metrics = None
+
+        self.kp_tokenizer = None
+        if self.config.kp_tokenizer is not None:
+            self.key_points_decoder = nn.ModuleList()
+            self.build_tokenizer()
+
         # Initialize weights and apply final processing
         self.build_encoder()
         self.build_decoder()
@@ -99,6 +106,29 @@ class STR(PreTrainedModel):
 
         print('model inited')
 
+    def build_tokenizer(self):
+        # For key points, only use x, and y
+        # currently forcing key point to be 2 dimension, with no speed and no yaw
+        if self.config.kp_tokenizer == 'uniform':
+            from transformer4planning.models.tokenizer.uniform_kp_tokenizer import UniformKPTokenizer
+            assert self.config.use_key_points == 'specified_backward'
+            self.kp_tokenizer = []
+            x_min = [-45, -7, -4, -2, -1.5]
+            x_max = [180, 86, 45, 25, 15]
+            y_min = [-70, -25, -8, -3, -1]
+            y_max = [80, 28, 9, 2.5, 1]
+            key_point_number = [[50, 50], [20, 20], [10, 10], [5, 5], [3, 3]]
+            for i in range(5):
+                kp_tokenizer = UniformKPTokenizer(
+                    num_key_points=key_point_number[i],
+                    x_min=x_min[i],
+                    x_max=x_max[i],
+                    y_min=y_min[i],
+                    y_max=y_max[i]
+                )
+                self.kp_tokenizer.append(kp_tokenizer)
+        else:
+            raise NotImplementedError
 
     def build_encoder(self):
         if self.config.task == "nuplan":
@@ -109,6 +139,9 @@ class STR(PreTrainedModel):
                 else:
                     from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
                     self.encoder = NuplanRasterizeEncoder(self.config)
+
+                if self.kp_tokenizer is not None:
+                    self.encoder.kp_tokenizer = self.kp_tokenizer
             elif "vector" in self.config.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
@@ -151,8 +184,14 @@ class STR(PreTrainedModel):
                 else:
                     logger.info("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
             elif self.kp_decoder_type == "mlp":
-                from transformer4planning.models.decoder.base import KeyPointMLPDeocder
-                self.key_points_decoder = KeyPointMLPDeocder(self.config)
+                if self.config.kp_tokenizer is None:
+                    from transformer4planning.models.decoder.base import KeyPointMLPDeocder
+                    self.key_points_decoder = KeyPointMLPDeocder(self.config)
+                elif self.config.kp_tokenizer == "uniform":
+                    from transformer4planning.models.decoder.base import KeyPointDecoderCLS
+                    proposal_nums = [50*50, 20*20, 10*10, 5*5, 3*3]
+                    for i in range(5):
+                        self.key_points_decoder.append(KeyPointDecoderCLS(self.config, proposal_num=proposal_nums[i]))
 
         # create a model list of traj_decoder for each
         # self.traj_decoders = nn.ModuleList()
@@ -244,10 +283,21 @@ class STR(PreTrainedModel):
                 kp_logits = info_dict["future_key_points"].to(transformer_outputs_hidden_state.device) if self.config.predict_yaw else \
                             info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
             else:
-                kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
-                # kp_loss will be 10x larger than traj_loss when converged
-                if self.k > 1:
-                    kp_logits = kp_logits['selected_logits']
+                if self.config.kp_tokenizer is None:
+                    kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
+                    # kp_loss will be 10x larger than traj_loss when converged
+                    if self.k > 1:
+                        kp_logits = kp_logits['selected_logits']
+                else:
+                    kp_losses, kp_logits = [], []
+                    for i in range(5):
+                        kp_loss, kp_id = self.key_points_decoder[i].compute_keypoint_loss(transformer_outputs_hidden_state, info_dict, i)
+                        kp_losses.append(kp_loss)  # list of [1]
+                        kp_logit = self.kp_tokenizer[i].decode(kp_id, dtype=kp_loss.dtype, device=kp_loss.device)
+                        kp_logits.append(kp_logit)  # list of [bsz, 2]
+                    loss_per_kp = torch.stack(kp_losses, dim=0)  # [5]
+                    kp_loss = loss_per_kp.mean()
+                    kp_logits = torch.stack(kp_logits, dim=1)  # [bsz, 5, 2]
                 if self.config.predict_yaw:
                     # padding last dimension from 2 to 4
                     kp_logits = torch.cat([kp_logits, torch.zeros_like(kp_logits)[:, :, :2]], dim=-1)
@@ -362,6 +412,9 @@ class STR(PreTrainedModel):
         device = input_embeds.device
         context_length = info_dict["context_length"]
 
+        # for debug only
+        gt_1s_kp = kwargs.get('gt_1s_kp', None)
+
         if self.use_proposal:
             if self.config.autoregressive_proposals:
                 # TODO: Training for debugging results
@@ -451,7 +504,6 @@ class STR(PreTrainedModel):
                 route_ids = kwargs.get("route_ids", None)
                 ego_pose = kwargs.get("ego_pose", None)
                 road_dic = kwargs.get("road_dic", None)
-                idm_reference_global = kwargs.get("idm_reference_global", None)  # WIP, this was not fulled tested
 
                 trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
                 if 'specified' in self.use_key_points:
@@ -490,8 +542,12 @@ class STR(PreTrainedModel):
                     future_key_point_hidden_state = transformer_outputs_hidden_state[:,
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
+                    if self.config.kp_tokenizer is None:
+                        key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+                    else:
+                        key_point_ids, key_points_scores = self.key_points_decoder[i].generate_keypoints(future_key_point_hidden_state)
+                        key_points_logit = self.kp_tokenizer[i].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
 
-                    key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                     if self.k > 1:
                         k_key_points_logit = key_points_logit['logits']  # (bs, 1, k, 2/4)
                         k_key_points_scores = key_points_logit['scores']  # (bs, 1, k)
@@ -505,6 +561,9 @@ class STR(PreTrainedModel):
                             selected_key_points_current_batch = torch.stack(selected_key_points_current_batch, dim=0)
                             selected_key_points.append(selected_key_points_current_batch)  # a list of (1, 2/4)
                         key_points_logit = torch.stack(selected_key_points, dim=0)  # (bs, 1, 2/4)
+
+                    if gt_1s_kp is not None and i == 3:
+                        key_points_logit = gt_1s_kp
 
                     # pred_key_point = torch.zeros((batch_size, 1, 2), device=device)
                     pred_key_point = key_points_logit

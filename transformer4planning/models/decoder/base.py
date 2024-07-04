@@ -259,12 +259,42 @@ class ProposalDecoderCLS(nn.Module):
             loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())
             return loss_proposal.mean(), pred_proposal_cls
 
-        # context_length = info_dict["context_length"]
-        # pred_proposal_embed = hidden_output[:, context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
-        #
-        # pred_proposal_cls = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, 5)
-        # loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(torch.float64), gt_proposal_cls.reshape(-1).long())
-        # return loss_proposal.mean(), pred_proposal_cls
+
+class KeyPointDecoderCLS(nn.Module):
+    def __init__(self, config, proposal_num):
+        super().__init__()
+        self.config = config
+        self.proposal_num = proposal_num
+        self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num)
+        self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
+
+    def compute_keypoint_loss(self, hidden_output, info_dict, i):
+        """
+        pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
+        params:
+            hidden_output: whole hidden state output from transformer backbone
+            label: ground truth trajectory in future 8-s
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc.
+        """
+        if 'future_key_points_ids' in info_dict:
+            gt_proposal_cls = info_dict["future_key_points_ids"][:, i]
+        else:
+            assert False, f'no future_key_points_ids in info_dict {list(info_dict.keys())}'
+        context_length = info_dict["context_length"]
+        pred_proposal_embed = hidden_output[:, context_length - 1 + i:context_length - 1 + 1 + i, :]  # (bs, 1, n_embed)
+        pred_proposal_scores = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, 1, n)
+        pred_proposal_scores = nn.Softmax(dim=-1)(pred_proposal_scores)
+        loss_proposal = self.cls_proposal_loss(pred_proposal_scores.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())
+        pred_proposal_cls = pred_proposal_scores.argmax(dim=-1).squeeze(-1)
+        return loss_proposal.mean(), pred_proposal_cls
+
+    def generate_keypoints(self, hidden_state):
+        batch_size, seq_len, hidden_dim = hidden_state.shape
+        key_point_id_scores = self.proposal_cls_decoder(hidden_state)  # b, s=1, n
+        key_point_id_scores = nn.Softmax(dim=-1)(key_point_id_scores)  # b, s=1, n
+        key_point_ids = key_point_id_scores.argmax(dim=-1).squeeze(-1)  # b, s=1
+        # key_point_logits = self.tokenizer.decode(key_point_id)  # b, s=1, 2
+        return key_point_ids, key_point_id_scores
 
 
 class KeyPointMLPDeocder(nn.Module):

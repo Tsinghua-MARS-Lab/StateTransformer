@@ -281,6 +281,11 @@ class ModelArguments:
         default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
     )
 
+    # WIP: key point tokenize
+    kp_tokenizer: Optional[str] = field(
+        default=None, metadata={"help": "choose from [none, uniform, gaussian]"}
+    )
+
     # WIP: training with the simulation scores as loss
     finetuning_with_simulation_on_val: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use finetuning with simulation on val"}
@@ -294,7 +299,6 @@ class ModelArguments:
     sim_eval_with_gt: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use gt for sim"}
     )
-
     skip_yaw_norm: Optional[bool] = field(
         default=False, metadata={"help": "Skip rotation normalization during preprocess"}
     )
