@@ -21,16 +21,16 @@ class UniformKPTokenizer:
         """
         x_key_points = torch.linspace(self.x_min, self.x_max, self.key_point_num_on_x, dtype=dtype).to(device)
         y_key_points = torch.linspace(self.y_min, self.y_max, self.key_point_num_on_y, dtype=dtype).to(device)
-        x_ids = torch.bucketize(key_points[:, 0], x_key_points) - 1  # [bsz, 1]
-        y_ids = torch.bucketize(key_points[:, 1], y_key_points) - 1  # [bsz, 1]
+        x_ids = torch.bucketize(key_points[:, 0].contiguous(), x_key_points) - 1  # [bsz, 1]
+        y_ids = torch.bucketize(key_points[:, 1].contiguous(), y_key_points) - 1  # [bsz, 1]
         # Check if any x_ids are out of bounds
         if torch.any(x_ids < 0) or torch.any(x_ids >= self.key_point_num_on_x):
-            print('x id overflow: ', x_ids, self.key_point_num_on_x, self.x_min, self.x_max, key_points[:, 0])
+            # print('x id overflow: ', x_ids, self.key_point_num_on_x, self.x_min, self.x_max, key_points[:, 0])
             x_ids = torch.clip(x_ids, 0, self.key_point_num_on_x)
 
         # Check if any y_ids are out of bounds
         if torch.any(y_ids < 0) or torch.any(y_ids >= self.key_point_num_on_y):
-            print('y id overflow: ', y_ids, self.key_point_num_on_y, self.y_min, self.y_max, key_points[:, 1])
+            # print('y id overflow: ', y_ids, self.key_point_num_on_y, self.y_min, self.y_max, key_points[:, 1])
             y_ids = torch.clip(y_ids, 0, self.key_point_num_on_y)
 
         key_point_ids = x_ids + y_ids * self.key_point_num_on_y

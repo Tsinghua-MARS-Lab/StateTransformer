@@ -264,6 +264,7 @@ class KeyPointDecoderCLS(nn.Module):
     def __init__(self, config, proposal_num):
         super().__init__()
         self.config = config
+        self.kp_tokenizer = None
         self.proposal_num = proposal_num
         self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num)
         self.cls_proposal_loss = CrossEntropyLoss(reduction="none")

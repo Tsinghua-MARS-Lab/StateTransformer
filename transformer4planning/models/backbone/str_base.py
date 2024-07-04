@@ -191,7 +191,9 @@ class STR(PreTrainedModel):
                     from transformer4planning.models.decoder.base import KeyPointDecoderCLS
                     proposal_nums = [50*50, 20*20, 10*10, 5*5, 3*3]
                     for i in range(5):
-                        self.key_points_decoder.append(KeyPointDecoderCLS(self.config, proposal_num=proposal_nums[i]))
+                        new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_nums[i])
+                        new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
+                        self.key_points_decoder.append(new_key_points_decoder)
 
         # create a model list of traj_decoder for each
         # self.traj_decoders = nn.ModuleList()
