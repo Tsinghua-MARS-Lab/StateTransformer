@@ -127,6 +127,16 @@ class STR(PreTrainedModel):
                     y_max=y_max[i]
                 )
                 self.kp_tokenizer.append(kp_tokenizer)
+        elif self.config.kp_tokenizer == 'cluster':
+            from transformer4planning.models.tokenizer.cluster_kp_tokenizer import ClusterKPTokenizer
+            assert self.config.use_key_points == 'specified_backward'
+            cluster_path = self.config.kp_cluster_files.split(",")
+            logger.warning(f"cluster_path {cluster_path}")
+            assert len(cluster_path) == 5, f"we only support 8s 4s 2s 1s 0_5s csvfiles but get {cluster_path}"
+            self.kp_tokenizer = []
+            for i in range(5):
+                kp_tokenizer = ClusterKPTokenizer(cluster_path[i])
+                self.kp_tokenizer.append(kp_tokenizer)
         else:
             raise NotImplementedError
 
@@ -192,6 +202,13 @@ class STR(PreTrainedModel):
                     proposal_nums = [50*50, 20*20, 10*10, 5*5, 3*3]
                     for i in range(5):
                         new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_nums[i])
+                        new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
+                        self.key_points_decoder.append(new_key_points_decoder)
+                elif self.config.kp_tokenizer == 'cluster':
+                    from transformer4planning.models.decoder.base import KeyPointDecoderCLS
+                    for i in range(5):
+                        proposal_num_i = self.kp_tokenizer[i].centers.shape[0]
+                        new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_num_i)
                         new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
                         self.key_points_decoder.append(new_key_points_decoder)
 

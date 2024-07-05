@@ -33,7 +33,7 @@ class UniformKPTokenizer:
             # print('y id overflow: ', y_ids, self.key_point_num_on_y, self.y_min, self.y_max, key_points[:, 1])
             y_ids = torch.clip(y_ids, 0, self.key_point_num_on_y)
 
-        key_point_ids = x_ids + y_ids * self.key_point_num_on_y
+        key_point_ids = x_ids + y_ids * self.key_point_num_on_x
         return key_point_ids
 
     def decode(self, kp_ids, dtype, device=None):
