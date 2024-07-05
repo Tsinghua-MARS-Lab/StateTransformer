@@ -283,7 +283,11 @@ class ModelArguments:
 
     # WIP: key point tokenize
     kp_tokenizer: Optional[str] = field(
-        default=None, metadata={"help": "choose from [none, uniform, gaussian]"}
+        default=None, metadata={"help": "choose from [none, uniform, cluster, gaussian]"}
+    )
+
+    kp_cluster_files: Optional[str] = field(
+        default=None, metadata={"help": "csv files which record all cluster center info for 8s 4s 2s 1s 0.5s"}
     )
 
     # WIP: training with the simulation scores as loss

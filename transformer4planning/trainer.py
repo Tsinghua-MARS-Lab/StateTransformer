@@ -31,7 +31,7 @@ from transformers.trainer_utils import (
 )
 
 from transformers.trainer_pt_utils import (
-    AcceleratorConfig,
+    # AcceleratorConfig,
     DistributedTensorGatherer,
     IterableDatasetShard,
     LabelSmoother,
