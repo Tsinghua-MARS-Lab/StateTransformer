@@ -268,6 +268,8 @@ class KeyPointDecoderCLS(nn.Module):
         self.proposal_num = proposal_num
         self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num)
         self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
+        if self.config.add_regression_loss:
+            self.regression_loss = MSELoss(reduction="none")
 
     def compute_keypoint_loss(self, hidden_output, info_dict, i):
         """
@@ -287,7 +289,14 @@ class KeyPointDecoderCLS(nn.Module):
         pred_proposal_scores = nn.Softmax(dim=-1)(pred_proposal_scores)
         loss_proposal = self.cls_proposal_loss(pred_proposal_scores.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())
         pred_proposal_cls = pred_proposal_scores.argmax(dim=-1).squeeze(-1)
-        return loss_proposal.mean(), pred_proposal_cls
+        if self.config.add_regression_loss:
+            gt_proposal_logits = info_dict["future_key_points_after"][:, i]
+            pred_proposal_logits = self.kp_tokenizer.decode(pred_proposal_cls, dtype=hidden_output.dtype, device=hidden_output.device)
+            loss_proposal_logits = self.regression_loss(pred_proposal_logits, gt_proposal_logits)
+            final_loss = loss_proposal.mean() + loss_proposal_logits.mean()
+            return final_loss, pred_proposal_cls
+        else:
+            return loss_proposal.mean(), pred_proposal_cls
 
     def generate_keypoints(self, hidden_state):
         batch_size, seq_len, hidden_dim = hidden_state.shape
@@ -483,3 +492,48 @@ class KeyPointMLPDeocder(nn.Module):
             torch.save(transformer_outputs_hidden_state[:,kp_end_index-1+key_point_idx:kp_end_index-1+key_point_idx+1,:].detach().cpu(), os.path.join(self.save_testing_diffusion_feature_dir, f'future_key_points_hidden_state_{current_save_id}.pth'), )
             torch.save(info_dict['future_key_points'][...,key_point_idx:key_point_idx+1,:].detach().cpu(), os.path.join(self.save_testing_diffusion_feature_dir, f'future_key_points_{current_save_id}.pth'), )
         self.current_idx += 1
+
+
+class KeyPointLinearDecoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        # out_features = 4 if self.config.predict_yaw else 2
+        out_features = 2
+        loss_reduction = "mean"
+        if self.config.kp_dropout > 0:
+            self.kp_dropout = nn.Dropout(self.config.kp_dropout)
+        self.model = nn.Linear(self.config.n_embd, out_features)
+        if 'mse' in self.config.loss_fn:
+            self.loss_fct = nn.MSELoss(reduction=loss_reduction)
+        elif 'l1' in self.config.loss_fn:
+            self.loss_fct = nn.SmoothL1Loss(reduction=loss_reduction)
+        else:
+            assert False, f"loss fn not supported {self.config.loss_fn}"
+
+    def compute_keypoint_loss(self,
+                              hidden_output,
+                              info_dict: Dict = None,
+                              device=None):
+        if device is None:
+            device = hidden_output.device
+        context_length = info_dict.get("context_length", None)
+        future_key_points = info_dict["future_key_points"]
+        kp_start_index = context_length - 1
+        if self.config.use_proposal:
+            if self.config.autoregressive_proposals:
+                kp_start_index += int(self.config.proposal_num)
+            else:
+                kp_start_index += 1
+        future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
+        if self.config.kp_dropout > 0:
+            future_key_points_hidden_state = self.kp_dropout(future_key_points_hidden_state)
+        key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 2
+        kp_loss = self.loss_fct(key_points_logits, future_key_points[..., :2].to(device)).mean()
+        return kp_loss, key_points_logits
+
+    def generate_keypoints(self, hidden_state, info_dict: Dict = None):
+        batch_size, seq_len, hidden_dim = hidden_state.shape
+        assert hidden_state.shape[1] == 1
+        key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 2
+        return key_points_logit, None

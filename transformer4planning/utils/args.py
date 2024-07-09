@@ -115,7 +115,10 @@ class ModelArguments:
     )
     kp_decoder_type: Optional[str] = field(
         default='mlp',
-        metadata={"help": "choose from [mlp, diffusion]"}
+        metadata={"help": "choose from [linear, mlp, diffusion]"}
+    )
+    kp_dropout: Optional[float] = field(
+        default=0.0
     )
     ######## end of key points args ########
 
@@ -281,13 +284,32 @@ class ModelArguments:
         default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
     )
 
+    # begin of MoE configs
+    num_local_experts: Optional[int] = field(
+        default=8, metadata={"help": "The number of local experts."}
+    )
+    num_experts_per_token: Optional[int] = field(
+        default=2, metadata={"help": "The number of experts to route per-token, can be also interpreted as the top-k routing parameter."}
+    )
+    router_jitter_noise: Optional[float] = field(
+        default=0.0, metadata={"help": "The noise added to the router logits. From 0 to 1."}
+    )
+    # end of MoE configs
+
     # WIP: key point tokenize
     kp_tokenizer: Optional[str] = field(
         default=None, metadata={"help": "choose from [none, uniform, cluster, gaussian]"}
     )
-
     kp_cluster_files: Optional[str] = field(
         default=None, metadata={"help": "csv files which record all cluster center info for 8s 4s 2s 1s 0.5s"}
+    )
+
+    regression_long_class_short: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use regression long class short"}
+    )
+
+    add_regression_loss: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to add regression loss"}
     )
 
     # WIP: training with the simulation scores as loss

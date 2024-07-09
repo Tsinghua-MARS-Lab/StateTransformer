@@ -273,10 +273,9 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             future_key_points_aug = future_key_points_aug[:, :, :2]
 
             if self.config.separate_kp_encoder:
-                if self.config.kp_tokenizer is None:
+                if self.kp_tokenizer is None:
                     future_key_embeds = self.kps_m_embed(future_key_points_aug)
                 else:
-                    assert self.kp_tokenizer is not None, 'key point tokenizer should not be None'
                     assert future_key_points.shape[1] == 5, 'future key points should be 5'
                     future_key_points_ids = []
                     future_key_points_after = []

@@ -67,7 +67,7 @@ class STRConfig(PretrainedConfig):
                      "autoregressive_proposals", "selected_exponential_past",
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
-                     "camera_image_encoder", "use_speed", "no_yaw_with_stepping", "autoregressive",
+                     "camera_image_encoder", "use_speed", "no_yaw_with_stepping", "autoregressive", "regression_long_class_short",
                      "skip_yaw_norm"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
@@ -94,9 +94,12 @@ class STR(PreTrainedModel):
         self.clf_metrics = None
 
         self.kp_tokenizer = None
-        if self.config.kp_tokenizer is not None:
-            self.key_points_decoder = nn.ModuleList()
-            self.build_tokenizer()
+        try:
+            if self.config.kp_tokenizer is not None:
+                self.key_points_decoder = nn.ModuleList()
+                self.build_tokenizer()
+        except AttributeError:
+            pass
 
         # Initialize weights and apply final processing
         self.build_encoder()
@@ -193,8 +196,14 @@ class STR(PreTrainedModel):
                     logger.info("Pretrained keypoint decoder has been loaded!")
                 else:
                     logger.info("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
+            elif self.kp_decoder_type == "linear":
+                from transformer4planning.models.decoder.base import KeyPointLinearDecoder
+                self.kp_points_decoder = KeyPointLinearDecoder(self.config)
             elif self.kp_decoder_type == "mlp":
-                if self.config.kp_tokenizer is None:
+                if self.config.regression_long_class_short:
+                    assert self.config.kp_tokenizer == 'cluster', "only support cluster tokenizer for regression_long_class_short"
+
+                if self.kp_tokenizer is None:
                     from transformer4planning.models.decoder.base import KeyPointMLPDeocder
                     self.key_points_decoder = KeyPointMLPDeocder(self.config)
                 elif self.config.kp_tokenizer == "uniform":
@@ -207,10 +216,14 @@ class STR(PreTrainedModel):
                 elif self.config.kp_tokenizer == 'cluster':
                     from transformer4planning.models.decoder.base import KeyPointDecoderCLS
                     for i in range(5):
-                        proposal_num_i = self.kp_tokenizer[i].centers.shape[0]
-                        new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_num_i)
-                        new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
-                        self.key_points_decoder.append(new_key_points_decoder)
+                        if self.config.regression_long_class_short and i in [0, 1, 2]:
+                            from transformer4planning.models.decoder.base import KeyPointMLPDeocder
+                            self.key_points_decoder.append(KeyPointMLPDeocder(self.config))
+                        else:
+                            proposal_num_i = self.kp_tokenizer[i].centers.shape[0]
+                            new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_num_i)
+                            new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
+                            self.key_points_decoder.append(new_key_points_decoder)
 
         # create a model list of traj_decoder for each
         # self.traj_decoders = nn.ModuleList()
@@ -289,6 +302,7 @@ class STR(PreTrainedModel):
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
 
         if self.use_key_points != 'no' and not self.config.pred_traj_only:
+            loss_per_kp = None
             # new: if pred_traj_only, no need to compute key points, this setting is for putting key point from other pretrained model later
             if self.config.generate_diffusion_dataset_for_key_points_decoder:
                 future_key_points = info_dict["future_key_points"] if self.config.predict_yaw else \
@@ -299,27 +313,34 @@ class STR(PreTrainedModel):
                 # assert not self.training, "please train diffusion decoder separately."
                 # return a dummy loss&kp_logits here. The real data for computing metrics will be computed in the generate function
                 kp_loss = torch.tensor(0.0).to(transformer_outputs_hidden_state.device)
-                kp_logits = info_dict["future_key_points"].to(transformer_outputs_hidden_state.device) if self.config.predict_yaw else \
-                            info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
+                kp_logits = info_dict["future_key_points"][..., :2].to(transformer_outputs_hidden_state.device)
+            elif self.config.kp_decoder_type == "linear":
+                kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
             else:
-                if self.config.kp_tokenizer is None:
+                if self.kp_tokenizer is None:
                     kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
                     # kp_loss will be 10x larger than traj_loss when converged
                     if self.k > 1:
                         kp_logits = kp_logits['selected_logits']
                 else:
+                    assert self.k == 1, "only support k=1 for now"
                     kp_losses, kp_logits = [], []
                     for i in range(5):
-                        kp_loss, kp_id = self.key_points_decoder[i].compute_keypoint_loss(transformer_outputs_hidden_state, info_dict, i)
-                        kp_losses.append(kp_loss)  # list of [1]
-                        kp_logit = self.kp_tokenizer[i].decode(kp_id, dtype=kp_loss.dtype, device=kp_loss.device)
-                        kp_logits.append(kp_logit)  # list of [bsz, 2]
+                        if self.config.regression_long_class_short and i in [0, 1, 2]:
+                            kp_loss, kp_logit, loss_per_kp = self.key_points_decoder[i].compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
+                            kp_logits.append(kp_logit[:, i, :].squeeze(1))
+                            kp_losses.append(loss_per_kp[i])
+                        else:
+                            kp_loss, kp_id = self.key_points_decoder[i].compute_keypoint_loss(transformer_outputs_hidden_state, info_dict, i)
+                            kp_losses.append(kp_loss)  # list of [1]
+                            kp_logit = self.kp_tokenizer[i].decode(kp_id, dtype=kp_loss.dtype, device=kp_loss.device)
+                            kp_logits.append(kp_logit)  # list of [bsz, 2]
                     loss_per_kp = torch.stack(kp_losses, dim=0)  # [5]
                     kp_loss = loss_per_kp.mean()
                     kp_logits = torch.stack(kp_logits, dim=1)  # [bsz, 5, 2]
-                if self.config.predict_yaw:
-                    # padding last dimension from 2 to 4
-                    kp_logits = torch.cat([kp_logits, torch.zeros_like(kp_logits)[:, :, :2]], dim=-1)
+            if self.config.predict_yaw:
+                # padding last dimension from 2 to 4
+                kp_logits = torch.cat([kp_logits, torch.zeros_like(kp_logits)[:, :, :2]], dim=-1)
 
             loss += kp_loss
             traj_logits = torch.cat([kp_logits, traj_logits], dim=1)
@@ -561,8 +582,10 @@ class STR(PreTrainedModel):
                     future_key_point_hidden_state = transformer_outputs_hidden_state[:,
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
-                    if self.config.kp_tokenizer is None:
+                    if self.kp_tokenizer is None:
                         key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+                    elif self.config.regression_long_class_short and i in [0, 1, 2]:
+                        key_points_logit, _ = self.key_points_decoder[i].generate_keypoints(future_key_point_hidden_state)
                     else:
                         key_point_ids, key_points_scores = self.key_points_decoder[i].generate_keypoints(future_key_point_hidden_state)
                         key_points_logit = self.kp_tokenizer[i].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
@@ -582,6 +605,8 @@ class STR(PreTrainedModel):
                         key_points_logit = torch.stack(selected_key_points, dim=0)  # (bs, 1, 2/4)
 
                     if gt_1s_kp is not None and i == 3:
+                        # assert False, 'deprecated, debug only'
+                        print('testing: ', key_points_logit[0, 0, :2] - gt_1s_kp[0, 0, :2])
                         key_points_logit = gt_1s_kp
 
                     # pred_key_point = torch.zeros((batch_size, 1, 2), device=device)
@@ -994,7 +1019,7 @@ def build_models(model_args):
         # from transformers import AqlmConfig
         # quantization_config = AqlmConfig(weights="int8", pre_quantized=False)
         model = ModelCls.from_pretrained(model_args.model_pretrain_name_or_path, config=config_p)
-        logger.info('Pretrained ' + tag + 'from {}'.format(model_args.model_pretrain_name_or_path))
+        logger.info('Pretrained ' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
         if model_args.key_points_diffusion_decoder_load_from is not None:
                 print(f"Now loading pretrained key_points_diffusion_decoder from {model_args.key_points_diffusion_decoder_load_from}.")
                 state_dict = torch.load(model_args.key_points_diffusion_decoder_load_from)

@@ -139,6 +139,17 @@ def load_dictionary_for_file(root_path, split, _sample):
             return None, None
     else:
         road_dic = st.session_state.all_map_dic[map]
+
+    minimal_map = True
+    if minimal_map:
+        road_ids = _sample['road_ids']
+        minimal_road_dic = {}
+        for each in road_dic:
+            if each in road_ids:
+            # if road_dic[each]['type'] in [0]:
+                minimal_road_dic[each] = road_dic[each]
+        road_dic = minimal_road_dic
+
     if split == 'val':
         map = 'all_cities'
     if file_name is not None:
@@ -199,7 +210,8 @@ def ego_to_global(poses, ego_pose, y_reverse=1):
     rotated_poses[:, 1] = poses[:, 0] * sin_ + poses[:, 1] * cos_
     rotated_poses[:, 0] += ego_pose[0]
     rotated_poses[:, 1] += ego_pose[1]
-    rotated_poses[:, 3] += -ego_pose[3]
+    if rotated_poses.shape[-1] == 4:
+        rotated_poses[:, 3] += -ego_pose[3]
     return rotated_poses
 
 def add_intention_to_agent_dic(agent_dic):
