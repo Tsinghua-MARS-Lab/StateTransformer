@@ -152,6 +152,7 @@ class STR(PreTrainedModel):
 
                 if self.kp_tokenizer is not None:
                     self.encoder.kp_tokenizer = self.kp_tokenizer
+                    # self.encoder.kp_tokenizer_type = self.config.kp_tokenizer
             elif "vector" in self.config.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
@@ -211,6 +212,13 @@ class STR(PreTrainedModel):
                         new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_num_i)
                         new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
                         self.key_points_decoder.append(new_key_points_decoder)
+                # elif self.config.kp_tokenizer == 'cluster_regression':
+                #     from transformer4planning.models.decoder.base import KeyPointDecoderCLS
+                #     for i in range(5):
+                #         proposal_num_i = self.kp_tokenizer[i].centers.shape[0]
+                #         new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_num_i)
+                #         new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
+                #         self.key_points_decoder.append(new_key_points_decoder)
 
         # create a model list of traj_decoder for each
         # self.traj_decoders = nn.ModuleList()
@@ -549,6 +557,10 @@ class STR(PreTrainedModel):
 
                 input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
                 pred_key_points_during_generate = []
+                pred_key_points_ids = []
+                pred_key_points_scores = []
+                pred_key_points_topk = []
+                pred_key_points_topk_scores = []
                 for i in range(key_points_num):
                     input_embeds_current = input_embeds[:, :kp_start_index + i, :]
                     attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -564,8 +576,19 @@ class STR(PreTrainedModel):
                     if self.config.kp_tokenizer is None:
                         key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
                     else:
-                        key_point_ids, key_points_scores = self.key_points_decoder[i].generate_keypoints(future_key_point_hidden_state)
+                        key_point_ids, key_points_scores, key_point_ids_topk, key_point_scores_topk = self.key_points_decoder[i].generate_keypoints(future_key_point_hidden_state)
                         key_points_logit = self.kp_tokenizer[i].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
+                        pred_key_points_ids.append(key_point_ids) # [ (bs,) ]
+                        pred_key_points_scores.append(key_points_scores) # [ (bs, 1, n_cluster)]
+
+                        key_points_score_top_ks = []
+                        key_points_logit_top_ks = []
+                        for top_k in range(key_point_ids_topk.shape[-1]):
+                            # [topk (bs, 2) ]
+                            key_points_logit_top_ks.append(self.kp_tokenizer[i].decode(key_point_ids_topk[:, 0, top_k], dtype=key_points_scores.dtype, device=key_points_scores.device) )
+                            key_points_score_top_ks.append(key_point_scores_topk[:, 0, top_k]) # [topk (bs,)]
+                        pred_key_points_topk.append(key_points_logit_top_ks) # [K [topk (bs, 2) ]]
+                        pred_key_points_topk_scores.append(key_points_score_top_ks) # [K [topk (bs,)]
 
                     if self.k > 1:
                         k_key_points_logit = key_points_logit['logits']  # (bs, 1, k, 2/4)
@@ -628,6 +651,85 @@ class STR(PreTrainedModel):
                     pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
                 key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
                 key_points_logits_k.append(key_points_logits)
+
+                pred_key_points_ids = torch.stack(pred_key_points_ids, dim=1) # [(bs,),... ] -> (bs, K)
+                # pred_key_points_scores = torch.cat(pred_key_points_scores, dim=1) # [ (bs, 1, n_cluster), ...] -> (bs, K, n_cluster)
+
+                bs, K = pred_key_points_ids.shape
+                gt_traj = info_dict['trajectory_label'][:, :, :2].cpu().numpy() # bs,80,2
+                gt_future_key_points = info_dict['future_key_points'].cpu().numpy() # bs,K,4
+                gt_future_key_points_aug = info_dict['future_key_points_aug'].cpu().numpy() # bs,K,2
+                gt_future_key_points_ids = info_dict['future_key_points_ids'].cpu().numpy() # bs,K
+                gt_future_key_points_qat = info_dict['future_key_points_after'].cpu().numpy() # bs,K,2
+                pred_future_key_points_ids = pred_key_points_ids.cpu().numpy() # (bs,K)
+                pred_future_key_points_qat = key_points_logits.cpu().numpy() # bs,K,2
+                pred_future_key_points_scores = pred_key_points_scores #.cpu().numpy() # (bs,K,n_cluster)
+                pred_future_key_points_topk = pred_key_points_topk #[K [topk (bs,2), ] ]
+                pred_future_key_points_topk_scores = pred_key_points_topk_scores # [K [topk (bs,)]
+
+                import matplotlib.pyplot as plt
+                import os
+                for bs_i in range(bs):
+                    plt.figure(figsize=(10, 6))
+                    score_str = ""
+                    alphas = [1.0, 0.8, 0.6, 0.4, 0.2]
+                    sizes = [4, 6, 8, 10, 12]
+                    for k in range(K):
+                        # gt_centers = self.kp_tokenizer[k].centers.cpu().numpy() # n_cluster,2
+                        gt_kp = gt_future_key_points[bs_i, k, :2]
+                        gt_kp_aug = gt_future_key_points_aug[bs_i, k, :2]
+                        gt_kp_id = gt_future_key_points_ids[bs_i, k]
+                        gt_kp_qat = gt_future_key_points_qat[bs_i, k, :2]
+                        pred_kp_id = pred_future_key_points_ids[bs_i, k]
+                        pred_kp_score = pred_future_key_points_scores[k].cpu().numpy()[bs_i, 0, pred_kp_id]
+                        pred_kp_qat = pred_future_key_points_qat[bs_i, k, :2]
+
+                        # plt.scatter(
+                        #     x=gt_centers[:,0],
+                        #     y=gt_centers[:,1],
+                        #     # s=df['label_num'],
+                        #     alpha=0.2,
+                        #     c='k',
+                        #     cmap='viridis'
+                        # )
+
+                        # print("gt_kp", gt_kp)
+                        # print("gt_kp_aug", gt_kp_aug)
+                        # print("gt_kp_qat", gt_kp_qat)
+                        # print("pred_kp_qat", pred_kp_qat)
+                        plt.plot(gt_traj[bs_i, :, 0], gt_traj[bs_i, :, 1], '-', color='g') 
+                        plt.plot(gt_kp[0], gt_kp[1], 'o', markerfacecolor='none', markeredgecolor='g', markersize=sizes[k], alpha=alphas[k]) 
+                        plt.plot(gt_kp_aug[0], gt_kp_aug[1],'+', markerfacecolor='none', markeredgecolor='b', markersize=sizes[k], alpha=alphas[k]) 
+                        plt.plot(gt_kp_qat[0], gt_kp_qat[1],'x', markerfacecolor='none', markeredgecolor='y', markersize=sizes[k], alpha=alphas[k]) 
+                        plt.plot(pred_kp_qat[0], pred_kp_qat[1], 'o', markerfacecolor='none', markeredgecolor='r', markersize=sizes[k], alpha=alphas[k]) 
+                        score_str += f' K:{k} kp_id:{gt_kp_id} vs {pred_kp_id} score:{pred_kp_score:.2f}'
+
+                        # for topk
+                        for topk in range(3): 
+                            topk_pred_kp = pred_future_key_points_topk[k][topk].cpu().numpy()[bs_i]
+                            topk_pred_kp_score = pred_future_key_points_topk_scores[k][topk].cpu().numpy()[bs_i]
+                            if topk == 0:
+                                assert topk_pred_kp_score == pred_kp_score, f"k={topk} topk_pred_kp_score:{topk_pred_kp_score} != pred_kp_score:{pred_kp_score}"
+                                continue
+                            plt.plot(topk_pred_kp[0], topk_pred_kp[1], '*', markerfacecolor='none', markeredgecolor='r', markersize=sizes[k], alpha=alphas[k]) 
+                            score_str += f" top_{topk}:{topk_pred_kp_score:.2f}"
+                        
+                        if k%2 == 0:
+                            score_str += "\n"
+
+
+
+                    # plt.xlabel('label_center_x')
+                    # plt.ylabel('label_center_y')
+                    plt.title(score_str, fontsize=6)
+                    plt.axis("equal")
+                    #save_path = "debug/CKS-Small-Cluster-1024/"
+                    #save_path = "debug/CKS-Small-Uniform/"
+                    save_path = "debug/"
+                    if not os.path.exists(save_path):
+                        os.makedirs(save_path)
+                    plt.savefig(os.path.join(save_path, f"{kwargs['file_name'][bs_i]}_frameid_{kwargs['frame_id'][bs_i]}.png"))
+                    plt.close()
 
             # generate remaining trajectory
             transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds)

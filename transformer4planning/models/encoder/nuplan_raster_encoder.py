@@ -109,6 +109,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         self.action_m_embed = nn.Sequential(nn.Linear(input_dim, action_kwargs.get("d_embed")), nn.Tanh())
 
         self.kp_tokenizer = None
+        # self.kp_tokenizer_type = None
 
         # For key points, only use x, and y
         # currently forcing key point to be 2 dimension, with no speed and no yaw
@@ -266,11 +267,13 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             future_key_points = None
         else:
             future_key_points = self.select_keypoints(info_dict)
+            info_dict['future_key_points'] = future_key_points
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
             # argument future trajectory
             future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk)  # bs, seq, 4
             future_key_points_aug = future_key_points_aug[:, :, :2]
+            info_dict['future_key_points_aug'] = future_key_points_aug
 
             if self.config.separate_kp_encoder:
                 if self.config.kp_tokenizer is None:
@@ -280,14 +283,25 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                     assert future_key_points.shape[1] == 5, 'future key points should be 5'
                     future_key_points_ids = []
                     future_key_points_after = []
+                    # future_key_points_diff = []
                     for i in range(5):
                         future_key_points_ids.append(self.kp_tokenizer[i].encode(future_key_points_aug[:, i, :], dtype=action_embeds.dtype, device=device))
                         future_key_points_after.append(self.kp_tokenizer[i].decode(future_key_points_ids[i], dtype=action_embeds.dtype, device=device))
+                        # if self.kp_tokenizer_type == "cluster":
+                        #     kp_gt = future_key_points_aug[:, [i], :]
+                        #     kp_cluster_centers = self.kp_tokenizer[i].centers[None,:,:].type_as(future_key_points_aug)
+                        #     # bs,1,2 - 1,K,2 -> bs,K,2
+                        #     kp_diff = kp_gt - kp_cluster_centers
+                        #     future_key_points_diff.append(kp_diff)
                     future_key_points_after = torch.stack(future_key_points_after, dim=1)
                     future_key_points_ids = torch.stack(future_key_points_ids, dim=1)
                     future_key_embeds = self.kps_m_embed(future_key_points_after)
                     info_dict['future_key_points_ids'] = future_key_points_ids.to(device)
                     info_dict['future_key_points_after'] = future_key_points_after.to(device)
+                    # if self.kp_tokenizer_type == "cluster":
+                    #     # bs,5,K,2
+                    #     future_key_points_diff = torch.stack(future_key_points_diff, dim=1)
+                    #     info_dict['future_key_points_diff'] = future_key_points_diff.to(device)
             else:
                 assert False, 'deprecated for clarity, use separate_kp_encoder instead'
                 # if self.config.use_speed:

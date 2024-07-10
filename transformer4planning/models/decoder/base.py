@@ -295,7 +295,9 @@ class KeyPointDecoderCLS(nn.Module):
         key_point_id_scores = nn.Softmax(dim=-1)(key_point_id_scores)  # b, s=1, n
         key_point_ids = key_point_id_scores.argmax(dim=-1).squeeze(-1)  # b, s=1
         # key_point_logits = self.tokenizer.decode(key_point_id)  # b, s=1, 2
-        return key_point_ids, key_point_id_scores
+        # bs,1,3
+        key_point_scores_topk, key_point_ids_topk = torch.topk(key_point_id_scores, k=3, dim=-1)
+        return key_point_ids, key_point_id_scores, key_point_ids_topk, key_point_scores_topk
 
 
 class KeyPointMLPDeocder(nn.Module):
