@@ -925,6 +925,7 @@ def save_raster(inputs, sample_index, file_index=0,
         # draw prediction trajectory
         if prediction_trajectory is not None:
             for i in range(prediction_trajectory.shape[0]):
+
                 x = int(prediction_trajectory[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_trajectory[i, 1] * scale) + target_image.shape[1] // 2
                 if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:

@@ -41,4 +41,4 @@ runner.py \
 --analyze_dataset_target "test" \
 --remove_unused_columns False \
 --per_device_eval_batch_size 1 \
---max_test_samples 1
+--max_test_samples 4

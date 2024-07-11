@@ -572,6 +572,8 @@ class STR(PreTrainedModel):
                 input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
                 pred_key_points_during_generate = []
                 print("the shape of input_embeds is: ", input_embeds.shape)
+                assert batch_size == 1, 'only support batch size 1 for now'
+                prev_batch_size = batch_size
                 for i in range(key_points_num):
                     print("*********************the i is: ************", i)
                     input_embeds_current = input_embeds[:, :kp_start_index + i, :]
@@ -731,17 +733,25 @@ class STR(PreTrainedModel):
             if len(key_points_logits_k) > 0:
                 assert len(key_points_logits_k) == self.k
                 key_points_pred_logits = torch.stack(key_points_logits_k, dim=1)
-
-        pred_dict = {
-            "traj_logits": traj_pred_logits
+        if prev_batch_size != batch_size:
+            pred_dict = {
+            "traj_logits": traj_pred_logits.unsqueeze(0)
         }
+        else:
+            pred_dict = {
+                "traj_logits": traj_pred_logits,
+
+            }
 
         # if kwargs.get('old_file_name', None) is not None:
         #     logger.warning('passing gt at gen next step for debugging')
         #     pred_dict['traj_logits'] = kwargs['trajectory_label']
 
         if key_points_pred_logits is not None:
-            pred_dict.update({"key_points_logits": key_points_pred_logits})
+            if prev_batch_size != batch_size:
+                pred_dict.update({"key_points_logits": key_points_pred_logits.unsqueeze(0)})
+            else:
+                pred_dict.update({"key_points_logits": key_points_pred_logits})
 
         if self.use_proposal:
             pred_dict.update({"proposal": proposal_result})  # topk results
