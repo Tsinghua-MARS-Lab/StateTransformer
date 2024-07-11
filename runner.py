@@ -53,7 +53,7 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
     index_root_folders = os.path.join(root, split)
     indices = os.listdir(index_root_folders)
 
-    for index in indices:
+    for index in indices[:1]:
         index_path = os.path.join(index_root_folders, index)
         if os.path.isdir(index_path):
             # load training dataset
@@ -96,11 +96,23 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
 
     return dataset
 
+def update_config_from_json(config_args, json_file_path):
+    with open(json_file_path, 'r') as file:
+        import json
+        data = json.load(file)
+        for key, value in data.items():
+            if hasattr(config_args, key):
+                setattr(config_args, key, value)
+    return config_args
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
     model_args, data_args, config_args, training_args = parser.parse_args_into_dataclasses()
-
+    
+    # we exclusively load the model from the model_args.model_name
+    model_args=update_config_from_json(model_args, "model_args_for_config.json")
+    
+    
     if training_args.gradient_checkpointing:
         """
         Gradient checkpointing is going to crush your training for unknown reasons of the transformers library.
@@ -186,12 +198,13 @@ def main():
     elif model_args.task == "train_diffusion_decoder":
         index_root = data_args.saved_dataset_folder
     root_folders = os.listdir(index_root)
-
-    if 'train' in root_folders:
-        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
+    if training_args.do_train:
+        if 'train' in root_folders:
+            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
+        else:
+            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
     else:
-        raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
-
+        train_dataset = None
     if model_args.camera_image_encoder is not None:
         train_dataset = train_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
 
@@ -206,7 +219,8 @@ def main():
         val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False)
         if model_args.camera_image_encoder is not None:
             val_dataset = val_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
-
+    else:
+        val_dataset = None
     val14_1k_dataset = None
     if training_args.do_sim_val:
         # load val14_1k dataset for sim_val, 1118 samples in total
@@ -299,12 +313,19 @@ def main():
 
     # loop split info and update for test set
     logger.info('TrainingSet: '+ str(train_dataset) + '\nValidationSet: ' + str(val_dataset) + '\nTestingSet: ' + str(test_dataset) + '\nSimulationSet: ' + str(val14_1k_dataset))
-
-    dataset_dict = dict(
-        train=train_dataset.shuffle(seed=training_args.seed),
-        validation=val_dataset,
-        test=test_dataset.shuffle(seed=training_args.seed) if test_dataset is not None else None,
-    )
+    print("the seed is ", training_args.seed)
+    if training_args.do_train:
+        dataset_dict = dict(
+            train=train_dataset.shuffle(seed=training_args.seed),
+            validation=val_dataset,
+            test=test_dataset.shuffle(seed=training_args.seed) if test_dataset is not None else None,
+        )
+    else:
+        dataset_dict=dict(
+            train=train_dataset,
+            validation=val_dataset,
+            test=test_dataset.shuffle(seed=training_args.seed) if test_dataset is not None else None,
+        )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
@@ -532,8 +553,10 @@ def main():
         # evaluate.save("./results/", ** result, ** hyperparams)
         # logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
-
+    target_dataset=None
     if training_args.do_predict:
+        print("===============PREDICT=================")
+        
         """
         Use this to inference on specific dataset and output the worst or best cases for visualizations and analysis
         """
@@ -548,6 +571,7 @@ def main():
                     target_dataset = val_dataset
                 elif config_args.analyze_dataset_target == 'test':
                     target_dataset = test_dataset
+                    print('predict on test')
                 else:
                     assert False, f'Unknown target dataset to analyze, got {config_args.analyze_dataset_target}'
                 trainer.analyze(target_dataset=target_dataset,
@@ -556,13 +580,16 @@ def main():
         else:
             assert False, f'Pass result path and target dataset to analyze'
 
-    if False:
+    if training_args.do_dagger:
+        print("===============DAGGER=================")
         # Currently only supports single GPU predict outputs
         """
         Will save prediction results, and dagger results if dagger is enabled
         """
         # TODO: fit new online process pipeline to save dagger and prediction results
         logger.info("*** Predict ***")
+        if target_dataset is None:
+            target_dataset = test_dataset
         with torch.no_grad():
             dagger_results = {
                 'file_name':[],
@@ -577,9 +604,10 @@ def main():
                 'current_frame': [],
                 'next_step_action': [],
                 'predicted_trajectory': [],
+                'input':[]
             }
             test_dataloader = DataLoader(
-                dataset=predict_dataset,
+                dataset=target_dataset,
                 batch_size=training_args.per_device_eval_batch_size,
                 num_workers=training_args.per_device_eval_batch_size,
                 collate_fn=collate_fn,
@@ -597,6 +625,9 @@ def main():
                 loss_fn = torch.nn.MSELoss(reduction="mean")
 
             for itr, input in enumerate(tqdm(test_dataloader)):
+                print("==================================================================================")
+                # if itr >=20:
+                #     break
                 # move batch to device
                 for each_key in input:
                     if isinstance(input[each_key], type(torch.tensor(0))):
@@ -606,6 +637,13 @@ def main():
                 if model_args.autoregressive or model_args.use_key_points is not None:
                     # Todo: add autoregressive predict
                     traj_pred = model.generate(**input)
+                    file_name = input['file_name']
+                    current_frame_idx = input['frame_id']
+                    prediction_results['file_names'].extend(file_name)
+                    prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
+                    prediction_results['input'].append(input)
+                    traj_pred_copy = copy.deepcopy(traj_pred)
+                    prediction_results['predicted_trajectory'].append(traj_pred_copy)
                 else:
                     output = model(**copy.deepcopy(input))
                     traj_pred = output.logits                   
@@ -617,6 +655,8 @@ def main():
                         current_frame_idx = -1 * torch.ones(eval_batch_size)
                     prediction_results['file_names'].extend(file_name)
                     prediction_results['current_frame'].extend(current_frame_idx.cpu().numpy())
+                    prediction_results['input'].append(input)
+                    prediction_results['predicted_trajectory'].extend(traj_pred.cpu().numpy())
                     if data_args.dagger:
                         dagger_results['file_name'].extend(file_name)
                         dagger_results['frame_id'].extend(list(current_frame_idx.cpu().numpy()))

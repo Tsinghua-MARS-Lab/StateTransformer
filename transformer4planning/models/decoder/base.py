@@ -457,6 +457,7 @@ class KeyPointMLPDeocder(nn.Module):
 
     def generate_keypoints(self, hidden_state, info_dict:Dict=None):
         batch_size, seq_len, hidden_dim = hidden_state.shape
+        print("in generate_keypoints, hidden_state shape: ",hidden_state.shape)
         assert hidden_state.shape[1] == 1
         if self.k > 1:
             key_points_logit = self.logits_decoder(hidden_state).view(batch_size, seq_len, self.k, -1)  # b, s, k, 4/2

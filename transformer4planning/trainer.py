@@ -920,20 +920,20 @@ def save_raster(inputs, sample_index, file_index=0,
                     elif 'label' in each_traj_key:
                         target_image[x, y, :] = [255, 255, 0]
 
-        tray_point_size = max(2, int(0.75 * scale * 4 / 7 / 20))
-        key_point_size = max(2, int(3 * scale * 4 / 7))
+        tray_point_size = max(1, int(0.05 * scale * 4 / 7 / 20))
+        key_point_size = max(2, int(1 * scale * 4 / 7))
         # draw prediction trajectory
         if prediction_trajectory is not None:
             for i in range(prediction_trajectory.shape[0]):
                 x = int(prediction_trajectory[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_trajectory[i, 1] * scale) + target_image.shape[1] // 2
                 if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:
-                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, 1:] += 200
+                    target_image[x-tray_point_size:x+tray_point_size, y-tray_point_size:y+tray_point_size, :] +=100
 
             x = int(0 * scale) + target_image.shape[0] // 2
             y = int(0 * scale) + target_image.shape[1] // 2
             if 0 < x < target_image.shape[0] and 0 < y < target_image.shape[1]:
-                target_image[x - tray_point_size:x + tray_point_size, y - tray_point_size:y + tray_point_size, 2] += 200
+                target_image[x - tray_point_size:x + tray_point_size, y - tray_point_size:y + tray_point_size, 1] += 150
 
         # draw prediction trajectory by generation
         if prediction_trajectory_by_gen is not None:
@@ -945,11 +945,13 @@ def save_raster(inputs, sample_index, file_index=0,
 
         # draw key points
         if prediction_key_point is not None:
+            print(prediction_key_point.shape[0])
             for i in range(prediction_key_point.shape[0]):
                 x = int(prediction_key_point[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_key_point[i, 1] * scale) + target_image.shape[1] // 2
+                print("x :",x," y :",y)
                 if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:
-                    target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 1] += 200
+                    target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 0] += 250
 
         # draw prediction key points during generation
         if prediction_key_point_by_gen is not None:
@@ -957,7 +959,7 @@ def save_raster(inputs, sample_index, file_index=0,
                 x = int(prediction_key_point_by_gen[i, 0] * scale) + target_image.shape[0] // 2
                 y = int(prediction_key_point_by_gen[i, 1] * scale) + target_image.shape[1] // 2
                 if 0 < x < target_image.shape[0] and 0 <y < target_image.shape[1]:
-                    target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 2] += 200
+                    target_image[x-key_point_size:x+key_point_size, y-key_point_size:y+key_point_size, 1] += 200
 
         target_image = np.clip(target_image, 0, 255)
         image_to_save[each_key] = target_image

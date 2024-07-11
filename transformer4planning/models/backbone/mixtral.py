@@ -1,5 +1,6 @@
 from transformer4planning.models.backbone.str_base import STR, STRConfig
-from transformers import (MixtralModel, MixtralPreTrainedModel, MixtralConfig)
+from transformers import ( MixtralPreTrainedModel, MixtralConfig)
+from MoeProne.mixtral import MixtralModelPro
 
 
 class STRMixtralConfig(MixtralConfig, STRConfig):
@@ -13,5 +14,5 @@ class STR_Mixtral(STR, MixtralPreTrainedModel):
     """
     def __init__(self, config):
         super().__init__(config)
-        self.transformer = MixtralModel(config)
+        self.transformer = MixtralModelPro(config)
         assert self.config.output_router_logits is False, "Router z-loss is not supported yet"

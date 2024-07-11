@@ -365,15 +365,17 @@ class STR(PreTrainedModel):
             loss_items=loss_items
         )
 
-    def embedding_to_hidden(self, input_embeds, attention_mask=None, position_ids=None, return_dict=True):
+    def embedding_to_hidden(self, input_embeds, attention_mask=None, position_ids=None, return_dict=True, first_token=False, **kwargs):
         # default as the gpt2 model output
         transformer_outputs = self.transformer(
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
             position_ids=position_ids,
             return_dict=return_dict,
+            first_token=first_token,
             # **kwargs
         )
+
         return transformer_outputs['last_hidden_state']
 
     def do_closed_loop_simulation(self,
@@ -544,7 +546,6 @@ class STR(PreTrainedModel):
                 route_ids = kwargs.get("route_ids", None)
                 ego_pose = kwargs.get("ego_pose", None)
                 road_dic = kwargs.get("road_dic", None)
-
                 trajectory_label_dummy = torch.zeros((batch_size, pred_length, 4), device=device)
                 if 'specified' in self.use_key_points:
                     future_key_points = trajectory_label_dummy[:, selected_indices, :]
@@ -570,15 +571,26 @@ class STR(PreTrainedModel):
 
                 input_embeds[:, kp_start_index:kp_start_index + key_points_num, :] = future_key_embeds_dummy
                 pred_key_points_during_generate = []
+                print("the shape of input_embeds is: ", input_embeds.shape)
                 for i in range(key_points_num):
+                    print("*********************the i is: ************", i)
                     input_embeds_current = input_embeds[:, :kp_start_index + i, :]
+                    print("the input_embeds_current shape is: ", input_embeds_current.shape)
+                    print("the kp_start_index is: ", kp_start_index)
                     attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+                    # attention_mask = attention_mask.expand(28, -1, -1)  # -1 表示保持该维度不变
                     position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
+                    if i ==0:
+                        first_token=True
+                    else:
+                        first_token=False
                     transformer_outputs_hidden_state = self.embedding_to_hidden(
                         input_embeds_current,
                         attention_mask,
                         position_ids,
+                        first_token=first_token,
                     )
+                    batch_size=transformer_outputs_hidden_state.shape[0]
                     future_key_point_hidden_state = transformer_outputs_hidden_state[:,
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
@@ -649,6 +661,8 @@ class STR(PreTrainedModel):
                     else:
                         assert False, 'Key Point for waymo not implemented yet'
                     # replace embed at the next position
+                    times=int(batch_size/input_embeds.shape[0])
+                    input_embeds= input_embeds.repeat(times, 1, 1, 1).view(batch_size, -1, input_embeds.shape[2])
                     input_embeds[:, kp_start_index + i, :] = key_point_embed[:, 0, :]
                     pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
                 key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
@@ -656,6 +670,7 @@ class STR(PreTrainedModel):
 
             # generate remaining trajectory
             transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds)
+            batch_size, seq_len, _ = transformer_outputs_hidden_state.shape
             if self.config.autoregressive:
                 points_to_predict = info_dict["pred_length"]
                 raster_seq_length = info_dict["sequence_length"]
@@ -696,6 +711,7 @@ class STR(PreTrainedModel):
                 # traj_logits_k.append(expanded_traj_logits)
             # expected shape for pred trajectory is (b, pred_length, 4/7)
             elif self.traj_decoder is not None:
+                
                 traj_logits = self.traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
                 if self.config.reverse_traj_index_order:
                     traj_logits = traj_logits.flip(-2)
