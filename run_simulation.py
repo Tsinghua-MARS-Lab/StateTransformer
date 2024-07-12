@@ -864,7 +864,7 @@ def main(args):
     build_simulation_experiment_folder(output_dir, simulation_dir, metric_dir, aggregator_metric_dir)
 
     # build scenarios
-    print('Extracting scenarios...')
+    print('Extracting scenarios...', args.load_test_set)
     map_version = "nuplan-maps-v1.0"
     scenario_mapping = ScenarioMapping(scenario_map=get_scenario_map(), subsample_ratio_override=0.5)
     builder = NuPlanScenarioBuilder(args.data_path, args.map_path, None, None, map_version, scenario_mapping=scenario_mapping)
@@ -915,7 +915,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_path', type=str)
     parser.add_argument('--exp_folder', type=str, default=None)
     parser.add_argument('--test_type', type=str, default='closed_loop_nonreactive_agents')
-    parser.add_argument('--load_test_set', action='store_true')
+    parser.add_argument('--load_test_set', action='store_false')
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--scenarios_per_type', type=int, default=20)
     parser.add_argument('--nuplan_exp_root', type=str, default='/cephfs/sunq/nuplan/dataset')

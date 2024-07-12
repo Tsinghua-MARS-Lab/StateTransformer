@@ -67,7 +67,7 @@ class ModelArguments:
         default=0.0
     )
     predict_yaw: Optional[bool] = field(
-        default=False
+        default=True
     )
     loss_fn: Optional[str] = field(
         default="mse",
@@ -118,6 +118,13 @@ class ModelArguments:
         metadata={"help": "choose from [linear, mlp, diffusion]"}
     )
     kp_dropout: Optional[float] = field(
+        default=0.0
+    )
+    trajectory_decoder_type: Optional[str] = field(
+        default='mlp',
+        metadata={"help": "choose from [linear, mlp]"}
+    )
+    traj_dropout: Optional[float] = field(
         default=0.0
     )
     ######## end of key points args ########

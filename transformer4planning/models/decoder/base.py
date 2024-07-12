@@ -44,9 +44,16 @@ class TrajectoryDecoder(nn.Module):
         super().__init__()
         self.config = config
         out_features = 4 if self.config.predict_yaw else 2
-        self.model = DecoderResCat(config.n_inner, 
-                                   config.n_embd, 
-                                   out_features=out_features)
+
+        if self.config.trajectory_decoder_type == 'linear':
+            if self.config.traj_dropout:
+                self.dropout = nn.Dropout(self.config.traj_dropout)
+            self.model = nn.Linear(config.n_embd, out_features)
+        else:
+            self.model = DecoderResCat(config.n_inner,
+                                       config.n_embd,
+                                       out_features=out_features,
+                                       dropout=self.config.traj_dropout)
         
         if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
@@ -72,6 +79,8 @@ class TrajectoryDecoder(nn.Module):
         if device is None:
             device = traj_hidden_state.device
         # compute trajectory loss
+        if self.config.trajectory_decoder_type == 'linear' and self.config.traj_dropout and self.training:
+            traj_hidden_state = self.dropout(traj_hidden_state)
         traj_logits = self.model(traj_hidden_state)
         assert self.config.task == "nuplan", "only support nuplan task"
         assert self.config.mean_circular_loss, "only support mean circular loss"
@@ -111,6 +120,8 @@ class TrajectoryDecoder(nn.Module):
             device = traj_hidden_state.device
         # compute trajectory loss conditioned on gt keypoints
         if not self.config.pred_key_points_only:
+            if self.config.trajectory_decoder_type == 'linear' and self.config.traj_dropout and self.training:
+                traj_hidden_state = self.dropout(traj_hidden_state)
             traj_logits = self.model(traj_hidden_state)
             if self.config.task == "waymo":
                 trajectory_label_mask = info_dict.get("trajectory_label_mask", None)
@@ -171,6 +182,8 @@ class TrajectoryDecoder(nn.Module):
         pred_length = info_dict.get("pred_length", 0)
         assert pred_length > 0
         traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
+        if self.config.trajectory_decoder_type == 'linear' and self.config.traj_dropout and self.training:
+            traj_hidden_state = self.dropout(traj_hidden_state)
         traj_logits = self.model(traj_hidden_state)
         return traj_logits
 
@@ -266,7 +279,7 @@ class KeyPointDecoderCLS(nn.Module):
         self.config = config
         self.kp_tokenizer = None
         self.proposal_num = proposal_num
-        self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num)
+        self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.proposal_num, dropout=self.config.kp_dropout)
         self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
         if self.config.add_regression_loss:
             self.regression_loss = MSELoss(reduction="none")
@@ -319,13 +332,13 @@ class KeyPointMLPDeocder(nn.Module):
 
         if self.k > 1:
             out_features *= self.k
-            self.logits_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
-            self.score_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k)
+            self.logits_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features, dropout=self.config.kp_dropout)
+            self.score_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=self.k, dropout=self.config.kp_dropout)
             self.cls_loss_fct = CrossEntropyLoss(reduction="none")
             self.softmax = nn.Softmax(dim=-1)
             loss_reduction = "none"
         else:
-            self.model = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features)
+            self.model = DecoderResCat(config.n_inner, config.n_embd, out_features=out_features, dropout=self.config.kp_dropout)
 
         if 'mse' in self.config.loss_fn:
             self.loss_fct = nn.MSELoss(reduction=loss_reduction)
@@ -501,7 +514,7 @@ class KeyPointLinearDecoder(nn.Module):
         # out_features = 4 if self.config.predict_yaw else 2
         out_features = 2
         loss_reduction = "mean"
-        if self.config.kp_dropout > 0:
+        if self.config.kp_dropout:
             self.kp_dropout = nn.Dropout(self.config.kp_dropout)
         self.model = nn.Linear(self.config.n_embd, out_features)
         if 'mse' in self.config.loss_fn:
@@ -526,7 +539,7 @@ class KeyPointLinearDecoder(nn.Module):
             else:
                 kp_start_index += 1
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
-        if self.config.kp_dropout > 0:
+        if self.config.kp_dropout and self.training:
             future_key_points_hidden_state = self.kp_dropout(future_key_points_hidden_state)
         key_points_logits = self.model(future_key_points_hidden_state)  # b, s, 2
         kp_loss = self.loss_fct(key_points_logits, future_key_points[..., :2].to(device)).mean()
@@ -535,5 +548,7 @@ class KeyPointLinearDecoder(nn.Module):
     def generate_keypoints(self, hidden_state, info_dict: Dict = None):
         batch_size, seq_len, hidden_dim = hidden_state.shape
         assert hidden_state.shape[1] == 1
+        if self.config.kp_dropout and self.training:
+            hidden_state = self.kp_dropout(hidden_state)
         key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 2
         return key_points_logit, None

@@ -68,7 +68,7 @@ class STRConfig(PretrainedConfig):
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
                      "camera_image_encoder", "use_speed", "no_yaw_with_stepping", "autoregressive", "regression_long_class_short",
-                     "skip_yaw_norm"]
+                     "kp_dropout", "traj_dropout", "trajectory_decoder_type", "skip_yaw_norm"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
@@ -198,7 +198,7 @@ class STR(PreTrainedModel):
                     logger.info("Now initializing diffusion decoder from scratch. Training will consume lots of time.")
             elif self.kp_decoder_type == "linear":
                 from transformer4planning.models.decoder.base import KeyPointLinearDecoder
-                self.kp_points_decoder = KeyPointLinearDecoder(self.config)
+                self.key_points_decoder = KeyPointLinearDecoder(self.config)
             elif self.kp_decoder_type == "mlp":
                 if self.config.regression_long_class_short:
                     assert self.config.kp_tokenizer == 'cluster', "only support cluster tokenizer for regression_long_class_short"
@@ -613,13 +613,15 @@ class STR(PreTrainedModel):
                     pred_key_point = key_points_logit
 
                     off_road_checking = True
-                    if off_road_checking and batch_size == 1 and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
+                    if off_road_checking and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
                         from transformer4planning.utils import nuplan_utils
-                        if i in [0, 1] and 'backward' in self.use_key_points:
+                        print('inspect gen: ', off_road_checking)
+                        for sample_index in range(batch_size):
+                        # if i in [0, 1] and 'backward' in self.use_key_points:
                             # Check key points with map_api
                             # WARNING: WIP, do not use
                             y_inverse = -1 if map_name == 'sg-one-north' else 1
-                            pred_key_point_copy = copy.deepcopy(pred_key_point)
+                            pred_key_point_copy = copy.deepcopy(pred_key_point[sample_index, 0, :2])
                             pred_key_point_copy[0, 0, 1] *= y_inverse
                             pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[0, 0, :2].cpu().numpy(),
                                                                         ego_pose,
@@ -634,8 +636,9 @@ class STR(PreTrainedModel):
                                                                                       ego_pose,
                                                                                       ego_to_global=False)
                                 pred_key_point_ego[1] *= y_inverse
-                                pred_key_point[0, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
+                                pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
                                 print(f'Off Road Detected! Replace {i}th key point')
+                        print('inspect gen done: ', off_road_checking)
 
                     if self.config.task == "nuplan":
                         if not self.config.separate_kp_encoder:
@@ -887,6 +890,18 @@ def build_models(model_args):
             config_p.hidden_size = 256
             config_p.intermediate_size = config_p.n_embd * 4
             config_p.num_attention_heads = 8
+        elif 'mixtral-narrow-medium' in model_args.model_name:
+            """
+            Number of parameters: 1.5B (ViT)
+            """
+            config_p.n_layer = 16
+            config_p.n_embd = config_p.d_model = 512
+            config_p.n_inner = 2048
+            config_p.n_head = 16
+            config_p.num_hidden_layers = 16
+            config_p.hidden_size = 512
+            config_p.intermediate_size = 2048
+            config_p.num_attention_heads = 16
         elif 'mixtral-medium' in model_args.model_name:
             """
             Number of parameters: 1.5B (ViT)

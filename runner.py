@@ -594,7 +594,6 @@ def main():
                 all_bias_x = []
                 all_bias_y = []
                 losses = []
-                loss_fn = torch.nn.MSELoss(reduction="mean")
 
             for itr, input in enumerate(tqdm(test_dataloader)):
                 # move batch to device
