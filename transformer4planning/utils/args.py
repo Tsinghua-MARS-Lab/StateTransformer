@@ -301,6 +301,9 @@ class ModelArguments:
     router_jitter_noise: Optional[float] = field(
         default=0.0, metadata={"help": "The noise added to the router logits. From 0 to 1."}
     )
+    router_aux_loss_coef: Optional[float] = field(
+        default=0.001, metadata={"help": "The coefficient of the router auxiliary loss."}
+    )
     # end of MoE configs
 
     # WIP: key point tokenize
