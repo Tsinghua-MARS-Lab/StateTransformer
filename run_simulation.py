@@ -302,6 +302,8 @@ class SimulationRunnerBatch(SimulationRunner):
                 model_samples=samples_in_batch,
                 map_names=[self.planners[i]._map_api.map_name for i in range(self._batch_size)],
                 ego_states_in_batch=[planner_inputs[i].history.ego_states for i in range(self._batch_size)],
+                route_ids=[self.planners[i]._route_roadblock_ids for i in range(self._batch_size)],
+                road_dics=[self.planners[i].road_dic for i in range(self._batch_size)],
             )
             for i in range(self._batch_size):
                 if i == 0:

@@ -183,8 +183,7 @@ class NuPlanDL:
                  scenarios_to_keep=None,
                  filter_still=False,
                  sensor_blob_path=None,
-                 sensor_meta_path=None,
-                 with_planner=False):
+                 sensor_meta_path=None):
         """
         :param sample_interval:
         :param agent_only:

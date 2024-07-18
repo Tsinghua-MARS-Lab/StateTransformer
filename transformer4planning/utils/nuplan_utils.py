@@ -77,12 +77,18 @@ def get_closest_lane_point_on_route(pred_key_point_global,
     # loop over all the route ids
     pred_key_point_global_copy = copy.deepcopy(pred_key_point_global)
     route_lanes = []
-    route_ids = route_ids[:10]
+    route_ids = route_ids[:100]
     for each_route_block in route_ids:
+        if each_route_block not in road_dic:
+            print('Route block not found in road dic: ', each_route_block, len(list(road_dic.keys())), list(road_dic.keys())[:10])
+            continue
         route_lanes += road_dic[each_route_block]['lower_level']
     route_lane_pts = []
     lane_ids = []
     for each_lane in route_lanes:
+        if each_lane not in road_dic:
+            print('lane not found in road dic: ', each_lane)
+            continue
         if road_dic[each_lane]['type'] not in [0, 11]:
             continue
         route_lane_pts.append(road_dic[each_lane]['xyz'][:, :2])

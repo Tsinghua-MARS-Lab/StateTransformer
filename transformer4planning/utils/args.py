@@ -301,6 +301,9 @@ class ModelArguments:
     router_jitter_noise: Optional[float] = field(
         default=0.0, metadata={"help": "The noise added to the router logits. From 0 to 1."}
     )
+    output_router_logits: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to output the router logits."}
+    )
     router_aux_loss_coef: Optional[float] = field(
         default=0.001, metadata={"help": "The coefficient of the router auxiliary loss."}
     )
@@ -344,6 +347,10 @@ class ModelArguments:
     )
     future_seconds: Optional[int] = field(
         default=8, metadata={"help": "The number of seconds to predict in the future"}
+    )
+    # WIP
+    stick_raster_view_to_lane: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to stick raster view to lane"}
     )
 
 
@@ -448,6 +455,8 @@ class PlanningTrainingArguments(TrainingArguments):
     images_cleaning_to_folder: Optional[str] = field(
         default=None, metadata={"help": "Pass a target folder to clean the raw image folder to the target folder."}
     )
+    
+    # arguments for simulations testings in the training loop
     do_sim_val: Optional[bool] = field(
         default=False, metadata={"help": "Whether to do simulation validation"}
     )
@@ -481,11 +490,6 @@ class PlanningTrainingArguments(TrainingArguments):
     sim_controller: Optional[str] = field(
         default='two_stage_controller', metadata={"help": "The controller for simulation, choose from [perfect_controller, two_stage_controller]"}
     )
-
-    # WIP
-    # long_model_ckpt_path: Optional[str] = field(
-    #     default=None, metadata={"help": "The path of the long model checkpoint"}
-    # )
 
 
     # label_names: Optional[List[str]] = field(

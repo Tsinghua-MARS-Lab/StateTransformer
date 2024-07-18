@@ -111,6 +111,7 @@ def main(args):
         scenarios_to_keep = None
 
     def yield_data_by_scenario(shards):
+        assert False, 'Deprecated'
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
                           file_to_start=shard,
@@ -341,6 +342,10 @@ def main(args):
             del dl
             break
 
+    def yield_data_index_with_simulation(shards):
+        for shard in shards:
+            pass
+
     # dic = yield_data_dic([0])
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
 
@@ -460,11 +465,7 @@ def main(args):
                                                 num_proc=args.num_proc
                                                 )
     else:
-        nuplan_dataset = Dataset.from_generator(yield_data,
-                                                gen_kwargs={'shards': file_indices, 'dl': None,
-                                                            'filter_info': filter_dic},
-                                                writer_batch_size=10, cache_dir=args.cache_folder,
-                                                num_proc=args.num_proc)
+        assert False, "Please specify the generation mode"
     print('Saving dataset with ', args.num_proc)
     nuplan_dataset.set_format(type="torch")
     nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)

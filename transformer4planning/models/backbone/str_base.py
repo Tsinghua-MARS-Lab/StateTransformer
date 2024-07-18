@@ -68,7 +68,8 @@ class STRConfig(PretrainedConfig):
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
                      "camera_image_encoder", "use_speed", "no_yaw_with_stepping", "autoregressive", "regression_long_class_short",
-                     "kp_dropout", "traj_dropout", "trajectory_decoder_type", "skip_yaw_norm"]
+                     "kp_dropout", "traj_dropout", "trajectory_decoder_type", "skip_yaw_norm",
+                     "output_router_logits"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
@@ -106,8 +107,8 @@ class STR(PreTrainedModel):
         self.build_decoder()
 
         self.training_scenarios = None
-
-        print('model inited')
+        if self.config.output_router_logits:
+            logger.info("Now using z-loss for MoE router balancing.")
 
     def build_tokenizer(self):
         # For key points, only use x, and y
@@ -249,7 +250,8 @@ class STR(PreTrainedModel):
             raise NotImplementedError('need to return dict for evaluations in trainer.py')
 
         input_embeds, info_dict = self.encoder(is_training=self.training, **kwargs)
-        transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds, return_dict=return_dict)
+        transformer_outputs = self.embedding_to_hidden(input_embeds, return_dict=return_dict)
+        transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
         if self.config.autoregressive:
             frames_length_to_predict = info_dict["pred_length"]
@@ -349,6 +351,14 @@ class STR(PreTrainedModel):
             if loss_per_kp is not None:
                 loss_items["loss_per_kp"] = loss_per_kp
 
+        if self.config.output_router_logits:
+            aux_loss = self.load_balancing_loss_func(
+                transformer_outputs["router_logits"],
+                self.config.num_local_experts,
+                self.config.num_experts_per_token
+            )
+            loss += self.config.router_aux_loss_coef * aux_loss.to(loss.device)  # make sure to reside in the same device
+
         # WIP: training with simulations
         if self.config.finetuning_with_simulation_on_val and self.training:
             sim_loss = self.do_closed_loop_simulation(kwargs)
@@ -371,10 +381,9 @@ class STR(PreTrainedModel):
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
             position_ids=position_ids,
-            return_dict=return_dict,
-            # **kwargs
+            return_dict=return_dict
         )
-        return transformer_outputs['last_hidden_state']
+        return transformer_outputs
 
     def do_closed_loop_simulation(self,
                                   inputs,
@@ -468,7 +477,7 @@ class STR(PreTrainedModel):
                     context_embeds = input_embeds[:, :context_length + 1 + i, :]
                     attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
                     position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-                    transformer_outputs_hidden_state = self.embedding_to_hidden(context_embeds)
+                    transformer_outputs_hidden_state = self.embedding_to_hidden(context_embeds)['last_hidden_state']
                     proposal_hidden_state = transformer_outputs_hidden_state[:, context_length - 1 + i:context_length - 1 + 1 + i, :]  # (bs, 1, n_embed)
                     proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1)  # (bs, 1, 5)
                     # WARNING: Only tested with self.k = 1
@@ -494,7 +503,7 @@ class STR(PreTrainedModel):
                     input_embeds=context_embeds,
                     attention_mask=attention_mask,
                     position_ids=self._prepare_position_ids_for_generation(attention_mask.clone())
-                )
+                )['last_hidden_state']
                 proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
                 proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64/5)
                 if self.config.task == "nuplan":
@@ -578,7 +587,7 @@ class STR(PreTrainedModel):
                         input_embeds_current,
                         attention_mask,
                         position_ids,
-                    )
+                    )['last_hidden_state']
                     future_key_point_hidden_state = transformer_outputs_hidden_state[:,
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
@@ -615,25 +624,29 @@ class STR(PreTrainedModel):
                     off_road_checking = True
                     if off_road_checking and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
                         from transformer4planning.utils import nuplan_utils
-                        print('inspect gen: ', off_road_checking)
                         for sample_index in range(batch_size):
-                        # if i in [0, 1] and 'backward' in self.use_key_points:
+                            # if i in [0, 1] and 'backward' in self.use_key_points:
                             # Check key points with map_api
                             # WARNING: WIP, do not use
-                            y_inverse = -1 if map_name == 'sg-one-north' else 1
+                            y_inverse = -1 if map_name[sample_index] == 'sg-one-north' else 1
                             pred_key_point_copy = copy.deepcopy(pred_key_point[sample_index, 0, :2])
-                            pred_key_point_copy[0, 0, 1] *= y_inverse
-                            pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[0, 0, :2].cpu().numpy(),
-                                                                        ego_pose,
-                                                                        ego_to_global=True)
-                            if isinstance(route_ids, torch.Tensor):
-                                route_ids = route_ids.cpu().numpy().tolist()
+                            pred_key_point_copy[1] *= y_inverse
+                            pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[:2].cpu().numpy(),
+                                                                                     ego_pose[sample_index],
+                                                                                     ego_to_global=True)
+                            if isinstance(route_ids[sample_index], torch.Tensor):
+                                route_ids_this_sample = route_ids[sample_index].cpu().numpy().tolist()
+                            else:
+                                route_ids_this_sample = route_ids[sample_index]
+                            route_ids_this_sample = [int(route_id) for route_id in route_ids_this_sample]
                             closest_lane_point_on_route, dist, _, _, on_road = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
-                                                                                                                            route_ids,
-                                                                                                                            road_dic)
+                                                                                                                            route_ids_this_sample,
+                                                                                                                            road_dic[sample_index])
                             if not on_road:
-                                pred_key_point_ego = nuplan_utils.change_coordination(closest_lane_point_on_route,
-                                                                                      ego_pose,
+                                # changing to lane center from 4? to 53, average 51
+                                revised_pred_point = closest_lane_point_on_route
+                                pred_key_point_ego = nuplan_utils.change_coordination(revised_pred_point,
+                                                                                      ego_pose[sample_index],
                                                                                       ego_to_global=False)
                                 pred_key_point_ego[1] *= y_inverse
                                 pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
@@ -658,7 +671,7 @@ class STR(PreTrainedModel):
                 key_points_logits_k.append(key_points_logits)
 
             # generate remaining trajectory
-            transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds)
+            transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds)['last_hidden_state']
             if self.config.autoregressive:
                 points_to_predict = info_dict["pred_length"]
                 raster_seq_length = info_dict["sequence_length"]
@@ -674,7 +687,7 @@ class STR(PreTrainedModel):
                         context_embeds,
                         attention_mask,
                         position_ids,
-                    )
+                    )['last_hidden_state']
                     traj_logits[:, i, :] = self.traj_decoder.model(transformer_outputs_hidden_state)[:, predicting_index, :]
                     predicting_index += (1 + raster_seq_length)
                     # 2. update input_embeds with generated trajectory
@@ -881,7 +894,16 @@ def build_models(model_args):
         config_p.update_by_model_args(model_args)
         ModelCls = STR_Mixtral
         tag = 'MixTralTrajectory'
-        if 'mixtral-small' in model_args.model_name:
+        if 'mixtral-small-wide' in model_args.model_name:
+            config_p.n_layer = 4
+            config_p.n_embd = config_p.d_model = 512
+            config_p.n_inner = config_p.n_embd * 4
+            config_p.n_head = 8
+            config_p.num_hidden_layers = 4
+            config_p.hidden_size = 512
+            config_p.intermediate_size = config_p.n_embd * 4
+            config_p.num_attention_heads = 8
+        elif 'mixtral-small' in model_args.model_name:
             config_p.n_layer = 4
             config_p.n_embd = config_p.d_model = 256
             config_p.n_inner = config_p.n_embd * 4
@@ -892,7 +914,7 @@ def build_models(model_args):
             config_p.num_attention_heads = 8
         elif 'mixtral-narrow-medium' in model_args.model_name:
             """
-            Number of parameters: 1.5B (ViT)
+            Number of parameters: 1.2B with 24 experts with top 2 (ViT)
             """
             config_p.n_layer = 16
             config_p.n_embd = config_p.d_model = 512
