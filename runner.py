@@ -53,7 +53,7 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
     index_root_folders = os.path.join(root, split)
     indices = os.listdir(index_root_folders)
 
-    for index in indices:
+    for index in indices[:1]:
         index_path = os.path.join(index_root_folders, index)
         if os.path.isdir(index_path):
             # load training dataset
@@ -111,7 +111,7 @@ def main():
 
     # set default label names
     training_args.label_names = ['trajectory_label']
-
+    print(model_args.router_aux_loss_coef)
     # pre-compute raster channels number
     if model_args.raster_channels == 0:
         road_types = 20
