@@ -399,6 +399,12 @@ def main():
     else:
         raise AttributeError("task must be nuplan or waymo or train_diffusion_decoder")
 
+    if training_args.num_cycles is not None:
+        lr_scheduler_kwargs = {
+            'num_cycles': training_args.num_cycles,
+        }
+        training_args.lr_scheduler_kwargs = lr_scheduler_kwargs
+
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above

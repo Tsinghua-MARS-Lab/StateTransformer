@@ -615,7 +615,7 @@ class STR(PreTrainedModel):
 
                     if gt_1s_kp is not None and i == 3:
                         # assert False, 'deprecated, debug only'
-                        print('testing: ', key_points_logit[0, 0, :2] - gt_1s_kp[0, 0, :2])
+                        print('testing with gt1skp: ', key_points_logit[0, 0, :2] - gt_1s_kp[0, 0, :2])
                         key_points_logit = gt_1s_kp
 
                     # pred_key_point = torch.zeros((batch_size, 1, 2), device=device)
@@ -642,16 +642,36 @@ class STR(PreTrainedModel):
                             closest_lane_point_on_route, dist, _, _, on_road = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
                                                                                                                             route_ids_this_sample,
                                                                                                                             road_dic[sample_index])
-                            if not on_road:
-                                # changing to lane center from 4? to 53, average 51
-                                revised_pred_point = closest_lane_point_on_route
-                                pred_key_point_ego = nuplan_utils.change_coordination(revised_pred_point,
+                            
+                            iterative = False
+                            if iterative:
+                                counter = 0
+                                while not on_road and counter < 10:
+                                    # changing to the middle point with the lane center and pred_key_point
+                                    revised_pred_point = (closest_lane_point_on_route + pred_key_point_global) / 2
+                                    pred_key_point_ego, dist, _, _, on_road = nuplan_utils.get_closest_lane_point_on_route(revised_pred_point,
+                                                                                                                           route_ids_this_sample,
+                                                                                                                           road_dic[sample_index])
+                                    if on_road:
+                                        pred_key_point_global = revised_pred_point
+                                    counter += 1
+
+                                pred_key_point_ego = nuplan_utils.change_coordination(pred_key_point_global,
                                                                                       ego_pose[sample_index],
                                                                                       ego_to_global=False)
                                 pred_key_point_ego[1] *= y_inverse
                                 pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
-                                print(f'Off Road Detected! Replace {i}th key point')
-                        print('inspect gen done: ', off_road_checking)
+                                print(f'Off Road Detected! Replace iteratively {i}th key point')
+                            else:
+                                if not on_road:
+                                    # changing to lane center from 4? to 53, average 51
+                                    revised_pred_point = closest_lane_point_on_route
+                                    pred_key_point_ego = nuplan_utils.change_coordination(revised_pred_point,
+                                                                                          ego_pose[sample_index],
+                                                                                          ego_to_global=False)
+                                    pred_key_point_ego[1] *= y_inverse
+                                    pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
+                                    print(f'Off Road Detected! Replace {i}th key point')
 
                     if self.config.task == "nuplan":
                         if not self.config.separate_kp_encoder:
@@ -936,6 +956,15 @@ def build_models(model_args):
             config_p.hidden_size = 1024
             config_p.intermediate_size = 4096
             config_p.num_attention_heads = 16
+        elif 'mixtral-800m-deep' in model_args.model_name:
+            # 800M trainable with batch size of 32
+            config_p.n_layer = 32
+            config_p.n_embd = config_p.d_model = 512
+            config_p.n_inner = 2048
+            config_p.n_head = 32
+            config_p.hidden_size = config_p.n_embd
+            config_p.intermediate_size = config_p.n_inner
+            config_p.num_attention_heads = config_p.n_head
         elif 'mixtral-3b-deep' in model_args.model_name:
             """
             Number of parameters: 350M x 8 -> 3.3B (ViT)

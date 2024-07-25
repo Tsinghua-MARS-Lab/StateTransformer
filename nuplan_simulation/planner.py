@@ -11,14 +11,11 @@ from nuplan.planning.simulation.trajectory.interpolated_trajectory import Interp
 from nuplan.planning.simulation.observation.idm.utils import path_to_linestring
 
 # packages for STR model
-from transformer4planning.models.backbone.str_base import build_models
-from transformer4planning.utils.args import ModelArguments
-from transformers import (HfArgumentParser)
+from transformer4planning.models.backbone.str_base import build_model_from_path
 from nuplan.common.actor_state.state_representation import Point2D
 from transformer4planning.utils.nuplan_utils import get_angle_of_a_line
 from nuplan_simulation.route_corrections.route_utils import route_roadblock_correction
 
-import os
 import cv2
 import torch
 
@@ -54,18 +51,7 @@ class Planner(AbstractPlanner):
         # self._trajectory_planner = TreePlanner(self._device, self._encoder, self._decoder)
 
     def _initialize_model(self):
-        parser = HfArgumentParser((ModelArguments))
-        # load model args from config.json
-        config_path = os.path.join(self._model_path, 'config.json')
-        if not os.path.exists(config_path):
-            print('WARNING config.json not found in checkpoint path, using default model args ', config_path)
-            model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
-        else:
-            model_args, = parser.parse_json_file(config_path, allow_extra_keys=True)
-            model_args.model_pretrain_name_or_path = self._model_path
-            model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
-        print('model loaded with args: ', model_args, model_args.model_name, self._model_path)
-        self._model = build_models(model_args=model_args)
+        self._model = build_model_from_path(self._model_path)
         self._model.to(self._device)
         self._model.eval()
         print('model built on ', self._model.device)
@@ -230,16 +216,19 @@ class Planner(AbstractPlanner):
         # print(f'Step {iteration + 1} with timestamp {current_input.iteration.time_s} Planning time: {time.perf_counter() - start_time:.3f} s')
         return trajectory
 
-    def compute_planner_trajectory_in_batch(self, model_samples, map_names, ego_states_in_batch):
+    def compute_planner_trajectory_in_batch(self, model_samples, map_names, ego_states_in_batch, route_ids, road_dics=None):
         # Construct input features
         map_y_inverse = [-1 if map_name == "sg-one-north" else 1 for map_name in map_names]
         y_inverse = np.array(map_y_inverse)[:, np.newaxis]
         batch_size = model_samples['context_actions'].shape[0]
 
+        one_second_correction = False
+        one_second_correction_with_kp = False
+
         if self._model.config.sim_eval_with_gt:
             assert self.scenarios is not None
             relative_traj = np.zeros((batch_size, self._N_points, 3))
-            print("WARNING: testing with ground truth trajectory on 1st frame")
+            print("WARNING: testing with ground truth trajectory")
             origin_ego_pose = model_samples['oriented_point']
 
             from nuplan.planning.training.preprocessing.features.trajectory_utils import convert_absolute_to_relative_poses
@@ -259,6 +248,7 @@ class Planner(AbstractPlanner):
                 #
                 # print('testing: ', relative_gt_traj.shape, self.iteration, relative_gt_traj[:5, :])
                 relative_traj[i, :, :] = relative_gt_traj[:, :]
+                # relative_traj[i, :10, :] = relative_gt_traj[:10, :]
 
             # from transformer4planning.trainer import save_raster
             # for i in range(batch_size):
@@ -270,16 +260,49 @@ class Planner(AbstractPlanner):
             #                 prediction_trajectory=relative_traj[i],
             #                 path_to_save='./debug_raster')
         else:
+            if one_second_correction or one_second_correction_with_kp:
+                # temporory debug by passing gt
+                assert self.scenarios is not None
+                relative_traj = np.zeros((batch_size, self._N_points, 3))
+                print("WARNING: testing with ground truth 1s KP")
+                origin_ego_pose = model_samples['oriented_point']
+                from nuplan.planning.training.preprocessing.features.trajectory_utils import convert_absolute_to_relative_poses
+                for i in range(batch_size):
+                    ego_initial = ego_states_in_batch[i][-1].rear_axle
+                    gt_absolute_traj = self.scenarios[i].get_ego_future_trajectory(
+                        iteration=self.iteration,
+                        num_samples=self._N_points,
+                        time_horizon=self._future_horizon,
+                    )
+                    from nuplan.common.actor_state.state_representation import StateSE2, Point2D, StateVector2D
+                    # relative_gt_traj = convert_absolute_to_relative_poses(StateSE2(origin_ego_pose[i, 0], origin_ego_pose[i, 1], origin_ego_pose[i, 2]),
+                    #                                                       [state.rear_axle for state in gt_absolute_traj])
+                    relative_gt_traj = convert_absolute_to_relative_poses(ego_initial,
+                                                                          [state.rear_axle for state in
+                                                                           gt_absolute_traj])
+                    # print('testing: ', relative_gt_traj.shape, self.iteration, relative_gt_traj[:5, :])
+                    relative_traj[i, :, :] = relative_gt_traj[:, :]
+                gt_1s_kp = relative_traj[:, 10, :]
             # features = observation_adapter(history, traffic_light_data, self._map_api, self._route_roadblock_ids, self._device)
+
+            # set up a timer
+            start_time = time.perf_counter()
+
             with torch.no_grad():
                 # print("start generating trajectory with gpu?", self.use_gpu)
                 if self._model.device != 'cpu':
+                    gt_1s_kp = torch.tensor(gt_1s_kp[..., :2]).float().to(self._model.device).unsqueeze(1) if one_second_correction_with_kp else None
                     device = self._model.device
                     prediction_generation = self._model.generate(
                         context_actions=torch.tensor(model_samples['context_actions']).to(device),
                         high_res_raster=torch.tensor(model_samples['high_res_raster']).to(device),
                         low_res_raster=torch.tensor(model_samples['low_res_raster']).to(device),
                         trajectory_label=torch.zeros((batch_size, self._N_points, 4)).to(device),
+                        route_ids=route_ids,
+                        ego_pose=model_samples['oriented_point'],
+                        road_dic=road_dics,
+                        map=map_names,
+                        gt_1s_kp=gt_1s_kp if one_second_correction else None,
                     )
                     pred_traj = prediction_generation['traj_logits'].detach().cpu().float().numpy()
                     if 'key_points_logits' in prediction_generation:
@@ -292,6 +315,11 @@ class Planner(AbstractPlanner):
                         high_res_raster=torch.tensor(model_samples['high_res_raster']),
                         low_res_raster=torch.tensor(model_samples['low_res_raster']),
                         trajectory_label=torch.zeros((batch_size, self._N_points, 4)),
+                        route_ids=route_ids,
+                        ego_pose=model_samples['oriented_point'],
+                        road_dic=road_dics,
+                        map=map_names,
+                        gt_1s_kp=gt_1s_kp if one_second_correction else None,
                     )
                     pred_traj = prediction_generation['traj_logits'].float().numpy()  # (80, 2) or (80, 4)
                     if 'key_points_logits' in prediction_generation:
@@ -316,6 +344,9 @@ class Planner(AbstractPlanner):
                         rotated_pred_traj[i, :, 1] = pred_traj[i, :, 0] * sin_[i] + pred_traj[i, :, 1] * cos_[i]
                     pred_traj = rotated_pred_traj
 
+            # print the timer
+            print(f'Model inference time: {time.perf_counter() - start_time:.3f} s')
+
             # post-processing
             relative_traj = pred_traj.copy()  # [batch_size, 80, 4]
 
@@ -325,6 +356,14 @@ class Planner(AbstractPlanner):
                 new[:, :, :2] = relative_traj[:, :, :2]
                 new[:, :, -1] = relative_traj[:, :, -1]
                 relative_traj = new  # [batch_size, 80, 3]
+
+            if one_second_correction:
+                one_second_delta = relative_traj[:, 10, :] - gt_1s_kp
+                # linearly interpolate the trajectory from 0 to 1s
+                for i in range(10):
+                    relative_traj[:, i, :] -= one_second_delta * i / 10
+                for i in range(10, 20):
+                    relative_traj[:, i, :] -= one_second_delta * (20 - i) / 10
 
             # from transformer4planning.trainer import save_raster
             # for i in range(batch_size):

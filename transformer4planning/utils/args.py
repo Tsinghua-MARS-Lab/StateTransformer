@@ -307,6 +307,9 @@ class ModelArguments:
     router_aux_loss_coef: Optional[float] = field(
         default=0.001, metadata={"help": "The coefficient of the router auxiliary loss."}
     )
+    sliding_window: Optional[int] = field(
+        default=4096, metadata={"help": "The sliding window size for the MoE."}
+    )
     # end of MoE configs
 
     # WIP: key point tokenize
@@ -454,6 +457,10 @@ class PlanningTrainingArguments(TrainingArguments):
     )
     images_cleaning_to_folder: Optional[str] = field(
         default=None, metadata={"help": "Pass a target folder to clean the raw image folder to the target folder."}
+    )
+
+    num_cycles: Optional[int] = field(
+        default=None, metadata={"help": "The number of cycles for the cosine learning rate scheduler."}
     )
     
     # arguments for simulations testings in the training loop
