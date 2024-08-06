@@ -173,7 +173,8 @@ def main(args):
                                             filter_still=args.filter_still,
                                             sensor_meta_path=args.sensor_meta_path,
                                             sensor_blob_path=args.sensor_blob_path,
-                                            with_planner=args.index_with_planner)
+                                            correct_route_ids=args.correct_route_ids
+                                            )
                 if loaded_dic is None:
                     continue
                 if args.keep_future_steps:
@@ -534,6 +535,7 @@ if __name__ == '__main__':
     parser.add_argument('--balance', default=False, action='store_true')
     parser.add_argument('--filter_still', default=False, action='store_true')
     parser.add_argument('--index_with_planner', default=False, action='store_true')
+    parser.add_argument('--correct_route_ids', default=False, action='store_true')
 
     parser.add_argument('--constant_v_dropout', type=float, default=0.0)  # 0=no dropout, 1=drop all
     args_p = parser.parse_args()

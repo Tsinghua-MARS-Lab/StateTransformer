@@ -387,19 +387,55 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         result_to_return["t0_frame_id"] = sample['t0_frame_id']
     if 'intentions' in sample and kwargs.get('use_proposal', False):
         result_to_return["intentions"] = sample['intentions']
-    # try:
-    #     result_to_return["scenario_type"] = sample["scenario_type"]
-    # except:
-    #     # to be compatible with older version dataset without scenario_type
-    #     pass
-    # try:
-    #     result_to_return["scenario_id"] = sample["scenario_id"]
-    # except:
-    #     pass
 
     result_to_return["route_ids"] = sample['route_ids']
     result_to_return["aug_current"] = aug_current
     # print('inspect shape: ', result_to_return['trajectory_label'].shape, result_to_return["context_actions"].shape)
+    if 'off_roadx100' in kwargs.get('trajectory_prediction_mode', ''):
+        """
+        Pack road blocks as a list of all xyz points. Keep another list to mark the length of each block points.
+        """
+        route_blocks_pts = []
+        route_block_ending_idx = []
+        current_points_index = 0
+
+        from shapely import geometry
+        for each_route_id in sample['route_ids']:
+            each_route_id = int(each_route_id)
+            if each_route_id in sample['road_ids'] and each_route_id in data_dic['road_dic']:
+                # point_num = len(data_dic['road_dic'][each_route_id]['xyz'])
+                route_blocks_pts_this_block = data_dic['road_dic'][each_route_id]['xyz'][:, :2]
+                # route_blocks_pts_this_block_line = geometry.LineString(route_blocks_pts_this_block).simplify(1)
+                route_blocks_pts_this_block_line = geometry.LineString(route_blocks_pts_this_block)
+                # turn line back to points
+                route_blocks_pts_this_block = np.array(route_blocks_pts_this_block_line.coords.xy).transpose()
+                route_blocks_pts_this_block = route_blocks_pts_this_block.flatten().tolist()
+                point_num = len(route_blocks_pts_this_block) / 2
+                route_blocks_pts += route_blocks_pts_this_block
+                current_points_index += point_num * 2
+                route_block_ending_idx.append(current_points_index)
+
+        # for each_route_id in sample['route_ids']:
+        #     each_route_id = int(each_route_id)
+        #     if each_route_id in sample['road_ids'] and each_route_id in data_dic['road_dic']:
+        #         point_num = len(data_dic['road_dic'][each_route_id]['xyz'])
+        #         route_blocks_pts += data_dic['road_dic'][each_route_id]['xyz'][:, :2].flatten().tolist()
+        #         current_points_index += point_num * 2
+        #         route_block_ending_idx.append(current_points_index)
+
+        # padding to the longest
+        max_len = 1000 * 100
+        route_blocks_pts = np.array(route_blocks_pts, dtype=np.float64)  # shape: block_num*2*point_num
+        route_blocks_pts = np.pad(route_blocks_pts, (0, max_len - len(route_blocks_pts)))
+        route_block_ending_idx = np.array(route_block_ending_idx, dtype=np.int32)
+        route_block_ending_idx = np.pad(route_block_ending_idx, (0, 100 - len(route_block_ending_idx)))
+
+        result_to_return['route_blocks_pts'] = route_blocks_pts
+        result_to_return['route_block_ending_idx'] = route_block_ending_idx
+
+    # if kwargs.get('pass_agents_to_model', False):
+    #     pass
+    result_to_return["ego_pose"] = origin_ego_pose
 
     # del agent_dic
     # del road_dic

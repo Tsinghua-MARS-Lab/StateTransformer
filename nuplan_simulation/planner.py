@@ -86,7 +86,7 @@ class Planner(AbstractPlanner):
             relative_traj = np.zeros((1, self._N_points, 4))
             # normalize gt trajectory
             trajectory_label_15s = self.gt_trajs.copy()
-            origin_ego_pose = sample['oriented_point']
+            origin_ego_pose = sample['ego_pose']
             sin_, cos_ = np.sin(-origin_ego_pose[-1]), np.cos(-origin_ego_pose[-1])
             trajectory_label_15s -= origin_ego_pose
             traj_x = trajectory_label_15s[:, 0].copy()
@@ -108,7 +108,7 @@ class Planner(AbstractPlanner):
                         trajectory_label=torch.zeros((1, self._N_points, 4)).to(device),
                         map_api=self._map_api,
                         route_ids=self._route_roadblock_ids,
-                        ego_pose=sample['oriented_point'],
+                        ego_pose=sample['ego_pose'],
                         road_dic=self.road_dic,
                         map=self._map_api.map_name,
                         # idm_reference_global=idm_reference_trajectory._trajectory
@@ -126,7 +126,7 @@ class Planner(AbstractPlanner):
                         trajectory_label=torch.zeros((1, self._N_points, 4)),
                         map_api=self._map_api,
                         route_ids=self._route_roadblock_ids,
-                        ego_pose=sample['oriented_point'],
+                        ego_pose=sample['ego_pose'],
                         road_dic=self.road_dic,
                         map_name=self._map_api.map_name
                         # idm_reference_global=idm_reference_trajectory._trajectory
@@ -137,7 +137,7 @@ class Planner(AbstractPlanner):
                     else:
                         pred_key_points = None
                 if self._model.config.skip_yaw_norm:
-                    oriented_yaw = sample['oriented_point'][-1]
+                    oriented_yaw = sample['ego_pose'][-1]
                     # rotate prediction based on oriented yaw
                     sin_, cos_ = np.sin(-oriented_yaw), np.cos(-oriented_yaw)
                     rotated_pred_traj = pred_traj.copy()
@@ -225,11 +225,13 @@ class Planner(AbstractPlanner):
         one_second_correction = False
         one_second_correction_with_kp = False
 
+        agents_rect_local = model_samples['agents_rect_local']  # batch_size, time_steps, max_agent_num, 4, 2 (x, y)
+
         if self._model.config.sim_eval_with_gt:
             assert self.scenarios is not None
             relative_traj = np.zeros((batch_size, self._N_points, 3))
             print("WARNING: testing with ground truth trajectory")
-            origin_ego_pose = model_samples['oriented_point']
+            origin_ego_pose = model_samples['ego_pose']
 
             from nuplan.planning.training.preprocessing.features.trajectory_utils import convert_absolute_to_relative_poses
             for i in range(batch_size):
@@ -265,7 +267,7 @@ class Planner(AbstractPlanner):
                 assert self.scenarios is not None
                 relative_traj = np.zeros((batch_size, self._N_points, 3))
                 print("WARNING: testing with ground truth 1s KP")
-                origin_ego_pose = model_samples['oriented_point']
+                origin_ego_pose = model_samples['ego_pose']
                 from nuplan.planning.training.preprocessing.features.trajectory_utils import convert_absolute_to_relative_poses
                 for i in range(batch_size):
                     ego_initial = ego_states_in_batch[i][-1].rear_axle
@@ -299,9 +301,10 @@ class Planner(AbstractPlanner):
                         low_res_raster=torch.tensor(model_samples['low_res_raster']).to(device),
                         trajectory_label=torch.zeros((batch_size, self._N_points, 4)).to(device),
                         route_ids=route_ids,
-                        ego_pose=model_samples['oriented_point'],
+                        ego_pose=model_samples['ego_pose'],
                         road_dic=road_dics,
                         map=map_names,
+                        agents_rect_local=torch.tensor(agents_rect_local).to(device),
                         gt_1s_kp=gt_1s_kp if one_second_correction else None,
                     )
                     pred_traj = prediction_generation['traj_logits'].detach().cpu().float().numpy()
@@ -316,9 +319,10 @@ class Planner(AbstractPlanner):
                         low_res_raster=torch.tensor(model_samples['low_res_raster']),
                         trajectory_label=torch.zeros((batch_size, self._N_points, 4)),
                         route_ids=route_ids,
-                        ego_pose=model_samples['oriented_point'],
+                        ego_pose=model_samples['ego_pose'],
                         road_dic=road_dics,
                         map=map_names,
+                        agents_rect_local=torch.tensor(agents_rect_local),
                         gt_1s_kp=gt_1s_kp if one_second_correction else None,
                     )
                     pred_traj = prediction_generation['traj_logits'].float().numpy()  # (80, 2) or (80, 4)
@@ -335,7 +339,7 @@ class Planner(AbstractPlanner):
                     pass
 
                 if self._model.config.skip_yaw_norm:
-                    oriented_yaws = model_samples['oriented_point'][:, -1]
+                    oriented_yaws = model_samples['ego_pose'][:, -1]
                     # rotate prediction based on oriented yaw
                     sin_, cos_ = np.sin(-oriented_yaws - math.pi / 2), np.cos(-oriented_yaws - math.pi / 2)
                     rotated_pred_traj = pred_traj.copy()
@@ -417,6 +421,7 @@ class Planner(AbstractPlanner):
                                    ego_states[-1].rear_axle.y,
                                    ego_states[-1].rear_axle.heading]).astype(np.float32)
 
+
         if self._model.config.skip_yaw_norm:
             oriented_yaw = oriented_point[-1]
             oriented_point[-1] = 0
@@ -436,13 +441,13 @@ class Planner(AbstractPlanner):
         agents = [observation.tracked_objects.get_agents() for observation in sampled_observation_buffer]
         statics = [observation.tracked_objects.get_static_objects() for observation in sampled_observation_buffer]
 
-        # corrected_route_ids = route_roadblock_correction(
-        #     ego_states[-1],
-        #     self._map_api,
-        #     self._route_roadblock_ids,
-        # )
+        self._route_roadblock_ids = route_roadblock_correction(
+            ego_states[-1],
+            self._map_api,
+            self._route_roadblock_ids,
+        )
         corrected_route_ids = self._route_roadblock_ids
-        high_res_raster, low_res_raster, context_action = self.compute_raster_input(
+        high_res_raster, low_res_raster, context_action, agent_rect_pts_local = self.compute_raster_input(
             ego_trajectory, agents, statics, traffic_light_data, ego_shape,
             origin_ego_pose=oriented_point,
             map_name=map_name,
@@ -465,7 +470,8 @@ class Planner(AbstractPlanner):
             'high_res_raster': high_res_raster,
             'low_res_raster': low_res_raster,
             'context_actions': context_action,
-            'oriented_point': oriented_point
+            'ego_pose': oriented_point,
+            'agents_rect_local': agent_rect_pts_local,
         }
 
     def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, traffic_data=None,
@@ -625,8 +631,12 @@ class Planner(AbstractPlanner):
                              tuple(low_res_traffic[j + 1, :2]), (255, 255, 255), 2)
 
         cos_, sin_ = math.cos(-origin_ego_pose[2]), math.sin(-origin_ego_pose[2])
+        agent_rect_pts_local = []
         ## agent includes VEHICLE, PEDESTRIAN, BICYCLE, EGO(except)
         for i, each_type_agents in enumerate(agents_seq):
+            # i is the time sequence
+            current_agent_rect_pts_local = []
+            current_agent_pose_unnorm = []
             for j, agent in enumerate(each_type_agents):
                 agent_type = int(agent.tracked_object_type.value)
                 pose = np.array([agent.box.center.point.x, agent.box.center.point.y,
@@ -637,10 +647,16 @@ class Planner(AbstractPlanner):
                 rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                                 pose[0] * sin_ + pose[1] * cos_]
                 shape = np.array([agent.box.width, agent.box.length])
+                shape = np.clip(shape, 1, 100)
+                if shape[0] == 0 or shape[1] == 0:
+                    continue
                 rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                                 direction=-pose[2])
                 rect_pts = np.array(rect_pts, dtype=np.int32)
                 rect_pts[:, 0] *= y_inverse
+                if agent_type != 7:
+                    current_agent_rect_pts_local.append(rect_pts)
+                    current_agent_pose_unnorm.append(pose)
                 rect_pts_high_res = (high_res_scale * rect_pts).astype(np.int64) + raster_shape[0] // 2
                 # example: if frame_interval = 10, past frames = 40
                 # channel number of [index:0-frame_0, index:1-frame_10, index:2-frame_20, index:3-frame_30, index:4-frame_40]  for agent_type = 0
@@ -654,6 +670,32 @@ class Planner(AbstractPlanner):
                 cv2.drawContours(rasters_low_res_channels[
                                      2 + road_types + traffic_types + agent_type * context_length + i],
                                  [rect_pts_low_res], -1, (255, 255, 255), -1)
+
+            max_agent_num = 300
+            if len(current_agent_rect_pts_local) == 0:
+                agent_rect_pts_local.append(np.zeros((max_agent_num, 4, 2)))
+                continue
+            current_agent_rect_pts_local = np.stack(current_agent_rect_pts_local)
+            if len(current_agent_rect_pts_local) > max_agent_num:
+                print('agent more than 100 overflowing: ', current_agent_rect_pts_local.shape)
+                current_agent_rect_pts_local = current_agent_rect_pts_local[:max_agent_num]
+            elif len(current_agent_rect_pts_local) < max_agent_num:
+                current_agent_rect_pts_local = np.concatenate([current_agent_rect_pts_local, np.zeros((max_agent_num - len(current_agent_rect_pts_local), 4, 2))], axis=0)
+
+            agent_rect_pts_local.append(current_agent_rect_pts_local)
+        agent_rect_pts_local = np.stack(agent_rect_pts_local)  # 4(time steps), 300(agent number), 4(rectangle points), 2(x, y)
+
+        # check and only keep static agents
+        static_num = 0
+        for i in range(max_agent_num):
+            first_pt = agent_rect_pts_local[0, i, :, :]
+            last_pt = agent_rect_pts_local[-1, i, :, :]
+            if first_pt.sum() == 0 and last_pt.sum() == 0:
+                continue
+            if not (abs(first_pt - last_pt).sum() < 0.1):
+                agent_rect_pts_local[:, i, :, :] = 0
+            else:
+                static_num += 1
 
         recentered_ego_trajectory = ego_trajectory - origin_ego_pose
         for i, pose in enumerate(recentered_ego_trajectory):
@@ -691,7 +733,7 @@ class Planner(AbstractPlanner):
         result_dict = {'high_res_raster': rasters_high_res, 'low_res_raster': rasters_low_res,
                        'context_actions': rotated_poses}
 
-        return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32)
+        return rasters_high_res, rasters_low_res, np.array(context_actions, dtype=np.float32), agent_rect_pts_local
 
 
 def get_road_dict(map_api, ego_pose_center, all_road_dic={}):

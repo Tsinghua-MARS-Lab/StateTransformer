@@ -57,6 +57,7 @@ class TrajectoryDecoder(nn.Module):
         
         if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
+        loss_reduction = "none"
 
         if 'mse' in self.config.loss_fn:
             self.loss_fct = nn.MSELoss(reduction=loss_reduction)
@@ -96,7 +97,8 @@ class TrajectoryDecoder(nn.Module):
                           label, 
                           info_dict,
                           no_yaw_loss=False,
-                          device=None):
+                          device=None,
+                          **kwargs):
         """
         pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
         params:
@@ -139,14 +141,14 @@ class TrajectoryDecoder(nn.Module):
                 if self.config.mean_circular_loss:
                     assert self.config.predict_yaw, "mean_circular_loss only works for yaw prediction"
                     if self.config.trajectory_prediction_mode == 'start_frame':
-                        traj_loss = self.loss_fct(traj_logits[..., 0, :2], label[..., 0, :2].to(device)) * self.config.first_frame_scele
+                        traj_loss = self.loss_fct(traj_logits[..., 0, :2], label[..., 0, :2].to(device)).mean() * self.config.first_frame_scele
                         if not no_yaw_loss:
                             traj_loss += mean_circular_error(traj_logits[..., 0, -1], label[..., 0, -1]).to(device) * self.config.first_frame_scele
                     elif self.config.trajectory_prediction_mode == 'both':
                         assert not no_yaw_loss, "yaw loss must be included"
-                        traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+                        traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)).mean()
                         traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device)
-                        traj_loss += self.loss_fct(traj_logits[..., 0, :2], label[..., 0, :2].to(device)) * self.config.first_frame_scele
+                        traj_loss += self.loss_fct(traj_logits[..., 0, :2], label[..., 0, :2].to(device)).mean() * self.config.first_frame_scele
                         traj_loss += mean_circular_error(traj_logits[..., 0, -1], label[..., 0, -1]).to(device) * self.config.first_frame_scele
                         traj_loss += mean_circular_error(traj_logits[..., 0, -1], label[..., 0, -1]).to(device) * self.config.first_frame_scele
                     elif self.config.trajectory_prediction_mode == 'rebalance':
@@ -156,17 +158,87 @@ class TrajectoryDecoder(nn.Module):
                         # generate a linearly decreasing weight for each point from 1000 to 1 with length of 80
                         weights = torch.linspace(1000, 1, total_points, device=device)
                         for i in range(total_points):
-                            point_loss = self.loss_fct(traj_logits[..., i, :2], label[..., i, :2].to(device))
+                            point_loss = self.loss_fct(traj_logits[..., i, :2], label[..., i, :2].to(device)).mean()
                             if not no_yaw_loss:
                                 point_loss += mean_circular_error(traj_logits[..., i, -1], label[..., i, -1]).to(device)
                             point_losses.append(point_loss * weights[i])
                         # scale each point loss based on the last point loss
                         point_losses = torch.stack(point_losses)
                         traj_loss = point_losses.mean()
+                    elif self.config.trajectory_prediction_mode == 'off_roadx100':
+                        # WIP: checking off-road during training
+                        y_inverse = -1 if kwargs.get('map', None) == 'sg-one-north' else 1
+                        ego_poses = kwargs.get('ego_pose', None)  # bsz, 4
+                        route_blocks_pts = kwargs.get('route_blocks_pts', None)  # bsz, 100*1000
+                        route_block_ending_idx = kwargs.get('route_block_ending_idx', None)  # bsz, 100
+
+                        if ego_poses is not None and route_blocks_pts is not None and self.training:
+                            ego_poses[:, 0] *= y_inverse
+                            route_blocks_pts[:, 0] *= y_inverse
+                            # check if the predicted trajectory is off-road
+                            from transformer4planning.utils import nuplan_utils
+                            from shapely import geometry
+                            off_road_mask = torch.ones_like(label[...,
+                                                            :2], dtype=torch.float32)  # bsz, 80, 2, 1=off-road, 0=on-road
+
+                            examine_step = 5  # for efficiency, check every n step
+
+                            for i in range(traj_logits.shape[0]):
+                                last_off = True
+                                for j in range(traj_logits.shape[1]):
+                                    if j % examine_step == 0:
+                                        last_off = True
+                                        global_pred_point_t = nuplan_utils.change_coordination(traj_logits[i, j,
+                                                                                               :2].float().detach().cpu().numpy(),
+                                                                                               ego_poses[
+                                                                                                   i].cpu().numpy(),
+                                                                                               ego_to_global=True)
+                                        # check if on road
+                                        route_blocks_xyz = []
+                                        previous_index = 0
+                                        for k in route_block_ending_idx[i]:
+                                            if k == 0:
+                                                # end with padding 0
+                                                break
+                                            route_blocks_xyz.append(route_blocks_pts[i,
+                                                                    previous_index:k].cpu().numpy().reshape(-1, 2))
+                                            previous_index = k
+
+                                        for each_block_xyz in route_blocks_xyz:
+                                            # clean all padding 0s in route_block_xyz with a size of 1000, 3
+                                            each_block_xyz = each_block_xyz[each_block_xyz[:, 0] != 0]
+                                            if each_block_xyz.shape[0] == 0:
+                                                continue
+                                            block_line = geometry.LineString(each_block_xyz[:, :2])
+                                            current_point = geometry.Point(global_pred_point_t)
+                                            block_polygon = geometry.Polygon(block_line)
+                                            if block_polygon.contains(current_point):
+                                                off_road_mask[i, j, :] = 0
+                                                last_off = False
+                                                break
+                                    else:
+                                        if not last_off:
+                                            off_road_mask[i, j, :] = 0
+
+                                    if j == 0 and off_road_mask[i, j, 0] == 1:
+                                        # point zero off-road indicating wrong route info, ignore
+                                        off_road_mask[i, :, :] = 0
+                                        break
+
+                            # torch.set_printoptions(profile="full")
+                            traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+                            traj_loss *= (1 + off_road_mask * 100)
+                            traj_loss = traj_loss.mean()
+                            if not no_yaw_loss:
+                                traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device).mean()
+                        else:
+                            traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)).mean()
+                            if not no_yaw_loss:
+                                traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device).mean()
                     else:
-                        traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))
+                        traj_loss = self.loss_fct(traj_logits[..., :2], label[..., :2].to(device)).mean()
                         if not no_yaw_loss:
-                            traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device)
+                            traj_loss += mean_circular_error(traj_logits[..., -1], label[..., -1]).to(device).mean()
                 else:
                     traj_loss = self.loss_fct(traj_logits, label.to(device)) if self.config.predict_yaw else \
                                 self.loss_fct(traj_logits[..., :2], label[..., :2].to(device))

@@ -866,18 +866,18 @@ def main(args):
     build_simulation_experiment_folder(output_dir, simulation_dir, metric_dir, aggregator_metric_dir)
 
     # build scenarios
-    print('Extracting scenarios...', args.load_test_set)
+    print('Extracting scenarios...', args.load_without_yaml)
     map_version = "nuplan-maps-v1.0"
     scenario_mapping = ScenarioMapping(scenario_map=get_scenario_map(), subsample_ratio_override=0.5)
     builder = NuPlanScenarioBuilder(args.data_path, args.map_path, None, None, map_version, scenario_mapping=scenario_mapping)
-    if args.load_test_set:
+    if not args.load_without_yaml:
         params = yaml.safe_load(open(args.split_filter_yaml, 'r'))
         scenario_filter = ScenarioFilter(**params)
     else:
         scenario_filter = ScenarioFilter(*get_filter_parameters(args.scenarios_per_type))
     worker = SingleMachineParallelExecutor(use_process_pool=False)
     scenarios = builder.get_scenarios(scenario_filter, worker)
-
+    print('Got scenarios ', len(scenarios))
     if args.max_scenario_num > 0:
         scenarios = scenarios[:args.max_scenario_num]
 
@@ -917,7 +917,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_path', type=str)
     parser.add_argument('--exp_folder', type=str, default=None)
     parser.add_argument('--test_type', type=str, default='closed_loop_nonreactive_agents')
-    parser.add_argument('--load_test_set', action='store_false')
+    parser.add_argument('--load_without_yaml', action='store_false')
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--scenarios_per_type', type=int, default=20)
     parser.add_argument('--nuplan_exp_root', type=str, default='/cephfs/sunq/nuplan/dataset')

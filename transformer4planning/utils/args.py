@@ -256,7 +256,7 @@ class ModelArguments:
     )
     ######## temporal model args, check your model config before using it! ########
     trajectory_prediction_mode: Optional[str] = field(
-        default='all_frames', metadata={"help": "choose from [all_frames, start_frame, both, rebalance]"}
+        default='all_frames', metadata={"help": "choose from [all_frames, start_frame, both, rebalance], experimental [off_roadx100, ]"}
     )
     finetuning_with_stepping: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use finetuning with stepping"}
@@ -276,7 +276,6 @@ class ModelArguments:
     no_yaw_with_stepping: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use finetuning with stepping without yaw"}
     )
-
     first_frame_scele: Optional[float] = field(
         default=1000.0, metadata={"help": "The scale of the first frame"}
     )
@@ -352,8 +351,11 @@ class ModelArguments:
         default=8, metadata={"help": "The number of seconds to predict in the future"}
     )
     # WIP
-    stick_raster_view_to_lane: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to stick raster view to lane"}
+    pass_road_blocks_to_model: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to pass road blocks to the model"}
+    )
+    pass_agent_dic_to_model: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to pass agent dic to the model"}
     )
 
 

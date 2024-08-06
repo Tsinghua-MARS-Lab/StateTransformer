@@ -269,7 +269,8 @@ class STR(PreTrainedModel):
             frames_length_to_predict = trajectory_label.shape[1]
             traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
                                                                          trajectory_label,
-                                                                         info_dict)
+                                                                         info_dict,
+                                                                         **kwargs)
             if not self.config.pred_key_points_only:
                 loss += traj_loss
 
@@ -642,36 +643,53 @@ class STR(PreTrainedModel):
                             closest_lane_point_on_route, dist, _, _, on_road = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
                                                                                                                             route_ids_this_sample,
                                                                                                                             road_dic[sample_index])
-                            
-                            iterative = False
-                            if iterative:
-                                counter = 0
-                                while not on_road and counter < 10:
-                                    # changing to the middle point with the lane center and pred_key_point
-                                    revised_pred_point = (closest_lane_point_on_route + pred_key_point_global) / 2
-                                    pred_key_point_ego, dist, _, _, on_road = nuplan_utils.get_closest_lane_point_on_route(revised_pred_point,
-                                                                                                                           route_ids_this_sample,
-                                                                                                                           road_dic[sample_index])
-                                    if on_road:
-                                        pred_key_point_global = revised_pred_point
-                                    counter += 1
-
-                                pred_key_point_ego = nuplan_utils.change_coordination(pred_key_point_global,
+                            if not on_road:
+                                # changing to lane center from 4? to 53, average 51
+                                revised_pred_point = closest_lane_point_on_route
+                                pred_key_point_ego = nuplan_utils.change_coordination(revised_pred_point,
                                                                                       ego_pose[sample_index],
                                                                                       ego_to_global=False)
                                 pred_key_point_ego[1] *= y_inverse
                                 pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
-                                print(f'Off Road Detected! Replace iteratively {i}th key point')
-                            else:
-                                if not on_road:
-                                    # changing to lane center from 4? to 53, average 51
-                                    revised_pred_point = closest_lane_point_on_route
-                                    pred_key_point_ego = nuplan_utils.change_coordination(revised_pred_point,
-                                                                                          ego_pose[sample_index],
-                                                                                          ego_to_global=False)
-                                    pred_key_point_ego[1] *= y_inverse
-                                    pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
-                                    print(f'Off Road Detected! Replace {i}th key point')
+                                print(f'Off Road Detected! Replace {i}th key point')
+
+                    object_collision_checking = True
+                    agents_rect_local = kwargs.get('agents_rect_local', None)
+                    if object_collision_checking and agents_rect_local is not None:
+                        assert self.config.selected_exponential_past, 'only support selected_exponential_past for now'
+
+                        # flip the second and third dimension
+                        agents_rect_local = agents_rect_local.permute(0, 2, 1, 3, 4)  # (b, 300, 4, 4, 2)
+                        ego_shape = [2.297, 5.176]
+                        for sample_index in range(batch_size):
+                            if i in [0, 1]:
+                                break
+                            agents_rect_local_this_sample = agents_rect_local[sample_index]
+                            ego_center = pred_key_point[sample_index, 0, :2].float().cpu().numpy()
+                            from shapely import geometry
+                            ego_rect = geometry.box(ego_center[0] - ego_shape[0] / 2, ego_center[1] - ego_shape[0] / 2,
+                                                    ego_center[0] + ego_shape[0] / 2, ego_center[1] + ego_shape[0] / 2)
+                            for each_agent_index in range(agents_rect_local_this_sample.shape[1]):
+                                agent_rects = agents_rect_local_this_sample[each_agent_index].float().cpu().numpy()  # (4(past_steps), 4(box), 2(x,y))
+                                if agent_rects.sum() == 0:
+                                    # padding numbers
+                                    continue
+                                # only process static objects
+                                future_position_at_t = agent_rects[0, :, :]
+                                # create polygon for the future position
+                                try:
+                                    future_line = geometry.LineString(future_position_at_t)
+                                    future_poly = geometry.Polygon(future_line)
+                                except:
+                                    print('future_position_at_t failed to create polygon: ', future_position_at_t)
+                                    continue
+                                if future_poly.intersects(ego_rect):
+                                    # replace key point with a slower speed
+                                    speed_penalty_rate = 0.8
+                                    pred_key_point[sample_index, 0, :2] *= speed_penalty_rate
+                                    print(f'Object Collision Detected! Replace {i}th key point')
+                                    print(f'ego: {ego_center}, agent: {future_position_at_t}')
+                                    break
 
                     if self.config.task == "nuplan":
                         if not self.config.separate_kp_encoder:
@@ -933,9 +951,6 @@ def build_models(model_args):
             config_p.intermediate_size = config_p.n_embd * 4
             config_p.num_attention_heads = 8
         elif 'mixtral-narrow-medium' in model_args.model_name:
-            """
-            Number of parameters: 1.2B with 24 experts with top 2 (ViT)
-            """
             config_p.n_layer = 16
             config_p.n_embd = config_p.d_model = 512
             config_p.n_inner = 2048
@@ -965,6 +980,7 @@ def build_models(model_args):
             config_p.hidden_size = config_p.n_embd
             config_p.intermediate_size = config_p.n_inner
             config_p.num_attention_heads = config_p.n_head
+
         elif 'mixtral-3b-deep' in model_args.model_name:
             """
             Number of parameters: 350M x 8 -> 3.3B (ViT)
