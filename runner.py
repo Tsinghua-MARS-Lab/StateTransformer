@@ -45,14 +45,16 @@ from datasets import Dataset, Value
 
 # os.environ["WANDB_DISABLED"] = "true"
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+os.environ["WANDB_DISABLED"] = "true"
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=False):
+def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=False, debug = False):
     datasets = []
     index_root_folders = os.path.join(root, split)
     indices = os.listdir(index_root_folders)
-
+    if debug:
+        indices = indices[:1]
     for index in indices:
         index_path = os.path.join(index_root_folders, index)
         if os.path.isdir(index_path):
@@ -188,7 +190,7 @@ def main():
     root_folders = os.listdir(index_root)
 
     if 'train' in root_folders:
-        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
+        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True, training_args.debug_train)
     else:
         raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
 
@@ -197,13 +199,13 @@ def main():
 
     if training_args.do_test:
         assert 'test' in root_folders, f'No test dataset found in {root_folders}, cannot do test'
-        test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
+        test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False, training_args.debug_train)
     else:
         test_dataset = None
 
     if (training_args.do_eval or training_args.do_predict):
         assert 'val' in root_folders, f'No val dataset found in {root_folders}, cannot do eval or predict'
-        val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False)
+        val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False, training_args.debug_train)
         if model_args.camera_image_encoder is not None:
             val_dataset = val_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
 
@@ -211,10 +213,10 @@ def main():
     if training_args.do_sim_val:
         # load val14_1k dataset for sim_val, 1118 samples in total
         assert 'val14_1k' in root_folders, f'No val14_1k dataset found in {root_folders}, cannot do sim_val'
-        val14_1k_dataset = load_dataset(index_root, "val14_1k", data_args.dataset_scale, data_args.agent_type, False)
+        val14_1k_dataset = load_dataset(index_root, "val14_1k", data_args.dataset_scale, data_args.agent_type, False, training_args.debug_train)
     elif training_args.do_sim_test:
         assert 'test' in root_folders, f'No test dataset found in {root_folders}, cannot do sim_test'
-        val14_1k_dataset = load_dataset(index_root, "test_hard14_index", data_args.dataset_scale, data_args.agent_type, False)
+        val14_1k_dataset = load_dataset(index_root, "test_hard14_index", data_args.dataset_scale, data_args.agent_type, False, training_args.debug_train)
 
 
     # clean image folders

@@ -811,7 +811,6 @@ class STR(PreTrainedModel):
 
         return pred_dict
 
-
 def build_models(model_args):
     # TODO: refactor model building function into each model class
     if 'gpt' in model_args.model_name:
@@ -1109,6 +1108,15 @@ def build_models(model_args):
     elif 'transfer' in model_args.model_name:
         model = ModelCls(config_p)
         logger.info('Transfer' + tag + ' from {}'.format(model_args.model_pretrain_name_or_path))
+    
+    if 'diffusion' in model_args.model_name:
+        from transformer4planning.models.backbone.StrDiff import StrDiff
+        # load the yaml as cfg to initialize the StrDiff
+        from transformer4planning.utils.common_utils import load_config
+        print("=======add the diffusion module=======")
+        cfg = load_config("/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiff.yaml")
+        print(cfg)
+        model = StrDiff(cfg, model)
     return model
 
 
