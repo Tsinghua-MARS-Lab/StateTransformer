@@ -182,12 +182,13 @@ class TrajectoryDecoder(nn.Module):
                                                             :2], dtype=torch.float32)  # bsz, 80, 2, 1=off-road, 0=on-road
 
                             examine_step = 5  # for efficiency, check every n step
-
+                            max_examin_frames = 30
                             for i in range(traj_logits.shape[0]):
-                                last_off = True
-                                for j in range(traj_logits.shape[1]):
-                                    if j % examine_step == 0:
-                                        last_off = True
+                                # last_off = True
+                                # for j in range(traj_logits.shape[1]):
+                                for j in range(max_examin_frames):
+                                    if j % examine_step == 3:
+                                        # last_off = True
                                         global_pred_point_t = nuplan_utils.change_coordination(traj_logits[i, j,
                                                                                                :2].float().detach().cpu().numpy(),
                                                                                                ego_poses[
@@ -213,12 +214,12 @@ class TrajectoryDecoder(nn.Module):
                                             current_point = geometry.Point(global_pred_point_t)
                                             block_polygon = geometry.Polygon(block_line)
                                             if block_polygon.contains(current_point):
-                                                off_road_mask[i, j, :] = 0
-                                                last_off = False
+                                                off_road_mask[i, j-2:j+2, :] = 0
+                                                # last_off = False
                                                 break
-                                    else:
-                                        if not last_off:
-                                            off_road_mask[i, j, :] = 0
+                                    # else:
+                                    #     if not last_off:
+                                    #         off_road_mask[i, j, :] = 0
 
                                     if j == 0 and off_road_mask[i, j, 0] == 1:
                                         # point zero off-road indicating wrong route info, ignore

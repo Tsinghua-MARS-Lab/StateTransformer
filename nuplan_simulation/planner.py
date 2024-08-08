@@ -640,19 +640,19 @@ class Planner(AbstractPlanner):
             for j, agent in enumerate(each_type_agents):
                 agent_type = int(agent.tracked_object_type.value)
                 pose = np.array([agent.box.center.point.x, agent.box.center.point.y,
-                                 agent.box.center.heading]).astype(np.float32)
+                                 agent.box.center.heading], dtype=np.float32)
                 pose -= origin_ego_pose
                 if (abs(pose[0]) > max_dis or abs(pose[1]) > max_dis):
                     continue
                 rotated_pose = [pose[0] * cos_ - pose[1] * sin_,
                                 pose[0] * sin_ + pose[1] * cos_]
-                shape = np.array([agent.box.width, agent.box.length])
-                shape = np.clip(shape, 1, 100)
+                shape = np.array([agent.box.width, agent.box.length], dtype=np.float32)
                 if shape[0] == 0 or shape[1] == 0:
                     continue
+                shape = np.clip(shape, 0.1, 100.0)
                 rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]), w=shape[0], l=shape[1],
                                                 direction=-pose[2])
-                rect_pts = np.array(rect_pts, dtype=np.int32)
+                rect_pts = np.array(rect_pts, dtype=np.float64)
                 rect_pts[:, 0] *= y_inverse
                 if agent_type != 7:
                     current_agent_rect_pts_local.append(rect_pts)
@@ -671,13 +671,13 @@ class Planner(AbstractPlanner):
                                      2 + road_types + traffic_types + agent_type * context_length + i],
                                  [rect_pts_low_res], -1, (255, 255, 255), -1)
 
-            max_agent_num = 300
+            max_agent_num = 400
             if len(current_agent_rect_pts_local) == 0:
                 agent_rect_pts_local.append(np.zeros((max_agent_num, 4, 2)))
                 continue
             current_agent_rect_pts_local = np.stack(current_agent_rect_pts_local)
             if len(current_agent_rect_pts_local) > max_agent_num:
-                print('agent more than 100 overflowing: ', current_agent_rect_pts_local.shape)
+                print('agent more than 400 overflowing: ', current_agent_rect_pts_local.shape)
                 current_agent_rect_pts_local = current_agent_rect_pts_local[:max_agent_num]
             elif len(current_agent_rect_pts_local) < max_agent_num:
                 current_agent_rect_pts_local = np.concatenate([current_agent_rect_pts_local, np.zeros((max_agent_num - len(current_agent_rect_pts_local), 4, 2))], axis=0)
@@ -705,7 +705,7 @@ class Planner(AbstractPlanner):
             rect_pts = generate_contour_pts((rotated_pose[1], rotated_pose[0]),
                                             w=ego_shape[0], l=ego_shape[1],
                                             direction=-pose[2])
-            rect_pts = np.array(rect_pts, dtype=np.int32)
+            rect_pts = np.array(rect_pts, dtype=np.float64)
             rect_pts[:, 0] *= y_inverse
             rect_pts_high_res = (high_res_scale * rect_pts).astype(np.int64) + raster_shape[0] // 2
             cv2.drawContours(rasters_high_res_channels[

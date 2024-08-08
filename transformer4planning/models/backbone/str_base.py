@@ -653,7 +653,7 @@ class STR(PreTrainedModel):
                                 pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
                                 print(f'Off Road Detected! Replace {i}th key point')
 
-                    object_collision_checking = True
+                    object_collision_checking = False
                     agents_rect_local = kwargs.get('agents_rect_local', None)
                     if object_collision_checking and agents_rect_local is not None:
                         assert self.config.selected_exponential_past, 'only support selected_exponential_past for now'
@@ -669,8 +669,9 @@ class STR(PreTrainedModel):
                             from shapely import geometry
                             ego_rect = geometry.box(ego_center[0] - ego_shape[0] / 2, ego_center[1] - ego_shape[0] / 2,
                                                     ego_center[0] + ego_shape[0] / 2, ego_center[1] + ego_shape[0] / 2)
-                            for each_agent_index in range(agents_rect_local_this_sample.shape[1]):
-                                agent_rects = agents_rect_local_this_sample[each_agent_index].float().cpu().numpy()  # (4(past_steps), 4(box), 2(x,y))
+                            for each_agent_index in range(agents_rect_local_this_sample.shape[0]):
+                                agent_rects = agents_rect_local_this_sample[
+                                    each_agent_index].float().cpu().numpy()  # (4(past_steps), 4(box), 2(x,y))
                                 if agent_rects.sum() == 0:
                                     # padding numbers
                                     continue
@@ -769,6 +770,49 @@ class STR(PreTrainedModel):
             if len(key_points_logits_k) > 0:
                 assert len(key_points_logits_k) == self.k
                 key_points_pred_logits = torch.stack(key_points_logits_k, dim=1)
+
+        emergency_brake_checking = True
+        agents_rect_local = kwargs.get('agents_rect_local', None)
+        if emergency_brake_checking and agents_rect_local is not None:
+            assert self.config.selected_exponential_past, 'only support selected_exponential_past for now'
+            from shapely import geometry
+            # flip the second and third dimension
+            agents_rect_local = agents_rect_local.permute(0, 2, 1, 3, 4)  # (b, 300, 4, 4, 2)
+            ego_shape = [2.297, 5.176]
+            time_threshold = [0.1, 1.5]  # change this to test different params
+            for sample_index in range(batch_size):
+                agents_rect_local_this_sample = agents_rect_local[sample_index]
+                for each_agent_index in range(agents_rect_local_this_sample.shape[0]):
+                    collision = False
+                    agent_rects = agents_rect_local_this_sample[
+                        each_agent_index].float().cpu().numpy()  # (4(past_steps), 4(box), 2(x,y))
+                    if agent_rects[0].sum() == 0:
+                        # padding numbers
+                        continue
+                    # only process static objects
+                    future_position_at_t = agent_rects[0, :, :]
+                    # create polygon for the future position
+                    try:
+                        future_line = geometry.LineString(future_position_at_t)
+                        future_poly = geometry.Polygon(future_line)
+                    except:
+                        print('future_position_at_t failed to create polygon: ', future_position_at_t)
+                        continue
+                    for time_index in range(int(time_threshold[0] * 10), int(time_threshold[1] * 10), 2):
+                        ego_center = traj_pred_logits[sample_index, time_index, :2].float().cpu().numpy()
+                        ego_rect = geometry.box(ego_center[0] - ego_shape[0] / 2, ego_center[1] - ego_shape[0] / 2,
+                                                ego_center[0] + ego_shape[0] / 2, ego_center[1] + ego_shape[0] / 2)
+
+                        if future_poly.intersects(ego_rect):
+                            # replace key point with a slower speed
+                            traj_pred_logits[sample_index, :, :2] = 0
+                            traj_pred_logits[sample_index, :, -1] = traj_pred_logits[sample_index, 0, -1]
+                            print(f'Emergency brake due to collision at {time_index} index of 80')
+                            print(f'ego: {ego_center}, ego rect: {ego_rect}, agent: {future_position_at_t}')
+                            collision = True
+                            break
+                    if collision:
+                        break
 
         pred_dict = {
             "traj_logits": traj_pred_logits
