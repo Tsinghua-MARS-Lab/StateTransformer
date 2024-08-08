@@ -17,6 +17,7 @@ from random import random
 class LTMOutput(CausalLMOutputWithCrossAttentions):
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
+    trajectory_label: torch.FloatTensor = None
     
 
 
@@ -59,7 +60,7 @@ class StrDiff(DiffusionForcingBase):
             deterministic_t = None
             if random() <= self.gt_cond_prob or (t == 0 and random() <= self.gt_first_frame):
                 deterministic_t = 0
-            print(f"log the input data, z shape:{z.shape},xs shape:{xs[t].shape}, condition shape: {conditions[t].shape}")
+            # print(f"log the input data, z shape:{z.shape},xs shape:{xs[t].shape}, condition shape: {conditions[t].shape}")
             z_next, x_next_pred, l, cum_snr = self.transition_model(
                 z, xs[t], conditions[t], deterministic_t=deterministic_t, cum_snr=cum_snr
             )
@@ -69,8 +70,8 @@ class StrDiff(DiffusionForcingBase):
             loss.append(l)
         xs_pred = torch.stack(xs_pred)
         loss = torch.stack(loss)
-        # x_loss = self.reweigh_loss(loss, masks)
-        # loss = x_loss
+        x_loss = self.reweigh_loss(loss)
+        loss = x_loss
         # output_dict = {
         #     "loss": loss,
         #     "xs_pred": self._unnormalize_x(xs_pred),
@@ -85,10 +86,10 @@ class StrDiff(DiffusionForcingBase):
 
     def _preprocess_batch(self, batch, is_train=True):
         if is_train:
-            batch[1]= batch[1].reshape(batch[1].shape[0], -1).unsqueeze(1).repeat(1, 80, 1)
+            batch[1]= batch[1]
             return super()._preprocess_batch(batch)
         else:
-            batch[0]= batch[0].reshape(batch[0].shape[0], -1).unsqueeze(1).repeat(1, 80, 1)
+            batch[0]= batch[0]
             batch_size, n_frames = batch[0].shape[:2]
             xs = torch.randn(batch_size, n_frames, *self.x_shape)
 

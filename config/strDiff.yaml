@@ -4,7 +4,7 @@ z_shape: [256]
 frame_stack: 10
 data_mean: 0
 data_std: 1
-external_cond_dim: 240
+external_cond_dim: 40
 context_frames: 0
 weight_decay: 1e-4
 warmup_steps: 2000
