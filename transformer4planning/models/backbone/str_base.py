@@ -1112,12 +1112,21 @@ def build_models(model_args):
     
     if 'diffusion' in model_args.model_name:
         from transformer4planning.models.backbone.StrDiff import StrDiff
+        from transformer4planning.models.backbone.StrDiffDiT import StrDiffDiT
         # load the yaml as cfg to initialize the StrDiff
         from transformer4planning.utils.common_utils import load_config
-        print("=======add the diffusion module=======")
-        cfg = load_config("/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiff.yaml")
-        print(cfg)
-        model = StrDiff(cfg, model)
+        
+  
+        if 'dit' in model_args.model_name:
+            print("=======add the DiT module=======")
+            cfg = load_config("/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiffDiT.yaml")
+            print(cfg)  
+            model = StrDiffDiT(cfg, model)
+        else:
+            print("=======add the diffusion module=======")
+            cfg = load_config("/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiff.yaml")
+            print(cfg)
+            model = StrDiff(cfg, model)
     return model
 
 
