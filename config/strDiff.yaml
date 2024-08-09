@@ -41,3 +41,4 @@ diffusion:
 
 debug: False
 lr: 0.0002
+map_cond: False

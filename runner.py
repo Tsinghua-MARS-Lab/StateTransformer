@@ -45,7 +45,6 @@ from datasets import Dataset, Value
 
 # os.environ["WANDB_DISABLED"] = "true"
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-os.environ["WANDB_DISABLED"] = "true"
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 

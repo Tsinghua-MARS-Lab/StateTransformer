@@ -217,7 +217,10 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             )
             input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
             input_embeds[:, 1::2, :] = action_embeds  # index: 1, 3, 5, .., 19
-
+        
+        # give out the context info for diffusion model
+        maps_info = input_embeds
+        
         if self.camera_image_encoder is not None:
             camera_images = kwargs.get("camera_images", None)
             assert camera_images is not None, "camera_image should not be None"
@@ -306,7 +309,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             if self.config.autoregressive_proposals:
                 info_dict["intentions"] = intentions
 
-        return input_embeds, info_dict
+        return input_embeds, info_dict, maps_info
 
 
 class NuplanRasterizeAutoRegressiveEncoder(NuplanRasterizeEncoder):

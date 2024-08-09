@@ -457,7 +457,7 @@ class STR(PreTrainedModel):
     @torch.no_grad()
     def generate(self, **kwargs) -> torch.FloatTensor:
         # first encode context
-        input_embeds, info_dict = self.encoder(is_training=False, **kwargs)
+        input_embeds, info_dict, maps_info= self.encoder(is_training=False, **kwargs)
         batch_size, _, _ = input_embeds.shape
         device = input_embeds.device
         context_length = info_dict["context_length"]
@@ -771,7 +771,8 @@ class STR(PreTrainedModel):
                 key_points_pred_logits = torch.stack(key_points_logits_k, dim=1)
 
         pred_dict = {
-            "traj_logits": traj_pred_logits
+            "traj_logits": traj_pred_logits,
+            "maps_info": maps_info,
         }
 
         # if kwargs.get('old_file_name', None) is not None:

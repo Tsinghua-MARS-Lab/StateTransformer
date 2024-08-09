@@ -18,6 +18,7 @@ class LTMOutput(CausalLMOutputWithCrossAttentions):
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
     trajectory_label: torch.FloatTensor = None
+    loss_items: Optional[torch.FloatTensor] = None
     
 
 
@@ -26,9 +27,19 @@ class StrDiff(DiffusionForcingBase):
         super().__init__(cfg=cfg)
         logging.info(f"STRDiff: {cfg}")
         self.str_model = str_model
+        self.freeze_parameters(self.str_model) # freeze the STR model
         self._build_model()
         self.configure_optimizers()
+        self.config = str_model.config
         
+        self.map_cond = cfg.map_cond
+    @property
+    def encoder(self):
+        return self.str_model.encoder
+    def freeze_parameters(self, model):
+        for param in model.parameters():
+            param.requires_grad = False
+    
     def forward(self,
             return_dict: Optional[bool] = None,
             **kwargs):
@@ -45,8 +56,9 @@ class StrDiff(DiffusionForcingBase):
         # Phase1: get the result from the STR model
         str_result = self.str_model.generate(**kwargs)
         trajectory_prior = str_result["traj_logits"]
+        maps_info = str_result["maps_info"]
         trajectory_label = kwargs.get("trajectory_label", None)
-        batch = [trajectory_label, trajectory_prior]
+        batch = [trajectory_label, trajectory_prior, maps_info]
         
         # Phase2:convey the result to the diffusion model
         xs, conditions, masks, *_, init_z = self._preprocess_batch(batch, is_train=True)
@@ -71,14 +83,15 @@ class StrDiff(DiffusionForcingBase):
         xs_pred = torch.stack(xs_pred)
         loss = torch.stack(loss)
         x_loss = self.reweigh_loss(loss)
-        loss = x_loss
+
         # output_dict = {
         #     "loss": loss,
         #     "xs_pred": self._unnormalize_x(xs_pred),
         #     "xs": self._unnormalize_x(xs),
         # }
         output_dict = LTMOutput(
-            loss=loss,
+            loss=x_loss,
+            loss_items=loss,
             logits=self._unnormalize_x(xs_pred),
             trajectory_label=self._unnormalize_x(xs)
         )
@@ -86,52 +99,63 @@ class StrDiff(DiffusionForcingBase):
 
     def _preprocess_batch(self, batch, is_train=True):
         if is_train:
-            batch[1]= batch[1]
-            return super()._preprocess_batch(batch)
+            prior_indice = 1
+            maps_indice = 2
+            label_indice = 0
+            xs = batch[1]
         else:
-            batch[0]= batch[0]
-            batch_size, n_frames = batch[0].shape[:2]
+            prior_indice = 0
+            maps_indice = 1
+            label_indice = None
             xs = torch.randn(batch_size, n_frames, *self.x_shape)
+        batch_size, n_frames = batch[0].shape[:2]
 
-            if n_frames % self.frame_stack != 0:
-                raise ValueError("Number of frames must be divisible by frame stack size")
-            if self.context_frames % self.frame_stack != 0:
-                raise ValueError("Number of context frames must be divisible by frame stack size")
+        # check if number of frames is divisible by frame stack size
+        if n_frames % self.frame_stack != 0:
+            raise ValueError("Number of frames must be divisible by frame stack size")
+        if self.context_frames % self.frame_stack != 0:
+            raise ValueError("Number of context frames must be divisible by frame stack size")
 
-            nonterminals = batch[-1]
-            nonterminals = nonterminals.bool().permute(1, 0)
-            masks = torch.cumprod(nonterminals, dim=0).contiguous()
-            n_frames = n_frames // self.frame_stack
+        n_frames = n_frames // self.frame_stack
 
-            if self.external_cond_dim:
-                conditions = batch[0]
-                conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
-                conditions = rearrange(conditions, "b (t fs) d -> t b (fs d)", fs=self.frame_stack).contiguous()
-            else:
-                conditions = [None for _ in range(n_frames)]
+        if self.external_cond_dim:
+            conditions = batch[prior_indice]
+            conditions = torch.cat([torch.zeros_like(conditions[:, :1]), conditions[:, 1:]], 1)
+            conditions = rearrange(conditions, "b (t fs) d -> t b (fs d)", fs=self.frame_stack).contiguous()
+            if self.map_cond:
+                maps_info = batch[maps_indice].view(batch_size, -1)
+                maps_info = rearrange(maps_info, "b d -> 1 b d").repeat(n_frames, 1, 1)
+                conditions = torch.cat([maps_info, conditions], -1)
+        else:
+            conditions = [None for _ in range(n_frames)]
+        
+        print(f"log the input data, xs shape:{xs.shape}, conditions shape: {conditions.shape}")
+            
 
-            xs = self._normalize_x(xs)
-            xs = rearrange(xs, "b (t fs) c ... -> t b (fs c) ...", fs=self.frame_stack).contiguous()
 
-            if self.learnable_init_z:
-                init_z = self.init_z[None].expand(batch_size, *self.z_shape)
-            else:
-                init_z = torch.zeros(batch_size, *self.z_shape)
-                init_z = init_z.to(xs.device)
+        xs = self._normalize_x(xs)
+        xs = rearrange(xs, "b (t fs) c ... -> t b (fs c) ...", fs=self.frame_stack).contiguous()
 
-            return xs, conditions, masks, init_z
+        if self.learnable_init_z:
+            init_z = self.init_z[None].expand(batch_size, *self.z_shape)
+        else:
+            init_z = torch.zeros(batch_size, *self.z_shape)
+            init_z = init_z.to(xs.device)
+
+        return xs, conditions, None, init_z
     
     @torch.no_grad()
-    def generate(self, **kwargs):
+    def generate(self, **kwargs)-> torch.FloatTensor:
 
         
         # Phase1: get the result from the STR model
         str_result = self.str_model.generate(**kwargs)
         trajectory_prior = str_result["traj_logits"]
+        maps_info = str_result["maps_info"]
         
         
         # Phase2:convey the result to the diffusion model
-        batch = [trajectory_prior]
+        batch = [trajectory_prior, maps_info]
         xs, conditions, masks, *_, init_z = self._preprocess_batch(batch, is_train=False)
         n_frames, batch_size, *_ = xs.shape
         xs_pred = []
@@ -181,8 +205,9 @@ class StrDiff(DiffusionForcingBase):
         xs_pred = torch.stack(xs_pred)
         xs_pred = rearrange(xs_pred, "t b (fs c) ... -> (t fs) b c ...", fs=self.frame_stack)
         xs_pred = self._unnormalize_x(xs_pred)
+        xs_pred = xs_pred.reshape(batch_size, n_frames*self.frame_stack, *self.x_shape)
         pred_dict = {
-            "traj_logits": traj_pred_logits
+            "traj_logits": xs_pred.to(dtype=torch.float)
         }
         return pred_dict
 
