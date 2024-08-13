@@ -7,8 +7,6 @@ map_cond: True
 data_mean: [30,10,0,0]
 data_std: [150,20,1,1]
 
-lr: 0.0002
-weight_decay: 1e-4
 optimizer_beta: [0.9, 0.999]
 
 maps_dim: 256

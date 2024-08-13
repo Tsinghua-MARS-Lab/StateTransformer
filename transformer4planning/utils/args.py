@@ -152,6 +152,9 @@ class ModelArguments:
     learnable_std_mean: Optional[bool] = field(
         default=False, metadata={"help": "Whether to learn the mean and std of the diffusion forcing."}
     )
+    map_cond: Optional[bool] = field(   
+        default=True, metadata={"help": "Whether to use map condition in the diffusion forcing."}
+    )
     ######## end of diffusion forcing args ########
     
     ######## begin of camera images args ########

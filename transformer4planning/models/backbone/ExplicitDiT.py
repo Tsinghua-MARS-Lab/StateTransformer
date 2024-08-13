@@ -61,8 +61,8 @@ class ExplicitDiT(PreTrainedModel):
         self.diffusion = TrajDiffusion(self.cfg)
         
         if self.config.learnable_std_mean:
-            self.mean = nn.Parameter(torch.zeros(1))
-            self.std = nn.Parameter(torch.ones(1))
+            self.data_mean = nn.Parameter(torch.zeros(1))
+            self.data_std = nn.Parameter(torch.ones(1))
         else:
             self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
         
@@ -109,6 +109,7 @@ class ExplicitDiT(PreTrainedModel):
                 label[t], transition_info, trajectory_prior[t], maps_info[t]   
             ) # (b, 40)
             transition_info = prediction
+            
             loss.append(l)
             final_predict.append(prediction)
             
@@ -166,7 +167,7 @@ class ExplicitDiT(PreTrainedModel):
         str_result = self.str_model.generate(**kwargs)
         trajectory_prior = str_result["traj_logits"]
         maps_info = str_result["maps_info"]
-        
+            
         
         # Phase2:convey the result to the diffusion model
         label, trajectory_prior, maps_info, init_traj = self._preprocess_batch(trajectory_prior=trajectory_prior, maps_info=maps_info, is_train=False)

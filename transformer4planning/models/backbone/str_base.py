@@ -1048,11 +1048,13 @@ def build_models(model_args):
                 config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/explicitDiT.yaml"
                 config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
                 config_p.learnable_std_mean = model_args.learnable_std_mean
+                config_p.map_cond = model_args.map_cond
                 ModelCls = ExplicitDiT
             elif 'whole' in model_args.model_name:
                 config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/explicitDiT_whole.yaml"
                 config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
                 config_p.learnable_std_mean = model_args.learnable_std_mean
+                config_p.map_cond = model_args.map_cond
                 ModelCls = ExplicitDiT
             else:
                 config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiff.yaml"
