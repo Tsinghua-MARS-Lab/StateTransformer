@@ -1,0 +1,24 @@
+__pycache__
+*.egg*
+build
+wandb
+*.so
+.sh
+src/
+.venv
+node_modules
+*.DS_Store
+.idea
+test.py
+.vscode
+training_configs
+testing_log
+.git
+
+# 忽略特定文件
+data_dic.pkl
+visualization/
+
+# 忽略整个目录
+images/
+MoeProne/

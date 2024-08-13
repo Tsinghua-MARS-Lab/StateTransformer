@@ -1,0 +1,36 @@
+
+x_shape: [4]
+z_shape: [10, 768]
+frame_stack: 10
+data_mean: [30,10,0,0]
+data_std: [150,20,1,1]
+prior_dim: 4
+cond_dim: 256
+n_maps_token: 788
+
+
+external_cond_dim: 40
+context_frames: 0
+weight_decay: 1e-4
+warmup_steps: 2000
+gt_first_frame: 0.0
+gt_cond_prob: 0.0 # setting this to 1 will give you teacher forcing + single frame diffusion
+uncertainty_scale: 1
+chunk_size: 1 # -1 for full trajectory diffusion, number to specify diffusion chunk size
+calc_crps_sum: 100 # generate multiple samples for computing crps_sum
+learnable_init_z: True
+optimizer_beta: [0.9, 0.999]
+
+scheduler:
+  num_train_timesteps: 10
+  num_inference_steps: 10
+  beta_start: 0.0001
+  beta_end: 0.02
+  beta_schedule: squaredcos_cap_v2
+  variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+  clip_sample: True # required when predict_epsilon=False
+  prediction_type: epsilon # or sample or epsilon
+
+debug: False
+lr: 0.0002
+map_cond: True

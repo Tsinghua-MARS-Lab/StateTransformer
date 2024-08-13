@@ -1,0 +1,27 @@
+# the config file for explicit DiT
+trajectory_dim: 4
+frame_stack: 80
+learnable_init_traj: True
+map_cond: True
+
+data_mean: [30,10,0,0]
+data_std: [150,20,1,1]
+
+lr: 0.0002
+weight_decay: 1e-4
+optimizer_beta: [0.9, 0.999]
+
+maps_dim: 256
+n_maps_token: 788
+
+
+scheduler:
+  num_train_timesteps: 10
+  num_inference_steps: 10
+  beta_start: 0.0001
+  beta_end: 0.02
+  beta_schedule: squaredcos_cap_v2
+  variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+  clip_sample: True # required when predict_epsilon=False
+  prediction_type: epsilon # or sample or epsilon
+
