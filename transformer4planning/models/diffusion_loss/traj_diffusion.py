@@ -7,6 +7,7 @@ from einops import rearrange, reduce
 
 from transformer4planning.models.diffusion_loss.diffusion import DiffusionForTraj
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from diffusers import DDIMScheduler
 
 class TrajDiffusion(nn.Module):
     def __init__(self, cfg):
@@ -27,13 +28,14 @@ class TrajDiffusion(nn.Module):
         prior_dim=self.cfg.trajectory_dim*self.cfg.frame_stack,
         
         causal_attn=True,
+        map_cond=self.cfg.map_cond,
         )
-        self.noise_scheduler = DDPMScheduler(
+        self.noise_scheduler = DDIMScheduler(
             num_train_timesteps  = self.cfg.scheduler.num_train_timesteps,
             beta_start=self.cfg.scheduler.beta_start,
             beta_end=self.cfg.scheduler.beta_end,
             beta_schedule=self.cfg.scheduler.beta_schedule,
-            variance_type=self.cfg.scheduler.variance_type,
+            #variance_type=self.cfg.scheduler.variance_type,
             clip_sample=self.cfg.scheduler.clip_sample,
             prediction_type=self.cfg.scheduler.prediction_type,
         )
@@ -73,7 +75,8 @@ class TrajDiffusion(nn.Module):
             trajectory = scheduler.step(
                 model_output, t, trajectory, 
                 ).prev_sample
-            
+        #     print("model_output:",model_output[0][0][:12])
+        # print("trajectory:",trajectory[0][0][:12])
         return trajectory.squeeze(1)
 
     def forward(

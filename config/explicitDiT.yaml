@@ -5,7 +5,7 @@ learnable_init_traj: True
 map_cond: True
 
 data_mean: [30,10,0,0]
-data_std: [150,20,1,1]
+data_std: [100,20,1,1]
 
 optimizer_beta: [0.9, 0.999]
 

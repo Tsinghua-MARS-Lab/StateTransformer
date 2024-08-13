@@ -37,8 +37,9 @@ class ExplicitDiT(PreTrainedModel):
         self.trajectory_dim = cfg.trajectory_dim
         self.frame_stack = cfg.frame_stack
         self.learnable_init_traj = cfg.learnable_init_traj
-        self.map_cond = self.cfg.map_cond
+        self.map_cond = config.map_cond
         self.config = config
+        self.cfg.map_cond = self.map_cond
         
         # init the pretrained model
         super().__init__(config)
@@ -61,8 +62,8 @@ class ExplicitDiT(PreTrainedModel):
         self.diffusion = TrajDiffusion(self.cfg)
         
         if self.config.learnable_std_mean:
-            self.data_mean = nn.Parameter(torch.zeros(1))
-            self.data_std = nn.Parameter(torch.ones(1))
+            self.data_mean = nn.Parameter(torch.zeros(4))
+            self.data_std = nn.Parameter(torch.ones(4))
         else:
             self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
         
@@ -109,10 +110,8 @@ class ExplicitDiT(PreTrainedModel):
                 label[t], transition_info, trajectory_prior[t], maps_info[t]   
             ) # (b, 40)
             transition_info = prediction
-            
             loss.append(l)
             final_predict.append(prediction)
-            
         # Notice the final_predict is not the final result, it is the intermediate result
         final_predict = torch.stack(final_predict)
         final_predict = rearrange(final_predict, "t b (fs c) ... -> b (t fs) c ...", fs=self.frame_stack)

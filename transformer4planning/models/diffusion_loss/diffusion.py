@@ -27,7 +27,8 @@ class DiffusionForTraj(nn.Module):
             causal_attn: bool=False,
             time_as_cond: bool=True,
             obs_as_cond: bool=False,
-            n_cond_layers: int = 0
+            n_cond_layers: int = 0,
+            map_cond: bool=True
         ) -> None:
         super().__init__()
 
@@ -38,9 +39,10 @@ class DiffusionForTraj(nn.Module):
             T += 1
             T_cond -= 1
         obs_as_cond = cond_dim > 0
-        if obs_as_cond:
+        T_cond += n_prior_steps+horizon
+        if map_cond:
             assert time_as_cond
-            T_cond += n_cond_steps+n_prior_steps+horizon
+            T_cond += n_cond_steps
 
         
         # input embedding stem
@@ -50,9 +52,11 @@ class DiffusionForTraj(nn.Module):
 
         # cond encoder
         self.time_emb = SinusoidalPosEmb(n_emb)
-        
+        self.map_cond = map_cond
+        self.cond_obs_emb = None
         if obs_as_cond:
-            self.cond_obs_emb = nn.Linear(cond_dim, n_emb)
+            if map_cond:
+                self.cond_obs_emb = nn.Linear(cond_dim, n_emb)
             self.prior_z_emb = nn.Linear(prior_dim, n_emb)
 
         self.cond_pos_emb = None
@@ -249,11 +253,15 @@ class DiffusionForTraj(nn.Module):
             # encoder
             cond_embeddings = time_emb
             if self.obs_as_cond:
-                cond_obs_emb = self.cond_obs_emb(maps_info)
+                if self.map_cond:
+                    cond_obs_emb = self.cond_obs_emb(maps_info)
                 trajectory_prior = self.prior_z_emb(trajectory_prior)
                 transition_info = self.prior_z_emb(transition_info)
                 # (B,To,n_emb)
-                cond_embeddings = torch.cat([cond_embeddings, cond_obs_emb, transition_info, trajectory_prior], dim=1) 
+                if self.map_cond:
+                    cond_embeddings = torch.cat([cond_embeddings, cond_obs_emb, transition_info, trajectory_prior], dim=1) 
+                else:
+                    cond_embeddings = torch.cat([cond_embeddings, transition_info, trajectory_prior], dim=1)
                 # cond_embeddings: (B,1,n_emb)
                 # z: (B,1, n_emb)
                 # prior_emb: (B,1, n_emb)
