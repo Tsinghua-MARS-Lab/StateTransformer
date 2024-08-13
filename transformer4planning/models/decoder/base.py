@@ -44,7 +44,6 @@ class TrajectoryDecoder(nn.Module):
         super().__init__()
         self.config = config
         out_features = 4 if self.config.predict_yaw else 2
-
         if self.config.trajectory_decoder_type == 'linear':
             if self.config.traj_dropout:
                 self.dropout = nn.Dropout(self.config.traj_dropout)
@@ -54,7 +53,8 @@ class TrajectoryDecoder(nn.Module):
                                        config.n_embd,
                                        out_features=out_features,
                                        dropout=self.config.traj_dropout)
-        
+   
+
         if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
 
@@ -91,9 +91,9 @@ class TrajectoryDecoder(nn.Module):
         return traj_loss, traj_logits
 
 
-    def compute_traj_loss(self, 
+    def compute_traj_loss(self,
                           hidden_output,
-                          label, 
+                          label,
                           info_dict,
                           no_yaw_loss=False,
                           device=None):
@@ -102,18 +102,22 @@ class TrajectoryDecoder(nn.Module):
         params:
             hidden_output: whole hidden state output from transformer backbone
             label: ground truth trajectory in future 8-s
-            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc.
         """
         pred_length = info_dict.get("pred_length", label.shape[1])
 
         context_length = info_dict.get("context_length", None)
         selected_indices = info_dict.get("selected_indices", None)
+        candi_kp_num = info_dict.get("candi_kp_num", None)
 
         if context_length is not None:
             if selected_indices is None:
                 traj_hidden_state = hidden_output[:, context_length - 1:context_length + pred_length - 1, :]
             else:
-                traj_hidden_state = hidden_output[:, context_length - 1 + len(selected_indices):context_length + pred_length - 1 + len(selected_indices), :]
+                if candi_kp_num is not None:
+                    traj_hidden_state = hidden_output[:, context_length + candi_kp_num + len(selected_indices):context_length + candi_kp_num + len(selected_indices) + pred_length, :]
+                else:
+                    traj_hidden_state = hidden_output[:, context_length - 1 + len(selected_indices):context_length + pred_length - 1 + len(selected_indices), :]
         else:
             traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
         if device is None:
@@ -175,19 +179,21 @@ class TrajectoryDecoder(nn.Module):
             last_dimension = 4 if self.config.predict_yaw else 2
             traj_logits = torch.zeros_like(label[..., :last_dimension])
             traj_loss = torch.tensor(0, dtype=hidden_output.dtype, device=hidden_output.device)
-        
+
         return traj_loss, traj_logits
-    
+
     def generate_trajs(self, hidden_output, info_dict):
         pred_length = info_dict.get("pred_length", 0)
         assert pred_length > 0
-        traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
-        if self.config.trajectory_decoder_type == 'linear' and self.config.traj_dropout and self.training:
-            traj_hidden_state = self.dropout(traj_hidden_state)
+        candi_kp_num = info_dict.get("candi_kp_num", None)
+        if candi_kp_num is not None:
+            traj_hidden_state = hidden_output[:, -pred_length:, :]
+        else:
+            traj_hidden_state = hidden_output[:, -pred_length-1:-1, :]
         traj_logits = self.model(traj_hidden_state)
         return traj_logits
 
-    
+
 class ProposalDecoder(nn.Module):
     def __init__(self, config, proposal_num=64):
         super().__init__()
@@ -199,7 +205,7 @@ class ProposalDecoder(nn.Module):
         self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
         self.logits_proposal_loss = MSELoss(reduction="none")
 
-    def compute_proposal_loss(self, 
+    def compute_proposal_loss(self,
                           hidden_output,
                           info_dict):
         """
@@ -207,7 +213,7 @@ class ProposalDecoder(nn.Module):
         params:
             hidden_output: whole hidden state output from transformer backbone
             label: ground truth trajectory in future 8-s
-            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc. 
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc.
         """
         gt_proposal_cls= info_dict["gt_proposal_cls"]
         gt_proposal_mask = info_dict["gt_proposal_mask"]
@@ -221,14 +227,14 @@ class ProposalDecoder(nn.Module):
 
         loss_proposal = self.cls_proposal_loss(pred_proposal_cls.reshape(-1, self.proposal_num).to(hidden_output.dtype), gt_proposal_cls.reshape(-1).long())
         loss_proposal = (loss_proposal * gt_proposal_mask.view(-1)).sum()/ (gt_proposal_mask.sum()+1e-7)
-        
+
         bs = gt_proposal_cls.shape[0]
         pred_proposal_logits = pred_proposal_logits.view(bs, self.proposal_num, 2)
-        
-        pred_pos_proposal_logits = pred_proposal_logits[torch.arange(bs), gt_proposal_cls, :] # (bs, 2)            
+
+        pred_pos_proposal_logits = pred_proposal_logits[torch.arange(bs), gt_proposal_cls, :] # (bs, 2)
         loss_proposal_logits = self.logits_proposal_loss(pred_pos_proposal_logits, gt_proposal_logits)
         loss_proposal_logits = (loss_proposal_logits * gt_proposal_mask).sum() / (gt_proposal_mask.sum() + 1e-7)
-        
+
         return loss_proposal, loss_proposal_logits
 
 
@@ -319,6 +325,118 @@ class KeyPointDecoderCLS(nn.Module):
         # key_point_logits = self.tokenizer.decode(key_point_id)  # b, s=1, 2
         return key_point_ids, key_point_id_scores
 
+class TrajDecoderCLS(nn.Module):
+    def __init__(self, config, proposal_num):
+        super().__init__()
+        self.config = config
+        self.kp_tokenizer = None
+        self.proposal_num = proposal_num
+        self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=proposal_num)
+        self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
+
+    def compute_traj_loss(self, hidden_output, info_dict):
+        """
+        pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
+        params:
+            hidden_output: whole hidden state output from transformer backbone
+            label: ground truth trajectory in future 8-s
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc.
+        """
+
+         #if 'future_key_points_ids' in info_dict:
+        if 'future_traj_diff' in info_dict:
+            # gt_proposal_cls = info_dict["future_key_points_ids"][:, i]
+            # bs,n_kp,n_cluster,2 -> bs,n_cluster,2
+            gt_l2_distance = info_dict['future_traj_diff'][:, 0, :]
+            # bs,n_cluster,2 -> bs,n_cluster
+            # gt_l2_distance = torch.norm(gt_diff, p=2, dim=-1)
+            mask = gt_l2_distance > 30
+            gt_l2_distance[mask] = float('inf')
+            gt_prob = torch.softmax(-gt_l2_distance, dim=1)
+
+        else:
+            assert False, f'no future_trajs_ids in info_dict {list(info_dict.keys())}'
+
+        context_length = info_dict["context_length"]
+        candi_kp_num = info_dict['candi_kp_num']
+        pred_proposal_embed = hidden_output[:, context_length + candi_kp_num-1, :]  # (bs, n_candi, n_embed)
+        pred_proposal_scores = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, n_candi, 1)
+        # pred_proposal_logits = pred_proposal_scores.squeeze(-1) # (bs, n_candi)
+        loss_proposal = self.cls_proposal_loss(pred_proposal_scores.to(hidden_output.dtype), gt_prob.to(hidden_output.dtype))
+        pred_proposal_cls = pred_proposal_scores.argmax(dim=-1)
+        pred_trajs = self.kp_tokenizer.decode(pred_proposal_cls)
+        return loss_proposal.mean(), pred_trajs
+
+    def generate_trajs(self, hidden_state, info_dict):
+        # batch_size, seq_len, hidden_dim = hidden_state.shape
+        # bs,n_candi,n_embed -> bs,n_candi,1
+        context_length = info_dict["context_length"]
+        candi_kp_num = info_dict['candi_kp_num']
+        key_point_id_scores = self.proposal_cls_decoder(hidden_state[:, context_length + candi_kp_num-1,:])
+        # -> bs,n_candi
+        # key_point_id_logits = key_point_id_scores.squeeze(-1)
+        # -> bs,n_candi
+        key_point_id_scores = nn.Softmax(dim=-1)(key_point_id_scores)
+        # -> bs,
+        key_point_ids = key_point_id_scores.argmax(dim=-1)
+        pred_trajs = self.kp_tokenizer.decode(key_point_ids)
+        zeros_tensor = torch.zeros([pred_trajs.shape[0], pred_trajs.shape[1], 1]).to(pred_trajs.device)
+        pred_trajs_total = torch.cat((pred_trajs[ :, :, :2], zeros_tensor, pred_trajs[ :, :, 2:]), dim=-1)
+        # key_point_logits = self.tokenizer.decode(key_point_id)  # b, s=1, 2
+        return pred_trajs_total, key_point_id_scores
+
+class KeyPointDecoderEmbedAndCLS(nn.Module):
+    def __init__(self, config, proposal_num):
+        super().__init__()
+        self.config = config
+        self.kp_tokenizer = None
+        # self.proposal_num = proposal_num
+        self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=1)
+        self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
+
+    def compute_keypoint_loss(self, hidden_output, info_dict, i):
+        """
+        pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
+        params:
+            hidden_output: whole hidden state output from transformer backbone
+            label: ground truth trajectory in future 8-s
+            info_dict: dict contains additional infomation, such as context length/input length, pred length, etc.
+        """
+        #if 'future_key_points_ids' in info_dict:
+        if 'future_key_points_diff' in info_dict:
+            # gt_proposal_cls = info_dict["future_key_points_ids"][:, i]
+            # bs,n_kp,n_cluster,2 -> bs,n_cluster,2
+            gt_diff = info_dict['future_key_points_diff'][:, 0]
+            # bs,n_cluster,2 -> bs,n_cluster
+            gt_l2_distance = torch.norm(gt_diff, p=2, dim=-1)
+            gt_prob = torch.softmax(-gt_l2_distance, dim=1)
+        else:
+            assert False, f'no future_key_points_ids in info_dict {list(info_dict.keys())}'
+
+        context_length = info_dict["context_length"]
+        candi_kp_num = info_dict['candi_kp_num']
+        pred_proposal_embed = hidden_output[:, context_length:context_length + candi_kp_num, :]  # (bs, n_candi, n_embed)
+        pred_proposal_scores = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, n_candi, 1)
+        pred_proposal_logits = pred_proposal_scores.squeeze(-1) # (bs, n_candi)
+        loss_proposal = self.cls_proposal_loss(pred_proposal_logits.to(hidden_output.dtype), gt_prob)
+        pred_proposal_cls = pred_proposal_logits.argmax(dim=-1)
+        return loss_proposal.mean(), pred_proposal_cls
+
+    def generate_keypoints(self, hidden_state, topk_num):
+        # batch_size, seq_len, hidden_dim = hidden_state.shape
+        # bs,n_candi,n_embed -> bs,n_candi,1
+        key_point_id_scores = self.proposal_cls_decoder(hidden_state)
+        # -> bs,n_candi
+        key_point_id_logits = key_point_id_scores.squeeze(-1)
+        # -> bs,n_candi
+        key_point_id_scores = nn.Softmax(dim=-1)(key_point_id_logits)
+        # -> bs,
+        key_point_ids = key_point_id_scores.argmax(dim=-1)
+        key_point_scores_topk, key_point_ids_topk = torch.topk(key_point_id_scores, k = topk_num, dim=-1)
+        return key_point_ids, key_point_id_scores, key_point_ids_topk, key_point_scores_topk
+
+        # key_point_logits = self.tokenizer.decode(key_point_id)  # b, s=1, 2
+        # return key_point_ids, key_point_id_scores
 
 class KeyPointMLPDeocder(nn.Module):
     def __init__(self, config):
@@ -362,7 +480,7 @@ class KeyPointMLPDeocder(nn.Module):
             # This is because evaluation is way faster than training (since there are no backward propagation), and after saving features for evaluation, we just change our test set to training set and then run the evaluation loop again.
             # The related code can be found in runner.py at around line 511.
             self.current_idx = 0
-            
+
     def compute_keypoint_loss(self,
                               hidden_output,
                               info_dict: Dict = None,
@@ -483,7 +601,7 @@ class KeyPointMLPDeocder(nn.Module):
         else:
             key_points_logit = self.model(hidden_state).reshape(batch_size, 1, -1)  # b, 1, 4/2*k
         return key_points_logit, None
-    
+
     def save_features(self,input_embeds,context_length,info_dict,future_key_points,transformer_outputs_hidden_state):
         # print("hidden_state shape: ",transformer_outputs_hidden_state.shape)
         current_device_idx = int(str(input_embeds.device)[-1])
