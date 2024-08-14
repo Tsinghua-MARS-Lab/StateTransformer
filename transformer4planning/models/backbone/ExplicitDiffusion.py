@@ -1,6 +1,6 @@
-#######################################################################################
-# receive the checkpoint from the original STR and combine it with the diffusion model#
-#######################################################################################
+###################################
+# using the diffusion from liderun#
+###################################
 import torch
 import torch.nn as nn
 import numpy as np
@@ -13,6 +13,7 @@ from einops import rearrange, reduce
 import torch.nn.functional as F
 from typing import Tuple, Optional, Dict
 from transformer4planning.models.diffusion_loss.traj_diffusion import TrajDiffusion
+from transformer4planning.models.diffusion_loss.TrajRefiner import TrajectoryRefiner
 from transformer4planning.models.diffusion_loss.mlp import SimpleMLP
 from transformers.modeling_utils import PreTrainedModel
 
@@ -26,10 +27,10 @@ class LTMOutput(CausalLMOutputWithCrossAttentions):
     
 
 
-class ExplicitDiT(PreTrainedModel):
+class ExplicitDiffusion(PreTrainedModel):
     def __init__(self, config):
         from transformer4planning.utils.common_utils import load_config
-        print("=================ExplicitDiT===================")
+        print("=================DiffusionRefiner===================")
         print("loading the diffusion config...")
         cfg=load_config(config.diffusion_config)
         
@@ -60,16 +61,11 @@ class ExplicitDiT(PreTrainedModel):
         return self.str_model.encoder
     
     def _build_model(self):
-        self.diffusion = TrajDiffusion(self.cfg)
+        self.diffusion = TrajectoryRefiner(self.cfg)
         
-        if self.config.learnable_std_mean:
-            self.data_mean = nn.Parameter(torch.zeros(4))
-            self.data_std = nn.Parameter(torch.ones(4))
-        else:
-            self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
         
         if self.learnable_init_traj:
-            self.init_x = nn.Parameter(torch.randn(list([self.trajectory_dim*self.frame_stack])), requires_grad=True)
+            self.init_x = nn.Parameter(torch.randn(list([self.frame_stack, self.trajectory_dim])), requires_grad=True)
         else:
             self.init_x = torch.zeros(list([self.trajectory_dim*self.frame_stack]))
     
@@ -104,21 +100,21 @@ class ExplicitDiT(PreTrainedModel):
         loss = []
         transition_info = init_traj
         # into the diffusion model
-        # label: (8, b, 40)
-        # trajectory_prior: (8, b, 40)
+        # label: (8, b, 10, 4)
+        # trajectory_prior: (8, b, 10, 4)
         # maps_info: (8, b, 788, 512)
         # init_traj: (b, 40)
+        self.diffusion.train()
         for t in range(0, n_frames):
             l, prediction= self.diffusion(
-                label[t], transition_info, trajectory_prior[t], maps_info[t]   
-            ) # (b, 40)
+                label[t], transition_info, trajectory_prior[t], maps_info
+            ) # (b, 10, 4)
             transition_info = prediction
             loss.append(l)
             final_predict.append(prediction)
         # Notice the final_predict is not the final result, it is the intermediate result
         final_predict = torch.stack(final_predict)
-        final_predict = rearrange(final_predict, "t b (fs c) ... -> b (t fs) c ...", fs=self.frame_stack)
-        final_predict = self._unnormalize_x(final_predict)
+        final_predict = rearrange(final_predict, "t b fs c ... -> b (t fs) c ...", fs=self.frame_stack)
         
         loss = torch.stack(loss)
         x_loss = loss.mean()
@@ -148,18 +144,14 @@ class ExplicitDiT(PreTrainedModel):
             raise ValueError("Number of frames must be divisible by frame stack size")
         n_frames = n_frames // self.frame_stack
 
-        trajectory_prior = rearrange(trajectory_prior, "b (t fs) d -> t b (fs d)", fs=self.frame_stack).contiguous()
-        
-        if self.map_cond:
-            maps_info = rearrange(maps_info, "b t d -> 1 b t d").repeat(n_frames, 1, 1, 1)
-
-        label = self._normalize_x(label)
-        label = rearrange(label, "b (t fs) c ... -> t b (fs c) ...", fs=self.frame_stack).contiguous()
-        
         if self.learnable_init_traj:
             init_traj = self.init_x[None].expand(batch_size, *self.init_x.shape)
         else:
             init_traj = self.init_x[None].expand(batch_size, *self.init_x.shape)
+        
+        trajectory_prior = rearrange(trajectory_prior, "b (t fs) c ... -> t b fs c ...", fs=self.frame_stack)
+        label = rearrange(label, "b (t fs) c ... -> t b fs c ...", fs=self.frame_stack)
+        
 
         return label, trajectory_prior, maps_info, init_traj
     
@@ -179,56 +171,24 @@ class ExplicitDiT(PreTrainedModel):
         
         final_predict = []
         transition_info = init_traj
-        
+        self.diffusion.eval()
         # prediction
         for t in range(0, n_frames):
             prediction= self.diffusion.generate(
-                label[t], transition_info, trajectory_prior[t], maps_info[t]
+                label[t], transition_info, trajectory_prior[t], maps_info
             ) # torch.Size([8, 1, 40])
             transition_info = prediction
             final_predict.append(prediction)
         final_predict = torch.stack(final_predict)
         
+        
         # unnormalize after rearrange
-        final_predict = rearrange(final_predict, "t b (fs c) ... -> b (t fs) c ...", fs=self.frame_stack)
-        final_predict = self._unnormalize_x(final_predict)
+        final_predict = rearrange(final_predict, "t b fs c ... -> b (t fs) c ...", fs=self.frame_stack)
+        print("final predict:", final_predict[0,:2])
         pred_dict = {
             "traj_logits": final_predict.to(dtype=torch.float)
         }
         return pred_dict
 
-    def _normalize_x(self, xs):
-        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
-        mean = self.data_mean.reshape(shape).to(xs.device)
-        std = self.data_std.reshape(shape).to(xs.device)
-        return (xs - mean) / std
-
-    def _unnormalize_x(self, xs):
-        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
-        mean = self.data_mean.reshape(shape).to(xs.device)
-        std = self.data_std.reshape(shape).to(xs.device)
-        return xs * std + mean
 
         
-    def register_data_mean_std(
-        self, mean: Union[str, float, Sequence], std: Union[str, float, Sequence], namespace: str = "data"
-    ):
-        """
-        Register mean and std of data as tensor buffer.
-
-        Args:
-            mean: the mean of data.
-            std: the std of data.
-            namespace: the namespace of the registered buffer.
-        """
-        for k, v in [("mean", mean), ("std", std)]:
-            if isinstance(v, str):
-                if v.endswith(".npy"):
-                    v = torch.from_numpy(np.load(v))
-                elif v.endswith(".pt"):
-                    v = torch.load(v)
-                else:
-                    raise ValueError(f"Unsupported file type {v.split('.')[-1]}.")
-            else:
-                v = torch.tensor(v)
-            self.register_buffer(f"{namespace}_{k}", v.float().to(self.device))

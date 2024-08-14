@@ -19,9 +19,9 @@ class DiffusionForTraj(nn.Module):
             n_prior_steps: int = 0,
             prior_dim: int = 0,
             
-            n_layer: int = 6,
-            n_head: int = 8,
-            n_emb: int = 128,
+            n_layer: int = 2,
+            n_head: int = 4,
+            n_emb: int = 32,
             p_drop_emb: float = 0.1,
             p_drop_attn: float = 0.1,
             causal_attn: bool=False,
@@ -46,6 +46,7 @@ class DiffusionForTraj(nn.Module):
 
         
         # input embedding stem
+        self.out_features = output_dim
         self.input_emb = nn.Linear(input_dim, n_emb)
         self.pos_emb = nn.Parameter(torch.zeros(1, T, n_emb))
         self.drop = nn.Dropout(p_drop_emb)
@@ -204,9 +205,7 @@ class DiffusionForTraj(nn.Module):
     def forward(self,
         noisy_x: torch.Tensor, 
         timestep: Union[torch.Tensor, float, int], 
-        transition_info: Optional[torch.Tensor]=None,
-        trajectory_prior: Optional[torch.Tensor]=None,
-        maps_info: Optional[torch.Tensor]= None, **kwargs):
+        condition, **kwargs):
         """
         x: (B,T,input_dim)
         timestep: (B,) or int, diffusion step
@@ -221,6 +220,9 @@ class DiffusionForTraj(nn.Module):
         by x_from_z, we can get the output x
         
         """
+        maps_info = condition["maps_info"]
+        transition_info = condition["transition_info"]
+        trajectory_prior = condition["trajectory_prior"]
         # 1. time
         timesteps = timestep
         if not torch.is_tensor(timesteps):

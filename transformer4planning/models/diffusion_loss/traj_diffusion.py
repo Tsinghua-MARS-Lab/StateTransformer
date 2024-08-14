@@ -8,6 +8,7 @@ from einops import rearrange, reduce
 from transformer4planning.models.diffusion_loss.diffusion import DiffusionForTraj
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers import DDIMScheduler
+from transformer4planning.models.utils import *
 
 class TrajDiffusion(nn.Module):
     def __init__(self, cfg):
@@ -121,6 +122,4 @@ class TrajDiffusion(nn.Module):
         
         
         return loss, pred_x
-        
-        
         

@@ -110,7 +110,8 @@ def exp_positional_embedding(key_point_num, feat_dim):
 
 def uniform_positional_embedding(key_point_num, feat_dim):
     point_num = key_point_num
-    position = torch.tensor([6 * (point_num - i)] for i in range(point_num))
+    position = torch.tensor([[6 * (point_num - i)] for i in range(point_num)])
+
     # Create a table of divisors to divide each position. This will create a sequence of values for the divisor.
     div_term = torch.exp(torch.arange(0, feat_dim, 2).float() * (-math.log(100.0) / feat_dim))
 
@@ -121,3 +122,18 @@ def uniform_positional_embedding(key_point_num, feat_dim):
     pos_embedding[:, 1::2] = torch.cos(position * div_term)
 
     return pos_embedding
+
+from transformer4planning.utils.modify_traj_utils import modify_func
+def select_k_from_mc(traj_logits, scores, k):
+    reg_sigma_cls_dict = modify_func(
+        output = dict(
+            reg = [traj_p for traj_p in traj_logits.detach().unsqueeze(1)],
+            cls = [cls for cls in scores.detach().unsqueeze(1)],
+        ),
+        num_mods_out = k,
+        EM_Iter = 25,
+    )
+    traj_logits = torch.cat(reg_sigma_cls_dict["reg"],dim=0)
+    scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
+    
+    return traj_logits, scores

@@ -1038,6 +1038,7 @@ def build_models(model_args):
             from transformer4planning.models.backbone.StrDiff import StrDiff
             from transformer4planning.models.backbone.StrDiffDiT import StrDiffDiT
             from transformer4planning.models.backbone.ExplicitDiT import ExplicitDiT
+            from transformer4planning.models.backbone.ExplicitDiffusion import ExplicitDiffusion
             
     
             if 'dit' in model_args.model_name:
@@ -1056,6 +1057,12 @@ def build_models(model_args):
                 config_p.learnable_std_mean = model_args.learnable_std_mean
                 config_p.map_cond = model_args.map_cond
                 ModelCls = ExplicitDiT
+            elif 'refiner' in model_args.model_name:
+                config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/ldr_diffusion.yaml"
+                config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
+                config_p.learnable_std_mean = model_args.learnable_std_mean
+                config_p.map_cond = model_args.map_cond
+                ModelCls = ExplicitDiffusion
             else:
                 config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiff.yaml"
                 config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path

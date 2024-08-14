@@ -1,0 +1,35 @@
+# the config file for explicit DiT
+trajectory_dim: 4
+frame_stack: 10
+learnable_init_traj: True
+map_cond: True
+
+data_mean: [50,5,0,0]
+data_std: [100,10,1,1]
+
+optimizer_beta: [0.9, 0.999]
+
+maps_dim: 256
+n_maps_token: 788
+
+
+  # num_train_timesteps: 100
+  # num_inference_steps: 10
+  # beta_start: 0.0001
+  # beta_end: 0.02
+  # beta_schedule: linear
+  # variance_type: fixed_small # Yilun's paper uses fixed_small_log instead, but easy to cause Nan
+  # clip_sample: True # required when predict_epsilon=False
+  # prediction_type: epsilon # or sample or epsilon
+
+
+# ldr's diffusion version
+diffusion_backbone: DDPM
+predict_yaw: True
+k: 1
+
+beta_schedule: linear
+diffusion_timesteps: 10
+
+trajectory_loss_rescale: 1.0
+visualize_diffusion_intermedians: False
