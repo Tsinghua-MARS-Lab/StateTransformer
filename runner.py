@@ -44,6 +44,7 @@ from transformer4planning.trainer import compute_metrics
 from datasets import Dataset, Value
 
 # os.environ["WANDB_DISABLED"] = "true"
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
@@ -83,10 +84,6 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
         pass
 
     dataset.set_format(type='torch')
-    # if "centerline" in dataset.column_names:
-    #     dataset = dataset.filter(lambda example: np.sum(np.array(example["centerline"])) != 0, num_proc=mp.cpu_count())
-    # if 'halfs_intention' in dataset.column_names and split == 'train':
-    #     dataset = dataset.filter(lambda example: not (int(example["halfs_intention"]) == 4 and random.random() > 0.1), num_proc=mp.cpu_count())
 
     if agent_type != "all":
         agent_type_list = agent_type.split()
@@ -102,7 +99,15 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
-    model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, config_args, training_args = parser.parse_args_into_dataclasses()
+
+    if training_args.gradient_checkpointing:
+        """
+        Gradient checkpointing is going to crush your training for unknown reasons of the transformers library.
+        This problem bugs universally over all backbones and types of encoders!
+        See https://discuss.huggingface.co/t/enabling-gradient-checkpointing-and-deepspeed-zero3-raise-train-failure/53789
+        """
+        logger.warning("Gradient checkpointing is likely going to crush your training for unknown reasons!!!!!")
 
     # set default label names
     training_args.label_names = ['trajectory_label']
@@ -182,42 +187,37 @@ def main():
         index_root = data_args.saved_dataset_folder
     root_folders = os.listdir(index_root)
 
-    if data_args.use_full_training_set:
-        if 'train_alltype' in root_folders:
-            train_dataset = load_dataset(index_root, "train_alltype", data_args.dataset_scale, data_args.agent_type, True)
-        else:
-            raise ValueError("No training dataset found in {}, must include at least one city in /train_alltype".format(index_root))
+    if 'train' in root_folders:
+        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
     else:
-        if 'train' in root_folders:
-            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
-        else:
-            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+        raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
 
     if model_args.camera_image_encoder is not None:
         train_dataset = train_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
 
-    if training_args.do_test and 'test' in root_folders:
-        # TODO: compatible with older training args
+    if training_args.do_test:
+        assert 'test' in root_folders, f'No test dataset found in {root_folders}, cannot do test'
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
     else:
-        logger.warning('Using training set as test set')
-        test_dataset = train_dataset
+        test_dataset = None
 
-    if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
+    if (training_args.do_eval or training_args.do_predict):
+        assert 'val' in root_folders, f'No val dataset found in {root_folders}, cannot do eval or predict'
         val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False)
         if model_args.camera_image_encoder is not None:
             val_dataset = val_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
-    else:
-        logger.warning('Validation set not found, using training set as val set')
-        val_dataset = test_dataset
-        # val_dataset = train_dataset
 
-    if data_args.do_closed_loop_simulation and 'val1k' in root_folders:
-        # WIP
-        val1k_dataset = load_dataset(index_root, "val1k", data_args.dataset_scale, data_args.agent_type, False)
-        val1k_dataset = val1k_dataset.suffle(seed=training_args.seed)
+    val14_1k_dataset = None
+    if training_args.do_sim_val:
+        # load val14_1k dataset for sim_val, 1118 samples in total
+        assert 'val14_1k' in root_folders, f'No val14_1k dataset found in {root_folders}, cannot do sim_val'
+        val14_1k_dataset = load_dataset(index_root, "val14_1k", data_args.dataset_scale, data_args.agent_type, False)
+    elif training_args.do_sim_test:
+        assert 'test' in root_folders, f'No test dataset found in {root_folders}, cannot do sim_test'
+        val14_1k_dataset = load_dataset(index_root, "test_hard14_index", data_args.dataset_scale, data_args.agent_type, False)
 
-    # clean image fodler
+
+    # clean image folders
     def check_images(each):
         if 'images_path' not in each:
             logger.error('images_path not found in dataset')
@@ -252,7 +252,7 @@ def main():
                 dest_fpath = os.path.join(training_args.images_cleaning_to_folder, each_image)
                 os.makedirs(os.path.dirname(dest_fpath), exist_ok=True)
                 img = PIL.Image.open(src_fpath)
-                img = img.resize((1080 // 4, 1920 // 4))
+                img = img.resize((1920 // 4, 1080 // 4))
                 img.save(dest_fpath)
             else:
                 logger.warning('Image not found: ' + src_fpath)
@@ -298,16 +298,20 @@ def main():
                 all_maps_dic[map_name] = map_dic
 
     # loop split info and update for test set
-    logger.info('TrainingSet: '+ str(train_dataset) + '\nValidationSet' + str(val_dataset) + '\nTestingSet' + str(test_dataset))
+    logger.info('TrainingSet: '+ str(train_dataset) + '\nValidationSet: ' + str(val_dataset) + '\nTestingSet: ' + str(test_dataset) + '\nSimulationSet: ' + str(val14_1k_dataset))
 
     dataset_dict = dict(
         train=train_dataset.shuffle(seed=training_args.seed),
-        validation=val_dataset.shuffle(seed=training_args.seed),
-        test=test_dataset.shuffle(seed=training_args.seed),
+        validation=val_dataset,
+        test=test_dataset.shuffle(seed=training_args.seed) if test_dataset is not None else None,
     )
 
     # Load a model's pretrained weights from a path or from hugging face's model base
     model = build_models(model_args)
+    # use sync normal
+    if model_args.sync_norm:
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+
     # clf_metrics = dict(
     #     accuracy=evaluate.load("accuracy"),
     #     f1=evaluate.load("f1"),
@@ -316,7 +320,7 @@ def main():
     # )
     # if 'auto' in model_args.model_name and model_args.k == -1:  # for the case action label as token
     #     model.clf_metrics = clf_metrics
-    if training_args.do_train:
+    if training_args.do_train or training_args.do_predict:
         import multiprocessing
         if 'OMP_NUM_THREADS' not in os.environ:
             # os.environ["OMP_NUM_THREADS"] = str(int(multiprocessing.cpu_count() / training_args.dataloader_num_workers))
@@ -326,17 +330,28 @@ def main():
             max_train_samples = min(len(train_dataset), data_args.max_train_samples)
             train_dataset = train_dataset.select(range(max_train_samples))
 
-    if training_args.do_eval:
+    if training_args.do_eval or training_args.do_predict:
         eval_dataset = dataset_dict["validation"]
         if data_args.max_eval_samples is not None:
             max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
             eval_dataset = eval_dataset.select(range(max_eval_samples))
 
-    if training_args.do_predict:
-        predict_dataset = dataset_dict["test"]
-        if data_args.max_predict_samples is not None:
-            max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
-            predict_dataset = predict_dataset.select(range(max_predict_samples))
+    if training_args.do_test:
+        test_dataset = dataset_dict["test"]
+        if data_args.max_test_samples is not None:
+            max_test_samples = min(len(test_dataset), data_args.max_test_samples)
+            test_dataset = test_dataset.select(range(max_test_samples))
+
+    if model_args.finetuning_with_simulation_on_val:
+        logger.warning('Finetuning with simulation on val set!!')
+        assert training_args.do_sim_val, 'do_sim_val must be set to True to finetune with simulation on val set'
+        assert val14_1k_dataset is not None, 'No val14_1k dataset found, cannot finetune with simulation on val set'
+        train_dataset = copy.deepcopy(val14_1k_dataset)
+
+    if training_args.do_sim_val or training_args.do_sim_test:
+        if data_args.max_sim_samples is not None:
+            max_sim_samples = min(len(val14_1k_dataset), data_args.max_sim_samples)
+            val14_1k_dataset = val14_1k_dataset.select(range(max_sim_samples))
 
     # Initialize our Trainer
     if model_args.task == "nuplan":
@@ -384,6 +399,12 @@ def main():
     else:
         raise AttributeError("task must be nuplan or waymo or train_diffusion_decoder")
 
+    if training_args.num_cycles is not None:
+        lr_scheduler_kwargs = {
+            'num_cycles': training_args.num_cycles,
+        }
+        training_args.lr_scheduler_kwargs = lr_scheduler_kwargs
+
     trainer = PlanningTrainer(
         model=model,  # the instantiated 🤗 Transformers model to be trained
         args=training_args,  # training arguments, defined above
@@ -393,6 +414,104 @@ def main():
         data_collator=collate_fn,
         compute_metrics=compute_metrics_waymo if model_args.task == "waymo" else compute_metrics
     )
+
+    model.data_collator = trainer.data_collator
+
+    if training_args.do_sim_val or training_args.do_sim_test:
+        trainer.val14_1k_dataset = val14_1k_dataset
+        # check lagitimacy of simulation steps if not None
+        if training_args.sim_steps is not None:
+            assert training_args.sim_steps % training_args.eval_steps == 0, f'simulation_steps must be divisible by eval_steps {training_args.simulation_steps} {training_args.eval_steps}'
+
+        # initialize nuplan scenarios for simulation
+        import yaml, time
+        from nuplan_simulation.common_utils import get_scenario_map, get_filter_parameters
+        from nuplan.planning.scenario_builder.nuplan_db.nuplan_scenario_utils import ScenarioMapping
+        from nuplan.planning.scenario_builder.nuplan_db.nuplan_scenario_builder import NuPlanScenarioBuilder
+        from nuplan.planning.scenario_builder.scenario_filter import ScenarioFilter
+        from nuplan.planning.utils.multithreading.worker_parallel import SingleMachineParallelExecutor
+        os.environ['NUPLAN_EXP_ROOT'] = trainer.args.nuplan_sim_exp_root
+        # build simulation folder
+        # build_simulation_experiment_folder(output_dir, simulation_dir, metric_dir, aggregator_metric_dir)
+        # set a timer
+        start_time = time.perf_counter()
+        # build scenarios
+        print('Extracting scenarios...')
+        map_version = "nuplan-maps-v1.0"
+        scenario_mapping = ScenarioMapping(scenario_map=get_scenario_map(), subsample_ratio_override=0.5)
+        builder = NuPlanScenarioBuilder(trainer.args.nuplan_sim_data_path,
+                                        trainer.args.nuplan_sim_map_folder,
+                                        None, None, map_version, scenario_mapping=scenario_mapping)
+        params = yaml.safe_load(open(trainer.args.nuplan_sim_split_filter_yaml, 'r'))
+        scenario_filter = ScenarioFilter(**params)
+
+        # number of workers = cpu count / gpu count
+
+        # calculate the available number of cpus
+        worker = SingleMachineParallelExecutor(use_process_pool=False)
+        # from multiprocessing import cpu_count
+        # num_workers = cpu_count() * trainer.args.world_size
+        # worker = SingleMachineParallelExecutor(use_process_pool=False, max_workers=num_workers)
+        scenarios = builder.get_scenarios(scenario_filter, worker)
+        trainer.scenarios = scenarios
+        if model_args.finetuning_with_simulation_on_val:
+            model.training_scenarios = scenarios
+
+        print(f'\nTime all: {time.perf_counter() - start_time:.3f} s')
+
+    # manage Megatron if set to use
+    from accelerate import DistributedType
+    if trainer.accelerator.distributed_type == DistributedType.MEGATRON_LM:
+        from accelerate.utils import MegatronLMDummyScheduler
+        lr_scheduler = MegatronLMDummyScheduler(
+            optimizer=trainer.optimizer,
+            total_num_steps=training_args.max_steps,
+            warmup_num_steps=training_args.warmup_steps,
+        )
+        trainer.lr_scheduler = lr_scheduler
+        from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+        from transformers.modeling_utils import PreTrainedModel, load_sharded_checkpoint, unwrap_model
+        from transformers.utils import (
+            SAFE_WEIGHTS_NAME,
+            WEIGHTS_NAME,
+        )
+        import safetensors
+        TRAINING_ARGS_NAME = "training_args.bin"
+        import types
+        def _save(self, output_dir: Optional[str] = None, state_dict=None):
+            # If we are executing this function, we are the process zero, so we don't check for that.
+            output_dir = output_dir if output_dir is not None else self.args.output_dir
+            os.makedirs(output_dir, exist_ok=True)
+            logger.info(f"Saving model checkpoint to {output_dir}")
+
+            supported_classes = (PreTrainedModel,)
+            # Save a trained model and configuration using `save_pretrained()`.
+            # They can then be reloaded using `from_pretrained()`
+            if not isinstance(self.model, supported_classes):
+                if state_dict is None:
+                    state_dict = self.model.state_dict()
+
+                if isinstance(unwrap_model(self.model), supported_classes):
+                    trainer.accelerator.save_state(output_dir)
+                else:
+                    logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
+                    if self.args.save_safetensors:
+                        safetensors.torch.save_file(
+                            state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME), metadata={"format": "pt"}
+                        )
+                    else:
+                        torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+            else:
+                trainer.accelerator.save_state(output_dir)
+
+            if self.tokenizer is not None:
+                self.tokenizer.save_pretrained(output_dir)
+
+            # Good practice: save your training arguments together with the trained model
+            torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+
+        trainer.save_model = types.MethodType(_save, trainer)
+
     trainer.pop_callback(DefaultFlowCallback)
 
     checkpoint = None
@@ -409,7 +528,7 @@ def main():
 
     # Evaluation
     results = {}
-    if training_args.do_eval:
+    if training_args.do_eval and not training_args.do_predict:
         if not training_args.do_train and training_args.resume_from_checkpoint is not None:
             assert 'pretrain' in model_args.model_name, 'resume_from_checkpoint is only for training, use pretrain model to load for eval only'
         result = trainer.evaluate(eval_dataset=eval_dataset, metric_key_prefix="eval")
@@ -419,14 +538,31 @@ def main():
         # evaluate.save("./results/", ** result, ** hyperparams)
         # logger.info(f" fde: {trainer.fde} ade: {trainer.ade}")
 
-    if data_args.do_closed_loop_simulation:
-        """
-        Will save closed loop simulation results
-        """
-        logger.info("*** Closed Loop Simulation ***")
-
 
     if training_args.do_predict:
+        """
+        Use this to inference on specific dataset and output the worst or best cases for visualizations and analysis
+        """
+        # compute predictions
+        # compute metrics
+        if config_args.save_analyze_result_to_path is not None and config_args.analyze_dataset_target is not None:
+            logger.info("*** Analyze ***")
+            with torch.no_grad():
+                if config_args.analyze_dataset_target == 'train':
+                    target_dataset = train_dataset
+                elif config_args.analyze_dataset_target == 'val':
+                    target_dataset = val_dataset
+                elif config_args.analyze_dataset_target == 'test':
+                    target_dataset = test_dataset
+                else:
+                    assert False, f'Unknown target dataset to analyze, got {config_args.analyze_dataset_target}'
+                trainer.analyze(target_dataset=target_dataset,
+                                result_saving_path=config_args.save_analyze_result_to_path)
+            logger.info("*** Analyze Finished ***")
+        else:
+            assert False, f'Pass result path and target dataset to analyze'
+
+    if False:
         # Currently only supports single GPU predict outputs
         """
         Will save prediction results, and dagger results if dagger is enabled
@@ -464,7 +600,6 @@ def main():
                 all_bias_x = []
                 all_bias_y = []
                 losses = []
-                loss_fn = torch.nn.MSELoss(reduction="mean")
 
             for itr, input in enumerate(tqdm(test_dataloader)):
                 # move batch to device
