@@ -109,6 +109,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         self.action_m_embed = nn.Sequential(nn.Linear(input_dim, action_kwargs.get("d_embed")), nn.Tanh())
 
         self.kp_tokenizer = None
+        self.traj_tokenizer = None
 
         # For key points, only use x, and y
         # currently forcing key point to be 2 dimension, with no speed and no yaw
@@ -116,7 +117,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         if self.config.use_key_points != 'no':
             # assert self.config.separate_kp_encoder
             self.kps_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
-        if self.config.use_key_points == 'no' and self.config.kp_tokenizer == 'cluster_traj':
+        if self.config.use_key_points == 'no' and self.config.traj_tokenizer == 'cluster_traj':
             # assert self.config.separate_kp_encoder
             self.kps_m_embed = nn.Sequential(nn.Linear(240, action_kwargs.get("d_embed")), nn.Tanh())
         if self.use_proposal:
@@ -260,8 +261,8 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
-            if self.config.kp_tokenizer == 'cluster_traj':
-                candidate_kp = self.kp_tokenizer[0].trajs.to(device)
+            if self.config.traj_tokenizer == 'cluster_traj':
+                candidate_kp = self.traj_tokenizer[0].trajs.to(device)
                 info_dict['candi_kp_num'] = candidate_kp.shape[0]
                 # n_candi,2 -> n_candi,256
                 candidate_kp_ = candidate_kp.reshape(candidate_kp.shape[0], -1)
@@ -271,7 +272,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 candi_embeds = candi_embeds.unsqueeze(0).repeat(bs,1,1)
                 input_embeds = torch.cat([input_embeds, candi_embeds], dim=1)
                 future_trajs_diff = []
-                for i in range(len(self.kp_tokenizer)):
+                for i in range(len(self.traj_tokenizer)):
                     traj_gt = trajectory_label[:, :, [0,1]].unsqueeze(1)
                     expanded_candidate_trajectory = candidate_kp[:, :, [0,1]].unsqueeze(0).repeat(bs,1,1,1)
                     # 计算每条轨迹与目标轨迹对应点之间的差值

@@ -402,7 +402,7 @@ class TrajDecoderCLS(nn.Module):
     def __init__(self, config, proposal_num):
         super().__init__()
         self.config = config
-        self.kp_tokenizer = None
+        self.traj_tokenizer = None
         self.proposal_num = proposal_num
         self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=proposal_num)
         self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
@@ -437,7 +437,7 @@ class TrajDecoderCLS(nn.Module):
         # pred_proposal_logits = pred_proposal_scores.squeeze(-1) # (bs, n_candi)
         loss_proposal = self.cls_proposal_loss(pred_proposal_scores.to(hidden_output.dtype), gt_prob.to(hidden_output.dtype))
         pred_proposal_cls = pred_proposal_scores.argmax(dim=-1)
-        pred_trajs = self.kp_tokenizer.decode(pred_proposal_cls)
+        pred_trajs = self.traj_tokenizer.decode(pred_proposal_cls)
         return loss_proposal.mean(), pred_trajs
 
     def generate_trajs(self, hidden_state, info_dict):
@@ -452,7 +452,7 @@ class TrajDecoderCLS(nn.Module):
         key_point_id_scores = nn.Softmax(dim=-1)(key_point_id_scores)
         # -> bs,
         key_point_ids = key_point_id_scores.argmax(dim=-1)
-        pred_trajs = self.kp_tokenizer.decode(key_point_ids)
+        pred_trajs = self.traj_tokenizer.decode(key_point_ids)
         zeros_tensor = torch.zeros([pred_trajs.shape[0], pred_trajs.shape[1], 1]).to(pred_trajs.device)
         pred_trajs_total = torch.cat((pred_trajs[ :, :, :2], zeros_tensor, pred_trajs[ :, :, 2:]), dim=-1)
         # key_point_logits = self.tokenizer.decode(key_point_id)  # b, s=1, 2

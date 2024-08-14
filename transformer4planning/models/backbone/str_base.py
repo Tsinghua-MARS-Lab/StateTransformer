@@ -95,8 +95,9 @@ class STR(PreTrainedModel):
         self.clf_metrics = None
 
         self.kp_tokenizer = None
+        self.traj_tokenizer = None
         try:
-            if self.config.kp_tokenizer is not None:
+            if self.config.kp_tokenizer is not None or self.config.traj_tokenizer is not None:
                 self.key_points_decoder = nn.ModuleList()
                 self.build_tokenizer()
         except AttributeError:
@@ -153,14 +154,14 @@ class STR(PreTrainedModel):
             for i in range(len(cluster_path)):
                 kp_tokenizer = ClusterKPTokenizer(cluster_path[i])
                 self.kp_tokenizer.append(kp_tokenizer)
-        elif self.config.kp_tokenizer == 'cluster_traj':
+        elif self.config.traj_tokenizer == 'cluster_traj':
             from transformer4planning.models.tokenizer.cluster_traj_tokenizer import ClusterTrajTokenizer
             cluster_path = self.config.kp_cluster_files.split(",")
             logger.warning(f"cluster_path {cluster_path}")
-            self.kp_tokenizer = []
+            self.traj_tokenizer = []
             for i in range(len(cluster_path)):
-                kp_tokenizer = ClusterTrajTokenizer(cluster_path[i])
-                self.kp_tokenizer.append(kp_tokenizer)
+                traj_tokenizer = ClusterTrajTokenizer(cluster_path[i])
+                self.traj_tokenizer.append(traj_tokenizer)
         else:
             raise NotImplementedError
 
@@ -176,6 +177,8 @@ class STR(PreTrainedModel):
 
                 if self.kp_tokenizer is not None:
                     self.encoder.kp_tokenizer = self.kp_tokenizer
+                if self.traj_tokenizer is not None:
+                    self.encoder.traj_tokenizer = self.traj_tokenizer                
             elif "vector" in self.config.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
@@ -268,11 +271,11 @@ class STR(PreTrainedModel):
                         new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[0]
                         self.key_points_decoder.append(new_key_points_decoder)
         if self.use_key_points == 'no':
-            if self.config.kp_tokenizer == 'cluster_traj':
+            if self.config.traj_tokenizer == 'cluster_traj':
                 from transformer4planning.models.decoder.base import TrajDecoderCLS
-                proposal_num_i = self.kp_tokenizer[0].trajs.shape[0]
+                proposal_num_i = self.traj_tokenizer[0].trajs.shape[0]
                 new_traj_decoder = TrajDecoderCLS(self.config, proposal_num=proposal_num_i)
-                new_traj_decoder.kp_tokenizer = self.kp_tokenizer[0]
+                new_traj_decoder.traj_tokenizer = self.traj_tokenizer[0]
                 self.key_traj_decoder = new_traj_decoder
         # create a model list of traj_decoder for each
         # self.traj_decoders = nn.ModuleList()
@@ -315,7 +318,7 @@ class STR(PreTrainedModel):
                 trajectory_label = trajectory_label.flip(-2)
             loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
             frames_length_to_predict = trajectory_label.shape[1]
-            if self.config.kp_tokenizer == 'cluster_traj':
+            if self.config.traj_tokenizer == 'cluster_traj':
                 traj_loss, traj_logits = self.key_traj_decoder.compute_traj_loss(transformer_outputs_hidden_state, info_dict)
                 loss += traj_loss
             else:
@@ -372,7 +375,7 @@ class STR(PreTrainedModel):
             elif self.config.kp_decoder_type == "linear":
                 kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
             else:
-                if self.kp_tokenizer is None:
+                if self.kp_tokenizer is None and self.traj_tokenizer is None:
                     kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
                     # kp_loss will be 10x larger than traj_loss when converged
                     if self.k > 1:
@@ -388,7 +391,10 @@ class STR(PreTrainedModel):
                         else:
                             kp_loss, kp_id = self.key_points_decoder[i].compute_keypoint_loss(transformer_outputs_hidden_state, info_dict, i)
                             kp_losses.append(kp_loss)  # list of [1]
-                            kp_logit = self.kp_tokenizer[i].decode(kp_id, dtype=kp_loss.dtype, device=kp_loss.device)
+                            if self.config.kp_tokenizer is not None:
+                                kp_logit = self.kp_tokenizer[i].decode(kp_id, dtype=kp_loss.dtype, device=kp_loss.device)
+                            elif self.config.traj_tokenizer is not None:
+                                kp_logit = self.traj_tokenizer[i].decode(kp_id, dtype=kp_loss.dtype, device=kp_loss.device)
                             kp_logits.append(kp_logit)  # list of [bsz, 2]
 
                     loss_per_kp = torch.stack(kp_losses, dim=0)  # [5]
@@ -657,7 +663,10 @@ class STR(PreTrainedModel):
                     future_key_point_hidden_state = transformer_outputs_hidden_state[:, kp_start_index - candi_kp_num:kp_start_index, :]
 
                     key_point_ids, key_points_scores, key_point_ids_topk, key_point_scores_topk = self.key_points_decoder[0].generate_keypoints(future_key_point_hidden_state, self.config.kp_decoder_num)
-                    key_points_logit = self.kp_tokenizer[0].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
+                    if self.config.kp_tokenizer is not None:
+                        key_points_logit = self.kp_tokenizer[0].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
+                    else:
+                        key_points_logit = self.traj_tokenizer[0].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
                     pred_key_points_ids.append(key_point_ids) # [ (bs,) ]
                     pred_key_points_scores.append(key_points_scores) # [ (bs, 1, n_cluster)]
 
@@ -665,7 +674,10 @@ class STR(PreTrainedModel):
                     key_points_logit_top_ks = []
                     for top_k in range(key_point_ids_topk.shape[-1]):
                         # [topk (bs, 2) ]
-                        key_points_logit_top_ks.append(self.kp_tokenizer[0].decode(key_point_ids_topk[:, top_k], dtype=key_points_scores.dtype, device=key_points_scores.device) )
+                        if self.config.kp_tokenizer is not None:
+                            key_points_logit_top_ks.append(self.kp_tokenizer[0].decode(key_point_ids_topk[:, top_k], dtype=key_points_scores.dtype, device=key_points_scores.device) )
+                        else:
+                            key_points_logit_top_ks.append(self.traj_tokenizer[0].decode(key_point_ids_topk[:, top_k], dtype=key_points_scores.dtype, device=key_points_scores.device) )
                         key_points_score_top_ks.append(key_point_scores_topk[:, top_k]) # [topk (bs,)]
                     pred_key_points_topk.append(key_points_logit_top_ks) # [K [topk (bs, 2) ]]
                     pred_key_points_topk_scores.append(key_points_score_top_ks) # [K [topk (bs,)]
@@ -846,7 +858,7 @@ class STR(PreTrainedModel):
                 #         expanded_traj_logits[:, i * 10 + j, :] = traj_logits[:, i, :] + (traj_logits[:, i + 1, :] - traj_logits[:, i, :]) * j / 10
                 # traj_logits_k.append(expanded_traj_logits)
             # expected shape for pred trajectory is (b, pred_length, 4/7)
-            elif self.config.kp_tokenizer == 'cluster_traj':
+            elif self.config.traj_tokenizer == 'cluster_traj':
                 traj_logits, scores = self.key_traj_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
                 if self.config.reverse_traj_index_order:
                     traj_logits = traj_logits.flip(-2)
@@ -875,7 +887,7 @@ class STR(PreTrainedModel):
 
         key_points_pred_logits = None
         if select_k == 1:
-            if self.config.kp_tokenizer == "cluster_traj":
+            if self.config.traj_tokenizer == "cluster_traj":
                 traj_pred_logits = traj_logits_k[0]
             elif self.config.kp_decoder_type == "candi_cls":
                 traj_pred_logits = torch.stack(traj_logits_k, dim=1)
