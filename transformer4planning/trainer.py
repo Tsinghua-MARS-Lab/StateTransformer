@@ -132,7 +132,7 @@ def compute_metrics(prediction: EvalPrediction):
     if isinstance(loss_items, dict):
         for each_key in loss_items:
             if each_key == 'loss_per_kp':
-                #loss_items[each_key] = loss_items[each_key].reshape(-1, 5)
+                loss_items[each_key] = loss_items[each_key].reshape(-1, 5)
                 for i in range(loss_items[each_key].shape[-1]):
                     eval_result[f'kp_loss_{i}'] = np.mean(loss_items[each_key][:, i])
                 continue
