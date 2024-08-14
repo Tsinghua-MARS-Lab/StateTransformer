@@ -127,6 +127,10 @@ class ModelArguments:
     traj_dropout: Optional[float] = field(
         default=0.0
     )
+    kp_decoder_num: Optional[int] = field(
+        default=1,
+        metadata={"help": "output topk key_point"}
+    )
     ######## end of key points args ########
 
     ######## begin of diffusion decoder args ########
@@ -316,6 +320,11 @@ class ModelArguments:
     kp_tokenizer: Optional[str] = field(
         default=None, metadata={"help": "choose from [none, uniform, cluster, gaussian]"}
     )
+
+    traj_tokenizer: Optional[str] = field(
+        default=None, metadata={"help": "choose from [none, cluster_traj]"}
+    )
+
     kp_cluster_files: Optional[str] = field(
         default=None, metadata={"help": "csv files which record all cluster center info for 8s 4s 2s 1s 0.5s"}
     )
