@@ -127,6 +127,10 @@ class ModelArguments:
     traj_dropout: Optional[float] = field(
         default=0.0
     )
+    kp_decoder_num: Optional[int] = field(
+        default=1,
+        metadata={"help": "output topk key_point"}
+    )
     ######## end of key points args ########
 
     ######## begin of diffusion decoder args ########
