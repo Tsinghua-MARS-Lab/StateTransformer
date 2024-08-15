@@ -69,7 +69,7 @@ class STRConfig(PretrainedConfig):
                      "vit_intermediate_size", "mean_circular_loss",
                      "camera_image_encoder", "use_speed", "no_yaw_with_stepping", "autoregressive", "regression_long_class_short",
                      "kp_dropout", "traj_dropout", "trajectory_decoder_type", "skip_yaw_norm",
-                     "output_router_logits"]
+                     "output_router_logits", "skip_trajectory_decoding"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
                 self.__dict__[each_attr] = False
@@ -80,12 +80,11 @@ class STR(PreTrainedModel):
         super().__init__(config)
         self.config = config
         self.encoder = None
+        self.proposal_decoder = None
+        self.key_points_decoder = None
         self.traj_decoder = None
         self.camera_image_encoder = None
         self.k = int(self.config.k)
-
-        self.use_proposal = self.config.use_proposal
-        # if self.use_proposal: assert self.config.task == "waymo", "NotImplemented"
 
         self.use_key_points = self.config.use_key_points
         self.kp_decoder_type = self.config.kp_decoder_type
@@ -94,53 +93,32 @@ class STR(PreTrainedModel):
         self.device_map = None
         self.clf_metrics = None
 
-        self.kp_tokenizer = None
-        try:
-            if self.config.kp_tokenizer is not None:
-                self.key_points_decoder = nn.ModuleList()
-                self.build_tokenizer()
-        except AttributeError:
-            pass
-
         # Initialize weights and apply final processing
         self.build_encoder()
         self.build_decoder()
+
+        if self.config.use_proposal:
+            self.build_trajectory_tokenizer()
 
         self.training_scenarios = None
         if self.config.output_router_logits:
             logger.info("Now using z-loss for MoE router balancing.")
 
-    def build_tokenizer(self):
-        # For key points, only use x, and y
-        # currently forcing key point to be 2 dimension, with no speed and no yaw
-        if self.config.kp_tokenizer == 'uniform':
-            from transformer4planning.models.tokenizer.uniform_kp_tokenizer import UniformKPTokenizer
-            assert self.config.use_key_points == 'specified_backward'
-            self.kp_tokenizer = []
-            x_min = [-45, -7, -4, -2, -1.5]
-            x_max = [180, 86, 45, 25, 15]
-            y_min = [-70, -25, -8, -3, -1]
-            y_max = [80, 28, 9, 2.5, 1]
-            key_point_number = [[50, 50], [20, 20], [10, 10], [5, 5], [3, 3]]
-            for i in range(5):
-                kp_tokenizer = UniformKPTokenizer(
-                    num_key_points=key_point_number[i],
-                    x_min=x_min[i],
-                    x_max=x_max[i],
-                    y_min=y_min[i],
-                    y_max=y_max[i]
-                )
-                self.kp_tokenizer.append(kp_tokenizer)
-        elif self.config.kp_tokenizer == 'cluster':
-            from transformer4planning.models.tokenizer.cluster_kp_tokenizer import ClusterKPTokenizer
-            assert self.config.use_key_points == 'specified_backward'
-            cluster_path = self.config.kp_cluster_files.split(",")
-            logger.warning(f"cluster_path {cluster_path}")
-            assert len(cluster_path) == 5, f"we only support 8s 4s 2s 1s 0_5s csvfiles but get {cluster_path}"
-            self.kp_tokenizer = []
-            for i in range(5):
-                kp_tokenizer = ClusterKPTokenizer(cluster_path[i])
-                self.kp_tokenizer.append(kp_tokenizer)
+    def build_trajectory_tokenizer(self):
+        if self.config.traj_tokenizer == 'cluster_traj':
+            from transformer4planning.models.tokenizer.cluster_traj_tokenizer import ClusterTrajTokenizer
+            cluster_path = self.config.traj_cluster_file
+            logger.warning(f"cluster_path for trajectory: {cluster_path}")
+            self.encoder.traj_tokenizer = ClusterTrajTokenizer(cluster_path)
+
+            if self.config.traj_tokenizer == 'cluster_traj':
+                from transformer4planning.models.decoder.base import TrajDecoderCLS
+                proposal_num_i = self.encoder.traj_tokenizer.trajs.shape[0]
+                new_traj_decoder = TrajDecoderCLS(self.config, proposal_num=proposal_num_i)
+                new_traj_decoder.traj_tokenizer = self.encoder.traj_tokenizer
+                self.proposal_decoder = new_traj_decoder
+            else:
+                raise NotImplementedError(f'Unknown tokenizer {self.config.traj_tokenizer} for proposal decoder.')
         else:
             raise NotImplementedError
 
@@ -154,8 +132,6 @@ class STR(PreTrainedModel):
                     from transformer4planning.models.encoder.nuplan_raster_encoder import NuplanRasterizeEncoder
                     self.encoder = NuplanRasterizeEncoder(self.config)
 
-                if self.kp_tokenizer is not None:
-                    self.encoder.kp_tokenizer = self.kp_tokenizer
             elif "vector" in self.config.encoder_type:
                 from transformer4planning.models.encoder.pdm_encoder import PDMEncoder
                 pdm_kwargs = dict(
@@ -177,14 +153,18 @@ class STR(PreTrainedModel):
 
     def build_decoder(self):
         # load pretrained diffusion keypoint decoder
-        #TODO: add diffusion decoder trained from scratch
-        if self.use_proposal:
+        #TODO: merge Waymo proposal logic into NuPlan
+        if self.config.use_proposal:
             if self.config.task == "nuplan":
-                from transformer4planning.models.decoder.base import ProposalDecoderCLS
-                self.proposal_decoder = ProposalDecoderCLS(self.config, proposal_num=self.use_proposal)
+                # from transformer4planning.models.decoder.base import ProposalDecoderCLS
+                # self.proposal_decoder = ProposalDecoderCLS(self.config, proposal_num=self.config.use_proposal)
+                assert self.config.traj_tokenizer is not None, "select traj_tokenizer to use proposal"
+                # building proposal decoder later when building tokenizer
             elif self.config.task == "waymo":
                 from transformer4planning.models.decoder.base import ProposalDecoder
                 self.proposal_decoder = ProposalDecoder(self.config)
+            else:
+                raise NotImplementedError(f'Unknown task {self.config.task} for proposal decoder.')
 
         if self.use_key_points != 'no':
             if self.kp_decoder_type == "diffusion":
@@ -201,36 +181,17 @@ class STR(PreTrainedModel):
                 from transformer4planning.models.decoder.base import KeyPointLinearDecoder
                 self.key_points_decoder = KeyPointLinearDecoder(self.config)
             elif self.kp_decoder_type == "mlp":
-                if self.config.regression_long_class_short:
-                    assert self.config.kp_tokenizer == 'cluster', "only support cluster tokenizer for regression_long_class_short"
-
-                if self.kp_tokenizer is None:
-                    from transformer4planning.models.decoder.base import KeyPointMLPDeocder
-                    self.key_points_decoder = KeyPointMLPDeocder(self.config)
-                elif self.config.kp_tokenizer == "uniform":
-                    from transformer4planning.models.decoder.base import KeyPointDecoderCLS
-                    proposal_nums = [50*50, 20*20, 10*10, 5*5, 3*3]
-                    for i in range(5):
-                        new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_nums[i])
-                        new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
-                        self.key_points_decoder.append(new_key_points_decoder)
-                elif self.config.kp_tokenizer == 'cluster':
-                    from transformer4planning.models.decoder.base import KeyPointDecoderCLS
-                    for i in range(5):
-                        if self.config.regression_long_class_short and i in [0, 1, 2]:
-                            from transformer4planning.models.decoder.base import KeyPointMLPDeocder
-                            self.key_points_decoder.append(KeyPointMLPDeocder(self.config))
-                        else:
-                            proposal_num_i = self.kp_tokenizer[i].centers.shape[0]
-                            new_key_points_decoder = KeyPointDecoderCLS(self.config, proposal_num=proposal_num_i)
-                            new_key_points_decoder.kp_tokenizer = self.kp_tokenizer[i]
-                            self.key_points_decoder.append(new_key_points_decoder)
+                from transformer4planning.models.decoder.base import KeyPointMLPDeocder
+                self.key_points_decoder = KeyPointMLPDeocder(self.config)
+            else:
+                raise NotImplementedError(f'Unknown keypoint decoder type {self.kp_decoder_type}.')
 
         # create a model list of traj_decoder for each
         # self.traj_decoders = nn.ModuleList()
         # for i in range(80):
         #     self.traj_decoders.append(TrajectoryDecoder(self.config))
-        self.traj_decoder = TrajectoryDecoder(self.config)
+        if not self.config.skip_trajectory_decoding:
+            self.traj_decoder = TrajectoryDecoder(self.config)
 
     def _prepare_attention_mask_for_generation(self, input_embeds):
         return torch.ones(input_embeds.shape[:2], dtype=torch.long, device=input_embeds.device)
@@ -253,6 +214,9 @@ class STR(PreTrainedModel):
         transformer_outputs = self.embedding_to_hidden(input_embeds, return_dict=return_dict)
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
 
+        loss_items = {}
+        pred_dict = {}
+
         if self.config.autoregressive:
             frames_length_to_predict = info_dict["pred_length"]
             trajectory_label = info_dict['trajectory_label'][..., -frames_length_to_predict:, :]
@@ -267,46 +231,39 @@ class STR(PreTrainedModel):
                 trajectory_label = trajectory_label.flip(-2)
             loss = torch.tensor(0, dtype=input_embeds.dtype, device=transformer_outputs_hidden_state.device)
             frames_length_to_predict = trajectory_label.shape[1]
-            traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
-                                                                         trajectory_label,
-                                                                         info_dict,
-                                                                         **kwargs)
-            if not self.config.pred_key_points_only:
+            if self.config.use_proposal:
+                if self.config.task == "waymo":
+                    proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
+                    loss += proposal_loss
+                    loss += proposal_loss_logits
+                    loss_items["proposal_loss"] = proposal_loss
+                    pred_dict["proposal"] = proposal_loss_logits
+                elif self.config.task == "nuplan":
+                    traj_loss, traj_logits = self.proposal_decoder.compute_traj_loss(transformer_outputs_hidden_state, info_dict)
+                    loss += traj_loss
+                    loss_items["proposal_loss"] = traj_loss
+                    # pred_dict["proposal"] = traj_logits
+            if not self.config.skip_trajectory_decoding:
+                traj_loss, traj_logits = self.traj_decoder.compute_traj_loss(transformer_outputs_hidden_state,
+                                                                             trajectory_label,
+                                                                             info_dict,
+                                                                             **kwargs)
                 loss += traj_loss
 
-        loss_items = dict(
-            traj_loss=traj_loss,
-        )
-        pred_dict = {"traj_logits": traj_logits}
+        loss_items.update(dict(traj_loss=traj_loss))
+        pred_dict.update(dict(traj_logits=traj_logits))
+
         # if finetuning_with_stepping:
         #     logger.warning('passing gt for debugging')
         #     pred_dict = {"traj_logits": trajectory_label}
-
-        if self.use_proposal:
-            if self.config.task == "nuplan":
-                proposal_loss, pred_proposal_cls = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
-                loss += proposal_loss
-                loss_items["proposal_loss"] = proposal_loss
-                pred_dict["proposal"] = pred_proposal_cls
-                # debugging
-                pred_proposal_score = pred_proposal_cls.softmax(-1)
-                topk_score, topk_indx = torch.topk(pred_proposal_score[:, 0, :], dim=-1, k=self.k)
-
-            elif self.config.task == "waymo":
-                proposal_loss, proposal_loss_logits = self.proposal_decoder.compute_proposal_loss(transformer_outputs_hidden_state, info_dict)
-                loss += proposal_loss
-                loss += proposal_loss_logits
-                loss_items["proposal_loss"] = proposal_loss
-                pred_dict["proposal"] = proposal_loss_logits
 
         if self.config.dense_pred:
             assert self.config.task == "waymo"
             loss += info_dict["dense_pred_loss"]
             loss_items["dense_pred_loss"] = info_dict["dense_pred_loss"]
 
-        if self.use_key_points != 'no' and not self.config.pred_traj_only:
+        if self.use_key_points != 'no':
             loss_per_kp = None
-            # new: if pred_traj_only, no need to compute key points, this setting is for putting key point from other pretrained model later
             if self.config.generate_diffusion_dataset_for_key_points_decoder:
                 future_key_points = info_dict["future_key_points"] if self.config.predict_yaw else \
                             info_dict["future_key_points"][..., :2]
@@ -320,27 +277,10 @@ class STR(PreTrainedModel):
             elif self.config.kp_decoder_type == "linear":
                 kp_loss, kp_logits = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
             else:
-                if self.kp_tokenizer is None:
-                    kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
-                    # kp_loss will be 10x larger than traj_loss when converged
-                    if self.k > 1:
-                        kp_logits = kp_logits['selected_logits']
-                else:
-                    assert self.k == 1, "only support k=1 for now"
-                    kp_losses, kp_logits = [], []
-                    for i in range(5):
-                        if self.config.regression_long_class_short and i in [0, 1, 2]:
-                            kp_loss, kp_logit, loss_per_kp = self.key_points_decoder[i].compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
-                            kp_logits.append(kp_logit[:, i, :].squeeze(1))
-                            kp_losses.append(loss_per_kp[i])
-                        else:
-                            kp_loss, kp_id = self.key_points_decoder[i].compute_keypoint_loss(transformer_outputs_hidden_state, info_dict, i)
-                            kp_losses.append(kp_loss)  # list of [1]
-                            kp_logit = self.kp_tokenizer[i].decode(kp_id, dtype=kp_loss.dtype, device=kp_loss.device)
-                            kp_logits.append(kp_logit)  # list of [bsz, 2]
-                    loss_per_kp = torch.stack(kp_losses, dim=0)  # [5]
-                    kp_loss = loss_per_kp.mean()
-                    kp_logits = torch.stack(kp_logits, dim=1)  # [bsz, 5, 2]
+                kp_loss, kp_logits, loss_per_kp = self.key_points_decoder.compute_keypoint_loss(transformer_outputs_hidden_state, info_dict)
+                # kp_loss will be 10x larger than traj_loss when converged
+                if self.k > 1:
+                    kp_logits = kp_logits['selected_logits']
             if self.config.predict_yaw:
                 # padding last dimension from 2 to 4
                 kp_logits = torch.cat([kp_logits, torch.zeros_like(kp_logits)[:, :, :2]], dim=-1)
@@ -465,85 +405,69 @@ class STR(PreTrainedModel):
         # for debug only
         gt_1s_kp = kwargs.get('gt_1s_kp', None)
 
-        if self.use_proposal:
-            if self.config.autoregressive_proposals:
-                # TODO: Training for debugging results
-                proposal_result = []
-                proposal_scores = []
-                assert self.config.task == 'nuplan', 'waymo proposal autoregressive not implemented yet'
-                dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, int(self.config.proposal_num), 1), device=device))  # bsz, 16, 256
-                input_embeds[:, context_length:context_length+int(self.config.proposal_num), :] = dummy_proposal_embedding
-                # loop over each intention for generation
-                for i in range(int(self.config.proposal_num)):
-                    context_embeds = input_embeds[:, :context_length + 1 + i, :]
-                    attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
-                    position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
-                    transformer_outputs_hidden_state = self.embedding_to_hidden(context_embeds)['last_hidden_state']
-                    proposal_hidden_state = transformer_outputs_hidden_state[:, context_length - 1 + i:context_length - 1 + 1 + i, :]  # (bs, 1, n_embed)
-                    proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1)  # (bs, 1, 5)
-                    # WARNING: Only tested with self.k = 1
-                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
-                    # topk_score: (bs, 5) topk_indx: (bs, 1)
-                    proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.float())  # (bs, n_embed)
-                    # print('test generate 1: ', topk_indx.unsqueeze(-1).float().shape, topk_indx, topk_score, proposal_pred_score[:, 0, :])
-                    proposal_result.append(topk_indx.unsqueeze(1))  # list of (bs, 1, 1)
-                    proposal_scores.append(proposal_pred_score[:, 0, :].unsqueeze(1))  # list of (bs, 1, 13)
-                    input_embeds[:, context_length+i:context_length+i+1, :] = proposal_pred_embed.unsqueeze(1)
-                proposal_result = torch.cat(proposal_result, dim=1)  # (bs, 13, 1)
-                proposal_scores = torch.cat(proposal_scores, dim=1)  # (bs, 13, 5)
-            else:
-                if self.config.task == "nuplan":
-                    dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 1), device=device)).unsqueeze(1)
-                elif self.config.task == 'waymo':
-                    dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size, 2), device=device)).unsqueeze(1)
-                input_embeds[:, context_length:context_length+1, :] = dummy_proposal_embedding
-
-                context_embeds = input_embeds[:, :context_length+1, :]
-                attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
-                transformer_outputs_hidden_state = self.embedding_to_hidden(
-                    input_embeds=context_embeds,
-                    attention_mask=attention_mask,
-                    position_ids=self._prepare_position_ids_for_generation(attention_mask.clone())
-                )['last_hidden_state']
-                proposal_hidden_state = transformer_outputs_hidden_state[:, context_length-1:context_length-1+1, :] # (bs, 1, n_embed)
-                proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1) # (bs, 1, 64/5)
-                if self.config.task == "nuplan":
-                    # WARNING: Only tested with self.k = 1
-                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
-                    # topk_score: (bs, 5), topk_indx: (bs, 1)
-                    proposal_pred_embed = self.encoder.proposal_m_embed(topk_indx.float())  # (bs, n_embed)
-                    # print('test generate 1: ', topk_indx.unsqueeze(-1).float().shape, topk_indx, topk_score, proposal_pred_score[:, 0, :])
-                    proposal_result = topk_indx
-                    proposal_scores = proposal_pred_score[:, 0, :]
-                    # proposal_pred_embed: (bs, k, n_embed)
-                elif self.config.task == 'waymo':
-                    proposal_logit = info_dict["center_obj_proposal_pts"] # (bs, 64, 2)
-                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
-                    proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1), topk_indx.view(-1), :].view(batch_size, self.k, 2)
-                    proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
-                    proposal_result = topk_indx
-                    proposal_scores = proposal_pred_score[:, 0, :]
-
         traj_logits_k = []
         key_points_logits_k = []
         select_k = 1 if self.config.task == 'nuplan' else self.k
 
+        proposal_result = None
+        proposal_scores = None
+
         for mode in range(select_k):
-            if self.use_proposal:
-                if self.config.autoregressive_proposals:
-                    # already updated in previous step
-                    pass
-                else:
-                    if self.config.task == "nuplan":
-                        input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(1)
-                    elif self.config.task == 'waymo':
-                        input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :, :]
+            kp_start_index = int(context_length)
+            if self.config.use_proposal:
+                if self.config.task == 'waymo' and mode == 1:
+                    dummy_proposal_embedding = self.encoder.proposal_m_embed(torch.zeros((batch_size,
+                                                                                          2), device=device)).unsqueeze(1)
+                    input_embeds[:, context_length:context_length + 1, :] = dummy_proposal_embedding
+                    context_embeds = input_embeds[:, :context_length + 1, :]
+                    attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
+                    transformer_outputs_hidden_state = self.embedding_to_hidden(
+                        input_embeds=context_embeds,
+                        attention_mask=attention_mask,
+                        position_ids=self._prepare_position_ids_for_generation(attention_mask.clone())
+                    )['last_hidden_state']
+                    proposal_hidden_state = transformer_outputs_hidden_state[:,
+                                            context_length - 1:context_length - 1 + 1, :]  # (bs, 1, n_embed)
+                    proposal_pred_score = self.proposal_decoder.proposal_cls_decoder(proposal_hidden_state).softmax(-1)  # (bs, 1, 64/5)
+                    proposal_logit = info_dict["center_obj_proposal_pts"]  # (bs, 64, 2)
+                    topk_score, topk_indx = torch.topk(proposal_pred_score[:, 0, :], dim=-1, k=self.k)
+                    proposal_pred_logit = proposal_logit[torch.arange(batch_size)[:, None].repeat(1, self.k).view(-1),
+                                          topk_indx.view(-1), :].view(batch_size, self.k, 2)
+                    proposal_pred_embed = self.encoder.proposal_m_embed(proposal_pred_logit)
+                    proposal_result = topk_indx
+                    proposal_scores = proposal_pred_score[:, 0, :]
+                    input_embeds[:, context_length:context_length + 1, :] = proposal_pred_embed.unsqueeze(2)[:, mode, :,:]
+                    kp_start_index += 1
+                elif self.config.task == 'nuplan':
+                    assert self.config.traj_tokenizer is not None, "select traj_tokenizer to use proposal"
+                    assert self.k == 1, "only support k=1 with proposal for now"
+                    assert self.config.traj_tokenizer == 'cluster_traj', "only support cluster_traj for proposal for now"
+
+                    context_length = info_dict["context_length"]
+                    candi_proposal_num = info_dict['candi_proposal_num']
+                    context_length_with_proposal = context_length + candi_proposal_num
+                    context_embeds = input_embeds[:, :context_length_with_proposal, :]
+                    attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
+                    transformer_outputs_hidden_state = self.embedding_to_hidden(
+                        input_embeds=context_embeds,  # keep the dim the same as training for simplicity
+                        attention_mask=attention_mask,
+                        position_ids=self._prepare_position_ids_for_generation(attention_mask.clone())
+                    )['last_hidden_state']
+                    traj_logits, scores = self.proposal_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
+                    if self.config.reverse_traj_index_order:
+                        traj_logits = traj_logits.flip(-2)
+                    pred_prob_embed = self.encoder.proposal_score_embed(scores)  # bs, 256
+                    kp_start_index += candi_proposal_num + 1
+                    # replace the last embedding with the predicted proposal embedding
+                    input_embeds[:, kp_start_index - 1, :] = pred_prob_embed
+                    proposal_result = traj_logits
+                    proposal_scores = scores
 
             if self.use_key_points != "no":
                 pred_length = info_dict["pred_length"]
                 selected_indices = self.encoder.selected_indices
                 kp_start_index = int(context_length)
-                if self.use_proposal:
+                if self.config.use_proposal:
                     if self.config.autoregressive_proposals:
                         kp_start_index += int(self.config.proposal_num)
                     else:
@@ -569,7 +493,8 @@ class STR(PreTrainedModel):
                         assert False, 'deprecated, use separate_kp_encoder instead'
                         if self.config.use_speed:
                             # padding speed, padding the last dimension from 4 to 7
-                            future_key_points = torch.cat([future_key_points, torch.zeros_like(future_key_points)[:, :, :3]], dim=-1)
+                            future_key_points = torch.cat([future_key_points,
+                                                           torch.zeros_like(future_key_points)[:, :, :3]], dim=-1)
                         future_key_embeds_dummy = self.encoder.action_m_embed(future_key_points)
                     else:
                         future_key_embeds_dummy = self.encoder.kps_m_embed(future_key_points[..., :2])
@@ -582,7 +507,8 @@ class STR(PreTrainedModel):
                 pred_key_points_during_generate = []
                 for i in range(key_points_num):
                     input_embeds_current = input_embeds[:, :kp_start_index + i, :]
-                    attention_mask = torch.ones(input_embeds_current.shape[:2], dtype=torch.long, device=input_embeds.device)
+                    attention_mask = torch.ones(input_embeds_current.shape[
+                                                :2], dtype=torch.long, device=input_embeds.device)
                     position_ids = self._prepare_position_ids_for_generation(attention_mask.clone())
                     transformer_outputs_hidden_state = self.embedding_to_hidden(
                         input_embeds_current,
@@ -592,13 +518,17 @@ class STR(PreTrainedModel):
                     future_key_point_hidden_state = transformer_outputs_hidden_state[:,
                                                     kp_start_index + i - 1,
                                                     :].reshape(batch_size, 1, -1)
-                    if self.kp_tokenizer is None:
-                        key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
-                    elif self.config.regression_long_class_short and i in [0, 1, 2]:
-                        key_points_logit, _ = self.key_points_decoder[i].generate_keypoints(future_key_point_hidden_state)
-                    else:
-                        key_point_ids, key_points_scores = self.key_points_decoder[i].generate_keypoints(future_key_point_hidden_state)
-                        key_points_logit = self.kp_tokenizer[i].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
+                    key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+                    # if self.kp_tokenizer is None:
+                    #     key_points_logit, _ = self.key_points_decoder.generate_keypoints(future_key_point_hidden_state)
+                    # elif self.config.regression_long_class_short and i in [0, 1, 2]:
+                    #     key_points_logit, _ = self.key_points_decoder[
+                    #         i].generate_keypoints(future_key_point_hidden_state)
+                    # else:
+                    #     key_point_ids, key_points_scores = self.key_points_decoder[
+                    #         i].generate_keypoints(future_key_point_hidden_state)
+                    #     key_points_logit = self.kp_tokenizer[
+                    #         i].decode(key_point_ids, dtype=key_points_scores.dtype, device=key_points_scores.device).unsqueeze(1)
 
                     if self.k > 1:
                         k_key_points_logit = key_points_logit['logits']  # (bs, 1, k, 2/4)
@@ -632,7 +562,8 @@ class STR(PreTrainedModel):
                             y_inverse = -1 if map_name[sample_index] == 'sg-one-north' else 1
                             pred_key_point_copy = copy.deepcopy(pred_key_point[sample_index, 0, :2])
                             pred_key_point_copy[1] *= y_inverse
-                            pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[:2].cpu().numpy(),
+                            pred_key_point_global = nuplan_utils.change_coordination(pred_key_point_copy[
+                                                                                     :2].cpu().numpy(),
                                                                                      ego_pose[sample_index],
                                                                                      ego_to_global=True)
                             if isinstance(route_ids[sample_index], torch.Tensor):
@@ -642,7 +573,8 @@ class STR(PreTrainedModel):
                             route_ids_this_sample = [int(route_id) for route_id in route_ids_this_sample]
                             closest_lane_point_on_route, dist, _, _, on_road = nuplan_utils.get_closest_lane_point_on_route(pred_key_point_global,
                                                                                                                             route_ids_this_sample,
-                                                                                                                            road_dic[sample_index])
+                                                                                                                            road_dic[
+                                                                                                                                sample_index])
                             if not on_road:
                                 # changing to lane center from 4? to 53, average 51
                                 revised_pred_point = closest_lane_point_on_route
@@ -650,7 +582,8 @@ class STR(PreTrainedModel):
                                                                                       ego_pose[sample_index],
                                                                                       ego_to_global=False)
                                 pred_key_point_ego[1] *= y_inverse
-                                pred_key_point[sample_index, 0, :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
+                                pred_key_point[sample_index, 0,
+                                :2] = torch.tensor(pred_key_point_ego, device=pred_key_point.device)
                                 print(f'Off Road Detected! Replace {i}th key point')
 
                     object_collision_checking = False
@@ -667,8 +600,9 @@ class STR(PreTrainedModel):
                             agents_rect_local_this_sample = agents_rect_local[sample_index]
                             ego_center = pred_key_point[sample_index, 0, :2].float().cpu().numpy()
                             from shapely import geometry
-                            ego_rect = geometry.box(ego_center[0] - ego_shape[0] / 2, ego_center[1] - ego_shape[0] / 2,
-                                                    ego_center[0] + ego_shape[0] / 2, ego_center[1] + ego_shape[0] / 2)
+                            ego_rect = geometry.box(
+                                ego_center[0] - ego_shape[0] / 2, ego_center[1] - ego_shape[0] / 2,
+                                ego_center[0] + ego_shape[0] / 2, ego_center[1] + ego_shape[0] / 2)
                             for each_agent_index in range(agents_rect_local_this_sample.shape[0]):
                                 agent_rects = agents_rect_local_this_sample[
                                     each_agent_index].float().cpu().numpy()  # (4(past_steps), 4(box), 2(x,y))
@@ -727,7 +661,8 @@ class STR(PreTrainedModel):
                         attention_mask,
                         position_ids,
                     )['last_hidden_state']
-                    traj_logits[:, i, :] = self.traj_decoder.model(transformer_outputs_hidden_state)[:, predicting_index, :]
+                    traj_logits[:, i, :] = self.traj_decoder.model(transformer_outputs_hidden_state)[:,
+                                           predicting_index, :]
                     predicting_index += (1 + raster_seq_length)
                     # 2. update input_embeds with generated trajectory
                     new_point_embed = self.encoder.action_m_embed(traj_logits[:, i, :].unsqueeze(1))
@@ -737,7 +672,8 @@ class STR(PreTrainedModel):
                         # skip generating observations for the last point
                         continue
                     # TODO: change to generate observation
-                    next_state_embeds = torch.zeros((batch_size, raster_seq_length, 1, self.config.n_embd), device=device)
+                    next_state_embeds = torch.zeros((batch_size, raster_seq_length, 1,
+                                                     self.config.n_embd), device=device)
                     for j in range(raster_seq_length):
                         input_embeds[:, current_context_length + 1 + j, :] = next_state_embeds[:, j, 0, :]
                 traj_logits_k.append(traj_logits)
@@ -756,7 +692,8 @@ class STR(PreTrainedModel):
                     traj_logits = traj_logits.flip(-2)
                 traj_logits_k.append(traj_logits)
             else:
-                raise NotImplementedError
+                logger.warning('Skipping trajectory decoder for generation.')
+                traj_logits_k.append(traj_logits)
 
         key_points_pred_logits = None
         if select_k == 1:
@@ -771,7 +708,71 @@ class STR(PreTrainedModel):
                 assert len(key_points_logits_k) == self.k
                 key_points_pred_logits = torch.stack(key_points_logits_k, dim=1)
 
-        emergency_brake_checking = True
+        dense_off_road_checking = self.config.dense_off_road_check
+        if dense_off_road_checking and route_ids is not None and ego_pose is not None and map_name is not None:
+            # fetch road dictionary
+            if road_dic is None:
+                import os, pickle
+                road_dic = []
+                for sample_index in range(batch_size):
+                    map_name_this_sample = map_name[sample_index]
+                    data_path = '/localdata_ssd/nuplan/online_s6'
+                    if os.path.exists(os.path.join(data_path, "map", f"{map_name_this_sample}.pkl")):
+                        with open(os.path.join(data_path, "map", f"{map_name_this_sample}.pkl"), "rb") as f:
+                            road_dic.append(pickle.load(f))
+                    else:
+                        print('Road dictionary not found for ', data_path, map_name_this_sample)
+
+            from transformer4planning.utils import nuplan_utils
+            any_point_off_road = [0] * batch_size
+            for sample_index in range(batch_size):
+                y_inverse = -1 if map_name[sample_index] == 'sg-one-north' else 1
+                if isinstance(route_ids[sample_index], torch.Tensor):
+                    route_ids_this_sample = route_ids[sample_index].cpu().numpy().tolist()
+                else:
+                    route_ids_this_sample = route_ids[sample_index]
+                route_ids_this_sample = [int(route_id) for route_id in route_ids_this_sample]
+                # check if ego_pose is the type of torch tensor
+                if isinstance(ego_pose, torch.Tensor):
+                    ego_center = ego_pose[sample_index].float().cpu().numpy()
+                else:
+                    print('testing: ', ego_pose.shape, ego_pose)
+                    ego_center = ego_pose[sample_index]
+                for i in range(0, traj_pred_logits.shape[1], 2):
+                    pred_t = traj_pred_logits[sample_index, i, :2].float().cpu().numpy()
+                    pred_t[1] *= y_inverse
+                    try:
+                        pred_t_global = nuplan_utils.change_coordination(pred_t,
+                                                                         ego_center,
+                                                                         ego_to_global=True)
+                    except Exception as e:
+                        print('Failed to center on gen for dense chacking: ', pred_t, ego_center)
+                        continue
+
+                    closest_lane_point_on_route, dist, _, _, on_road = nuplan_utils.get_closest_lane_point_on_route(pred_t_global,
+                                                                                                                    route_ids_this_sample,
+                                                                                                                    road_dic[
+                                                                                                                        sample_index])
+                    if on_road is None and closest_lane_point_on_route is None:
+                        break
+                    if not on_road and i == 0:
+                        print(f'First point off Road Detected! Skip')
+                        break
+                    if not on_road or any_point_off_road[sample_index]:
+                        # if previous point off road, replace with the closest point on road
+                        revised_pred_point = closest_lane_point_on_route
+                        pred_t_ego_revised = nuplan_utils.change_coordination(revised_pred_point,
+                                                                              ego_center,
+                                                                              ego_to_global=False)
+                        pred_t_ego_revised[1] *= y_inverse
+                        traj_pred_logits[sample_index, i,
+                        :2] = torch.tensor(pred_t_ego_revised, device=traj_pred_logits.device)
+                        if not on_road and not any_point_off_road[sample_index]:
+                            print(f'Dense off Road Detected! Replace {i}th point and all followings')
+                        any_point_off_road[sample_index] = 1
+            any_point_off_road = torch.tensor(any_point_off_road, device=traj_pred_logits.device)
+
+        emergency_brake_checking = False
         agents_rect_local = kwargs.get('agents_rect_local', None)
         if emergency_brake_checking and agents_rect_local is not None:
             assert self.config.selected_exponential_past, 'only support selected_exponential_past for now'
@@ -825,11 +826,12 @@ class STR(PreTrainedModel):
         if key_points_pred_logits is not None:
             pred_dict.update({"key_points_logits": key_points_pred_logits})
 
-        if self.use_proposal:
-            pred_dict.update({"proposal": proposal_result})  # topk results
-            pred_dict.update({"proposal_scores": proposal_scores})  # topk scores
-            if self.config.task == 'nuplan' and 'intentions' in info_dict:
-                pred_dict.update({'intentions': info_dict['intentions']})
+        # if self.config.use_proposal:
+        #     pred_dict.update({"proposal": proposal_result})  # topk results
+        #     pred_dict.update({"proposal_scores": proposal_scores})  # topk scores
+
+        if dense_off_road_checking:
+            pred_dict.update({'any_point_off_road': any_point_off_road})
 
         if self.config.task == "waymo":
             center_objects_world = kwargs['center_objects_world'].type_as(traj_pred_logits)
