@@ -871,9 +871,11 @@ def main(args):
     scenario_mapping = ScenarioMapping(scenario_map=get_scenario_map(), subsample_ratio_override=0.5)
     builder = NuPlanScenarioBuilder(args.data_path, args.map_path, None, None, map_version, scenario_mapping=scenario_mapping)
     if not args.load_without_yaml:
+        print('Filtering with yaml file...')
         params = yaml.safe_load(open(args.split_filter_yaml, 'r'))
         scenario_filter = ScenarioFilter(**params)
     else:
+        print('Filtering with types ...')
         scenario_filter = ScenarioFilter(*get_filter_parameters(args.scenarios_per_type))
     worker = SingleMachineParallelExecutor(use_process_pool=False)
     scenarios = builder.get_scenarios(scenario_filter, worker)
@@ -917,7 +919,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_path', type=str)
     parser.add_argument('--exp_folder', type=str, default=None)
     parser.add_argument('--test_type', type=str, default='closed_loop_nonreactive_agents')
-    parser.add_argument('--load_without_yaml', action='store_false')
+    parser.add_argument('--load_without_yaml', action='store_true')
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--scenarios_per_type', type=int, default=20)
     parser.add_argument('--nuplan_exp_root', type=str, default='/cephfs/sunq/nuplan/dataset')

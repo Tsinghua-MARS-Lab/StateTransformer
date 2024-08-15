@@ -242,6 +242,9 @@ def compute_metrics(prediction: EvalPrediction):
         item_to_save['convergence_rate'] = next_step_fde_gen / fde8_gen
         eval_result['convergence_rate'] = (next_step_fde_gen / fde8_gen).mean()
 
+    if 'any_point_off_road' in prediction_by_generation:
+        eval_result['any_point_off_road'] = np.mean(prediction_by_generation['any_point_off_road'])
+
     def normalize_angles(angles):
         return np.arctan2(np.sin(angles), np.cos(angles))
 

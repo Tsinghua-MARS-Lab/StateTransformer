@@ -441,11 +441,13 @@ class Planner(AbstractPlanner):
         agents = [observation.tracked_objects.get_agents() for observation in sampled_observation_buffer]
         statics = [observation.tracked_objects.get_static_objects() for observation in sampled_observation_buffer]
 
+        print('Route correction in progress. before: ', self._route_roadblock_ids)
         self._route_roadblock_ids = route_roadblock_correction(
             ego_states[-1],
             self._map_api,
             self._route_roadblock_ids,
         )
+        print('Route correction in progress. after: ', self._route_roadblock_ids)
         corrected_route_ids = self._route_roadblock_ids
         high_res_raster, low_res_raster, context_action, agent_rect_pts_local = self.compute_raster_input(
             ego_trajectory, agents, statics, traffic_light_data, ego_shape,

@@ -79,6 +79,8 @@ def get_closest_lane_point_on_route(pred_key_point_global,
     route_lanes = []
     route_ids = route_ids[:100]
     for each_route_block in route_ids:
+        if each_route_block == -1:
+            continue
         if each_route_block not in road_dic:
             print('Route block not found in road dic: ', each_route_block, len(list(road_dic.keys())), list(road_dic.keys())[:10])
             continue
@@ -93,6 +95,9 @@ def get_closest_lane_point_on_route(pred_key_point_global,
             continue
         route_lane_pts.append(road_dic[each_lane]['xyz'][:, :2])
         lane_ids += [each_lane] * road_dic[each_lane]['xyz'].shape[0]
+    if len(route_lane_pts) == 0:
+        print('no route lane points found at all ', route_ids, len(road_dic.keys()))
+        return None, None, None, None, None
     # concatenate all points in the list in one dimension
     route_lane_pts_np = np.concatenate(route_lane_pts, axis=0)
     # get the closest point over all of the selected lanes

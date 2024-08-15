@@ -181,13 +181,15 @@ class TrajectoryDecoder(nn.Module):
                             off_road_mask = torch.ones_like(label[...,
                                                             :2], dtype=torch.float32)  # bsz, 80, 2, 1=off-road, 0=on-road
 
-                            examine_step = 5  # for efficiency, check every n step
-                            max_examin_frames = 30
+                            examine_step = 5  # for efficiency, check every n step, do not change, not tested
+                            max_examin_frames = 40
                             for i in range(traj_logits.shape[0]):
                                 # last_off = True
                                 # for j in range(traj_logits.shape[1]):
+                                # just check the first 30 frames
+                                off_road_mask[i, max_examin_frames:, :] = 0
                                 for j in range(max_examin_frames):
-                                    if j % examine_step == 3:
+                                    if j % examine_step == 2:
                                         # last_off = True
                                         global_pred_point_t = nuplan_utils.change_coordination(traj_logits[i, j,
                                                                                                :2].float().detach().cpu().numpy(),
@@ -221,7 +223,7 @@ class TrajectoryDecoder(nn.Module):
                                     #     if not last_off:
                                     #         off_road_mask[i, j, :] = 0
 
-                                    if j == 0 and off_road_mask[i, j, 0] == 1:
+                                    if j == 2 and off_road_mask[i, j, 0] == 1:
                                         # point zero off-road indicating wrong route info, ignore
                                         off_road_mask[i, :, :] = 0
                                         break
