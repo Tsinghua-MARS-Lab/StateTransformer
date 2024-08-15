@@ -12,9 +12,7 @@ import logging
 from einops import rearrange, reduce
 import torch.nn.functional as F
 from typing import Tuple, Optional, Dict
-from transformer4planning.models.diffusion_loss.traj_diffusion import TrajDiffusion
 from transformer4planning.models.diffusion_loss.TrajRefiner import TrajectoryRefiner
-from transformer4planning.models.diffusion_loss.mlp import SimpleMLP
 from transformers.modeling_utils import PreTrainedModel
 
 @dataclass
@@ -162,6 +160,7 @@ class ExplicitDiffusion(PreTrainedModel):
         # Phase1: get the result from the STR model
         str_result = self.str_model.generate(**kwargs)
         trajectory_prior = str_result["traj_logits"]
+        print("trajectory_prior", trajectory_prior[0,:5,:])
         maps_info = str_result["maps_info"]
             
         
@@ -184,7 +183,6 @@ class ExplicitDiffusion(PreTrainedModel):
         
         # unnormalize after rearrange
         final_predict = rearrange(final_predict, "t b fs c ... -> b (t fs) c ...", fs=self.frame_stack)
-        print("final predict:", final_predict[0,:2])
         pred_dict = {
             "traj_logits": final_predict.to(dtype=torch.float)
         }

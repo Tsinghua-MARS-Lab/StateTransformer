@@ -137,3 +137,15 @@ def select_k_from_mc(traj_logits, scores, k):
     scores = torch.cat(reg_sigma_cls_dict["cls"],dim=0)
     
     return traj_logits, scores
+
+def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
+    """
+    cosine schedule
+    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
+    """
+    steps = timesteps + 1
+    t = torch.linspace(0, timesteps, steps, dtype=torch.float64) / timesteps
+    alphas_cumprod = torch.cos((t + s) / (1 + s) * math.pi * 0.5) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return torch.clip(betas, 0, 0.999).to(dtype)

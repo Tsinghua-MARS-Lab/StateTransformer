@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from typing import Dict, Tuple
 from einops import rearrange, reduce
 
-from transformer4planning.models.diffusion_loss.diffusion import DiffusionForTraj
+from transformer4planning.models.diffusion_loss.transformer import Transformer
 from transformer4planning.models.utils import *
 
 class TrajectoryRefiner(nn.Module):
@@ -17,7 +17,7 @@ class TrajectoryRefiner(nn.Module):
     def _build_model(self):
         
         # initailize the diffusion model
-        model = DiffusionForTraj(
+        model = Transformer(
             input_dim=self.cfg.trajectory_dim,
             output_dim=self.cfg.trajectory_dim,
             horizon=self.cfg.frame_stack,

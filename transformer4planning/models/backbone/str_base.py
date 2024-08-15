@@ -1035,9 +1035,9 @@ def build_models(model_args):
         else:
             assert False, f'Unsupported model name: {model_args.model_name}!'
         if 'diffusion' in model_args.model_name:
-            from transformer4planning.models.backbone.StrDiff import StrDiff
-            from transformer4planning.models.backbone.StrDiffDiT import StrDiffDiT
-            from transformer4planning.models.backbone.ExplicitDiT import ExplicitDiT
+            # from transformer4planning.models.backbone.StrDiff import StrDiff
+            # from transformer4planning.models.backbone.StrDiffDiT import StrDiffDiT
+            # from transformer4planning.models.backbone.ExplicitDiT import ExplicitDiT
             from transformer4planning.models.backbone.ExplicitDiffusion import ExplicitDiffusion
             
     

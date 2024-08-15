@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from typing import Dict, Tuple
 from einops import rearrange, reduce
 
-from transformer4planning.models.diffusion_loss.diffusion import DiffusionForTraj
+from transformer4planning.models.diffusion_loss.transformer import DiffusionForTraj
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers import DDIMScheduler
 from transformer4planning.models.utils import *

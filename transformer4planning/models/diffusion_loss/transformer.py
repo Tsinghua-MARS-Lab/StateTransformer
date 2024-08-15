@@ -7,7 +7,7 @@ from transformer4planning.models.diffusion_loss.positional_embedding import Sinu
 
 logger = logging.getLogger(__name__)
 
-class DiffusionForTraj(nn.Module):
+class Transformer(nn.Module):
     def __init__(self,
             input_dim: int, 
             output_dim: int,
@@ -19,8 +19,8 @@ class DiffusionForTraj(nn.Module):
             n_prior_steps: int = 0,
             prior_dim: int = 0,
             
-            n_layer: int = 2,
-            n_head: int = 4,
+            n_layer: int = 4,
+            n_head: int = 8,
             n_emb: int = 32,
             p_drop_emb: float = 0.1,
             p_drop_attn: float = 0.1,
@@ -192,7 +192,7 @@ class DiffusionForTraj(nn.Module):
         elif isinstance(module, nn.LayerNorm):
             torch.nn.init.zeros_(module.bias)
             torch.nn.init.ones_(module.weight)
-        elif isinstance(module, DiffusionForTraj):
+        elif isinstance(module, Transformer):
             torch.nn.init.normal_(module.pos_emb, mean=0.0, std=0.02)
             if module.cond_obs_emb is not None:
                 torch.nn.init.normal_(module.cond_pos_emb, mean=0.0, std=0.02)
