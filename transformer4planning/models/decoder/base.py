@@ -618,7 +618,10 @@ class KeyPointMLPDeocder(nn.Module):
         # hidden state to predict future kp is different from mlp decoder
         kp_end_index = context_length
         if self.config.use_proposal:
-            kp_end_index += 1
+            if self.config.task == 'waymo':
+                kp_start_index += 1
+            elif self.config.task == 'nuplan':
+                kp_start_index += self.config.proposal_num + 1
         # print("kp_end_index: ",kp_end_index)
         save_id = (self.gpu_device_count * self.current_idx + current_device_idx)*key_points_num
         for key_point_idx in range(key_points_num):
@@ -655,7 +658,10 @@ class KeyPointLinearDecoder(nn.Module):
         future_key_points = info_dict["future_key_points"]
         kp_start_index = context_length - 1
         if self.config.use_proposal:
-            kp_start_index += 1
+            if self.config.task == 'waymo':
+                kp_start_index += 1
+            elif self.config.task == 'nuplan':
+                kp_start_index += self.config.proposal_num + 1
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
         if self.config.kp_dropout and self.training:
             future_key_points_hidden_state = self.kp_dropout(future_key_points_hidden_state)
