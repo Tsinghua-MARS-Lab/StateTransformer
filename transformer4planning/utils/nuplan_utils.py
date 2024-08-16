@@ -205,6 +205,31 @@ def generate_contour_pts(center_pt, w, l, direction):
     pt4 = rotate(center_pt, (center_pt[0]-w/2, center_pt[1]+l/2), direction, tuple=True)
     return pt1, pt2, pt3, pt4
 
+def calculate_angle(vector1, vector2):
+    """
+    calculate angle of two vectors。
+
+    args:
+    vector1 [x1, y1]。
+    vector2 [x2, y2]。
+
+    return:
+    angle of two vectors , between [-π, π]。
+    """
+
+    dot_product = vector1[0] * vector2[0] + vector1[1] * vector2[1]
+
+    magnitude1 = math.sqrt(vector1[0] ** 2 + vector1[1] ** 2)
+    magnitude2 = math.sqrt(vector2[0] ** 2 + vector2[1] ** 2)
+
+    cosine_angle = dot_product / (magnitude1 * magnitude2)
+
+
+    angle = math.acos(cosine_angle)
+
+    if vector1[0] * vector2[1] - vector1[1] * vector2[0] < 0:
+        angle = -angle
+    return angle
 def rotate(origin, point, angle, tuple=False):
     """
     Rotate a point counter-clockwise by a given angle around a given origin.
@@ -234,7 +259,7 @@ HEADING_WEIGHT = 2
 def compute_average_score(horizon_3, horizon_5, horizon_8, threshold):
     avg_value =  np.mean((np.array(horizon_3) + np.array(horizon_5) + np.array(horizon_8))) / 3
     score = max(1 - avg_value/threshold, 0)
-    return score    
+    return score
 
 
 def compute_scenario_score(eval_results: List, scenario_id: int):
@@ -278,7 +303,7 @@ def compute_scenario_score(eval_results: List, scenario_id: int):
     else:
         miss_score = 1
     score =(ade_score + fde_score + ahe_score * 2 + fhe_score * 2) / 6
-    
+
     data_to_return = dict(
         # file_name = VALIDATION_LIST[int(scenario[0]["file_id"])],
         scenario15s_id=scenario_id,
@@ -290,8 +315,8 @@ def compute_scenario_score(eval_results: List, scenario_id: int):
         score=miss_score * score,
     )
     return data_to_return
-    
-        
+
+
 def compute_scores(data):
     scenarios = dict()
     data_frame = pd.DataFrame(data)

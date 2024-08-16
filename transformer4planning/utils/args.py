@@ -186,6 +186,15 @@ class ModelArguments:
     augment_current_with_future_linear_changes: Optional[bool] = field(
         default=False, metadata={"help": "Whether to augment future poses with linear changes"}
     )
+    augment_method: Optional[str] = field(
+        default="linear", metadata={"help": "How to augment future poses, linear or track"}
+    )
+    augment_max_dy: Optional[float] = field(
+        default=0.5, metadata={"help": "The max value along y axis of augmenting current pose in the preprocess"}
+    )
+    augment_max_dyaw: Optional[float] = field(
+        default=0.05, metadata={"help": "The max angle of augmenting current pose in the preprocess"}
+    )
     generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
         default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
     )
@@ -462,7 +471,7 @@ class PlanningTrainingArguments(TrainingArguments):
     num_cycles: Optional[int] = field(
         default=None, metadata={"help": "The number of cycles for the cosine learning rate scheduler."}
     )
-    
+
     # arguments for simulations testings in the training loop
     do_sim_val: Optional[bool] = field(
         default=False, metadata={"help": "Whether to do simulation validation"}

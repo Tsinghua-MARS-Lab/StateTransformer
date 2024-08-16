@@ -8,14 +8,14 @@ import torch
 from functools import partial
 
 from torch.utils.data._utils.collate import default_collate
-from transformer4planning.utils.nuplan_utils import generate_contour_pts, normalize_angle, change_coordination
+from transformer4planning.utils.nuplan_utils import generate_contour_pts, normalize_angle, change_coordination,rotate,calculate_angle
 from transformer4planning.utils import nuplan_utils
 from transformer4planning.utils.common_utils import save_raster
 
 def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **encode_kwargs):
     """
     'nuplan_collate_fn' is designed for nuplan dataset online generation.
-    To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,  
+    To use it, you need to provide a dictionary path of road dictionaries and agent&traffic dictionaries,
     as well as a dictionary of rasterization parameters.
 
     The batch is the raw indexes data for one nuplan data item, each data in batch includes:
@@ -56,7 +56,7 @@ def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **
 
     if len(new_batch) == 0:
         return {}
-    
+
     # process as data dictionary
     result = dict()
     for key in new_batch[0].keys():
@@ -153,7 +153,8 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
     # augment current position
     aug_current = 0
     aug_rate = kwargs.get('augment_current_pose_rate', 0)
-    if "train" in split and aug_rate > 0 and random.random() < aug_rate:
+    aug_method = kwargs.get('augment_method',"linear")
+    if "train" in split and aug_rate > 0 and random.random() < aug_rate and aug_method == 'linear':
         augment_current_ratio = kwargs.get('augment_current_pose_ratio', 0.3)
         augment_current_with_past_linear_changes = kwargs.get('augment_current_with_past_linear_changes', False)
         augment_current_with_future_linear_changes = kwargs.get('augment_current_with_future_linear_changes', False)
@@ -189,6 +190,71 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             raising[:, 2] *= 0
             raising[:, 3] *= dyaw
             ego_pose_agent_dic[frame_id // frequency_change_rate - 21: frame_id // frequency_change_rate - 1, :] += raising
+    elif "train" in split and aug_rate > 0 and random.random() < aug_rate and aug_method == 'track':
+        augment_max_dy = kwargs.get('augment_max_dy', 0.5)
+        augment_max_dyaw = kwargs.get('augment_max_dyaw', 0.05)
+        ego_pose_agent_dic=ego_pose_agent_dic.astype(np.float64)
+        check_distance=ego_pose_agent_dic[frame_id // frequency_change_rate-10:frame_id // frequency_change_rate+81:10]-ego_pose_agent_dic[frame_id // frequency_change_rate-20:frame_id // frequency_change_rate+71:10]
+        if np.all(np.sqrt(check_distance[:,0]**2+check_distance[:,0]**2)>0.20):
+            aug_cur=np.array([0,(random.random() * 2 - 1) * augment_max_dy])
+            ego_point=np.zeros_like(aug_cur)
+            rotate_dx_cur,rotate_dy_cur=rotate((ego_point[0],ego_point[1]),(aug_cur[0],aug_cur[1]),ego_pose_agent_dic[frame_id//frequency_change_rate, 3],False)
+
+            dyaw = (random.random() * 2 * np.pi - np.pi) * augment_max_dyaw
+            # generate a numpy array raising from 0 to 1 with the shape of 20, 4
+            raising = np.ones((21, 4)) * np.linspace(0, 1, 21).reshape(-1, 1)
+            raising[:, 0] *= rotate_dx_cur
+            raising[:, 1] *= rotate_dy_cur
+            raising[:, 2] *= 0
+            raising[:, 3] *= dyaw
+            ego_pose_agent_dic[frame_id // frequency_change_rate - 20: frame_id // frequency_change_rate+1, :] += raising
+
+            aug_point=ego_pose_agent_dic[frame_id // frequency_change_rate, :]
+            traj=[aug_point]
+            delta_t=0.1
+            for index in range(frame_id//frequency_change_rate,frame_id//frequency_change_rate+50):
+                tgt_point=ego_pose_agent_dic[10+index, :]
+                speed_per_step = nuplan_utils.euclidean_distance(tgt_point[:2],aug_point[:2]) / 1.0
+
+                augheading_x,augheading_y=rotate(aug_point[:2],(aug_point[0]+1,aug_point[1]),aug_point[3])
+                cur2tar=tgt_point[:2]-aug_point[:2]
+                cur2tar_heading=calculate_angle(np.array([1.0,0.0]),cur2tar)
+                alpha=cur2tar_heading-aug_point[3]
+
+                if alpha<-np.pi:
+                    alpha+=2*np.pi
+                elif alpha>np.pi:
+                    alpha-=2*np.pi
+                R_norm=np.linalg.norm(tgt_point[:2]-aug_point[:2])/(2*math.sin(abs(alpha))+1e-10)
+                rot=aug_point[3]+alpha/abs(alpha)*np.pi/2
+                circle_x,circle_y=rotate(aug_point[:2],(aug_point[0]+R_norm,aug_point[1]),rot)
+                cross=(aug_point[0]-circle_x)*(augheading_y-aug_point[1])-(aug_point[1]-circle_y)*(augheading_x-aug_point[0])
+                dir=cross/(abs(cross)+1e-10)
+
+                step=speed_per_step*delta_t
+                delta_angle=dir*step/R_norm
+                update_x,update_y=rotate((circle_x,circle_y),aug_point[:2],delta_angle)
+                update_heading=aug_point[3]+delta_angle
+
+                if update_heading<-np.pi:
+                    update_heading+=2*np.pi
+                elif update_heading>np.pi:
+                    update_heading-=2*np.pi
+
+                aug_point=np.array([update_x,update_y,0.0,update_heading])
+                traj.append(aug_point)
+            traj=np.vstack(traj)
+            ego_pose_agent_dic[frame_id // frequency_change_rate+1: frame_id // frequency_change_rate + 51, :] = traj[1:]
+
+            dx_f,dy_f,dz_f,dyaw_f=traj[-1]-ego_pose_agent_dic[frame_id//frequency_change_rate+50]
+            # linearly project the past poses
+            # generate a numpy array decaying from 1 to 0 with shape of 80, 4
+            decay = np.ones((31, 4)) * np.linspace(1, 0, 31).reshape(-1, 1)
+            decay[:, 0] *= dx_f
+            decay[:, 1] *= dy_f
+            decay[:, 2] *= 0
+            decay[:, 3] *= dyaw_f
+            ego_pose_agent_dic[frame_id // frequency_change_rate+51: frame_id // frequency_change_rate + 81, :] -= decay[1:]
 
     # initialize rasters
     origin_ego_pose = ego_pose_agent_dic[frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
