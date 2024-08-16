@@ -108,17 +108,18 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         input_dim = 7 if self.config.use_speed else 4
         self.action_m_embed = nn.Sequential(nn.Linear(input_dim, action_kwargs.get("d_embed")), nn.Tanh())
 
-        self.kp_tokenizer = None
+        self.traj_tokenizer = None
 
         # For key points, only use x, and y
         # currently forcing key point to be 2 dimension, with no speed and no yaw
         # if self.config.separate_kp_encoder:
-        if self.config.use_key_points != 'no':
-            assert self.config.separate_kp_encoder
-            self.kps_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
-
         if self.use_proposal:
-            self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())
+            # self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())  # Deprecated
+            # each point has 3 dimensions, x, y, and yaw
+            self.proposal_m_embed = nn.Sequential(nn.Linear(self.config.traj_proposal_points_num * 3, action_kwargs.get("d_embed")), nn.Tanh())
+            self.proposal_score_embed = nn.Sequential(nn.Linear(int(self.config.use_proposal), action_kwargs.get("d_embed")), nn.Tanh())
+        if self.config.use_key_points != 'no':
+            self.kps_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
 
         self.image_processor = None
         self.camera_image_encoder = None
@@ -141,7 +142,52 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             self.camera_image_m_embed = STRMultiModalProjector(action_kwargs)
             for param in self.camera_image_encoder.parameters():
                 param.requires_grad = False
-        
+
+    def get_proposal_cluster_embedding(self, info_dict, device, input_embeds, trajectory_label=None):
+        # pass score when generate function is called
+        candidate_proposal = self.traj_tokenizer.trajs.to(device)[:, :self.config.traj_proposal_points_num, :]
+        info_dict['candi_proposal_num'] = candidate_proposal.shape[0]
+        assert int(info_dict['candi_proposal_num']) == int(self.config.use_proposal), f'proposal {candidate_proposal.shape[0]}, but got {self.config.use_proposal}'
+        # n_candi,80, 3 -> n_candi,240 -> n_candi,256
+        candidate_proposal_ = candidate_proposal.reshape(candidate_proposal.shape[0], -1)
+        candi_embeds = self.proposal_m_embed(candidate_proposal_)
+        # n_candi,256 -> bs,n_candi,256
+        bs = input_embeds.shape[0]
+        candi_embeds = candi_embeds.unsqueeze(0).repeat(bs, 1, 1)
+        input_embeds = torch.cat([input_embeds, candi_embeds], dim=1)  # bs,context_length+n_candi,256
+        # use gt score for training
+        traj_gt = trajectory_label[:, :, [0, 1]].unsqueeze(1)  # bs,1,seq,2
+        expanded_candidate_trajectory = candidate_proposal[:, :, [0, 1]].unsqueeze(0).repeat(bs, 1, 1, 1)  # bs,n_candi,seq,2
+        # 计算每条轨迹与目标轨迹对应点之间的差值
+        diff = expanded_candidate_trajectory - traj_gt  # bs, n_candi, seq, 2
+        # 计算欧式距离
+        distances = torch.sqrt(torch.sum(diff ** 2, dim=-1))  # 对最后一个维度求和  bs, n_candi, seq
+        distances = torch.mean(distances, dim=-1)  # ADE: bs, n_candi
+        info_dict['future_traj_diff'] = distances.to(device)
+        # import matplotlib.pyplot as plt
+        # for i in range(candidate_proposal.shape[0]):
+        #     plt.plot(candidate_proposal[i,:,0].cpu(),candidate_proposal[i,:,1].cpu(),alpha=0.2)
+        # index = torch.argmin(future_trajs_diff[0,0,:])
+        # plt.plot(candidate_proposal[index,:,0].cpu(),candidate_proposal[index,:,1].cpu(),'r')
+        # plt.plot(traj_gt[0,0,:,0].cpu(),traj_gt[0,0,:,1].cpu(),'b')
+        # plt.savefig('help.jpg')
+        # plt.close()
+
+        # compute gt distance to score and embed
+        gt_l2_distance = info_dict['future_traj_diff']  # bs,n_cluster,2
+        # bs,n_cluster,2 -> bs,n_cluster
+        # gt_l2_distance = torch.norm(gt_diff, p=2, dim=-1)
+        mask = gt_l2_distance > 30
+        gt_l2_distance[mask] = float('inf')
+        gt_prob = torch.softmax(-gt_l2_distance, dim=1)
+        if not self.training:
+            gt_prob = torch.zeros_like(gt_prob)
+        gt_prob_embed = self.proposal_score_embed(gt_prob)  # bs, 256
+        input_embeds = torch.cat([input_embeds,
+                                  gt_prob_embed.unsqueeze(1)], dim=1)  # bs,context_length+n_candi+1,256
+
+        return input_embeds, info_dict, candi_embeds
+
     def forward(self, **kwargs):
         """
         Nuplan raster encoder require inputs:
@@ -163,6 +209,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         is_training = kwargs.get("is_training", None)
         assert is_training is not None, "is_training should not be None"
+        assert self.training == is_training, "training status should be the same"
         self.augmentation.training = is_training
 
         assert trajectory_label is not None, "trajectory_label should not be None"
@@ -240,15 +287,6 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             input_embeds = torch.cat([input_embeds, camera_image_embed], dim=1)
             context_length += 8 * 257
 
-        # add proposal embedding
-        if self.use_proposal:
-            if self.config.autoregressive_proposals:
-                intentions = kwargs.get('intentions', None)  # batch_size, 16
-                assert intentions is not None, "intentions should not be None when using proposal"
-                proposal_embeds = self.proposal_m_embed(intentions.unsqueeze(-1).float())  # batch_size, 16, 256
-                # print('test encoder 1: ', proposal_embeds.shape)
-                input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
-
         info_dict = {
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
@@ -256,14 +294,16 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             "aug_current": aug_current,
         }
 
+        # add proposal embedding
+        if self.use_proposal:
+            assert self.config.traj_tokenizer == 'cluster_traj', 'only support cluster_traj for now'
+            # inpute_embedc -> bs,context_length+n_candi+1,256
+            input_embeds, info_dict, candi_embeds = self.get_proposal_cluster_embedding(info_dict, device, input_embeds,
+                                                                                        trajectory_label=trajectory_label)
+
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
-            input_embeds = torch.cat([input_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed),
-                                                  device=device,
-                                                  dtype=action_embeds.dtype)], dim=1)
             info_dict['future_key_points'] = None
-            future_key_points = None
         else:
             future_key_points = self.select_keypoints(info_dict)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
@@ -273,39 +313,20 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             future_key_points_aug = future_key_points_aug[:, :, :2]
 
             if self.config.separate_kp_encoder:
-                if self.kp_tokenizer is None:
+                if self.config.kp_decoder_type == "mlp":
                     future_key_embeds = self.kps_m_embed(future_key_points_aug)
-                else:
-                    assert future_key_points.shape[1] == 5, 'future key points should be 5'
-                    future_key_points_ids = []
-                    future_key_points_after = []
-                    for i in range(5):
-                        future_key_points_ids.append(self.kp_tokenizer[i].encode(future_key_points_aug[:, i, :], dtype=action_embeds.dtype, device=device))
-                        future_key_points_after.append(self.kp_tokenizer[i].decode(future_key_points_ids[i], dtype=action_embeds.dtype, device=device))
-                    future_key_points_after = torch.stack(future_key_points_after, dim=1)
-                    future_key_points_ids = torch.stack(future_key_points_ids, dim=1)
-                    future_key_embeds = self.kps_m_embed(future_key_points_after)
-                    info_dict['future_key_points_ids'] = future_key_points_ids.to(device)
-                    info_dict['future_key_points_after'] = future_key_points_after.to(device)
+                    input_embeds = torch.cat([input_embeds, future_key_embeds], dim=1)
             else:
                 assert False, 'deprecated for clarity, use separate_kp_encoder instead'
-                # if self.config.use_speed:
-                #     # padding speed, padding the last dimension from 4 to 7
-                #     future_key_points_aug = torch.cat([future_key_points_aug, torch.zeros_like(future_key_points_aug)[:, :, :3]], dim=-1)
-                #     future_key_embeds = self.action_m_embed(future_key_points_aug)
-                # else:
-                #     future_key_embeds = self.action_m_embed(future_key_points_aug)
-            input_embeds = torch.cat([input_embeds, future_key_embeds,
-                                      torch.zeros((batch_size, pred_length, n_embed),
-                                                  device=device,
-                                                  dtype=action_embeds.dtype)], dim=1)
             info_dict['future_key_points'] = future_key_points
 
-        info_dict['selected_indices'] = self.selected_indices
-        if self.use_proposal:
-            if self.config.autoregressive_proposals:
-                info_dict["intentions"] = intentions
+        # padding the input_embeds with pred_length zeros
+        input_embeds = torch.cat([input_embeds,
+                                  torch.zeros((batch_size, pred_length, n_embed),
+                                              device=device,
+                                              dtype=action_embeds.dtype)], dim=1)
 
+        info_dict['selected_indices'] = self.selected_indices
         return input_embeds, info_dict
 
 

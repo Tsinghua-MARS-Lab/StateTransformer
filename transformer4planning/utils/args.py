@@ -101,10 +101,7 @@ class ModelArguments:
     separate_kp_encoder: Optional[bool] = field(
         default=True
     )
-    pred_key_points_only: Optional[bool] = field(
-        default=False
-    )
-    pred_traj_only: Optional[bool] = field(
+    skip_trajectory_decoding: Optional[bool] = field(
         default=False
     )
     arf_x_random_walk: Optional[float] = field(
@@ -207,9 +204,6 @@ class ModelArguments:
     ######## end of WOMD args ########
 
     # WIP args
-    autoregressive_proposals: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use autoregressive proposals in MTR model"}
-    )
     proposal_num: Optional[int] = field(
         default=13
     )
@@ -312,19 +306,20 @@ class ModelArguments:
     # end of MoE configs
 
     # WIP: key point tokenize
-    kp_tokenizer: Optional[str] = field(
-        default=None, metadata={"help": "choose from [none, uniform, cluster, gaussian]"}
+    traj_tokenizer: Optional[str] = field(
+        default='cluster_traj', metadata={"help": "choose from [none, cluster_traj]"}
     )
-    kp_cluster_files: Optional[str] = field(
-        default=None, metadata={"help": "csv files which record all cluster center info for 8s 4s 2s 1s 0.5s"}
+
+    traj_proposal_points_num: Optional[int] = field(
+        default=80, metadata={"help": "The number of points for each trajectory proposal, set smaller than 80 to slice later"}
+    )
+
+    traj_cluster_file: Optional[str] = field(
+        default=None, metadata={"help": "the csv file which record all cluster center info for the whole 8s trajectory"}
     )
 
     regression_long_class_short: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use regression long class short"}
-    )
-
-    add_regression_loss: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to add regression loss"}
     )
 
     # WIP: training with the simulation scores as loss
@@ -356,6 +351,9 @@ class ModelArguments:
     )
     pass_agent_dic_to_model: Optional[bool] = field(
         default=False, metadata={"help": "Whether to pass agent dic to the model"}
+    )
+    dense_off_road_check: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use dense off road check, this might significantly slow down the eval"}
     )
 
 
