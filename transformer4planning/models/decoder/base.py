@@ -502,7 +502,10 @@ class KeyPointMLPDeocder(nn.Module):
 
         kp_start_index = context_length - 1
         if self.config.use_proposal:
-            kp_start_index += 1
+            if self.config.task == 'waymo':
+                kp_start_index += 1
+            elif self.config.task == 'nuplan':
+                kp_start_index += self.config.proposal_num + 1
 
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
 

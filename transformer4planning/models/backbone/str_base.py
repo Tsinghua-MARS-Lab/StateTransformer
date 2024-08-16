@@ -412,6 +412,21 @@ class STR(PreTrainedModel):
         proposal_result = None
         proposal_scores = None
 
+        """
+        sequence_in_ids = {
+            'context': [0, context_length],
+            'proposal': [context_length, context_length + candi_proposal_num + 1],
+            'key_points': [context_length + candi_proposal_num + 1, context_length + candi_proposal_num + 1 + key_point_num],
+            'trajectory': [context_length + candi_proposal_num + 1 + key_point_num, context_length + candi_proposal_num + 1 + key_point_num + pred_length]
+        }
+        sequence_out_ids = {
+            'context': [-1, context_length - 1],
+            'proposal': [context_length - 1, context_length + candi_proposal_num],
+            'key_points': [context_length + candi_proposal_num, context_length + candi_proposal_num + key_point_num],
+            'trajectory': [context_length + candi_proposal_num + key_point_num, context_length + candi_proposal_num + key_point_num + pred_length]
+        }
+        """
+
         for mode in range(select_k):
             kp_start_index = int(context_length)
             if self.config.use_proposal:
@@ -466,12 +481,7 @@ class STR(PreTrainedModel):
             if self.use_key_points != "no":
                 pred_length = info_dict["pred_length"]
                 selected_indices = self.encoder.selected_indices
-                kp_start_index = int(context_length)
-                if self.config.use_proposal:
-                    if self.config.autoregressive_proposals:
-                        kp_start_index += int(self.config.proposal_num)
-                    else:
-                        kp_start_index += 1
+                # kp_start_index = int(context_length)  # Update: set before proposal
 
                 # pass the following infos during generate for one sample (non-batch) generate with KP checking
                 map_name = kwargs.get("map", None)
