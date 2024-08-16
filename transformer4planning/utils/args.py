@@ -155,6 +155,25 @@ class ModelArguments:
     map_cond: Optional[bool] = field(   
         default=True, metadata={"help": "Whether to use map condition in the diffusion forcing."}
     )
+    ddim: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use DDIM in the diffusion forcing."}
+    )
+    stacks: Optional[int] = field(
+        default=80,
+    )
+    objective: Optional[str] = field(
+        default=None
+    )
+    beta_schedule: Optional[str]= field(
+        default=None
+    )
+    diffusion_timesteps:Optional[int]=field(
+        default=100,
+    )
+    normalize: Optional[bool] = field(
+        default=True
+    )
+    
     ######## end of diffusion forcing args ########
     
     ######## begin of camera images args ########

@@ -1034,39 +1034,25 @@ def build_models(model_args):
             config_p.num_attention_heads = config_p.n_head
         else:
             assert False, f'Unsupported model name: {model_args.model_name}!'
-        if 'diffusion' in model_args.model_name:
+        if 'refiner' in model_args.model_name:
             # from transformer4planning.models.backbone.StrDiff import StrDiff
             # from transformer4planning.models.backbone.StrDiffDiT import StrDiffDiT
             # from transformer4planning.models.backbone.ExplicitDiT import ExplicitDiT
             from transformer4planning.models.backbone.ExplicitDiffusion import ExplicitDiffusion
             
-    
-            if 'dit' in model_args.model_name:
-                config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiffDiT.yaml"
-                config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
-                ModelCls = StrDiffDiT
-            elif 'explicit' in model_args.model_name:
-                config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/explicitDiT.yaml"
-                config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
-                config_p.learnable_std_mean = model_args.learnable_std_mean
-                config_p.map_cond = model_args.map_cond
-                ModelCls = ExplicitDiT
-            elif 'whole' in model_args.model_name:
-                config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/explicitDiT_whole.yaml"
-                config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
-                config_p.learnable_std_mean = model_args.learnable_std_mean
-                config_p.map_cond = model_args.map_cond
-                ModelCls = ExplicitDiT
-            elif 'refiner' in model_args.model_name:
-                config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/ldr_diffusion.yaml"
-                config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
-                config_p.learnable_std_mean = model_args.learnable_std_mean
-                config_p.map_cond = model_args.map_cond
-                ModelCls = ExplicitDiffusion
-            else:
-                config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/strDiff.yaml"
-                config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
-                ModelCls = StrDiff
+
+            #config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/ldr_diffusion.yaml"
+            config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
+            config_p.learnable_std_mean = model_args.learnable_std_mean
+            config_p.map_cond = model_args.map_cond
+            config_p.ddim = model_args.ddim
+            config_p.frame_stack = model_args.stacks
+            config_p.objective = model_args.objective
+            config_p.beta_schedule = model_args.beta_schedule
+            config_p.diffusion_timesteps = model_args.diffusion_timesteps
+            config_p.normalize = model_args.normalize
+            ModelCls = ExplicitDiffusion
+
         
     elif 'stablelm' in model_args.model_name:
         from transformer4planning.models.backbone.stablelm import STR_StableLM, STRStableLMConfig

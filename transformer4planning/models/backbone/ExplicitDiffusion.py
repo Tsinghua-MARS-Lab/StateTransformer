@@ -29,18 +29,22 @@ class ExplicitDiffusion(PreTrainedModel):
     def __init__(self, config):
         from transformer4planning.utils.common_utils import load_config
         print("=================DiffusionRefiner===================")
-        print("loading the diffusion config...")
-        cfg=load_config(config.diffusion_config)
-        
+        # print("loading the diffusion config...")
+        # cfg=load_config(config.diffusion_config)
         ###########config the attribute#############
-        self.cfg = cfg
-        self.trajectory_dim = cfg.trajectory_dim
-        self.frame_stack = cfg.frame_stack
-        self.learnable_init_traj = cfg.learnable_init_traj
+        config.trajectory_dim=4
+        config.learnable_init_traj=True
+        config.data_mean = [50,5,0,0]
+        config.data_std = [100,10,1,1]
+        config.optimizer_beta = [0.9, 0.999]
+        config.maps_dim = 256
+        config.n_maps_token = 788
+        self.cfg = config
+        self.trajectory_dim = config.trajectory_dim
+        self.frame_stack = config.frame_stack
+        self.learnable_init_traj = config.learnable_init_traj
         self.map_cond = config.map_cond
         self.config = config
-        self.cfg.map_cond = self.map_cond
-        
         # init the pretrained model
         super().__init__(config)
         
@@ -160,7 +164,6 @@ class ExplicitDiffusion(PreTrainedModel):
         # Phase1: get the result from the STR model
         str_result = self.str_model.generate(**kwargs)
         trajectory_prior = str_result["traj_logits"]
-        print("trajectory_prior", trajectory_prior[0,:5,:])
         maps_info = str_result["maps_info"]
             
         
@@ -179,6 +182,7 @@ class ExplicitDiffusion(PreTrainedModel):
             transition_info = prediction
             final_predict.append(prediction)
         final_predict = torch.stack(final_predict)
+        
         
         
         # unnormalize after rearrange

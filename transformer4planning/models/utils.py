@@ -56,36 +56,29 @@ def cat_raster_seq_for_waymo(raster, framenum=11):
 def normalize(x):
     y = torch.zeros_like(x)
     # mean(x[...,0]) = 9.517, mean(sqrt(x[...,0]**2))=9.517
-    y[..., 0] += (x[..., 0] / 10)
-    y[..., 0] -= 0
+    y[..., 0] += (x[..., 0] / 25)
+    y[..., 0] -= 1.0
     # mean(x[..., 1]) = -0.737, mean(sqrt(x[..., 1]**2))=0.783
-    y[..., 1] += (x[..., 1] / 10)
-    y[..., 1] += 0
+    y[..., 1] += (x[..., 1] / 5)
     if x.shape[-1]==2:
         return y
     # mean(x[..., 2]) = 0, mean(sqrt(x[..., 2]**2)) = 0
-    y[..., 2] = x[..., 2] * 10
+    y[..., 2] = x[..., 2] 
     # mean(x[..., 3]) = 0.086, mean(sqrt(x[..., 3]**2))=0.090
-    y[..., 3] += x[..., 3] / 2
+    y[..., 3] += x[..., 3] 
     y[..., 3] += 0
     return y
 
 def denormalize(y):
     x = torch.zeros_like(y)
-    x[..., 0] = (y[..., 0]) * 10
-    x[..., 1] = (y[..., 1]) * 10
+    x[..., 0] = (y[..., 0] + 1.0) * 25
+    x[..., 1] = (y[..., 1]) * 5
     if y.shape[-1]==2:
         return x
-    x[..., 2] = y[..., 2] / 10
-    x[..., 3] = y[..., 3] * 2
+    x[..., 2] = 0
+    x[..., 3] = y[..., 3] 
     return x
 
-
-def linear_beta_schedule(timesteps, beta_start=1e-4, beta_end=2e-2, dtype=torch.float32):
-    betas = np.linspace(
-        beta_start, beta_end, timesteps
-    )
-    return torch.tensor(betas, dtype=dtype)
 
 def extract(a, t, x_shape):
     b, *_ = t.shape
@@ -138,14 +131,38 @@ def select_k_from_mc(traj_logits, scores, k):
     
     return traj_logits, scores
 
-def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
+def linear_beta_schedule(timesteps):
+    """
+    linear schedule, proposed in original ddpm paper
+    """
+    scale = 1000 / timesteps
+    beta_start = scale * 0.0001
+    beta_end = scale * 0.02
+    return torch.linspace(beta_start, beta_end, timesteps, dtype = torch.float64)
+
+def cosine_beta_schedule(timesteps, s = 0.008):
     """
     cosine schedule
     as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
     """
     steps = timesteps + 1
-    t = torch.linspace(0, timesteps, steps, dtype=torch.float64) / timesteps
+    t = torch.linspace(0, timesteps, steps, dtype = torch.float64) / timesteps
     alphas_cumprod = torch.cos((t + s) / (1 + s) * math.pi * 0.5) ** 2
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
-    return torch.clip(betas, 0, 0.999).to(dtype)
+    return torch.clip(betas, 0, 0.999)
+
+def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1e-5):
+    """
+    sigmoid schedule
+    proposed in https://arxiv.org/abs/2212.11972 - Figure 8
+    better for images > 64x64, when used during training
+    """
+    steps = timesteps + 1
+    t = torch.linspace(0, timesteps, steps, dtype = torch.float64) / timesteps
+    v_start = torch.tensor(start / tau).sigmoid()
+    v_end = torch.tensor(end / tau).sigmoid()
+    alphas_cumprod = (-((t * (end - start) + start) / tau).sigmoid() + v_end) / (v_end - v_start)
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return torch.clip(betas, 0, 0.999)

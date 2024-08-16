@@ -23,13 +23,7 @@ n_maps_token: 788
   # prediction_type: epsilon # or sample or epsilon
 
 
-# ldr's diffusion version
-diffusion_backbone: DDPM
-predict_yaw: True
-k: 1
 
-beta_schedule: cosine
-diffusion_timesteps: 100
 
 trajectory_loss_rescale: 1.0
 visualize_diffusion_intermedians: False
