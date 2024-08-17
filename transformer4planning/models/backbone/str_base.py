@@ -1038,11 +1038,11 @@ def build_models(model_args):
             # from transformer4planning.models.backbone.StrDiff import StrDiff
             # from transformer4planning.models.backbone.StrDiffDiT import StrDiffDiT
             # from transformer4planning.models.backbone.ExplicitDiT import ExplicitDiT
-            from transformer4planning.models.backbone.ExplicitDiffusion import ExplicitDiffusion
+            from transformer4planning.models.backbone.DiffusionAugmentation import DiffusionAugmentation
             
 
             #config_p.diffusion_config="/cephfs/zhanjh/DiffusionForcing/StateTransformer/config/ldr_diffusion.yaml"
-            config_p.model_pretrain_name_or_path = model_args.model_pretrain_name_or_path
+            config_p.backbone_path = model_args.backbone_path
             config_p.learnable_std_mean = model_args.learnable_std_mean
             config_p.map_cond = model_args.map_cond
             config_p.ddim = model_args.ddim
@@ -1051,7 +1051,7 @@ def build_models(model_args):
             config_p.beta_schedule = model_args.beta_schedule
             config_p.diffusion_timesteps = model_args.diffusion_timesteps
             config_p.normalize = model_args.normalize
-            ModelCls = ExplicitDiffusion
+            ModelCls = DiffusionAugmentation
 
         
     elif 'stablelm' in model_args.model_name:
@@ -1115,8 +1115,13 @@ def build_models(model_args):
         raise ValueError("Model name must choose from ['scratch', 'pretrain'] + ['nonauto-gpt', 'transxl', 'gpt', 'xlnet']!")
 
     if 'scratch' in model_args.model_name:
-        model = ModelCls(config_p)
-        logger.info('Scratch ' + tag + ' Initialized!')
+        if 'refiner' in model_args.model_name:
+            model = ModelCls.from_pretrained(model_args.backbone_path, config=config_p)
+            model.freeze_str_parameters()
+            logger.info('Scratch ' + tag + ' Initialized with Pretrained Weight!')
+        else:
+            model = ModelCls(config_p)
+            logger.info('Scratch ' + tag + ' Initialized!')
     elif 'pretrain' in model_args.model_name:
         # from transformers import AqlmConfig
         # quantization_config = AqlmConfig(weights="int8", pre_quantized=False)

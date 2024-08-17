@@ -517,7 +517,7 @@ chanllenge choice: `+simulation=closed_loop_reactive_agents` Optional `[closed_l
 ### Launch nuboard for visualization
 
 ```
-python script/run_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/test/2023.05.08.19.17.16]' 'scenario_builder=nuplan' 'port_number=5005'
+python script/run_nuboard.py simulation_path='[/cephfs/zhanjh/DiffusionForcing/StateTransformer/testing_log/closed_loop_nonreactive_agents/STR_planner/diff_test_10_wholeTrain]' 'scenario_builder=nuplan' 'port_number=5005'
 ```
 
 or

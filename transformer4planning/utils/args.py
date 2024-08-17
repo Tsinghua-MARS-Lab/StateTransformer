@@ -16,6 +16,9 @@ class ModelArguments:
         default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
+    backbone_path: str = field(
+        default=None,
+    )
     d_embed: Optional[int] = field(
         default=256,
     )
