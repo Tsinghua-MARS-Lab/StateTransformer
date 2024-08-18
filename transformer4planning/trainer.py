@@ -651,6 +651,7 @@ class PlanningTrainer(Trainer):
             else:
                 # # TODO: this needs to be fixed and made cleaner later.
                 raise NotImplementedError
+        
 
         pred_dict = outputs['pred_dict'] if 'pred_dict' in outputs else logits[-1]
 

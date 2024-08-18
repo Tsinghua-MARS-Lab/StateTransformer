@@ -392,7 +392,6 @@ class ModelArguments:
         default=False, metadata={"help": "Whether to pass agent dic to the model"}
     )
 
-
 @dataclass
 class DataTrainingArguments:
     """
