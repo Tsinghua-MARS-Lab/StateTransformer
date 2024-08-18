@@ -133,7 +133,7 @@ def compute_metrics(prediction: EvalPrediction):
         for each_key in loss_items:
             if each_key == 'loss_per_kp':
                 loss_items[each_key] = loss_items[each_key].reshape(-1, 5)
-                for i in range(loss_items[each_key].shape[-1]):
+                for i in range(5):
                     eval_result[f'kp_loss_{i}'] = np.mean(loss_items[each_key][:, i])
                 continue
             # get average loss for each key
@@ -241,9 +241,6 @@ def compute_metrics(prediction: EvalPrediction):
         next_step_fde_gen = np.sqrt(next_step_fde_x_error_gen ** 2 + next_step_fde_y_error_gen ** 2)
         item_to_save['convergence_rate'] = next_step_fde_gen / fde8_gen
         eval_result['convergence_rate'] = (next_step_fde_gen / fde8_gen).mean()
-
-    if 'any_point_off_road' in prediction_by_generation:
-        eval_result['any_point_off_road'] = np.mean(prediction_by_generation['any_point_off_road'])
 
     def normalize_angles(angles):
         return np.arctan2(np.sin(angles), np.cos(angles))
@@ -654,6 +651,7 @@ class PlanningTrainer(Trainer):
             else:
                 # # TODO: this needs to be fixed and made cleaner later.
                 raise NotImplementedError
+        
 
         pred_dict = outputs['pred_dict'] if 'pred_dict' in outputs else logits[-1]
 
@@ -664,7 +662,6 @@ class PlanningTrainer(Trainer):
 
         # making prediction with autorergressive generation
         prediction_generation = self.model.generate(**inputs)
-
         # padding if the batch size is not the same as the eval batch size
         if logits.shape[0] != self.args.per_device_eval_batch_size:
             # must top to the eval batch size, or will cause error and stuck the whole pipeline

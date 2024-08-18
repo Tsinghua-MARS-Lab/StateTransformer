@@ -1282,23 +1282,6 @@ class NuPlanDL:
             except:
                 print("Invalid scenario, cannot get route!, skipping")
                 return None
-
-            if correct_route_ids:
-                # fix route id
-                from nuplan_simulation.route_corrections.route_utils import route_roadblock_correction
-                try:
-                    route_ids = route_road_ids
-                    revised_route_ids = route_roadblock_correction(
-                        scenario.get_ego_state_at_iteration(0),
-                        self.map_api,
-                        route_ids
-                    )
-                    route_road_ids = revised_route_ids
-                    print('testing route correction: ', route_road_ids)
-                except:
-                    print("Invalid route given, Skipping ", route_road_ids)
-                    return None
-
             route_road_ids = list(set(route_road_ids))
             route_ids_processed = []
             for each_id in route_road_ids:
@@ -1316,18 +1299,14 @@ class NuPlanDL:
                 if correct_route_ids:
                     # fix route id
                     from nuplan_simulation.route_corrections.route_utils import route_roadblock_correction
-                    try:
-                        route_ids = self.route_idx_mem
-                        revised_route_ids = route_roadblock_correction(
-                            scenario.get_ego_state_at_iteration(0),
-                            self.map_api,
-                            route_ids
-                        )
-                        data_to_return['route'] = revised_route_ids
-                    except:
-                        print("Invalid route given, Skipping ", self.route_idx_mem)
-                        data_to_return['route'] = self.route_idx_mem
-                        return None
+                    route_ids = self.route_idx_mem
+                    revised_route_ids = route_roadblock_correction(
+                        scenario.get_ego_state_at_iteration(0),
+                        self.map_api,
+                        route_ids
+                    )
+                    data_to_return['route'] = revised_route_ids
+                    print('test correcting route ids: ', route_ids, revised_route_ids)
                 else:
                     data_to_return['route'] = self.route_idx_mem
 

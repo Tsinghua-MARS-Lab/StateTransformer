@@ -12,3 +12,13 @@ node_modules
 test.py
 .vscode
 training_configs
+testing_log
+.git
+
+# 忽略特定文件
+data_dic.pkl
+visualization/
+
+# 忽略整个目录
+images/
+MoeProne/

@@ -16,6 +16,9 @@ class ModelArguments:
         default=None,
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
+    backbone_path: str = field(
+        default=None,
+    )
     d_embed: Optional[int] = field(
         default=256,
     )
@@ -101,7 +104,10 @@ class ModelArguments:
     separate_kp_encoder: Optional[bool] = field(
         default=True
     )
-    skip_trajectory_decoding: Optional[bool] = field(
+    pred_key_points_only: Optional[bool] = field(
+        default=False
+    )
+    pred_traj_only: Optional[bool] = field(
         default=False
     )
     arf_x_random_walk: Optional[float] = field(
@@ -145,6 +151,37 @@ class ModelArguments:
     )
     ######## end of diffusion decoder args ########
 
+    ######## begin of diffusion forcing args ########
+    learnable_std_mean: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to learn the mean and std of the diffusion forcing."}
+    )
+    map_cond: Optional[bool] = field(   
+        default=True, metadata={"help": "Whether to use map condition in the diffusion forcing."}
+    )
+    ddim: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use DDIM in the diffusion forcing."}
+    )
+    stacks: Optional[int] = field(
+        default=80,
+    )
+    objective: Optional[str] = field(
+        default=None
+    )
+    beta_schedule: Optional[str]= field(
+        default=None
+    )
+    diffusion_timesteps:Optional[int]=field(
+        default=100,
+    )
+    normalize: Optional[bool] = field(
+        default=True
+    )
+    residual: Optional[bool] = field(
+        default=False
+    )
+    
+    ######## end of diffusion forcing args ########
+    
     ######## begin of camera images args ########
     camera_image_encoder: Optional[str] = field(
         default=None, metadata={"help": "choose from [dinov2], set None to not use camera images"}
@@ -186,15 +223,6 @@ class ModelArguments:
     augment_current_with_future_linear_changes: Optional[bool] = field(
         default=False, metadata={"help": "Whether to augment future poses with linear changes"}
     )
-    augment_method: Optional[str] = field(
-        default="linear", metadata={"help": "How to augment future poses, linear or track"}
-    )
-    augment_max_dy: Optional[float] = field(
-        default=0.5, metadata={"help": "The max value along y axis of augmenting current pose in the preprocess"}
-    )
-    augment_max_dyaw: Optional[float] = field(
-        default=0.05, metadata={"help": "The max angle of augmenting current pose in the preprocess"}
-    )
     generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
         default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
     )
@@ -213,6 +241,9 @@ class ModelArguments:
     ######## end of WOMD args ########
 
     # WIP args
+    autoregressive_proposals: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use autoregressive proposals in MTR model"}
+    )
     proposal_num: Optional[int] = field(
         default=13
     )
@@ -315,20 +346,19 @@ class ModelArguments:
     # end of MoE configs
 
     # WIP: key point tokenize
-    traj_tokenizer: Optional[str] = field(
-        default='cluster_traj', metadata={"help": "choose from [none, cluster_traj]"}
+    kp_tokenizer: Optional[str] = field(
+        default=None, metadata={"help": "choose from [none, uniform, cluster, gaussian]"}
     )
-
-    traj_proposal_points_num: Optional[int] = field(
-        default=80, metadata={"help": "The number of points for each trajectory proposal, set smaller than 80 to slice later"}
-    )
-
-    traj_cluster_file: Optional[str] = field(
-        default=None, metadata={"help": "the csv file which record all cluster center info for the whole 8s trajectory"}
+    kp_cluster_files: Optional[str] = field(
+        default=None, metadata={"help": "csv files which record all cluster center info for 8s 4s 2s 1s 0.5s"}
     )
 
     regression_long_class_short: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use regression long class short"}
+    )
+
+    add_regression_loss: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to add regression loss"}
     )
 
     # WIP: training with the simulation scores as loss
@@ -361,11 +391,6 @@ class ModelArguments:
     pass_agent_dic_to_model: Optional[bool] = field(
         default=False, metadata={"help": "Whether to pass agent dic to the model"}
     )
-    dense_off_road_check: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use dense off road check, this might significantly slow down the eval"}
-    )
-
-
 
 @dataclass
 class DataTrainingArguments:
@@ -461,8 +486,19 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
+    debug_train: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": (
+                "debug mode."
+            )
+        },  
+    )
     do_test: Optional[bool] = field(
         default=False,
+    )
+    resume_from_checkpoint:Optional[str] = field(
+        default=None,
     )
     images_cleaning_to_folder: Optional[str] = field(
         default=None, metadata={"help": "Pass a target folder to clean the raw image folder to the target folder."}
@@ -471,7 +507,7 @@ class PlanningTrainingArguments(TrainingArguments):
     num_cycles: Optional[int] = field(
         default=None, metadata={"help": "The number of cycles for the cosine learning rate scheduler."}
     )
-
+    
     # arguments for simulations testings in the training loop
     do_sim_val: Optional[bool] = field(
         default=False, metadata={"help": "Whether to do simulation validation"}

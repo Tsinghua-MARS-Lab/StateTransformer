@@ -3,11 +3,7 @@ import torch
 import einops
 import math
 import time
-INIT_THRESHOLD = 0.5
-
-
-    
-    
+INIT_THRESHOLD = 0.5  
 
 def farthest_point_sample_PointCloud(xy, npoint):
     """
@@ -19,13 +15,14 @@ def farthest_point_sample_PointCloud(xy, npoint):
     """
     device = xy.device
     B, N, C = xy.shape
+    
     centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
     distance = torch.ones(B, N).to(device) * 1e10
     farthest = torch.zeros((B,), dtype=torch.long).to(device) # modified so that the zeroth point with max confidence is always sampled.
     batch_indices = torch.arange(B, dtype=torch.long).to(device)
     for i in range(npoint):
         centroids[:, i] = farthest
-        centroid = xy[batch_indices, farthest, :].view(B, 1, 2)
+        centroid = xy[batch_indices, farthest, :].view(B, 1, C)
         dist = torch.sum((xy - centroid) ** 2, -1)
         mask = dist < distance
         distance[mask] = dist[mask]
@@ -33,7 +30,7 @@ def farthest_point_sample_PointCloud(xy, npoint):
     return centroids
 
 def modify_func(output:dict,nms_method='fde',num_mods_out:int = 36, init_threshold: float = INIT_THRESHOLD, nms_or_fps = 'nms', EM_Iter = 50, org_sigma = 1e-1, init_sigma = 1e-1,):
-    print("We are now using modifyTraj function defined in traj_modify_from_MultiPathPP.py.")
+    # print("We are now using modifyTraj function defined in traj_modify_from_MultiPathPP.py.")
     """Modify the output trajectory using NMS.
 
     Args:
@@ -57,9 +54,6 @@ def modify_func(output:dict,nms_method='fde',num_mods_out:int = 36, init_thresho
     # flag1 = time.time()
     # print("Currently using {} sampling method to initialize the output of EM algorithm. Default is fde.".format(nms_method))
     assert nms_method == "fde", 'Not implemented'
-        
-    
-
     
     ireg_lst = output['reg']
     icls_lst = output['cls']
@@ -79,8 +73,6 @@ def modify_func(output:dict,nms_method='fde',num_mods_out:int = 36, init_thresho
     # flag2 = time.time()
     # oreg_lst_: list of length #batch, each element is a tensor of shape 1 * num_mods_out * pred_length * 2
     # ocls_lst_: list of length #batch, each element is a tensor of shape 1 * num_mods_out
-    
-    
     
     refined_oreg_lst_, refined_ocls_lst_, sigma_lst_ = run_EM_algorithm(ireg_lst, icls_lst, oreg_lst_, ocls_lst_, EM_Iter, org_sigma, init_sigma)
     # flag3 = time.time()
@@ -161,12 +153,12 @@ def _compute_EM_algorithm(targs):
     current_q, indices = torch.sort(current_q, descending=True, dim=1)  # shape: (agent, out_mods)
 
     # Use indices to rearrange current_mu and current_sigma
-    current_mu = torch.gather(current_mu, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], 2))  # shape: (agent, out_mods, length, 2)
-    current_sigma = torch.gather(current_sigma, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], 2))  # shape: (agent, out_mods, length, 2)
+    current_mu = torch.gather(current_mu, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], current_mu.shape[-1]))  # shape: (agent, out_mods, length, 2)
+    current_sigma = torch.gather(current_sigma, 1, indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, current_mu.shape[-2], current_mu.shape[-1]))  # shape: (agent, out_mods, length, 2)
     return (current_q, current_mu, current_sigma)
 
 def run_EM_algorithm(ireg_lst, icls_lst, oreg_lst, ocls_lst, EM_Iter, org_sigma, init_sigma):
-    print("Now we run for {} iterations of EM algorithm.".format(EM_Iter))
+    # print("Now we run for {} iterations of EM algorithm.".format(EM_Iter))
     # ireg_lst: list of length #scene, each element is a tensor of shape #agent_in_current_scene * in_mods * #pred_length * 2
     # icls_lst: list of length #scene,                          of shape #agent_in_current_scene * in_mods
     # oreg_lst:                #scene                                    #agent_in_current_scene * out_mods * #pred_length * 2
@@ -177,8 +169,6 @@ def run_EM_algorithm(ireg_lst, icls_lst, oreg_lst, ocls_lst, EM_Iter, org_sigma,
     # This is the EM algorithm mentioned in the paper of MultiPath++.
     # we use the trajectories obtained by fps as an initialization.
     agent_nums = [x.shape[0] for x in ireg_lst]
-
-    
     
     org_q = torch.cat(icls_lst,dim=0)   # #agent * in_mods
     org_q_sum = torch.sum(org_q, dim=-1, keepdim = True)
