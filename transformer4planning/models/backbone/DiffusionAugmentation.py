@@ -41,6 +41,7 @@ class DiffusionAugmentation(STR_Mixtral):
         self.learnable_init_traj = config.learnable_init_traj
         self.map_cond = config.map_cond
         self.config = config
+        self.residual = config.residual
         # init the pretrained model
         
         # Initialize the parent class with the given configuration
@@ -89,6 +90,9 @@ class DiffusionAugmentation(STR_Mixtral):
         trajectory_prior = str_result["traj_logits"]
         maps_info = str_result["maps_info"]
         trajectory_label = kwargs.get("trajectory_label", None)
+        residual = trajectory_label - trajectory_prior
+        if self.residual:
+            trajectory_label = residual
         
         # Phase2:convey the result to the diffusion model
         label, trajectory_prior, maps_info, init_traj = self._preprocess_batch(trajectory_prior=trajectory_prior, maps_info=maps_info, label=trajectory_label, is_train=True)
@@ -147,7 +151,9 @@ class DiffusionAugmentation(STR_Mixtral):
         else:
             init_traj = self.init_x[None].expand(batch_size, *self.init_x.shape)
         
+
         trajectory_prior = rearrange(trajectory_prior, "b (t fs) c ... -> t b fs c ...", fs=self.frame_stack)
+        
         label = rearrange(label, "b (t fs) c ... -> t b fs c ...", fs=self.frame_stack)
         
 
@@ -162,6 +168,7 @@ class DiffusionAugmentation(STR_Mixtral):
         trajectory_prior = str_result["traj_logits"]
         maps_info = str_result["maps_info"]
         # print("trajectory_prior", trajectory_prior[0,::10])
+        
         
         # Phase2:convey the result to the diffusion model
         label, trajectory_prior, maps_info, init_traj = self._preprocess_batch(trajectory_prior=trajectory_prior, maps_info=maps_info, is_train=False)
@@ -178,8 +185,6 @@ class DiffusionAugmentation(STR_Mixtral):
             transition_info = prediction
             final_predict.append(prediction)
         final_predict = torch.stack(final_predict)
-        
-        
         
         # unnormalize after rearrange
         final_predict = rearrange(final_predict, "t b fs c ... -> b (t fs) c ...", fs=self.frame_stack)

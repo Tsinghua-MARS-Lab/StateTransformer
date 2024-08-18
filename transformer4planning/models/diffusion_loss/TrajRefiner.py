@@ -74,6 +74,7 @@ class TrajectoryRefiner(nn.Module):
             objective=self.cfg.objective,
             ddim_sampling_eta=self.cfg.ddim,
             auto_normalize_data=self.cfg.normalize,
+            residual=self.cfg.residual,
         )
 
     # ========= inference  ============
@@ -133,6 +134,7 @@ class DiffusionWrapper(nn.Module):
         min_snr_loss_weight = True, # https://arxiv.org/abs/2303.09556
         min_snr_gamma = 5,
         auto_normalize_data = True,
+        residual = False,
     ):
         super().__init__()
         # assert not (type(self) == DiffusionWrapper and model.channels != model.out_dim)
@@ -142,6 +144,7 @@ class DiffusionWrapper(nn.Module):
 
         self.objective = objective
         self.timesteps = timesteps
+        self.residual = residual
 
         assert objective in {'pred_noise', 'pred_x0', 'pred_v'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])'
 
@@ -315,6 +318,9 @@ class DiffusionWrapper(nn.Module):
 
         noise = torch.randn(shape, device = device)
         imgs = [noise]
+        
+        prior["trajectory_prior"] = self.normalize(prior["trajectory_prior"])
+        prior["transition_info"] = self.normalize(prior["transition_info"])
 
 
         for t in reversed(range(0, self.num_timesteps)):
@@ -336,6 +342,9 @@ class DiffusionWrapper(nn.Module):
 
         img = torch.randn(shape, device = device)
         imgs = [img]
+        
+        prior["trajectory_prior"] = self.normalize(prior["trajectory_prior"])
+        prior["transition_info"] = self.normalize(prior["transition_info"])
 
         for time, time_next in time_pairs:
             time_cond = torch.full((batch,), time, device = device, dtype = torch.long)
@@ -370,7 +379,11 @@ class DiffusionWrapper(nn.Module):
     def sample(self, prior, trajectory_label, return_all_timesteps = False):
         shape = trajectory_label.shape
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        return sample_fn(shape, prior, return_all_timesteps = return_all_timesteps)
+        trajectory_prior = prior["trajectory_prior"].clone()
+        if self.residual:
+            return sample_fn(shape, prior, return_all_timesteps = return_all_timesteps) + trajectory_prior
+        else:
+            return sample_fn(shape, prior, return_all_timesteps = return_all_timesteps)
 
     @torch.inference_mode()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
@@ -405,6 +418,8 @@ class DiffusionWrapper(nn.Module):
         
         b, to, c = x_start.shape
         x_start = self.normalize(x_start)
+        prior["trajectory_prior"] = self.normalize(prior["trajectory_prior"])
+        prior["transition_info"] = self.normalize(prior["transition_info"])
         t = torch.randint(0, self.timesteps, (b,), device = x_start.device).long()
 
         noise = torch.randn_like(x_start)

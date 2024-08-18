@@ -176,6 +176,9 @@ class ModelArguments:
     normalize: Optional[bool] = field(
         default=True
     )
+    residual: Optional[bool] = field(
+        default=False
+    )
     
     ######## end of diffusion forcing args ########
     
