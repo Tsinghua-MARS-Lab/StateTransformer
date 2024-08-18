@@ -1,6 +1,15 @@
 import numpy as np
 import os
 import cv2
+import yaml
+import types
+import omegaconf
+
+
+
+def load_config(config_path):
+    cfg = omegaconf.OmegaConf.load(config_path)
+    return cfg
 
 def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, image_file_name, split,
                 high_scale, low_scale):

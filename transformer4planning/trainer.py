@@ -654,6 +654,7 @@ class PlanningTrainer(Trainer):
             else:
                 # # TODO: this needs to be fixed and made cleaner later.
                 raise NotImplementedError
+        
 
         pred_dict = outputs['pred_dict'] if 'pred_dict' in outputs else logits[-1]
 
@@ -664,7 +665,6 @@ class PlanningTrainer(Trainer):
 
         # making prediction with autorergressive generation
         prediction_generation = self.model.generate(**inputs)
-
         # padding if the batch size is not the same as the eval batch size
         if logits.shape[0] != self.args.per_device_eval_batch_size:
             # must top to the eval batch size, or will cause error and stuck the whole pipeline

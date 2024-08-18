@@ -366,7 +366,6 @@ class ModelArguments:
     )
 
 
-
 @dataclass
 class DataTrainingArguments:
     """
@@ -461,7 +460,18 @@ class PlanningTrainingArguments(TrainingArguments):
             )
         },
     )
+    debug_train: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": (
+                "debug mode."
+            )
+        },  
+    )
     do_test: Optional[bool] = field(
+        default=False,
+    )
+    resume_from_checkpoint:Optional[bool] = field(
         default=False,
     )
     images_cleaning_to_folder: Optional[str] = field(
