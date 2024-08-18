@@ -161,7 +161,7 @@ class DiffusionAugmentation(STR_Mixtral):
         str_result = super().generate(**kwargs)
         trajectory_prior = str_result["traj_logits"]
         maps_info = str_result["maps_info"]
-        print("trajectory_prior", trajectory_prior[0,:20])
+        # print("trajectory_prior", trajectory_prior[0,::10])
         
         # Phase2:convey the result to the diffusion model
         label, trajectory_prior, maps_info, init_traj = self._preprocess_batch(trajectory_prior=trajectory_prior, maps_info=maps_info, is_train=False)
@@ -186,7 +186,7 @@ class DiffusionAugmentation(STR_Mixtral):
         pred_dict = {
             "traj_logits": final_predict.to(dtype=torch.float)
         }
-        print("final_predict", final_predict[0,:20])
+        #print("final_predict", final_predict[0,::10])
         return pred_dict
 
 
