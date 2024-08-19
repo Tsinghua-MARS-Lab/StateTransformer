@@ -123,6 +123,7 @@ class TrajectoryDecoder(nn.Module):
             if selected_indices is not None:
                 # using key points
                 starting_index += len(selected_indices)
+            # print('testing traj deocder index: ', hidden_output.shape, starting_index, pred_length)
             traj_hidden_state = hidden_output[:, starting_index:starting_index + pred_length, :]
         else:
             print("No context length found, using the last hidden state for trajectory decoding")
@@ -415,6 +416,7 @@ class TrajDecoderCLS(nn.Module):
 
         context_length = info_dict["context_length"]
         candi_proposal_num = info_dict['candi_proposal_num']
+        # print('testing decoder proposal index: ', context_length + candi_proposal_num - 1)
         pred_proposal_embed = hidden_output[:, context_length + candi_proposal_num-1, :]  # (bs, n_candi, n_embed)
         pred_proposal_scores = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, n_candi, 1)
         # pred_proposal_logits = pred_proposal_scores.squeeze(-1) # (bs, n_candi)
@@ -507,8 +509,9 @@ class KeyPointMLPDeocder(nn.Module):
             if self.config.task == 'waymo':
                 kp_start_index += 1
             elif self.config.task == 'nuplan':
-                kp_start_index += self.config.proposal_num + 1
+                kp_start_index += self.config.use_proposal + 1
 
+        # print('testing decoder keypoint index: ', self.config.proposal_num, context_length, kp_start_index)
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
 
         if self.k > 1:
@@ -574,6 +577,8 @@ class KeyPointMLPDeocder(nn.Module):
                     #         loss_this_kp_yaw = self.loss_fct(key_points_logits[:, i, -1], future_key_points[:, i, -1].to(device))
                     #     loss_this_kp = torch.cat([loss_this_kp, loss_this_kp_yaw], dim=-1)
                     loss_this_kp = loss_this_kp.sum(dim=-1)
+                    if self.config.rebalance_key_points and self.training:
+                        loss_this_kp *= (4 ** i)
                     # if i == 0 and self.training:
                     #     loss_per_kp *= 0
                     loss_per_kp.append(loss_this_kp)

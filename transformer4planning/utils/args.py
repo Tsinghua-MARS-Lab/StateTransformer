@@ -212,10 +212,10 @@ class ModelArguments:
     )
     ######## end of WOMD args ########
 
-    # WIP args
-    proposal_num: Optional[int] = field(
-        default=13
-    )
+    # # WIP args
+    # proposal_num: Optional[int] = field(
+    #     default=13
+    # )
 
     ######## begin of Mamba args ########
     rms_norm: Optional[bool] = field(
@@ -355,16 +355,15 @@ class ModelArguments:
         default=8, metadata={"help": "The number of seconds to predict in the future"}
     )
     # WIP
-    pass_road_blocks_to_model: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to pass road blocks to the model"}
-    )
     pass_agent_dic_to_model: Optional[bool] = field(
         default=False, metadata={"help": "Whether to pass agent dic to the model"}
     )
     dense_off_road_check: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use dense off road check, this might significantly slow down the eval"}
     )
-
+    rebalance_key_points: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to rebalance the key points loss"}
+    )
 
 
 @dataclass

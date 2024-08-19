@@ -297,7 +297,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         # add proposal embedding
         if self.use_proposal:
             assert self.config.traj_tokenizer == 'cluster_traj', 'only support cluster_traj for now'
-            # inpute_embedc -> bs,context_length+n_candi+1,256
+            # inpute_embedc -> bs,context_length+n_candi+1,256  (788->1301 (512+1))
             input_embeds, info_dict, candi_embeds = self.get_proposal_cluster_embedding(info_dict, device, input_embeds,
                                                                                         trajectory_label=trajectory_label)
 
@@ -314,6 +314,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
             if self.config.separate_kp_encoder:
                 if self.config.kp_decoder_type == "mlp":
+                    # 1301 -> 1301+5=1306
                     future_key_embeds = self.kps_m_embed(future_key_points_aug)
                     input_embeds = torch.cat([input_embeds, future_key_embeds], dim=1)
             else:
@@ -321,11 +322,11 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             info_dict['future_key_points'] = future_key_points
 
         # padding the input_embeds with pred_length zeros
+        # 1306 -> 1306+80=1386
         input_embeds = torch.cat([input_embeds,
                                   torch.zeros((batch_size, pred_length, n_embed),
                                               device=device,
                                               dtype=action_embeds.dtype)], dim=1)
-
         info_dict['selected_indices'] = self.selected_indices
         return input_embeds, info_dict
 
