@@ -212,7 +212,9 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         assert self.training == is_training, "training status should be the same"
         self.augmentation.training = is_training
 
-        assert trajectory_label is not None, "trajectory_label should not be None"
+        # assert trajectory_label is not None, "trajectory_label should not be None"
+        if trajectory_label is None:
+            trajectory_label = torch.zeros((high_res_raster.shape[0], 80, 4), device=high_res_raster.device)
         device = trajectory_label.device
         _, pred_length = trajectory_label.shape[:2]
         action_seq_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
