@@ -26,12 +26,16 @@ def save_raster(result_dic, debug_raster_path, agent_type_num, past_frames_num, 
         # 25-89: agent raster (64=8 (agent_types) * 8 (sample_frames_in_past))
         """
         each_img_list = result_dic[each_key]
+        print('testing: ', each_img_list.shape, each_key, result_dic.keys())
         if len(each_img_list.shape) == 4:
             image_number = each_img_list.shape[0]
         else:
             image_number = 1
         for i in range(image_number):
-            each_img = each_img_list[i]
+            if image_number > 1:
+                each_img = each_img_list[i]
+            else:
+                each_img = each_img_list
             goal = each_img[:, :, 0]
             road = each_img[:, :, :21]
             traffic_lights = each_img[:, :, 21:25]

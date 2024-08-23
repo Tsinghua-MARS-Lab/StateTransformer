@@ -19,6 +19,8 @@ from tuplan_garage.planning.training.preprocessing.features.pdm_feature import (
     PDMFeature,
 )
 
+from transformer4planning.models.backbone.str_base import build_model_from_path
+
 
 class PDMOffsetModel(TorchModuleWrapper):
     """
@@ -67,6 +69,8 @@ class PDMOffsetModel(TorchModuleWrapper):
 
         self.hidden_dim = hidden_dim
 
+        print('testing model...', self.hidden_dim)
+
         super().__init__(
             feature_builders=feature_builders,
             target_builders=target_builders,
@@ -95,9 +99,10 @@ class PDMOffsetModel(TorchModuleWrapper):
             nn.Dropout(0.1),
             nn.ReLU(),
             nn.Linear(self.hidden_dim, self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, trajectory_sampling.num_poses * len(SE2Index)),
+            # nn.ReLU(),
+            # nn.Linear(self.hidden_dim, trajectory_sampling.num_poses * len(SE2Index)),
         )
+        self._model = self.build_model()
 
     def forward(self, features: FeaturesType) -> TargetsType:
         """
@@ -126,11 +131,6 @@ class PDMOffsetModel(TorchModuleWrapper):
         )
         state_encodings = self.state_encoding(state_features)
 
-        state_features = torch.cat(
-            [ego_position, ego_velocity, ego_acceleration], dim=-1
-        )
-        state_encodings = self.state_encoding(state_features)
-
         # encode PDM-Closed trajectory
         planner_trajectory = input.planner_trajectory.reshape(batch_size, -1).float()
         trajectory_encodings = self.trajectory_encoding(planner_trajectory)
@@ -143,7 +143,32 @@ class PDMOffsetModel(TorchModuleWrapper):
         planner_features = torch.cat(
             [state_encodings, centerline_encodings, trajectory_encodings], dim=-1
         )
-        output_trajectory = planner_trajectory + self.planner_head(planner_features)
+
+        input_embeds, info_dict = self._model.encoder(is_training=False, **kwargs)
+        transformer_outputs = self._model.embedding_to_hidden(input_embeds, return_dict=return_dict)
+        transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
+        pred_trajectory = self._model.decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
+
+        # pdm_feature = self.planner_head(planner_features)
+        output_trajectory = planner_trajectory + pred_trajectory
         output_trajectory = output_trajectory.reshape(batch_size, -1, len(SE2Index))
 
         return {"trajectory": Trajectory(data=output_trajectory)}
+
+    def build_model(self):
+        from transformer4planning.models.backbone.mixtral import STR_Mixtral, STRMixtralConfig
+        config_p = STRMixtralConfig()
+        ModelCls = STR_Mixtral
+        # set default setting (based on 200m)
+        config_p.n_layer = 16
+        config_p.n_embd = config_p.d_model = 320
+        config_p.n_inner = config_p.n_embd * 4
+        config_p.n_head = 16
+        config_p.num_hidden_layers = config_p.n_layer
+        config_p.hidden_size = config_p.n_embd
+        config_p.intermediate_size = config_p.n_inner
+        config_p.num_attention_heads = config_p.n_head
+
+        model = ModelCls(config_p)
+        print('Scratch ' + tag + ' Initialized!')
+        return model

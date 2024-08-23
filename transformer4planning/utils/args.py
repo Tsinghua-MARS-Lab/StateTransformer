@@ -47,11 +47,11 @@ class ModelArguments:
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     raster_encoder_type: Optional[str] = field(
-        default='resnet18',
+        default='vit',
         metadata={"help": "choose from [vit, resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
     vit_intermediate_size: Optional[int] = field(
-        default=3072,
+        default=768,  # 3072,
     )
     pretrain_encoder: Optional[bool] = field(
         default=False,
@@ -86,7 +86,7 @@ class ModelArguments:
     )
     ######## end of speed args ########
     use_speed: Optional[bool] = field(
-        default=False
+        default=True
     )
     ######## begin of key points args ########
     use_key_points: Optional[str] = field(
@@ -344,9 +344,6 @@ class ModelArguments:
     sim_eval_with_gt: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use gt for sim"}
     )
-    skip_yaw_norm: Optional[bool] = field(
-        default=False, metadata={"help": "Skip rotation normalization during preprocess"}
-    )
 
     autoregressive: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use autoregressive prediction"}
@@ -364,6 +361,15 @@ class ModelArguments:
     rebalance_key_points: Optional[bool] = field(
         default=False, metadata={"help": "Whether to rebalance the key points loss"}
     )
+
+    multiple_propose: Optional[int] = field(
+        default=0, metadata={"help": "The number of proposals to use during simulations"}
+    )
+    # testing usage args
+    stick_sim_to_lane: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to stick the simulation to the lane"}
+    )
+
 
 
 @dataclass

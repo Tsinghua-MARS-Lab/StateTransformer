@@ -73,7 +73,9 @@ def get_closest_lane_on_route(pred_key_point_global,
 
 def get_closest_lane_point_on_route(pred_key_point_global,
                                     route_ids,
-                                    road_dic):
+                                    road_dic,
+                                    include_yaw=False):
+
     # loop over all the route ids
     pred_key_point_global_copy = copy.deepcopy(pred_key_point_global)
     route_lanes = []
@@ -93,7 +95,13 @@ def get_closest_lane_point_on_route(pred_key_point_global,
             continue
         if road_dic[each_lane]['type'] not in [0, 11]:
             continue
-        route_lane_pts.append(road_dic[each_lane]['xyz'][:, :2])
+        if include_yaw:
+            point = road_dic[each_lane]['xyz'][:, :2]
+            yaw = road_dic[each_lane]['dir']
+            yaw[0] = yaw[1]
+            route_lane_pts.append(np.concatenate([point, yaw], axis=1))
+        else:
+            route_lane_pts.append(road_dic[each_lane]['xyz'][:, :2])
         lane_ids += [each_lane] * road_dic[each_lane]['xyz'].shape[0]
     if len(route_lane_pts) == 0:
         print('no route lane points found at all ', route_ids, len(road_dic.keys()))
@@ -101,7 +109,7 @@ def get_closest_lane_point_on_route(pred_key_point_global,
     # concatenate all points in the list in one dimension
     route_lane_pts_np = np.concatenate(route_lane_pts, axis=0)
     # get the closest point over all of the selected lanes
-    dist = np.linalg.norm(route_lane_pts_np - pred_key_point_global_copy[:2], axis=1)
+    dist = np.linalg.norm(route_lane_pts_np[:, :2] - pred_key_point_global_copy[:2], axis=1)
     closest_index = np.argmin(dist)
     closest_lane_point = route_lane_pts_np[closest_index]
 

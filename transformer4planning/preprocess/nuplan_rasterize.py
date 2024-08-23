@@ -68,6 +68,8 @@ def nuplan_rasterize_collate_func(batch, dic_path=None, autoregressive=False, **
                 list_of_dvalues.append(d[key])
             elif key == "scenario_type":
                 list_of_dvalues.append('Unknown')
+            elif key == "intentions":
+                list_of_dvalues.append('Unknown')
             else:
                 print('Error: None value', key, d[key])   # scenario_type might be none for older dataset
         result[key] = default_collate(list_of_dvalues)
@@ -195,7 +197,7 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
         augment_max_dyaw = kwargs.get('augment_max_dyaw', 0.05)
         ego_pose_agent_dic=ego_pose_agent_dic.astype(np.float64)
         check_distance=ego_pose_agent_dic[frame_id // frequency_change_rate-10:frame_id // frequency_change_rate+81:10]-ego_pose_agent_dic[frame_id // frequency_change_rate-20:frame_id // frequency_change_rate+71:10]
-        if np.all(np.sqrt(check_distance[:,0]**2+check_distance[:,0]**2)>0.20):
+        if np.all(np.sqrt(check_distance[:,0]**2+check_distance[:,1]**2)>0.20):
             aug_cur=np.array([0,(random.random() * 2 - 1) * augment_max_dy])
             ego_point=np.zeros_like(aug_cur)
             rotate_dx_cur,rotate_dy_cur=rotate((ego_point[0],ego_point[1]),(aug_cur[0],aug_cur[1]),ego_pose_agent_dic[frame_id//frequency_change_rate, 3],False)
@@ -258,8 +260,6 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
 
     # initialize rasters
     origin_ego_pose = ego_pose_agent_dic[frame_id//frequency_change_rate].copy()  # hard-coded resample rate 2
-    if kwargs.get('skip_yaw_norm', False):
-        origin_ego_pose[-1] = 0
 
     if "agent_ids" not in sample.keys():
         if 'agent_ids_index' in sample.keys():
@@ -430,15 +430,17 @@ def static_coor_rasterize(sample, data_path, raster_shape=(224, 224),
             os.makedirs(debug_raster_path)
         image_file_name = sample['file_name'] + '_' + str(int(sample['frame_id']))
         # if split == 'test':
-        if map == 'sg-one-north':
+        if sample['scenario_id'] in ['87e58c8096745627', '60f647e2cda95b40', 'e06432b260555f40', '1e38057f148a5e31']:
+        # if map == 'sg-one-north':
             save_result = save_raster(result_to_return, debug_raster_path, agent_types, len(sample_frames_in_past),
                                       image_file_name, split, high_res_scale, low_res_scale)
             if save_result and 'images_path' in sample:
                 # copy camera images
-                for camera in sample['images_path']:
-                    import shutil
-                    path_to_save = split + '_' + image_file_name + '_' + str(os.path.basename(camera))
-                    shutil.copy(os.path.join(images_folder, camera), os.path.join(debug_raster_path, path_to_save))
+                if sample['images_path'] is not None:
+                    for camera in sample['images_path']:
+                        import shutil
+                        path_to_save = split + '_' + image_file_name + '_' + str(os.path.basename(camera))
+                        shutil.copy(os.path.join(images_folder, camera), os.path.join(debug_raster_path, path_to_save))
 
     result_to_return["file_name"] = sample['file_name']
     result_to_return["map"] = sample['map']

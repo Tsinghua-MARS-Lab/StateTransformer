@@ -68,7 +68,7 @@ class STRConfig(PretrainedConfig):
                      "rms_norm", "residual_in_fp32", "fused_add_norm", "raster_encoder_type",
                      "vit_intermediate_size", "mean_circular_loss",
                      "camera_image_encoder", "use_speed", "no_yaw_with_stepping", "autoregressive", "regression_long_class_short",
-                     "kp_dropout", "traj_dropout", "trajectory_decoder_type", "skip_yaw_norm",
+                     "kp_dropout", "traj_dropout", "trajectory_decoder_type",
                      "output_router_logits", "skip_trajectory_decoding"]
         for each_attr in attr_list:
             if not hasattr(self, each_attr):
@@ -108,7 +108,7 @@ class STR(PreTrainedModel):
         if self.config.traj_tokenizer == 'cluster_traj':
             from transformer4planning.models.tokenizer.cluster_traj_tokenizer import ClusterTrajTokenizer
             cluster_path = self.config.traj_cluster_file
-            logger.warning(f"cluster_path for trajectory: {cluster_path}")
+            logger.info(f"cluster_path for trajectory: {cluster_path}")
             self.encoder.traj_tokenizer = ClusterTrajTokenizer(cluster_path)
 
             if self.config.traj_tokenizer == 'cluster_traj':
@@ -1006,18 +1006,18 @@ def build_models(model_args):
             config_p.hidden_size = 256
             config_p.intermediate_size = config_p.n_embd * 4
             config_p.num_attention_heads = 8
-        elif 'mixtral-narrow-medium' in model_args.model_name:
+        elif 'mixtral-200m' in model_args.model_name:
             config_p.n_layer = 16
-            config_p.n_embd = config_p.d_model = 512
-            config_p.n_inner = 2048
+            config_p.n_embd = config_p.d_model = 320
+            config_p.n_inner = config_p.n_embd * 4
             config_p.n_head = 16
-            config_p.num_hidden_layers = 16
-            config_p.hidden_size = 512
-            config_p.intermediate_size = 2048
-            config_p.num_attention_heads = 16
+            config_p.num_hidden_layers = config_p.n_layer
+            config_p.hidden_size = config_p.n_embd
+            config_p.intermediate_size = config_p.n_inner
+            config_p.num_attention_heads = config_p.n_head
         elif 'mixtral-medium' in model_args.model_name:
             """
-            Number of parameters: 1.5B (ViT)
+            Number of parameters: 1.7B (ViT)
             """
             config_p.n_layer = 16
             config_p.n_embd = config_p.d_model = 1024
@@ -1027,7 +1027,7 @@ def build_models(model_args):
             config_p.hidden_size = 1024
             config_p.intermediate_size = 4096
             config_p.num_attention_heads = 16
-        elif 'mixtral-800m-deep' in model_args.model_name:
+        elif 'mixtral-800m' in model_args.model_name:
             # 800M trainable with batch size of 32
             config_p.n_layer = 32
             config_p.n_embd = config_p.d_model = 512
@@ -1036,7 +1036,15 @@ def build_models(model_args):
             config_p.hidden_size = config_p.n_embd
             config_p.intermediate_size = config_p.n_inner
             config_p.num_attention_heads = config_p.n_head
-
+        elif 'mixtral-1b' in model_args.model_name:
+            # Number of parameters: 1.0B (ViT)
+            config_p.n_layer = 32
+            config_p.n_embd = config_p.d_model = 512 + 64
+            config_p.n_inner = 2048 + 256
+            config_p.n_head = 32
+            config_p.hidden_size = config_p.n_embd
+            config_p.intermediate_size = config_p.n_inner
+            config_p.num_attention_heads = config_p.n_head
         elif 'mixtral-3b-deep' in model_args.model_name:
             """
             Number of parameters: 350M x 8 -> 3.3B (ViT)
@@ -1168,7 +1176,7 @@ def build_models(model_args):
     return model
 
 
-def build_model_from_path(model_path):
+def build_model_from_path(model_path, load_checkpoint=True):
     from transformer4planning.utils.args import ModelArguments
     from transformers import (HfArgumentParser)
     import os
@@ -1181,7 +1189,8 @@ def build_model_from_path(model_path):
     else:
         model_args, = parser.parse_json_file(config_path, allow_extra_keys=True)
         model_args.model_pretrain_name_or_path = model_path
-        model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
+        if load_checkpoint:
+            model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
     print('model loaded with args: ', model_args, model_args.model_name, model_path)
     model = build_models(model_args=model_args)
     return model

@@ -19,6 +19,10 @@ class PDMFeature(AbstractModelFeature):
     ego_acceleration: FeatureDataType
     planner_centerline: FeatureDataType
     planner_trajectory: FeatureDataType
+    high_res_raster: FeatureDataType
+    low_res_raster: FeatureDataType
+    context_actions: FeatureDataType
+    ego_pose: FeatureDataType
 
     def to_feature_tensor(self) -> PDMFeature:
         """
@@ -30,6 +34,10 @@ class PDMFeature(AbstractModelFeature):
             ego_acceleration=to_tensor(self.ego_acceleration),
             planner_centerline=to_tensor(self.planner_centerline),
             planner_trajectory=to_tensor(self.planner_trajectory),
+            high_res_raster=to_tensor(self.high_res_raster),
+            low_res_raster=to_tensor(self.low_res_raster),
+            context_actions=to_tensor(self.context_actions),
+            ego_pose=to_tensor(self.ego_pose),
         )
 
     def to_device(self, device: torch.device) -> PDMFeature:
@@ -47,6 +55,10 @@ class PDMFeature(AbstractModelFeature):
             ego_acceleration=self.ego_acceleration.to(device=device),
             planner_centerline=self.planner_centerline.to(device=device),
             planner_trajectory=self.planner_trajectory.to(device=device),
+            high_res_raster=self.high_res_raster.to(device=device),
+            low_res_raster=self.low_res_raster.to(device=device),
+            context_actions=self.context_actions.to(device=device),
+            ego_pose=self.ego_pose.to(device=device),
         )
 
     @classmethod
@@ -60,6 +72,10 @@ class PDMFeature(AbstractModelFeature):
             ego_acceleration=data["ego_acceleration"],
             planner_centerline=data["planner_centerline"],
             planner_trajectory=data["planner_trajectory"],
+            high_res_raster=data["high_res_raster"],
+            low_res_raster=data["low_res_raster"],
+            context_actions=data["context_actions"],
+            ego_pose=data["ego_pose"],
         )
 
     def unpack(self) -> List[PDMFeature]:
@@ -73,13 +89,21 @@ class PDMFeature(AbstractModelFeature):
                 ego_acceleration[None],
                 planner_centerline[None],
                 planner_trajectory[None],
+                high_res_raster[None],
+                low_res_raster[None],
+                context_actions[None],
+                ego_pose[None],
             )
-            for ego_position, ego_velocity, ego_acceleration, planner_centerline, planner_trajectory in zip(
+            for ego_position, ego_velocity, ego_acceleration, planner_centerline, planner_trajectory, high_res_raster, low_res_raster, context_actions, ego_pose in zip(
                 self.ego_position,
                 self.ego_velocity,
                 self.ego_acceleration,
                 self.planner_centerline,
                 self.planner_trajectory,
+                self.high_res_raster,
+                self.low_res_raster,
+                self.context_actions,
+                self.ego_pose,
             )
         ]
 
@@ -120,10 +144,27 @@ class PDMFeature(AbstractModelFeature):
             [item.planner_trajectory for item in batch], dim=0
         ).to(device)
 
+        collated_high_res_raster = torch.stack(
+            [item.high_res_raster for item in batch], dim=0
+        ).to(device)
+        collated_low_res_raster = torch.stack(
+            [item.low_res_raster for item in batch], dim=0
+        ).to(device)
+        collated_context_actions = torch.stack(
+            [item.context_actions for item in batch], dim=0
+        ).to(device)
+        collated_ego_pose = torch.stack(
+            [item.ego_pose for item in batch], dim=0
+        ).to(device)
+
         return PDMFeature(
             ego_position=collated_position,
             ego_velocity=collated_velocity,
             ego_acceleration=collated_acceleration,
             planner_centerline=collated_centerline,
             planner_trajectory=collated_trajectory,
+            high_res_raster=collated_high_res_raster,
+            low_res_raster=collated_low_res_raster,
+            context_actions=collated_context_actions,
+            ego_pose=collated_ego_pose,
         )
