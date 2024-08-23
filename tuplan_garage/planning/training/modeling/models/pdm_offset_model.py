@@ -77,31 +77,31 @@ class PDMOffsetModel(TorchModuleWrapper):
             future_trajectory_sampling=trajectory_sampling,
         )
 
-        self.state_encoding = nn.Sequential(
-            nn.Linear(
-                (history_sampling.num_poses + 1) * 3 * len(SE2Index), self.hidden_dim
-            ),
-            nn.ReLU(),
-        )
-
-        self.centerline_encoding = nn.Sequential(
-            nn.Linear(self.centerline_samples * len(SE2Index), self.hidden_dim),
-            nn.ReLU(),
-        )
-
-        self.trajectory_encoding = nn.Sequential(
-            nn.Linear(trajectory_sampling.num_poses * len(SE2Index), self.hidden_dim),
-            nn.ReLU(),
-        )
-
-        self.planner_head = nn.Sequential(
-            nn.Linear(self.hidden_dim * 3, self.hidden_dim),
-            nn.Dropout(0.1),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.hidden_dim),
-            # nn.ReLU(),
-            # nn.Linear(self.hidden_dim, trajectory_sampling.num_poses * len(SE2Index)),
-        )
+        # self.state_encoding = nn.Sequential(
+        #     nn.Linear(
+        #         (history_sampling.num_poses + 1) * 3 * len(SE2Index), self.hidden_dim
+        #     ),
+        #     nn.ReLU(),
+        # )
+        #
+        # self.centerline_encoding = nn.Sequential(
+        #     nn.Linear(self.centerline_samples * len(SE2Index), self.hidden_dim),
+        #     nn.ReLU(),
+        # )
+        #
+        # self.trajectory_encoding = nn.Sequential(
+        #     nn.Linear(trajectory_sampling.num_poses * len(SE2Index), self.hidden_dim),
+        #     nn.ReLU(),
+        # )
+        #
+        # self.planner_head = nn.Sequential(
+        #     nn.Linear(self.hidden_dim * 3, self.hidden_dim),
+        #     nn.Dropout(0.1),
+        #     nn.ReLU(),
+        #     nn.Linear(self.hidden_dim, self.hidden_dim),
+        #     # nn.ReLU(),
+        #     # nn.Linear(self.hidden_dim, trajectory_sampling.num_poses * len(SE2Index)),
+        # )
         self._model = self.build_model()
 
     def forward(self, features: FeaturesType) -> TargetsType:
@@ -126,25 +126,25 @@ class PDMOffsetModel(TorchModuleWrapper):
         ego_acceleration = input.ego_acceleration.reshape(batch_size, -1).float()
 
         # encode ego history states
-        state_features = torch.cat(
-            [ego_position, ego_velocity, ego_acceleration], dim=-1
-        )
-        state_encodings = self.state_encoding(state_features)
+        # state_features = torch.cat(
+        #     [ego_position, ego_velocity, ego_acceleration], dim=-1
+        # )
+        # state_encodings = self.state_encoding(state_features)
+        #
+        # # encode PDM-Closed trajectory
+        # planner_trajectory = input.planner_trajectory.reshape(batch_size, -1).float()
+        # trajectory_encodings = self.trajectory_encoding(planner_trajectory)
+        #
+        # # encode planner centerline
+        # planner_centerline = input.planner_centerline.reshape(batch_size, -1).float()
+        # centerline_encodings = self.centerline_encoding(planner_centerline)
+        #
+        # # decode future trajectory
+        # planner_features = torch.cat(
+        #     [state_encodings, centerline_encodings, trajectory_encodings], dim=-1
+        # )
 
-        # encode PDM-Closed trajectory
-        planner_trajectory = input.planner_trajectory.reshape(batch_size, -1).float()
-        trajectory_encodings = self.trajectory_encoding(planner_trajectory)
-
-        # encode planner centerline
-        planner_centerline = input.planner_centerline.reshape(batch_size, -1).float()
-        centerline_encodings = self.centerline_encoding(planner_centerline)
-
-        # decode future trajectory
-        planner_features = torch.cat(
-            [state_encodings, centerline_encodings, trajectory_encodings], dim=-1
-        )
-
-        input_embeds, info_dict = self._model.encoder(is_training=False, **kwargs)
+        input_embeds, info_dict = self._model.encoder(is_training=False, **input)
         transformer_outputs = self._model.embedding_to_hidden(input_embeds, return_dict=return_dict)
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
         pred_trajectory = self._model.decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
