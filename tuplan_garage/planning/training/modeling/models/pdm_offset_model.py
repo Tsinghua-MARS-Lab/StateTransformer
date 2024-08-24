@@ -132,7 +132,7 @@ class PDMOffsetModel(TorchModuleWrapper):
         # state_encodings = self.state_encoding(state_features)
         #
         # # encode PDM-Closed trajectory
-        # planner_trajectory = input.planner_trajectory.reshape(batch_size, -1).float()
+        planner_trajectory = input.planner_trajectory.reshape(batch_size, -1).float()
         # trajectory_encodings = self.trajectory_encoding(planner_trajectory)
         #
         # # encode planner centerline
@@ -145,7 +145,7 @@ class PDMOffsetModel(TorchModuleWrapper):
         # )
 
         input_embeds, info_dict = self._model.encoder(is_training=False, **input)
-        transformer_outputs = self._model.embedding_to_hidden(input_embeds, return_dict=return_dict)
+        transformer_outputs = self._model.embedding_to_hidden(input_embeds)
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
         pred_trajectory = self._model.decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
 
@@ -157,7 +157,12 @@ class PDMOffsetModel(TorchModuleWrapper):
 
     def build_model(self):
         from transformer4planning.models.backbone.mixtral import STR_Mixtral, STRMixtralConfig
+        from transformer4planning.utils.args import (
+            ModelArguments,
+        )
+        default_model_arg = ModelArguments()
         config_p = STRMixtralConfig()
+        config_p.update_by_model_args(default_model_arg)
         ModelCls = STR_Mixtral
         # set default setting (based on 200m)
         config_p.n_layer = 16
@@ -170,5 +175,5 @@ class PDMOffsetModel(TorchModuleWrapper):
         config_p.num_attention_heads = config_p.n_head
 
         model = ModelCls(config_p)
-        print('Scratch ' + tag + ' Initialized!')
+        print('Model Initialized!')
         return model
