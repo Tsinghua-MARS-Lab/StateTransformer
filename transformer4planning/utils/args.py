@@ -60,6 +60,10 @@ class ModelArguments:
         default=1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
     )
+    n_action_steps:Optional[int] = field(
+        default=80,
+        metadata={"help": "Set the number of action steps for the model."},
+    )
     x_random_walk: Optional[float] = field(
         default=0.0
     )

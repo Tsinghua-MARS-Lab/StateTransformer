@@ -12,3 +12,4 @@ node_modules
 test.py
 .vscode
 training_configs
+tuplan_garage/nuplan-devkit/
