@@ -40,7 +40,9 @@ from nuplan.planning.training.preprocessing.feature_builders.abstract_feature_bu
 from nuplan.planning.training.preprocessing.utils.agents_preprocessing import (
     build_ego_features,
 )
-from shapely.geometry import Point
+from shapely.geometry import Point, LineString
+
+from nuplan.common.actor_state.state_representation import Point2D
 
 from tuplan_garage.planning.simulation.planner.pdm_planner.pdm_closed_planner import (
     PDMClosedPlanner,
@@ -61,6 +63,10 @@ from tuplan_garage.planning.training.preprocessing.features.pdm_feature import (
 
 import cv2
 import torch
+import math
+from transformer4planning.utils.nuplan_utils import generate_contour_pts
+from nuplan.common.maps.maps_datatypes import SemanticMapLayer, TrafficLightStatusData, TrafficLightStatusType
+from transformer4planning.utils.nuplan_utils import get_angle_of_a_line
 
 class PDMFeatureBuilder(AbstractFeatureBuilder):
     """Feature builder class for PDMOpen and PDMOffset."""

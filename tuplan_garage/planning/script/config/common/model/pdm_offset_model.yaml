@@ -12,7 +12,6 @@ history_sampling:
   _convert_: 'all'
   num_poses: 10      # target future poses
   interval_length: 0.2
-
 planner:
   _target_: tuplan_garage.planning.simulation.planner.pdm_planner.pdm_closed_planner.PDMClosedPlanner
   _convert_: 'all'
@@ -30,6 +29,7 @@ planner:
     _convert_: 'all'
     num_poses: 40 # target future poses
     interval_length: 0.1 # interval of samples [s]
+
 
   idm_policies:
     _target_: tuplan_garage.planning.simulation.planner.pdm_planner.proposal.batch_idm_policy.BatchIDMPolicy
