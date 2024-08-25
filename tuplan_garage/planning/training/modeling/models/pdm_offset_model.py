@@ -192,11 +192,8 @@ class PDMOffsetModel(TorchModuleWrapper):
         config_p.hidden_size = config_p.n_embd
         config_p.intermediate_size = config_p.n_inner
         config_p.num_attention_heads = config_p.n_head
-        config_p.n_action_steps = 80
+        config_p.use_key_points = "no"
 
         model = ModelCls(config_p)
         print('PDM+StateTransformer Initialized!')
-        
-        # key points decoder is not necessary
-        del model.key_points_decoder
         return model
