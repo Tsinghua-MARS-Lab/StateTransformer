@@ -30,6 +30,7 @@ from tuplan_garage.planning.training.preprocessing.feature_builders.pdm_feature_
 from tuplan_garage.planning.training.preprocessing.features.pdm_feature import (
     PDMFeature,
 )
+from nuplan.common.actor_state.state_representation import Point2D
 
 
 def create_pdm_feature(
@@ -38,6 +39,7 @@ def create_pdm_feature(
     centerline: PDMPath,
     closed_loop_trajectory: Optional[InterpolatedTrajectory] = None,
     device: str = "cpu",
+    initialization = None
 ) -> PDMFeature:
     """
     Creates a PDMFeature (for PDM-Open and PDM-Offset) during simulation
@@ -107,12 +109,66 @@ def create_pdm_feature(
         # use centerline as dummy value
         planner_trajectory = planner_centerline
 
+    # compute the raster, context actions, and oriented_point for PDMFeature
+    from tuplan_garage.planning.training.preprocessing.feature_builders.pdm_feature_builder import PDMFeatureBuilder, get_road_dict
+    map_name = initialization.map_api.map_name
+    map_api = initialization.map_api
+    ego_states = history.ego_states[:-1]
+    
+    context_length = len(ego_states)  # context_length = 22/23
+    frame_rate_change = 2
+    frame_id = context_length * frame_rate_change - 1  # 22 * 2 = 44 in 20hz
+
+    sample_frames_in_past_20hz = [frame_id - 40, frame_id - 20, frame_id - 10, frame_id]
+    sample_frames_in_past_10hz = [int(frame_id / frame_rate_change) for frame_id in
+                                    sample_frames_in_past_20hz]  # length = 8
+    
+    oriented_point = np.array([ego_states[-1].rear_axle.x,
+                            ego_states[-1].rear_axle.y,
+                            ego_states[-1].rear_axle.heading]).astype(np.float32)
+    sampled_ego_states = [ego_states[i] for i in sample_frames_in_past_10hz]
+    ego_trajectory = np.array([(ego_state.rear_axle.x,
+                            ego_state.rear_axle.y,
+                            ego_state.rear_axle.heading) for ego_state in
+                            sampled_ego_states]).astype(np.float32)  # (20, 3)
+    road_dic = get_road_dict(map_api, ego_pose_center=Point2D(oriented_point[0], oriented_point[1]))
+    observation_buffer = list(history.observation_buffer)
+    sampled_observation_buffer = [observation_buffer[i] for i in sample_frames_in_past_10hz]
+    agents = [observation.tracked_objects.get_agents() for observation in sampled_observation_buffer]
+    statics = [observation.tracked_objects.get_static_objects() for observation in sampled_observation_buffer]
+    traffic_light_data = planner_input.traffic_light_data
+    ego_shape = np.array([ego_states[-1].waypoint.oriented_box.width,
+                        ego_states[-1].waypoint.oriented_box.length]).astype(np.float32)
+    route_blocks_ids = initialization.route_roadblock_ids
+    corrected_route_ids = route_blocks_ids
+    
+    high_res_raster, low_res_raster, context_action, agent_rect_pts_local = PDMFeatureBuilder.compute_raster_input(
+    ego_trajectory, agents, statics, traffic_light_data, ego_shape,
+    origin_ego_pose=oriented_point,
+    map_name=map_name,
+    corrected_route_ids=corrected_route_ids,
+    road_dic=road_dic)
+    
+    if True: # self._model.config.use_speed:
+        speed = np.ones((context_action.shape[0], 3), dtype=np.float32) * -1
+        for i in range(context_action.shape[0]):
+            current_ego_dynamic = sampled_ego_states[i].dynamic_car_state  # Class of DynamicCarState
+            speed[i, :] = [
+                current_ego_dynamic.speed,
+                current_ego_dynamic.acceleration,
+                current_ego_dynamic.angular_velocity]
+        context_action = np.concatenate([context_action, speed], axis=1)
+
     pdm_feature = PDMFeature(
         ego_position=ego_position,
         ego_velocity=ego_velocity,
         ego_acceleration=ego_acceleration,
         planner_centerline=planner_centerline,
         planner_trajectory=planner_trajectory,
+        high_res_raster=high_res_raster,
+        low_res_raster=low_res_raster,
+        context_actions=context_action,
+        ego_pose=oriented_point,
     )
 
     pdm_feature = pdm_feature.to_feature_tensor()

@@ -5,7 +5,7 @@ TRAIN_LR_DECAY=0.1
 BATCH_SIZE=16
 SEED=0
 
-JOB_NAME=training_pdm_offset_model
+JOB_NAME=training_pdm_offset_model_without_kpdecoder
 CACHE_PATH=/storage/Cache/
 USE_CACHE_WITHOUT_DATASET=True
 

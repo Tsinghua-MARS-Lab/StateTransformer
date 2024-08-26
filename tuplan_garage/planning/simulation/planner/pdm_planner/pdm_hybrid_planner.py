@@ -85,12 +85,16 @@ class PDMHybridPlanner(AbstractPDMClosedPlanner):
         )
 
         self._device = "cpu"
-
-        self._model = LightningModuleWrapper.load_from_checkpoint(
-            checkpoint_path,
-            model=model,
-            map_location=self._device,
-        ).model
+        if model.loaded_from_checkpoint is False:
+            self._model = LightningModuleWrapper.load_from_checkpoint(
+                checkpoint_path,
+                model=model,
+                map_location=self._device,
+                strict = True
+            ).model
+            model.loaded_from_checkpoint = True
+        else:
+            self._model = model
         self._model.eval()
         torch.set_grad_enabled(False)
 
@@ -100,6 +104,7 @@ class PDMHybridPlanner(AbstractPDMClosedPlanner):
         """Inherited, see superclass."""
         self._iteration = 0
         self._map_api = initialization.map_api
+        self._initialization = initialization
         self._load_route_dicts(initialization.route_roadblock_ids)
         gc.collect()
 
@@ -143,6 +148,7 @@ class PDMHybridPlanner(AbstractPDMClosedPlanner):
             self._centerline,
             closed_loop_trajectory,
             self._device,
+            self._initialization,
         )
         predictions = self._model.forward({"pdm_features": pdm_feature})
         trajectory_data = (

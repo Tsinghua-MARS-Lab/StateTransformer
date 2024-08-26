@@ -324,8 +324,9 @@ class PDMFeatureBuilder(AbstractFeatureBuilder):
             context_actions=context_action,
             ego_pose=oriented_point,
         )
-
-    def compute_raster_input(self, ego_trajectory, agents_seq, statics_seq, traffic_data=None,
+        
+    @staticmethod
+    def compute_raster_input(ego_trajectory, agents_seq, statics_seq, traffic_data=None,
                              ego_shape=None, max_dis=300, origin_ego_pose=None, map_name=None,
                              use_speed=True, corrected_route_ids=None, road_dic=None
                              ):
