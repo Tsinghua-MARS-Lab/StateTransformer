@@ -103,6 +103,7 @@ class PDMOffsetModel(TorchModuleWrapper):
         #     # nn.Linear(self.hidden_dim, trajectory_sampling.num_poses * len(SE2Index)),
         # )
         self._model = self.build_model()
+        self.loaded_from_checkpoint = False
 
     def forward(self, features: FeaturesType) -> TargetsType:
         """

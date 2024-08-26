@@ -11,7 +11,7 @@ from nuplan.planning.simulation.planner.abstract_planner import AbstractPlanner
 from nuplan.planning.simulation.planner.ml_planner.ml_planner import MLPlanner
 from nuplan.planning.training.modeling.lightning_module_wrapper import LightningModuleWrapper
 # customized model builder
-from nuplan_garage.planning.simulation.planner.str_planner.str_planner import STRPlanner
+from tuplan_garage.planning.simulation.planner.pdm_planner.pdm_hybrid_planner import PDMHybridPlanner
 # from transformer4planning.models.model import build_models
 from transformer4planning.models.backbone.str_base import build_models
 from transformer4planning.utils.args import ModelArguments
@@ -46,7 +46,7 @@ def _build_planner(planner_cfg: DictConfig, scenario: Optional[AbstractScenario]
         OmegaConf.set_struct(config, True)
 
         planner: AbstractPlanner = instantiate(config, model=model)
-    elif is_target_type(planner_cfg, STRPlanner):
+    elif is_target_type(planner_cfg, PDMHybridPlanner):
         # planner: AbstractPlanner = instantiate(config)
         if model is None:
         # if True: # planner_counter % 200 == 0:  # model is None:  # for small models
