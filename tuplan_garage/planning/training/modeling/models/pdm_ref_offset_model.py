@@ -86,15 +86,7 @@ class PDMRefOffsetModel(TorchModuleWrapper):
         #     nn.ReLU(),
         # )
         #
-        # self.centerline_encoding = nn.Sequential(
-        #     nn.Linear(self.centerline_samples * len(SE2Index), self.hidden_dim),
-        #     nn.ReLU(),
-        # )
-        #
-        # self.trajectory_encoding = nn.Sequential(
-        #     nn.Linear(trajectory_sampling.num_poses * len(SE2Index), self.hidden_dim),
-        #     nn.ReLU(),
-        # )
+
         #
         # self.planner_head = nn.Sequential(
         #     nn.Linear(self.hidden_dim * 3, self.hidden_dim),
@@ -107,8 +99,17 @@ class PDMRefOffsetModel(TorchModuleWrapper):
         self._model = self.build_model()
         self.loaded_from_checkpoint = False
         
-        self.trajectory_embd = nn.Sequential(
-            nn.Linear(trajectory_sampling.num_poses*len(SE2Index), self.d_model),
+        # self.trajectory_embd = nn.Sequential(
+        #     nn.Linear(trajectory_sampling.num_poses*len(SE2Index), self.d_model),
+        #     nn.ReLU(),
+        # )
+        self.centerline_encoding = nn.Sequential(
+            nn.Linear(self.centerline_samples * len(SE2Index), int(self.d_model/2)),
+            nn.ReLU(),
+        )
+        #
+        self.trajectory_encoding = nn.Sequential(
+            nn.Linear(trajectory_sampling.num_poses * len(SE2Index), int(self.d_model/2)),
             nn.ReLU(),
         )
 
@@ -153,22 +154,23 @@ class PDMRefOffsetModel(TorchModuleWrapper):
         #
         # # encode PDM-Closed trajectory
         # input.planner_trajectory is a tensor of shape (batch_size, num_poses, len(SE2Index))
-        planner_trajectory = input.planner_trajectory.float()
-        planner_trajectory_embd = self.trajectory_embd(planner_trajectory.reshape(batch_size, -1)) # (batch_size, hidden_dim)
-        planner_trajectory_embd = planner_trajectory_embd.unsqueeze(1)
-        # trajectory_encodings = self.trajectory_encoding(planner_trajectory)
+        planner_trajectory = input.planner_trajectory.float() # bsz 16 3
+        # planner_trajectory_embd = self.trajectory_embd(planner_trajectory.reshape(batch_size, -1)) # (batch_size, hidden_dim)
+        # planner_trajectory_embd = planner_trajectory_embd.unsqueeze(1)
+        trajectory_encodings = self.trajectory_encoding(planner_trajectory.reshape(batch_size, -1))
         #
         # # encode planner centerline
-        # planner_centerline = input.planner_centerline.reshape(batch_size, -1).float()
-        # centerline_encodings = self.centerline_encoding(planner_centerline)
+        planner_centerline = input.planner_centerline.reshape(batch_size, -1).float()
+        centerline_encodings = self.centerline_encoding(planner_centerline)
         #
         # # decode future trajectory
-        # planner_features = torch.cat(
-        #     [state_encodings, centerline_encodings, trajectory_encodings], dim=-1
-        # )
+        planner_features = torch.cat(
+            [centerline_encodings, trajectory_encodings], dim=-1
+        )
+        planner_features = planner_features.unsqueeze(1)
 
         input_embeds, info_dict = self._model.encoder(is_training=self.training, **kwargs)
-        input_embeds = torch.cat((input_embeds[:,:-80,:], planner_trajectory_embd, input_embeds[:,-80:,:]), dim=1)
+        input_embeds = torch.cat((input_embeds[:,:-80,:], planner_features, input_embeds[:,-80:,:]), dim=1)
         
         transformer_outputs = self._model.embedding_to_hidden(input_embeds)
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
