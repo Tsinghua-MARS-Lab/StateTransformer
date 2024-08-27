@@ -373,6 +373,10 @@ class ModelArguments:
     stick_sim_to_lane: Optional[bool] = field(
         default=False, metadata={"help": "Whether to stick the simulation to the lane"}
     )
+    # for pdm+str
+    model_type: Optional[str] = field(
+        default='naive', metadata={"help": "choose from [pdm, str]"}
+    )
 
 
 
