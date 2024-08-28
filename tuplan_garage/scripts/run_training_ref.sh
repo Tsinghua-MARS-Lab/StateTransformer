@@ -5,21 +5,21 @@ TRAIN_LR_DECAY=0.1
 BATCH_SIZE=16
 SEED=0
 
-JOB_NAME=training_pdm_offset_model_without_kpdecoder
-CACHE_PATH=/storage/Cache/
+JOB_NAME=training_pdm_ref_offset_model_without_kpdecoder
+CACHE_PATH=/localssd/Cache/
 USE_CACHE_WITHOUT_DATASET=True
 
 python $NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_training.py \
 seed=$SEED \
 py_func=train \
-+training=training_pdm_offset_model \
++training=training_pdm_ref_offset_model \
 job_name=$JOB_NAME \
 scenario_builder=nuplan \
 cache.cache_path=$CACHE_PATH \
 cache.use_cache_without_dataset=$USE_CACHE_WITHOUT_DATASET \
 lightning.trainer.params.max_epochs=$TRAIN_EPOCHS \
 lightning.trainer.params.max_time=00:10000:00:00 \
-lightning.trainer.checkpoint.resume_training=True \
+lightning.trainer.checkpoint.resume_training=False \
 data_loader.params.batch_size=$BATCH_SIZE \
 optimizer.lr=$TRAIN_LR \
 lr_scheduler=multistep_lr \
