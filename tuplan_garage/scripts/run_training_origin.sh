@@ -6,7 +6,7 @@ BATCH_SIZE=16
 SEED=0
 
 JOB_NAME=training_pdm_offset_origin_model_without_kpdecoder
-CACHE_PATH=/storage/Cache/
+CACHE_PATH=/storage/Cache  #/cephfs/shared/Cache
 USE_CACHE_WITHOUT_DATASET=True
 
 python $NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_training.py \
