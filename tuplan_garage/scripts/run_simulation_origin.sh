@@ -5,13 +5,13 @@ CHECKPOINT=/cephfs/zhanjh/PDM_EXP/EXP/exp/training_pdm_offset_origin_model/train
 
 python $NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_simulation.py \
 +simulation=$CHALLENGE \
-planner=pdm_hybrid_ref_planner \
+planner=pdm_hybrid_origin_planner \
 planner.pdm_hybrid_planner.checkpoint_path=$CHECKPOINT \
 scenario_filter=$SPLIT \
 scenario_builder=nuplan \
 scenario_builder.data_root=$NUPLAN_DATA_ROOT/nuplan-v1.1/test \
 worker.threads_per_node=16 \
-experiment_uid=60epoch_nonreactive_test \
+experiment_uid=origin_test \
 hydra.searchpath="[pkg://tuplan_garage.planning.script.config.common, pkg://tuplan_garage.planning.script.config.simulation, pkg://nuplan.planning.script.config.common, pkg://nuplan.planning.script.experiments]"
 # worker=single_machine_thread_pool \
 
