@@ -1,12 +1,12 @@
-TRAIN_EPOCHS=100
+TRAIN_EPOCHS=200
 TRAIN_LR=1e-4
-TRAIN_LR_MILESTONES=[50,75]
+TRAIN_LR_MILESTONES=[90,110]
 TRAIN_LR_DECAY=0.1
 BATCH_SIZE=16
 SEED=0
 
-JOB_NAME=training_pdm_ref_offset_model_without_kpdecoder
-CACHE_PATH=/cephfs/shared/Cache
+JOB_NAME=training_pdm_ref_16points_offset_model
+CACHE_PATH=/localssd/Cache
 USE_CACHE_WITHOUT_DATASET=True
 
 python $NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_training.py \

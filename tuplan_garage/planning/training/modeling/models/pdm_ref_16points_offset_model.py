@@ -112,6 +112,7 @@ class PDMRef16OffsetModel(TorchModuleWrapper):
             nn.Linear(trajectory_sampling.num_poses * len(SE2Index), int(self.d_model/2)),
             nn.ReLU(),
         )
+        self._model = self._model.float()
 
     def forward(self, features: FeaturesType) -> TargetsType:
         """
@@ -138,7 +139,7 @@ class PDMRef16OffsetModel(TorchModuleWrapper):
             "low_res_raster": input.low_res_raster,
             "context_actions": input.context_actions,
             "ego_pose": input.ego_pose,
-            "trajectory_label": torch.zeros(input.ego_position.shape[0], 16, 4).float(),
+            "trajectory_label": torch.zeros(input.ego_position.shape[0], 16, 4).to(input.ego_position.dtype).to(input.ego_position.device),
             }
 
         batch_size = input.ego_position.shape[0]
@@ -169,7 +170,7 @@ class PDMRef16OffsetModel(TorchModuleWrapper):
             [centerline_encodings, trajectory_encodings], dim=-1
         )
         planner_features = planner_features.unsqueeze(1)
-
+        
         input_embeds, info_dict = self._model.encoder(is_training=self.training, **kwargs)
         input_embeds = torch.cat((input_embeds[:,:-16,:], planner_features, input_embeds[:,-16:,:]), dim=1)
         
@@ -208,7 +209,6 @@ class PDMRef16OffsetModel(TorchModuleWrapper):
         config_p.num_attention_heads = config_p.n_head
         config_p.use_key_points = "no"
         self.d_model = config_p.d_model
-
         model = ModelCls(config_p)
         print('PDM+Ref+16OffsetModel with Reference Initialized!')
         return model
