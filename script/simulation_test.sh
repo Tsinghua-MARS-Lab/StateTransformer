@@ -4,8 +4,8 @@ python run_simulation.py  \
 --map_path /cephfs/shared/nuplan-v1.1/maps  \
 --model_path /cephfs/zhanjh/checkpoint/checkpoint-150000 \
 --split_filter_yaml nuplan_simulation/test14_hard.yaml \
---max_scenario_num 8 \
+--max_scenario_num 10000 \
 --batch_size 8  \
 --device cuda  \
 --exp_folder test_pdm_simulation  \
---processes-repetition 1 \
+--processes-repetition 8 \

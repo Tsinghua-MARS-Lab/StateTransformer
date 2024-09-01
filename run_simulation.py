@@ -44,6 +44,11 @@ from nuplan.planning.nuboard.base.data_class import NuBoardFile
 import logging
 import numpy as np
 
+from tuplan_garage.planning.simulation.planner.pdm_planner.observation.pdm_observation_utils import (
+    get_drivable_area_map,
+)
+from tuplan_garage.planning.simulation.planner.pdm_planner.utils.pdm_path import PDMPath
+
 logger = logging.getLogger(__name__)
 
 from nuplan.planning.scenario_builder.abstract_scenario import AbstractScenario
@@ -289,12 +294,29 @@ class SimulationRunnerBatch(SimulationRunner):
             model_samples = []
             for i in tqdm(range(self._batch_size), desc='Step model inputs converting in batch', disable=not debug):
                 
-                model_samples.append(self.planners[i].inputs_to_model_sample(
+                model_sample = self.planners[i].inputs_to_model_sample(
                     history=planner_inputs[i].history,
                     traffic_light_data=list(planner_inputs[i].traffic_light_data),
                     map_name=self.planners[i]._map_api.map_name,
                     planner_input = planner_inputs[i],
-                ))
+                )
+                ego_state, _ = planner_inputs[i].history.current_state
+                # Apply route correction on first iteration (ego_state required)
+                if self.planners[i]._iteration == 0:
+                    self.planners[i]._route_roadblock_correction(ego_state)
+                    
+                # Update/Create drivable area polygon map
+                self.planners[i]._drivable_area_map = get_drivable_area_map(
+                    self.planners[i]._map_api, ego_state, self.planners[i]._map_radius
+                )
+                
+                # Create centerline
+                current_lane = self.planners[i]._get_starting_lane(ego_state)
+                self.planners[i]._centerline = PDMPath(self.planners[i]._get_discrete_centerline(current_lane))
+
+                pdm_trajectory = self.planners[i]._get_closed_loop_trajectory(planner_inputs[i])
+                model_sample['pdm_trajectory'] = pdm_trajectory
+                model_samples.append(model_sample)
             # print(f'\nModel sample time: {time.perf_counter() - model_sample_start_time:.3f} s')
             # pack in batch
             samples_in_batch = {key: np.stack([sample[key] for sample in model_samples]) for key in model_samples[0].keys()}

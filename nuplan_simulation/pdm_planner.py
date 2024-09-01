@@ -364,44 +364,8 @@ class Planner(AbstractPDMClosedPlanner):
             pdm_trajectory = []
             # import idm's trajectory
             for i in range(batch_size):
-                current_input = model_samples["planner_input"][i]
-                ego_state, observation = current_input.history.current_state
-                # Apply route correction on first iteration (ego_state required)
-                if self._iteration == 0:
-                    self._route_roadblock_correction(ego_state)
-                    
-                # Update/Create drivable area polygon map
-                self._drivable_area_map = get_drivable_area_map(
-                    self._map_api, ego_state, self._map_radius
-                )
-                
-                # Create centerline
-                current_lane = self._get_starting_lane(ego_state)
-                self._centerline = PDMPath(self._get_discrete_centerline(current_lane))
-
-                # # Update/Create drivable area polygon map
-                
-                # self._drivable_area_map = get_drivable_area_map(
-                #     self._map_api, ego_state, self._map_radius
-                # )
-                # self._observation.update(ego_state, observation, current_input.traffic_light_data, self._route_lane_dict)
-                # self._update_proposal_manager(ego_state)
-                
-                # proposals_array = self._generator.generate_proposals(ego_state, self._observation, self._proposal_manager)
-                
-                # simulated_proposals_array = self._simulator.simulate_proposals(proposals_array, ego_state)
-                
-                # proposal_scores = self._scorer.score_proposals(simulated_proposals_array, ego_state, self._observation, self._centerline, self._route_lane_dict, self._drivable_area_map, self._map_api)
-                
-                # best_proposal = np.argmax(proposal_scores)
-                
-                # trajectory = self._emergency_brake.brake_if_emergency(
-                #     ego_state, proposal_scores, self._scorer
-                # )
-                
-                # if trajectory is None:
-                #     trajectory = self._generator.generate_trajectory(best_proposal)  
-                trajectory = self._get_closed_loop_trajectory(current_input)
+                ego_state = ego_states_in_batch[i][-1]
+                trajectory = model_samples["pdm_trajectory"][i]
                 current_time : TimePoint= ego_state.time_point
                 # self.trajectory_sampling.step_time = 0.1
                 future_step_time : TimeDuration= TimeDuration.from_s(self.trajectory_sampling.step_time)
@@ -417,12 +381,9 @@ class Planner(AbstractPDMClosedPlanner):
                 planner_trajectory = planner_trajectory[
                     ..., StateIndex.STATE_SE2
                 ]  # drop values
-                print("before:",planner_trajectory)
-                print("ego_state.rear_axle",ego_state.rear_axle)
                 planner_trajectory = convert_absolute_to_relative_se2_array(
                     ego_state.rear_axle, planner_trajectory
                 )  # convert to relative coords
-                print("after:",planner_trajectory)
                 pdm_trajectory.append(planner_trajectory)
 
                     
@@ -581,7 +542,6 @@ class Planner(AbstractPDMClosedPlanner):
         sampled_observation_buffer = [observation_buffer[i] for i in sample_frames_in_past_10hz]
         agents = [observation.tracked_objects.get_agents() for observation in sampled_observation_buffer]
         statics = [observation.tracked_objects.get_static_objects() for observation in sampled_observation_buffer]
-
         corrected_route_ids_=route_roadblock_correction(
             ego_states[-1],
             self._map_api,
