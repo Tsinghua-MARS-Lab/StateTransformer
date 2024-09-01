@@ -298,7 +298,7 @@ class Planner(AbstractPDMClosedPlanner):
         one_second_correction = False
         one_second_correction_with_kp = False
         
-        two_second_correction_with_kp = True
+        two_second_correction_with_kp = False
 
         agents_rect_local = model_samples['agents_rect_local']  # batch_size, time_steps, max_agent_num, 4, 2 (x, y)
 
@@ -371,7 +371,7 @@ class Planner(AbstractPDMClosedPlanner):
                 future_step_time : TimeDuration= TimeDuration.from_s(self.trajectory_sampling.step_time)
                 future_time_points: List[TimePoint] = [
                     current_time + future_step_time * (i)
-                    for i in [5,10,20]
+                    for i in range(1,21)
                 ]
                 trajectory = trajectory.get_state_at_times(future_time_points)
                 planner_trajectory = ego_states_to_state_array(
@@ -395,7 +395,7 @@ class Planner(AbstractPDMClosedPlanner):
                 if self._model.device != 'cpu':
                     gt_1s_kp = torch.tensor(gt_1s_kp[..., :2]).float().to(self._model.device).unsqueeze(1) if one_second_correction_with_kp else None
                     
-                    pdm_2s_kp = torch.tensor(pdm_trajectory).float().to(self._model.device) if two_second_correction_with_kp else None
+                    pdm_2s_kp = torch.tensor(pdm_trajectory).float().to(self._model.device) 
                     
                     device = self._model.device
                     prediction_generation = self._model.generate(
@@ -410,6 +410,7 @@ class Planner(AbstractPDMClosedPlanner):
                         agents_rect_local=torch.tensor(agents_rect_local).to(device),
                         gt_2s_kp=pdm_2s_kp if two_second_correction_with_kp else None,
                     )
+                    prediction_generation["traj_logits"][:,:20,:3] = pdm_2s_kp
                     pred_traj = prediction_generation['traj_logits'].detach().cpu().float().numpy()
                     if 'key_points_logits' in prediction_generation:
                         pred_key_points = prediction_generation['key_points_logits'].detach().cpu().numpy()

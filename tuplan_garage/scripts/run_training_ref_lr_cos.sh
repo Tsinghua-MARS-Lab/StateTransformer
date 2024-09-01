@@ -3,7 +3,7 @@ TRAIN_LR=1e-4
 BATCH_SIZE=16
 SEED=0
 
-JOB_NAME=training_pdm_ref_offset_model_lr_cos
+JOB_NAME=training_pdm_ref_offset_model_lr_cos_warmup
 CACHE_PATH=/localssd/Cache
 USE_CACHE_WITHOUT_DATASET=True
 
@@ -22,6 +22,7 @@ data_loader.params.batch_size=$BATCH_SIZE \
 optimizer.lr=$TRAIN_LR \
 lr_scheduler=one_cycle_lr \
 optimizer=adamw \
+warm_up_lr_scheduler=linear_warm_up \
 worker=single_machine_thread_pool \
 hydra.searchpath="[pkg://tuplan_garage.planning.script.config.common, pkg://tuplan_garage.planning.script.config.training, pkg://tuplan_garage.planning.script.experiments, pkg://nuplan.planning.script.config.common, pkg://nuplan.planning.script.experiments]"
 # worker=single_machine_thread_pool \\
