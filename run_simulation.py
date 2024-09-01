@@ -9,7 +9,7 @@ import argparse
 import warnings
 import os
 from tqdm import tqdm
-from nuplan_simulation.planner import Planner
+from nuplan_simulation.pdm_planner import Planner
 from nuplan_simulation.common_utils import *
 
 warnings.filterwarnings("ignore")
@@ -288,10 +288,12 @@ class SimulationRunnerBatch(SimulationRunner):
 
             model_samples = []
             for i in tqdm(range(self._batch_size), desc='Step model inputs converting in batch', disable=not debug):
+                
                 model_samples.append(self.planners[i].inputs_to_model_sample(
                     history=planner_inputs[i].history,
                     traffic_light_data=list(planner_inputs[i].traffic_light_data),
                     map_name=self.planners[i]._map_api.map_name,
+                    planner_input = planner_inputs[i],
                 ))
             # print(f'\nModel sample time: {time.perf_counter() - model_sample_start_time:.3f} s')
             # pack in batch

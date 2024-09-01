@@ -6,7 +6,7 @@ BATCH_SIZE=16
 SEED=0
 
 JOB_NAME=training_pdm_ref_offset_model_lr_warmup
-CACHE_PATH=/cephfs/shared/Cache
+CACHE_PATH=/localssd/Cache
 USE_CACHE_WITHOUT_DATASET=True
 
 python $NUPLAN_DEVKIT_ROOT/nuplan/planning/script/run_training.py \
@@ -19,7 +19,7 @@ cache.cache_path=$CACHE_PATH \
 cache.use_cache_without_dataset=$USE_CACHE_WITHOUT_DATASET \
 lightning.trainer.params.max_epochs=$TRAIN_EPOCHS \
 lightning.trainer.params.max_time=00:10000:00:00 \
-lightning.trainer.checkpoint.resume_training=False \
+lightning.trainer.checkpoint.resume_training=True \
 data_loader.params.batch_size=$BATCH_SIZE \
 optimizer.lr=$TRAIN_LR \
 lr_scheduler=multistep_lr \

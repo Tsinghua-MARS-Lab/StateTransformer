@@ -82,6 +82,9 @@ class ModelArguments:
     mean_circular_loss: Optional[bool] = field(
         default=True
     )
+    skip_yaw_norm: Optional[bool] = field(
+        default=False
+    )
 
     ######## begin of proposal args ########
     use_proposal: Optional[int] = field(

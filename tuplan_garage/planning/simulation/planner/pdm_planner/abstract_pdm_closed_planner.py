@@ -92,7 +92,6 @@ class AbstractPDMClosedPlanner(AbstractPDMPlanner):
         Updates or initializes PDMProposalManager class
         :param ego_state: state of ego-vehicle
         """
-
         current_lane = self._get_starting_lane(ego_state)
 
         # TODO: Find additional conditions to trigger re-planning

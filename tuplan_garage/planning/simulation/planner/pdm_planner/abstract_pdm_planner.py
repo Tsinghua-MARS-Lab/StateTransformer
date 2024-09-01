@@ -151,9 +151,9 @@ class AbstractPDMPlanner(AbstractPlanner, ABC):
         :param ego_state: state of ego-vehicle
         :return: tuple of lists with lane objects and heading errors [rad].
         """
-        assert (
-            self._drivable_area_map
-        ), "AbstractPDMPlanner: Drivable area map must be initialized first!"
+        # assert (
+        #     self._drivable_area_map
+        # ), "AbstractPDMPlanner: Drivable area map must be initialized first!"
 
         ego_position_array: npt.NDArray[np.float64] = ego_state.rear_axle.array
         ego_rear_axle_point: Point = Point(*ego_position_array)

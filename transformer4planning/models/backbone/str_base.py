@@ -403,7 +403,7 @@ class STR(PreTrainedModel):
         context_length = info_dict["context_length"]
 
         # for debug only
-        gt_1s_kp = kwargs.get('gt_1s_kp', None)
+        gt_2s_kp = kwargs.get('gt_2s_kp', None)
 
         traj_logits_k = []
         key_points_logits_k = []
@@ -554,10 +554,13 @@ class STR(PreTrainedModel):
                             selected_key_points.append(selected_key_points_current_batch)  # a list of (1, 2/4)
                         key_points_logit = torch.stack(selected_key_points, dim=0)  # (bs, 1, 2/4)
 
-                    if gt_1s_kp is not None and i == 3:
-                        # assert False, 'deprecated, debug only'
-                        print('testing with gt1skp: ', key_points_logit[0, 0, :2] - gt_1s_kp[0, 0, :2])
-                        key_points_logit = gt_1s_kp
+                    # if gt_1s_kp is not None and i == 3:
+                    #     # assert False, 'deprecated, debug only'
+                    #     key_points_logit = gt_1s_kp[:,i,:].unsqueeze(1)
+                    
+                    if gt_2s_kp is not None and i <3:
+                        key_points_logit = gt_2s_kp[:,i,:2].unsqueeze(1)
+                        
 
                     # pred_key_point = torch.zeros((batch_size, 1, 2), device=device)
                     pred_key_point = key_points_logit
@@ -1187,6 +1190,7 @@ def build_model_from_path(model_path, load_checkpoint=True):
         print('WARNING config.json not found in checkpoint path, using default model args ', config_path)
         model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
     else:
+        print('loading model args from ', config_path)
         model_args, = parser.parse_json_file(config_path, allow_extra_keys=True)
         model_args.model_pretrain_name_or_path = model_path
         if load_checkpoint:
