@@ -826,7 +826,8 @@ class STR(PreTrainedModel):
                         break
 
         pred_dict = {
-            "traj_logits": traj_pred_logits
+            "traj_logits": traj_pred_logits,
+            "traj_scores": torch.ones([traj_pred_logits.shape[0], 1]).to(traj_pred_logits.device)
         }
 
         # if kwargs.get('old_file_name', None) is not None:
