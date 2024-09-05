@@ -22,7 +22,7 @@ from tuplan_garage.planning.training.preprocessing.features.pdm_feature import (
 # from transformer4planning.models.backbone.str_base import build_model_from_path
 
 
-class PDMRefOffsetModel(TorchModuleWrapper):
+class PDMRef16Model(TorchModuleWrapper):
     """
     Wrapper around PDM-Offset MLP that consumes the ego history (position, velocity, acceleration),
     the trajectory of PDM-Closed and the centerline to regresses correction deltas.
@@ -112,6 +112,7 @@ class PDMRefOffsetModel(TorchModuleWrapper):
             nn.Linear(trajectory_sampling.num_poses * len(SE2Index), int(self.d_model/2)),
             nn.ReLU(),
         )
+        self._model = self._model.float()
 
     def forward(self, features: FeaturesType) -> TargetsType:
         """
@@ -138,7 +139,9 @@ class PDMRefOffsetModel(TorchModuleWrapper):
             "low_res_raster": input.low_res_raster,
             "context_actions": input.context_actions,
             "ego_pose": input.ego_pose,
+            "trajectory_label": torch.zeros(input.ego_position.shape[0], 16, 4).to(input.ego_position.dtype).to(input.ego_position.device),
             }
+
         batch_size = input.ego_position.shape[0]
 
         ego_position = input.ego_position.reshape(batch_size, -1).float()
@@ -167,9 +170,9 @@ class PDMRefOffsetModel(TorchModuleWrapper):
             [centerline_encodings, trajectory_encodings], dim=-1
         )
         planner_features = planner_features.unsqueeze(1)
-
+        
         input_embeds, info_dict = self._model.encoder(is_training=self.training, **kwargs)
-        input_embeds = torch.cat((input_embeds[:,:-80,:], planner_features, input_embeds[:,-80:,:]), dim=1)
+        input_embeds = torch.cat((input_embeds[:,:-16,:], planner_features, input_embeds[:,-16:,:]), dim=1)
         
         transformer_outputs = self._model.embedding_to_hidden(input_embeds)
         transformer_outputs_hidden_state = transformer_outputs['last_hidden_state']
@@ -177,12 +180,11 @@ class PDMRefOffsetModel(TorchModuleWrapper):
         
         # align the shape of pred_trajectory with planner_trajectory
         pred_trajectory = torch.cat((pred_trajectory[:, :, :2], pred_trajectory[:, :, 3:]), dim=2)
-        pred_trajectory = pred_trajectory[:, ::5, :]
         # pdm_feature = self.planner_head(planner_features)
         # the shape of planner_trajectory is (batch_size, 48)
         # the shape of pred_trajectory is (batch_size, 80, 4)
 
-        output_trajectory = planner_trajectory + pred_trajectory
+        output_trajectory = pred_trajectory
         output_trajectory = output_trajectory.reshape(batch_size, -1, len(SE2Index))
 
         return {"trajectory": Trajectory(data=output_trajectory)}
@@ -207,7 +209,6 @@ class PDMRefOffsetModel(TorchModuleWrapper):
         config_p.num_attention_heads = config_p.n_head
         config_p.use_key_points = "no"
         self.d_model = config_p.d_model
-
         model = ModelCls(config_p)
-        print('PDM+StateTransformer with Reference Initialized!')
+        print('PDM+Ref+16Model with Reference Initialized!')
         return model

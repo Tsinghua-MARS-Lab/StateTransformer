@@ -517,7 +517,7 @@ chanllenge choice: `+simulation=closed_loop_reactive_agents` Optional `[closed_l
 ### Launch nuboard for visualization
 
 ```
-python /cephfs/zhanjh/PDM_EXP/StateTransformer/tuplan_garage/nuplan-devkit/nuplan/planning/script/run_nuboard.py simulation_path='[/cephfs/zhanjh/PDM_EXP/StateTransformer/testing_log/closed_loop_nonreactive_agents/STR_planner/test_pdm_simulation]' 'scenario_builder=nuplan' 'port_number=5010'
+python /cephfs/zhanjh/PDM_EXP/StateTransformer/tuplan_garage/nuplan-devkit/nuplan/planning/script/run_nuboard.py simulation_path='[/cephfs/zhanjh/PDM_EXP/StateTransformer/testing_log/closed_loop_nonreactive_agents/STR_planner/test_pdm_simulation_non_final_6]' 'scenario_builder=nuplan' 'port_number=5010'
 ```
 
 or

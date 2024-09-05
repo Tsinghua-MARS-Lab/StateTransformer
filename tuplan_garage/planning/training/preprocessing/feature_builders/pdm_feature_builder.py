@@ -109,7 +109,6 @@ class PDMFeatureBuilder(AbstractFeatureBuilder):
 
     def get_features_from_scenario(self, scenario: AbstractScenario) -> PDMFeature:
         """Inherited, see superclass."""
-
         past_ego_states = [
             ego_state
             for ego_state in scenario.get_ego_past_trajectory(
@@ -186,7 +185,6 @@ class PDMFeatureBuilder(AbstractFeatureBuilder):
         :param initialization: planner initialization of current frame
         :return: PDMFeature dataclass
         """
-
         current_ego_state: EgoState = ego_states[-1]
         current_pose: StateSE2 = current_ego_state.rear_axle
 
@@ -277,11 +275,11 @@ class PDMFeatureBuilder(AbstractFeatureBuilder):
         trajectory: InterpolatedTrajectory = self._planner.compute_planner_trajectory(
             current_input
         )
-
         # extract planner trajectory
         future_step_time: TimeDuration = TimeDuration.from_s(
             self._trajectory_sampling.step_time
         )
+        print("num poses", self._trajectory_sampling.num_poses)
         future_time_points: List[TimePoint] = [
             trajectory.start_time + future_step_time * (i + 1)
             for i in range(self._trajectory_sampling.num_poses)
@@ -312,7 +310,6 @@ class PDMFeatureBuilder(AbstractFeatureBuilder):
             current_pose,
             centerline.interpolate(centerline_progress_values, as_array=True),
         )  # convert to relative coords
-
         return PDMFeature(
             ego_position=ego_position,
             ego_velocity=ego_velocity,

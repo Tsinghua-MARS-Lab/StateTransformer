@@ -362,6 +362,7 @@ class Planner(AbstractPDMClosedPlanner):
                 gt_1s_kp = relative_traj[:, 10, :]
             # features = observation_adapter(history, traffic_light_data, self._map_api, self._route_roadblock_ids, self._device)
             pdm_trajectory = []
+            
             # import idm's trajectory
             for i in range(batch_size):
                 ego_state = ego_states_in_batch[i][-1]
@@ -395,7 +396,7 @@ class Planner(AbstractPDMClosedPlanner):
                 if self._model.device != 'cpu':
                     gt_1s_kp = torch.tensor(gt_1s_kp[..., :2]).float().to(self._model.device).unsqueeze(1) if one_second_correction_with_kp else None
                     
-                    pdm_2s_kp = torch.tensor(pdm_trajectory).float().to(self._model.device) 
+                    pdm_2s_traj = torch.tensor(pdm_trajectory).float().to(self._model.device) 
                     
                     device = self._model.device
                     prediction_generation = self._model.generate(
@@ -408,9 +409,9 @@ class Planner(AbstractPDMClosedPlanner):
                         road_dic=road_dics,
                         map=map_names,
                         agents_rect_local=torch.tensor(agents_rect_local).to(device),
-                        gt_2s_kp=pdm_2s_kp if two_second_correction_with_kp else None,
                     )
-                    prediction_generation["traj_logits"][:,:20,:3] = pdm_2s_kp
+                    prediction_generation["traj_logits"][:,:20,:2] = pdm_2s_traj[:,:20,:2]
+                    prediction_generation["traj_logits"][:,:20,3] = pdm_2s_traj[:,:20,2]
                     pred_traj = prediction_generation['traj_logits'].detach().cpu().float().numpy()
                     if 'key_points_logits' in prediction_generation:
                         pred_key_points = prediction_generation['key_points_logits'].detach().cpu().numpy()
@@ -484,7 +485,7 @@ class Planner(AbstractPDMClosedPlanner):
             #                 path_to_save='./debug_raster')
 
             # reverse again for singapore trajectory
-            relative_traj[:, :, 1] *= y_inverse
+            relative_traj[:, 20:, 1] *= y_inverse
 
         trajectories = []
         for i in range(relative_traj.shape[0]):

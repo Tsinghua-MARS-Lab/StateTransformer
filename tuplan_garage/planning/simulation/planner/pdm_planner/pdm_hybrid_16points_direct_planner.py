@@ -47,7 +47,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 logger = logging.getLogger(__name__)
 
 
-class PDMHybridPlanner(AbstractPDMClosedPlanner):
+class PDMHybrid16DirectPlanner(AbstractPDMClosedPlanner):
     """PDM-Closed planner class."""
 
     # Inherited property, see superclass.
@@ -76,7 +76,7 @@ class PDMHybridPlanner(AbstractPDMClosedPlanner):
         :param checkpoint_path: path to checkpoint for model as string
         """
 
-        super(PDMHybridPlanner, self).__init__(
+        super(PDMHybrid16DirectPlanner, self).__init__(
             trajectory_sampling,
             proposal_sampling,
             idm_policies,
@@ -160,7 +160,7 @@ class PDMHybridPlanner(AbstractPDMClosedPlanner):
             self._model.trajectory_sampling.time_horizon,
             self._model.trajectory_sampling.step_time,
         )
-        
+
         # apply correction by fusing
         trajectory = self._apply_trajectory_correction(
             uncorrected_states, corrected_states
