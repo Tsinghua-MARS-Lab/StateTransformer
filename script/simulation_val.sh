@@ -1,0 +1,11 @@
+python run_simulation.py  \
+--test_type open_loop_boxes  \
+--data_path /cephfs/shared/nuplan-v1.1/data/cache/val/  \
+--map_path /cephfs/shared/nuplan-v1.1/maps  \
+--model_path /cephfs/shared/Mixtral800mDeep_CKS_CosRestartLR_Cycle10_RouteBalancing_KPDecDPt1_AugCur50Pct_PastProj_S6_bf16_Jun28/training_results/checkpoint-195000 \
+--split_filter_yaml /cephfs/zhanjh/PDM_EXP/StateTransformer/nuplan_simulation/val_whole.yaml \
+--max_scenario_num 1000000 \
+--batch_size 16  \
+--device cuda  \
+--exp_folder val_whole_pdm_simulation_open_result  \
+--processes-repetition 8 \

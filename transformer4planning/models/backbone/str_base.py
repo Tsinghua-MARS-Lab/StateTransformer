@@ -438,7 +438,7 @@ class STR(PreTrainedModel):
 
         if key_points_pred_logits is not None:
             pred_dict.update({"key_points_logits": key_points_pred_logits})
-
+        
         if self.use_proposal:
             pred_dict.update({"proposal": proposal_result})  # topk results
             pred_dict.update({"proposal_scores": proposal_scores})  # topk scores
@@ -664,3 +664,21 @@ def interpolate_yaw(pred_traj, mode, yaw_change_upper_threshold=0.1):
         else:
             pred_traj[:, :, -1] = torch.where(torch.abs(pred_traj[:, :, -1]) > yaw_change_upper_threshold, relative_yaw_angles_full, pred_traj[:, :, -1])
     return pred_traj
+def build_model_from_path(model_path, load_checkpoint=True):
+    from transformer4planning.utils.args import ModelArguments
+    from transformers import (HfArgumentParser)
+    import os
+    parser = HfArgumentParser((ModelArguments))
+    # load model args from config.json
+    config_path = os.path.join(model_path, 'config.json')
+    if not os.path.exists(config_path):
+        print('WARNING config.json not found in checkpoint path, using default model args ', config_path)
+        model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
+    else:
+        model_args, = parser.parse_json_file(config_path, allow_extra_keys=True)
+        model_args.model_pretrain_name_or_path = model_path
+        if load_checkpoint:
+            model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
+    print('model loaded with args: ', model_args, model_args.model_name, model_path)
+    model = build_models(model_args=model_args)
+    return model

@@ -7,3 +7,4 @@ wandb
 src/
 .venv
 node_modules
+testing_log/*
