@@ -43,15 +43,16 @@ from transformer4planning.trainer import compute_metrics
 
 from datasets import Dataset, Value
 
-# os.environ["WANDB_DISABLED"] = "true"
+os.environ["WANDB_DISABLED"] = "true"
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 logger = logging.getLogger(__name__)
 
-def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=False):
+def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=False, debug = False):
     datasets = []
     index_root_folders = os.path.join(root, split)
     indices = os.listdir(index_root_folders)
-
+    if debug:
+        indices = indices[:1]
     for index in indices:
         index_path = os.path.join(index_root_folders, index)
         if os.path.isdir(index_path):
@@ -189,7 +190,7 @@ def main():
             raise ValueError("No training dataset found in {}, must include at least one city in /train_alltype".format(index_root))
     else:
         if 'train' in root_folders:
-            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True)
+            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, data_args.agent_type, True, True)
         else:
             raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
 
@@ -204,7 +205,7 @@ def main():
         test_dataset = train_dataset
 
     if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
-        val_dataset = load_dataset(index_root, "val", data_args.dataset_scale, data_args.agent_type, False)
+        val_dataset = load_dataset(index_root, "val14_1k", data_args.dataset_scale, data_args.agent_type, False)
         if model_args.camera_image_encoder is not None:
             val_dataset = val_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
     else:
