@@ -42,6 +42,7 @@ from transformers.trainer_callback import DefaultFlowCallback
 from transformer4planning.trainer import compute_metrics
 
 from datasets import Dataset, Value
+import json
 
 os.environ["WANDB_DISABLED"] = "true"
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -100,10 +101,21 @@ def load_dataset(root, split='train', dataset_scale=1, agent_type="all", select=
 
     return dataset
 
+def update_model_args(config_path, model_args):
+    if config_path is not None:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    for key in model_args.__dict__:
+        if key in config:
+            setattr(model_args, key, config[key])
+            
+    return model_args
+
 
 def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ConfigArguments, PlanningTrainingArguments))
     model_args, data_args, _, training_args = parser.parse_args_into_dataclasses()
+    model_args = update_model_args("/cephfs/shared/Medium_SKPY_PI2_x10_auXYd1_VAL/checkpoint-407000/config.json", model_args)
 
     # set default label names
     training_args.label_names = ['trajectory_label']
@@ -205,7 +217,7 @@ def main():
         test_dataset = train_dataset
 
     if (training_args.do_eval or training_args.do_predict) and 'val' in root_folders:
-        val_dataset = load_dataset(index_root, "val14_1k", data_args.dataset_scale, data_args.agent_type, False)
+        val_dataset = load_dataset(index_root, "test", data_args.dataset_scale, data_args.agent_type, False)
         if model_args.camera_image_encoder is not None:
             val_dataset = val_dataset.filter(lambda example: len(example["images_path"]) == 8, num_proc=mp.cpu_count())
     else:

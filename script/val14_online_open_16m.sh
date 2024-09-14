@@ -1,0 +1,5 @@
+
+
+export CUDA_VISIBLE_DEVICES=0; python -m torch.distributed.run --nproc_per_node=1 --master_port 12345 runner.py --model_name scratch-gpt-small  --saved_dataset_folder /cephfs/shared/nuplan/online_s6 --output_dir /cephfs/zhanjh/str1 --logging_dir /cephfs/zhanjh/str1 --run_name val14 --num_train_epochs 50 --per_device_train_batch_size 32 --warmup_steps 50 --weight_decay 0.01 --logging_steps 100 --save_strategy steps --save_steps 1000 --dataloader_num_workers 24 --dataloader_drop_last True --save_total_limit 5 --do_train --task nuplan --remove_unused_columns False --do_eval --evaluation_strategy steps --eval_steps 1000 --per_device_eval_batch_size 8 --predict_yaw True --use_proposal 0 --selected_exponential_past True --mean_circular_loss True --raster_channels 34 --use_mission_goal False --raster_encoder_type resnet18 --vit_intermediate_size 768 --lr_scheduler_type cosine --use_speed --use_key_points specified_backward   --overwrite_output_dir --eval_on_start --resume_from_checkpoint /cephfs/zhanjh/checkpoint-27000 --use_speed False --max_eval_samples 16 
+
+# --model_name_or_path /cephfs/shared/Medium_SKPY_PI2_x10_auXYd1_VAL
