@@ -676,9 +676,20 @@ def build_model_from_path(model_path, load_checkpoint=True):
         model_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)[0]
     else:
         model_args, = parser.parse_json_file(config_path, allow_extra_keys=True)
+        model_args = update_model_args(config_path, model_args)
         model_args.model_pretrain_name_or_path = model_path
         if load_checkpoint:
             model_args.model_name = model_args.model_name.replace('scratch', 'pretrained')
     print('model loaded with args: ', model_args, model_args.model_name, model_path)
     model = build_models(model_args=model_args)
     return model
+import json
+def update_model_args(config_path, model_args):
+    if config_path is not None:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    for key in model_args.__dict__:
+        if key in config:
+            setattr(model_args, key, config[key])
+            
+    return model_args

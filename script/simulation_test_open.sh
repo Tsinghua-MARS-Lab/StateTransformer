@@ -6,7 +6,7 @@ python run_simulation.py  \
 --split_filter_yaml /cephfs/zhanjh/str1/StateTransformer/nuplan_simulation/test_whole.yaml \
 --max_scenario_num 1000000 \
 --max_scenario_num 1000000 \
---batch_size 20  \
+--batch_size 10  \
 --device cuda  \
 --exp_folder str124m_test_open  \
 --processes-repetition 8 \
