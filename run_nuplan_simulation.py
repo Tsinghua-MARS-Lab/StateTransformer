@@ -114,6 +114,16 @@ def arg_parse():
         action='store_true',
         default=False,
     )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="val14_split",
+    )
+    parser.add_argument(
+        "--generate_simlog",
+        action='store_true',
+        default=False,
+    )
     args = parser.parse_args()
     return args
 
@@ -133,7 +143,7 @@ def parse_hydra_config(args):
     # PLANNER = "str_closed_planner"  # [simple_planner, ml_planner]
     # [open_loop_boxes, closed_loop_nonreactive_agents, closed_loop_reactive_agents]
     CHALLENGE = args.challenge
-    SPLIT = "val14_split"
+    SPLIT = args.split
 
     # Name of the experiment
     EXPERIMENT = "simulation_simple_experiment"
@@ -165,6 +175,10 @@ def parse_hydra_config(args):
     if args.extrapolate:
         overrides_dict.update(
             {"planner.str_closed_planner.str_generator.extrapolate": args.extrapolate}
+        )
+    if not args.generate_simlog:
+        overrides_dict.update(
+            {"callback": "dummy_callback"}
         )
     overrides_dict.update(args.hydra_overrides)
     # Compose the configuration

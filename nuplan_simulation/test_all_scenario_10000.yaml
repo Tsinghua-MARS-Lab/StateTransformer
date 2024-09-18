@@ -1,0 +1,17 @@
+_target_: nuplan.planning.scenario_builder.scenario_filter.ScenarioFilter
+_convert_: all
+scenario_types: null
+
+scenario_tokens:
+log_names: null
+map_names: null
+num_scenarios_per_type: 10000
+limit_total_scenarios: null
+timestamp_threshold_s: null
+ego_displacement_minimum_m: null
+ego_start_speed_threshold: null
+ego_stop_speed_threshold: null
+speed_noise_tolerance: null
+expand_scenarios: false
+remove_invalid_goals: true
+shuffle: false
