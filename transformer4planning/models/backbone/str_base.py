@@ -239,7 +239,7 @@ class STR(PreTrainedModel):
                     loss_items["proposal_loss"] = proposal_loss
                     pred_dict["proposal"] = proposal_loss_logits
                 elif self.config.task == "nuplan":
-                    traj_loss, traj_logits = self.proposal_decoder.compute_traj_loss(transformer_outputs_hidden_state, info_dict)
+                    traj_loss = self.proposal_decoder.compute_traj_loss(transformer_outputs_hidden_state, info_dict)
                     loss += traj_loss
                     loss_items["proposal_loss"] = traj_loss
                     # pred_dict["proposal"] = traj_logits
@@ -460,6 +460,7 @@ class STR(PreTrainedModel):
 
                     context_length = info_dict["context_length"]
                     candi_proposal_num = info_dict['candi_proposal_num']
+                    pred_length = info_dict.get("pred_length", 0)
                     context_length_with_proposal = context_length + candi_proposal_num
                     context_embeds = input_embeds[:, :context_length_with_proposal, :]
                     attention_mask = torch.ones(context_embeds.shape[:2], dtype=torch.long, device=device)
@@ -471,15 +472,18 @@ class STR(PreTrainedModel):
                     traj_logits, scores = self.proposal_decoder.generate_trajs(transformer_outputs_hidden_state, info_dict)
                     if self.config.reverse_traj_index_order:
                         traj_logits = traj_logits.flip(-2)
-                    pred_prob_embed = self.encoder.proposal_score_embed(scores)  # bs, 256
-                    kp_start_index += candi_proposal_num + 1
-                    # replace the last embedding with the predicted proposal embedding
-                    input_embeds[:, kp_start_index - 1, :] = pred_prob_embed
+
+                    # pred_prob_embed = self.encoder.proposal_score_embed(scores)  # bs, 256
+                    kp_start_index += candi_proposal_num + pred_length
+                    # # replace the last embedding with the predicted proposal embedding
+                    # input_embeds[:, kp_start_index - 1, :] = pred_prob_embed
+                    prop_embeds = self.encoder.action_m_embed_traj(traj_logits)
+                    input_embeds[:, context_length + candi_proposal_num: context_length + candi_proposal_num + pred_length, :] = prop_embeds
                     proposal_result = traj_logits
                     proposal_scores = scores
 
             if self.use_key_points != "no":
-                pred_length = info_dict["pred_length"]
+
                 selected_indices = self.encoder.selected_indices
                 # kp_start_index = int(context_length)  # Update: set before proposal
 
@@ -652,7 +656,7 @@ class STR(PreTrainedModel):
                     pred_key_points_during_generate.append(pred_key_point[:, 0, :2].unsqueeze(1))
                 key_points_logits = torch.cat(pred_key_points_during_generate, dim=1).reshape(batch_size, key_points_num, -1)
                 key_points_logits_k.append(key_points_logits)
-
+            pred_length = info_dict["pred_length"]
             # generate remaining trajectory
             transformer_outputs_hidden_state = self.embedding_to_hidden(input_embeds)['last_hidden_state']
             if self.config.autoregressive:
