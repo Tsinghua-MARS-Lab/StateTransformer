@@ -40,6 +40,10 @@ from tuplan_garage.planning.simulation.planner.pdm_planner.observation.pdm_obser
 )
 import gc
 
+from tuplan_garage.planning.simulation.planner.pdm_planner.proposal.pdm_generator import (
+    PDMGenerator,
+)
+
 class STRClosedPlanner(PDMClosedPlanner):
 
     # Inherited property, see superclass.
@@ -51,7 +55,9 @@ class STRClosedPlanner(PDMClosedPlanner):
         trajectory_sampling: TrajectorySampling,
         proposal_sampling: TrajectorySampling,
         idm_policies: BatchIDMPolicy,
+        str_idm_policies: BatchIDMPolicy,
         lateral_offsets: Optional[List[float]],
+        str_lateral_offsets: Optional[List[float]],
         map_radius: float,
         debug_candidate_trajectories: bool,
         always_emergency_brake: bool,
@@ -74,9 +80,17 @@ class STRClosedPlanner(PDMClosedPlanner):
         self._str_generator = str_generator
         self.debug_candidate_trajectories = debug_candidate_trajectories
         self.always_emergency_brake = always_emergency_brake
+        self._str_idm_policies = str_idm_policies
+        self._str_lateral_offsets = str_lateral_offsets
+        self._str_proposal_manager: Optional[PDMProposalManager] = None
+        self._strpdm_generator = PDMGenerator(trajectory_sampling, proposal_sampling)
         
         print("============================== STRClosedPlanner")
         print(f"always_emergency_brake: {self.always_emergency_brake}")
+        print(f"pdm_lateral_offsets: {self._lateral_offsets}")
+        print(f"pdm_speed_limit_fraction: {self._idm_policies._speed_limit_fractions}")
+        print(f"str_lateral_offsets: {self._str_lateral_offsets}")
+        print(f"str_speed_limit_fraction: {self._str_idm_policies._speed_limit_fractions}")
         print("==============================")
 
     def initialize(self, initialization: PlannerInitialization) -> None:
@@ -120,17 +134,22 @@ class STRClosedPlanner(PDMClosedPlanner):
         self._update_proposal_manager(ego_state, str_pred_states)
 
         # 3. Generate/Unroll proposals
-        str_pdm_proposals_array = self._generator.generate_proposals(
+        pdm_proposals_array = self._generator.generate_proposals(
             ego_state, self._observation, self._proposal_manager
         )
-        str_proposals_array = np.expand_dims(ego_states_to_state_array(str_pred_states), axis=0) 
-        proposals_array = np.concatenate((str_pdm_proposals_array, str_proposals_array), axis=0)
+        
+        str_proposals_array = self._strpdm_generator.generate_proposals(
+            ego_state, self._observation, self._str_proposal_manager
+        )
+        
+        str_init_proposal_array = np.expand_dims(ego_states_to_state_array(str_pred_states), axis=0) 
+        proposals_array = np.concatenate((pdm_proposals_array, str_proposals_array, str_init_proposal_array), axis=0)
 
         # 4. Simulate proposals
         simulated_proposals_array = self._simulator.simulate_proposals(
             proposals_array, ego_state
         )
-
+        
         # 5. Score proposals
         proposal_scores = self._scorer.score_proposals(
             simulated_proposals_array,
@@ -150,10 +169,13 @@ class STRClosedPlanner(PDMClosedPlanner):
 
         # 6.b Otherwise, extend and output best proposal
         if trajectory is None:
-            if np.argmax(proposal_scores) == len(str_pdm_proposals_array):
+            if np.argmax(proposal_scores) == len(pdm_proposals_array) + len(str_proposals_array):
                 trajectory = InterpolatedTrajectory(str_pred_states)
-            else:
+            elif np.argmax(proposal_scores) < len(pdm_proposals_array):
                 trajectory = self._generator.generate_trajectory(np.argmax(proposal_scores))
+            else:
+                trajectory = self._strpdm_generator.generate_trajectory(np.argmax(proposal_scores) - len(pdm_proposals_array))
+                
 
         return trajectory
     
@@ -182,30 +204,40 @@ class STRClosedPlanner(PDMClosedPlanner):
         create_new_proposals = True
 
         if create_new_proposals:
-            proposal_paths: List[PDMPath] = self._get_proposal_paths(str_pred_states)
+            pdm_proposal_paths: List[PDMPath] = self._get_pdm_proposal_paths(current_lane)
 
             self._proposal_manager = PDMProposalManager(
-                lateral_proposals=proposal_paths,
+                lateral_proposals=pdm_proposal_paths,
                 longitudinal_policies=self._idm_policies,
             )
+            
+            str_proposal_paths: List[PDMPath] = self._get_str_proposal_paths(str_pred_states)
 
+            self._str_proposal_manager = PDMProposalManager(
+                lateral_proposals=str_proposal_paths,
+                longitudinal_policies=self._str_idm_policies,
+            )
         # update proposals
         self._proposal_manager.update(current_lane.speed_limit_mps)
-        
-    def _get_proposal_paths(
-        self, str_pred_states
+        self._str_proposal_manager.update(current_lane.speed_limit_mps)
+
+
+    def _get_pdm_proposal_paths(
+        self, current_lane
     ) -> List[PDMPath]:
         """
         Returns a list of path's to follow for the proposals. Inits a centerline.
         :param current_lane: current or starting lane of path-planning
         :return: lists of paths (0-index is centerline)
         """
-        centerline_discrete_path = [state.rear_axle for state in str_pred_states]
-        # centerline_discrete_path = self._get_discrete_centerline(current_lane)
+        output_paths = []
+        
+        ### pdm proposals
+        centerline_discrete_path = self._get_discrete_centerline(current_lane)
         self._centerline = PDMPath(centerline_discrete_path)
-
+        
         # 1. save centerline path (necessary for progress metric)
-        output_paths: List[PDMPath] = [self._centerline]
+        output_paths.append(self._centerline)
 
         # 2. add additional paths with lateral offset of centerline
         if self._lateral_offsets is not None:
@@ -214,10 +246,34 @@ class STRClosedPlanner(PDMClosedPlanner):
                     discrete_path=centerline_discrete_path, offset=lateral_offset
                 )
                 output_paths.append(PDMPath(offset_discrete_path))
-
+                
         return output_paths
     
     
+    def _get_str_proposal_paths(
+        self, str_pred_states
+    ) -> List[PDMPath]:
+        """
+        Returns a list of path's to follow for the proposals. Inits a centerline.
+        :param current_lane: current or starting lane of path-planning
+        :return: lists of paths (0-index is centerline)
+        """
+        output_paths = []
+        
+        ### str proposals
+        str_centerline_discrete_path = [state.rear_axle for state in str_pred_states]
+        str_centerline = PDMPath(str_centerline_discrete_path)
+        output_paths.append(str_centerline)
+
+        # 2. add additional paths with lateral offset of centerline
+        if self._str_lateral_offsets is not None:
+            for str_lateral_offset in self._str_lateral_offsets:
+                str_offset_discrete_path = parallel_discrete_path(
+                    discrete_path=str_centerline_discrete_path, offset=str_lateral_offset
+                )
+                output_paths.append(PDMPath(str_offset_discrete_path))
+                
+        return output_paths
     
     # def compute_planner_trajectory_in_batch(
     #     self, current_inputs: list[PlannerInput], states: list[dict]

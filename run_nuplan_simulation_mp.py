@@ -60,12 +60,19 @@ import torch.multiprocessing as mp
 # import debugpy
 # try:
 #     # 5678 is the default attach port in the VS Code debug configurations. Unless a host and port are specified, host defaults to 127.0.0.1
-#     debugpy.listen(("localhost", 9505))
+#     debugpy.listen(("localhost", 9506))
 #     print("Waiting for debugger attach")
 #     debugpy.wait_for_client()
 # except Exception as e:
 #     pass
 
+def deep_update(original, update):
+    for key, value in update.items():
+        if isinstance(value, dict):
+            original[key] = deep_update(original.get(key, {}), value)
+        else:
+            original[key] = value
+    return original
 
 def process_single_sample(i, planners, planner_inputs):
     return planners[i].inputs_to_model_sample(
@@ -311,8 +318,15 @@ class SimulationRunnerBatch(SimulationRunner):
                 # pack in batch
                 samples_in_batch = {key: np.stack([sample[key] for sample in model_samples]) for key in model_samples[0].keys()}
                 # model forward in batch
-                states_in_batch, scores_in_batch = self.planners[0]._str_generator.predict_states_in_batch(planner_inputs, map_names, samples_in_batch)
-                
+                states_in_batch, scores_in_batch = self.planners[0]._str_generator.predict_states_in_batch(
+                    planner_inputs=planner_inputs, 
+                    map_names=map_names, 
+                    samples_in_batch=samples_in_batch,
+                    ego_states_in_batch=[planner_inputs[i].history.ego_states for i in range(self._batch_size)],
+                    route_ids=[self.planners[i]._str_generator._route_roadblock_ids for i in range(self._batch_size)],
+                    road_dics=[self.planners[i]._str_generator.road_dic for i in range(self._batch_size)],
+                )
+
                 planner_start_time = time.perf_counter()
                 # Plan path based on all planner's inputs
                 for planner, current_input, str_pred_states in zip(self.planners, planner_inputs, states_in_batch):
@@ -540,7 +554,7 @@ def build_simulation_in_batch_multiprocess(experiment, scenarios, output_dir, si
     # global_model = model_planner._model
     params_planner = yaml.safe_load(open(f"{os.getcwd()}/tuplan_garage/planning/script/config/simulation/planner/{args.planner_name}.yaml", 'r'))
     if "str" in args.planner_name:
-        params_planner['str_closed_planner']['str_generator']['model_path'] = args.model_path
+        deep_update(params_planner, args.planner_override)
     model_planner = hydra.utils.instantiate(params_planner)[args.planner_name]
     if "str" in args.planner_name:
         global_model = model_planner._str_generator._model
@@ -670,6 +684,7 @@ def _worker_func(scenarios, all_road_dic, batch_size, experiment, controller, ou
     
     params_planner = yaml.safe_load(open(f"{os.getcwd()}/tuplan_garage/planning/script/config/simulation/planner/{args.planner_name}.yaml", 'r'))
     if "str" in args.planner_name:
+        deep_update(params_planner, args.planner_override)
         params_planner['str_closed_planner']['str_generator']['build_model'] = False
     # model_planner = hydra.utils.instantiate(params_planner)[args.planner_name]
     
@@ -833,7 +848,7 @@ def main(args):
     if args.batch_size < 1:
         params_planner = yaml.safe_load(open(f"{os.getcwd()}/tuplan_garage/planning/script/config/simulation/planner/{args.planner_name}.yaml", 'r'))
         if "str" in args.planner_name:
-            params_planner['str_closed_planner']['str_generator']['model_path'] = args.model_path
+            deep_update(params_planner, args.planner_override)
         planner = hydra.utils.instantiate(params_planner)[args.planner_name]
         build_simulation(experiment_name, planner, scenarios, output_dir, simulation_dir, metric_dir)
     else:
@@ -873,6 +888,22 @@ if __name__ == "__main__":
     parser.add_argument('--show_nuboard', action='store_true', default=False)
     parser.add_argument('--node_num', type=int, default=1)
     parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument('--pdm_lateral_offsets', type=str, default="none")      # 若要设置，形式例如 "-1 1"
+    parser.add_argument('--pdm_speed_limit_fraction', type=str, default="0.2 0.4 0.6 0.8 1.0")
+    
+    # param of reuse pdm centerline
+    def set_nested(dic, keys, value):
+        for key in keys[:-1]:
+            dic = dic.setdefault(key, {})
+        dic[keys[-1]] = value
+
+    planner_override = dict()
+    if parser.parse_args().pdm_lateral_offsets != "none":
+        set_nested(planner_override, ['str_closed_planner', 'lateral_offsets'], [float(c) for c in parser.parse_args().pdm_lateral_offsets.split(' ')])
+    set_nested(planner_override, ['str_closed_planner', 'idm_policies', 'speed_limit_fraction'], [float(c) for c in parser.parse_args().pdm_speed_limit_fraction.split(' ')])
+    set_nested(planner_override, ['str_closed_planner', 'str_generator', 'model_path'], parser.parse_args().model_path)
+        
+    parser.add_argument('--planner_override', type=dict, default=planner_override)
     args = parser.parse_args()
     os.environ['NUPLAN_EXP_ROOT'] = args.nuplan_exp_root
 

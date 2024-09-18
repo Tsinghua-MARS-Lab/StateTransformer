@@ -566,7 +566,7 @@ class STR(PreTrainedModel):
                     # pred_key_point = torch.zeros((batch_size, 1, 2), device=device)
                     pred_key_point = key_points_logit
 
-                    off_road_checking = True
+                    off_road_checking = False
                     if off_road_checking and route_ids is not None and road_dic is not None and ego_pose is not None and map_name is not None:
                         from transformer4planning.utils import nuplan_utils
                         for sample_index in range(batch_size):

@@ -26,6 +26,7 @@ import copy
 from nuplan.common.actor_state.ego_state import EgoState
 from nuplan.common.actor_state.state_representation import StateSE2
 
+from nuplan_simulation.route_corrections.route_utils import route_roadblock_correction
 
 class STRTrajectoryGenerator:
     def __init__(self, 
@@ -130,13 +131,26 @@ class STRTrajectoryGenerator:
 
         return states, scores
 
-    def predict_states_in_batch(self, planner_inputs: list[PlannerInput], map_names: list[str], samples_in_batch: dict=None) -> List[List[EgoState]]:
+    def predict_states_in_batch(
+            self, 
+            planner_inputs: list[PlannerInput], 
+            map_names: list[str], 
+            samples_in_batch: dict=None,
+            ego_states_in_batch: list=None,
+            route_ids: list=None,
+            road_dics: list=None,
+        ) -> List[List[EgoState]]:
         # if model_sample is not None:
         #     model_samples = [model_sample]
         # else:
 
         trajectories, scores = self._compute_str_trajectory(
-            model_samples=samples_in_batch, map_names=map_names)
+            model_samples=samples_in_batch, 
+            map_names=map_names, 
+            ego_states_in_batch=ego_states_in_batch,
+            route_ids=route_ids,
+            road_dics=road_dics,
+        )
         # trajectories = [trajectories[0]]
         
         states = [
@@ -152,13 +166,15 @@ class STRTrajectoryGenerator:
         return states, scores
 
 
-    def _compute_str_trajectory(self, model_samples, map_names):
+    def _compute_str_trajectory(self, model_samples, map_names, ego_states_in_batch, route_ids, road_dics):
         # Construct input features
         map_y_inverse = [
             -1 if map_name == "sg-one-north" else 1 for map_name in map_names
         ]
         y_inverse = np.array(map_y_inverse)[:, np.newaxis]
         batch_size = model_samples["context_actions"].shape[0]
+        
+        agents_rect_local = model_samples['agents_rect_local']  # batch_size, time_steps, max_agent_num, 4, 2 (x, y)
 
         # features = observation_adapter(history, traffic_light_data, self._map_api, self._route_roadblock_ids, self._device)
         with torch.no_grad():
@@ -174,6 +190,11 @@ class STRTrajectoryGenerator:
                 trajectory_label=torch.zeros((batch_size, self._N_points, 4)).to(
                     device
                 ),
+                route_ids=route_ids,
+                ego_pose=model_samples['ego_pose'],
+                road_dic=road_dics,
+                map=map_names,
+                agents_rect_local=torch.tensor(agents_rect_local).to(device),
             )
             pred_traj = (
                 prediction_generation["traj_logits"].detach().cpu().float().numpy()
@@ -319,13 +340,19 @@ class STRTrajectoryGenerator:
             for observation in sampled_observation_buffer
         ]
 
-        # corrected_route_ids = route_roadblock_correction(
+        # route_road_blocks_init = copy.deepcopy(self._route_roadblock_ids)
+        # self._route_roadblock_ids = route_roadblock_correction(
         #     ego_states[-1],
         #     self._map_api,
         #     self._route_roadblock_ids,
         # )
+        # if route_road_blocks_init != self._route_roadblock_ids:
+        #     print('Route correction !')
+        #     print('before: ', route_road_blocks_init)
+        #     print('after:  ', self._route_roadblock_ids)
+
         corrected_route_ids = self._route_roadblock_ids
-        high_res_raster, low_res_raster, context_action = self.compute_raster_input(
+        high_res_raster, low_res_raster, context_action, agent_rect_pts_local = self.compute_raster_input(
             ego_trajectory,
             agents,
             statics,
@@ -357,6 +384,8 @@ class STRTrajectoryGenerator:
             "low_res_raster": low_res_raster,
             "context_actions": context_action,
             "oriented_point": oriented_point,
+            'ego_pose': oriented_point,
+            'agents_rect_local': agent_rect_pts_local,
         }
 
     def compute_raster_input(
@@ -597,8 +626,12 @@ class STRTrajectoryGenerator:
                     )
 
         cos_, sin_ = math.cos(-origin_ego_pose[2]), math.sin(-origin_ego_pose[2])
+        agent_rect_pts_local = []
         ## agent includes VEHICLE, PEDESTRIAN, BICYCLE, EGO(except)
         for i, each_type_agents in enumerate(agents_seq):
+            # i is the time sequence
+            current_agent_rect_pts_local = []
+            current_agent_pose_unnorm = []
             for j, agent in enumerate(each_type_agents):
                 agent_type = int(agent.tracked_object_type.value)
                 pose = np.array(
@@ -624,6 +657,9 @@ class STRTrajectoryGenerator:
                 )
                 rect_pts = np.array(rect_pts, dtype=np.int32)
                 rect_pts[:, 0] *= y_inverse
+                if agent_type != 7:
+                    current_agent_rect_pts_local.append(rect_pts)
+                    current_agent_pose_unnorm.append(pose)
                 rect_pts_high_res = (high_res_scale * rect_pts).astype(
                     np.int64
                 ) + raster_shape[0] // 2
@@ -653,6 +689,32 @@ class STRTrajectoryGenerator:
                     (255, 255, 255),
                     -1,
                 )
+
+            max_agent_num = 400
+            if len(current_agent_rect_pts_local) == 0:
+                agent_rect_pts_local.append(np.zeros((max_agent_num, 4, 2)))
+                continue
+            current_agent_rect_pts_local = np.stack(current_agent_rect_pts_local)
+            if len(current_agent_rect_pts_local) > max_agent_num:
+                print('agent more than 400 overflowing: ', current_agent_rect_pts_local.shape)
+                current_agent_rect_pts_local = current_agent_rect_pts_local[:max_agent_num]
+            elif len(current_agent_rect_pts_local) < max_agent_num:
+                current_agent_rect_pts_local = np.concatenate([current_agent_rect_pts_local, np.zeros((max_agent_num - len(current_agent_rect_pts_local), 4, 2))], axis=0)
+
+            agent_rect_pts_local.append(current_agent_rect_pts_local)
+        agent_rect_pts_local = np.stack(agent_rect_pts_local)  # 4(time steps), 300(agent number), 4(rectangle points), 2(x, y)
+
+        # check and only keep static agents
+        static_num = 0
+        for i in range(max_agent_num):
+            first_pt = agent_rect_pts_local[0, i, :, :]
+            last_pt = agent_rect_pts_local[-1, i, :, :]
+            if first_pt.sum() == 0 and last_pt.sum() == 0:
+                continue
+            if not (abs(first_pt - last_pt).sum() < 0.1):
+                agent_rect_pts_local[:, i, :, :] = 0
+            else:
+                static_num += 1
 
         recentered_ego_trajectory = ego_trajectory - origin_ego_pose
         for i, pose in enumerate(recentered_ego_trajectory):
@@ -724,5 +786,6 @@ class STRTrajectoryGenerator:
         return (
             rasters_high_res,
             rasters_low_res,
-            np.array(context_actions, dtype=np.float32),
+            np.array(context_actions, dtype=np.float32), 
+            agent_rect_pts_local,
         )
