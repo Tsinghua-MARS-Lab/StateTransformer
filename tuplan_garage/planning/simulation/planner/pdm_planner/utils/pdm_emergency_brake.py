@@ -59,7 +59,7 @@ class PDMEmergencyBrake:
         ], f"PDMEmergencyBraking: Infraction {self._infraction} not available as brake condition!"
 
     def brake_if_emergency(
-        self, ego_state: EgoState, scores: npt.NDArray[np.float64], scorer: PDMScorer
+        self, ego_state: EgoState, scores: npt.NDArray[np.float64], scorer: PDMScorer, always_emergency_brake: bool
     ) -> Optional[InterpolatedTrajectory]:
         """
         Applies emergency brake only if an infraction is expected within horizon.
@@ -81,10 +81,11 @@ class PDMEmergencyBrake:
         elif self._infraction == "collision":
             time_to_infraction = scorer.time_to_at_fault_collision(proposal_idx)
 
+        max_speed = float("inf") if always_emergency_brake else self._max_ego_speed
         # check time to infraction below threshold
         if (
             time_to_infraction <= self._time_to_infraction_threshold
-            and ego_speed <= self._max_ego_speed
+            and ego_speed <= max_speed
         ):
             trajectory = self._generate_trajectory(ego_state)
 

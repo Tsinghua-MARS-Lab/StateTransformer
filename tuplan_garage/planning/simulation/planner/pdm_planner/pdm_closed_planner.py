@@ -75,7 +75,7 @@ class PDMClosedPlanner(AbstractPDMClosedPlanner):
         return DetectionsTracks  # type: ignore
 
     def compute_planner_trajectory(
-        self, current_input: PlannerInput
+        self, current_input: PlannerInput, str_pred_states=None
     ) -> AbstractTrajectory:
         """Inherited, see superclass."""
 
@@ -91,7 +91,7 @@ class PDMClosedPlanner(AbstractPDMClosedPlanner):
             self._map_api, ego_state, self._map_radius
         )
 
-        trajectory = self._get_closed_loop_trajectory(current_input)
+        trajectory = self._get_closed_loop_trajectory(current_input, str_pred_states)
 
         self._iteration += 1
         return trajectory
