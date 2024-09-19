@@ -88,6 +88,9 @@ class PDMScorer:
         self._collision_time_idcs: Optional[npt.NDArray[np.float64]] = None
         self._ttc_time_idcs: Optional[npt.NDArray[np.float64]] = None
 
+        self.conservative_factor = 1.0
+        self.comfort_weight = 2.0
+
     def time_to_at_fault_collision(self, proposal_idx: int) -> float:
         """
         Returns time to at-fault collision for given proposal
@@ -132,6 +135,8 @@ class PDMScorer:
         :return: array containing score of each proposal
         """
 
+        WEIGHTED_METRICS_WEIGHTS[WeightedMetricIndex.COMFORTABLE] = self.comfort_weight
+        
         # initialize & lazy load class values
         self._reset(
             states,
@@ -537,7 +542,7 @@ class PDMScorer:
             np.arange(0, self._proposal_sampling.num_poses + 1).astype(np.float64)
             * self._proposal_sampling.interval_length
         )
-        is_comfortable = ego_is_comfortable(self._states, time_point_s)
+        is_comfortable = ego_is_comfortable(self._states, time_point_s, self.conservative_factor)
         self._weighted_metrics[WeightedMetricIndex.COMFORTABLE] = np.all(
             is_comfortable, axis=-1
         )

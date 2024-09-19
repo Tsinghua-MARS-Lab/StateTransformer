@@ -375,7 +375,7 @@ class SimulationRunnerBatch(SimulationRunner):
         print("finish RunnerBatch")
         # Delete model to avoid crashes while saving the planner
         for i in range(self._batch_size):
-            self.planners[i]._model = None
+            self.planners[i]._str_generator._model = None
             # Execute specific callback
             self.simulations[i].callback.on_simulation_end(self.simulations[i].setup, self.planners[i], self.simulations[i].history)
             planner_report = self.planners[i].generate_planner_report()
@@ -890,6 +890,9 @@ if __name__ == "__main__":
     parser.add_argument('--local_rank', type=int, default=0)
     parser.add_argument('--pdm_lateral_offsets', type=str, default="none")      # 若要设置，形式例如 "-1 1"
     parser.add_argument('--pdm_speed_limit_fraction', type=str, default="0.2 0.4 0.6 0.8 1.0")
+    parser.add_argument('--conservative_factor', type=float, default=1.0)
+    parser.add_argument('--comfort_weight', type=float, default=2.0)
+    parser.add_argument('--initstable_time', type=int, default=5)
     
     # param of reuse pdm centerline
     def set_nested(dic, keys, value):
@@ -902,6 +905,11 @@ if __name__ == "__main__":
         set_nested(planner_override, ['str_closed_planner', 'lateral_offsets'], [float(c) for c in parser.parse_args().pdm_lateral_offsets.split(' ')])
     set_nested(planner_override, ['str_closed_planner', 'idm_policies', 'speed_limit_fraction'], [float(c) for c in parser.parse_args().pdm_speed_limit_fraction.split(' ')])
     set_nested(planner_override, ['str_closed_planner', 'str_generator', 'model_path'], parser.parse_args().model_path)
+    set_nested(planner_override, ['str_closed_planner', 'conservative_factor'], parser.parse_args().conservative_factor)
+    set_nested(planner_override, ['str_closed_planner', 'comfort_weight'], parser.parse_args().comfort_weight)
+    set_nested(planner_override, ['str_closed_planner', 'initstable_time'], parser.parse_args().initstable_time)
+
+    
         
     parser.add_argument('--planner_override', type=dict, default=planner_override)
     args = parser.parse_args()

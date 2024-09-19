@@ -166,7 +166,7 @@ class STRTrajectoryGenerator:
         return states, scores
 
 
-    def _compute_str_trajectory(self, model_samples, map_names, ego_states_in_batch, route_ids, road_dics):
+    def _compute_str_trajectory(self, model_samples, map_names, ego_states_in_batch=None, route_ids=None, road_dics=None):
         # Construct input features
         map_y_inverse = [
             -1 if map_name == "sg-one-north" else 1 for map_name in map_names

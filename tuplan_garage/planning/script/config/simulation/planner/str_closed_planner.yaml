@@ -47,3 +47,6 @@ str_closed_planner:
   map_radius: 50 # Radius to consider around ego [m]
   debug_candidate_trajectories: False # Whether to visualize candidate trajectories
   always_emergency_brake: True
+  conservative_factor: 1.0
+  comfort_weight: 2.0
+  initstable_time: 5

@@ -61,6 +61,9 @@ class STRClosedPlanner(PDMClosedPlanner):
         map_radius: float,
         debug_candidate_trajectories: bool,
         always_emergency_brake: bool,
+        conservative_factor: float,
+        comfort_weight: float,
+        initstable_time: int,
     ):
         """
         Constructor for PDMClosedPlanner
@@ -84,6 +87,10 @@ class STRClosedPlanner(PDMClosedPlanner):
         self._str_lateral_offsets = str_lateral_offsets
         self._str_proposal_manager: Optional[PDMProposalManager] = None
         self._strpdm_generator = PDMGenerator(trajectory_sampling, proposal_sampling)
+
+        self._scorer.conservative_factor = conservative_factor
+        self._scorer.comfort_weight = comfort_weight
+        self.initstable_time = initstable_time
         
         print("============================== STRClosedPlanner")
         print(f"always_emergency_brake: {self.always_emergency_brake}")
@@ -91,6 +98,9 @@ class STRClosedPlanner(PDMClosedPlanner):
         print(f"pdm_speed_limit_fraction: {self._idm_policies._speed_limit_fractions}")
         print(f"str_lateral_offsets: {self._str_lateral_offsets}")
         print(f"str_speed_limit_fraction: {self._str_idm_policies._speed_limit_fractions}")
+        print(f"conservative_factor: {self._scorer.conservative_factor}")
+        print(f"comfort_weight: {self._scorer.comfort_weight}")
+        print(f"initstable_time: {self.initstable_time}")
         print("==============================")
 
     def initialize(self, initialization: PlannerInitialization) -> None:
@@ -169,14 +179,15 @@ class STRClosedPlanner(PDMClosedPlanner):
 
         # 6.b Otherwise, extend and output best proposal
         if trajectory is None:
-            if np.argmax(proposal_scores) == len(pdm_proposals_array) + len(str_proposals_array):
+            if self._iteration < self.initstable_time:
                 trajectory = InterpolatedTrajectory(str_pred_states)
-            elif np.argmax(proposal_scores) < len(pdm_proposals_array):
-                trajectory = self._generator.generate_trajectory(np.argmax(proposal_scores))
             else:
-                trajectory = self._strpdm_generator.generate_trajectory(np.argmax(proposal_scores) - len(pdm_proposals_array))
-                
-
+                if np.argmax(proposal_scores) == len(pdm_proposals_array) + len(str_proposals_array):
+                    trajectory = InterpolatedTrajectory(str_pred_states)
+                elif np.argmax(proposal_scores) < len(pdm_proposals_array):
+                    trajectory = self._generator.generate_trajectory(np.argmax(proposal_scores))
+                else:
+                    trajectory = self._strpdm_generator.generate_trajectory(np.argmax(proposal_scores) - len(pdm_proposals_array))
         return trajectory
     
 
