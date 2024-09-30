@@ -1,5 +1,3 @@
-_target_: nuplan.planning.scenario_builder.scenario_filter.ScenarioFilter
-_convert_: all
 scenario_types: null
 
 scenario_tokens:

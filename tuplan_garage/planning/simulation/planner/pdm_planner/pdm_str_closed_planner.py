@@ -113,6 +113,30 @@ class STRClosedPlanner(PDMClosedPlanner):
             self.proposal_scores_list: List[npt.NDArray[np.float64]] = []
             self.pdm_proposals_num_list: List[int] = []
 
+
+    def compute_planner_trajectory(
+        self, current_input: PlannerInput, str_pred_states=None
+    ) -> AbstractTrajectory:
+        """Inherited, see superclass."""
+
+        gc.disable()
+        ego_state, _ = current_input.history.current_state
+
+        # Apply route correction on first iteration (ego_state required)
+        if self._iteration == 0:
+            self._route_roadblock_correction(ego_state)
+
+        # Update/Create drivable area polygon map
+        self._drivable_area_map = get_drivable_area_map(
+            self._map_api, ego_state, self._map_radius
+        )
+
+        trajectory = self._get_closed_loop_trajectory(current_input, str_pred_states)
+
+        self._iteration += 1
+        return trajectory
+
+
     def _get_closed_loop_trajectory(
         self,
         current_input: PlannerInput,
@@ -286,28 +310,3 @@ class STRClosedPlanner(PDMClosedPlanner):
                 
         return output_paths
     
-    # def compute_planner_trajectory_in_batch(
-    #     self, current_inputs: list[PlannerInput], states: list[dict]
-    # ) -> list[AbstractTrajectory]:
-    #     """Inherited, see superclass."""
-
-    #     gc.disable()
-    #     trajectories = []
-        
-    #     for current_input, model_sample in zip(current_inputs, model_samples):
-    #         ego_state, _ = current_input.history.current_state
-
-    #         # Apply route correction on first iteration (ego_state required)
-    #         if self._iteration == 0:
-    #             self._route_roadblock_correction(ego_state)
-
-    #         # Update/Create drivable area polygon map
-    #         self._drivable_area_map = get_drivable_area_map(
-    #             self._map_api, ego_state, self._map_radius
-    #         )
-
-    #         trajectory = self._get_closed_loop_trajectory(current_input, model_sample)
-    #         trajectories.append(trajectory)
-
-    #     self._iteration += 1
-    #     return trajectories

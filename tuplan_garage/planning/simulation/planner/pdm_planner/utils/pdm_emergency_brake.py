@@ -59,7 +59,7 @@ class PDMEmergencyBrake:
         ], f"PDMEmergencyBraking: Infraction {self._infraction} not available as brake condition!"
 
     def brake_if_emergency(
-        self, ego_state: EgoState, scores: npt.NDArray[np.float64], scorer: PDMScorer, always_emergency_brake: bool
+        self, ego_state: EgoState, scores: npt.NDArray[np.float64], scorer: PDMScorer, always_emergency_brake: bool=False
     ) -> Optional[InterpolatedTrajectory]:
         """
         Applies emergency brake only if an infraction is expected within horizon.

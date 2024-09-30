@@ -334,17 +334,6 @@ class SimulationRunnerBatch(SimulationRunner):
             else:
                 for planner, current_input in zip(self.planners, planner_inputs):
                     trajectories.append(planner.compute_planner_trajectory(current_input))
-            # trajectories = self.planners[0].compute_planner_trajectory_in_batch(
-            #     model_samples=samples_in_batch,
-            #     map_names=[self.planners[i]._map_api.map_name for i in range(self._batch_size)],
-            #     ego_states_in_batch=[planner_inputs[i].history.ego_states for i in range(self._batch_size)],
-            #     route_ids=[self.planners[i]._route_roadblock_ids for i in range(self._batch_size)],
-            #     road_dics=[self.planners[i].road_dic for i in range(self._batch_size)],
-            # )
-            # for i in range(self._batch_size):
-            #     if i == 0:
-            #         continue
-            #     self.planners[i].iteration += 1
 
             # print(f'Step {planner_inputs[0].iteration.index + 1} with timestamp {planner_inputs[0].iteration.time_s} Planning time: {time.perf_counter() - planner_start_time:.3f} s')
             # print("running: ", step)
@@ -375,7 +364,8 @@ class SimulationRunnerBatch(SimulationRunner):
         print("finish RunnerBatch")
         # Delete model to avoid crashes while saving the planner
         for i in range(self._batch_size):
-            self.planners[i]._str_generator._model = None
+            if "str" in self._args.planner_name:
+                self.planners[i]._str_generator._model = None
             # Execute specific callback
             self.simulations[i].callback.on_simulation_end(self.simulations[i].setup, self.planners[i], self.simulations[i].history)
             planner_report = self.planners[i].generate_planner_report()
@@ -457,7 +447,7 @@ def build_simulation(experiment, planner, scenarios, output_dir, simulation_dir,
 
         # Stateful callbacks
         metric_callback = MetricCallback(metric_engine=metric_engine)
-        # sim_log_callback = SimulationLogCallback(output_dir, simulation_dir, "msgpack")
+        sim_log_callback = SimulationLogCallback(output_dir, simulation_dir, "msgpack")
 
         # Construct simulation and manager
         simulation_setup = SimulationSetup(
@@ -469,8 +459,7 @@ def build_simulation(experiment, planner, scenarios, output_dir, simulation_dir,
 
         simulation = Simulation(
             simulation_setup=simulation_setup,
-            callback=MultiCallback([metric_callback])
-            # callback=MultiCallback([metric_callback, sim_log_callback])
+            callback=MultiCallback([metric_callback, sim_log_callback])
         )
 
         # Begin simulation
@@ -743,8 +732,7 @@ def _worker_func(scenarios, all_road_dic, batch_size, experiment, controller, ou
 
     simulations = [Simulation(
         simulation_setup=simulation_setup,
-        callback=MultiCallback([metric_callback])
-        # callback=MultiCallback([metric_callback, sim_log_callback])
+        callback=MultiCallback([metric_callback, sim_log_callback])
     ) for simulation_setup, metric_callback, sim_log_callback in zip(simulation_setups, metric_callbacks, sim_log_callbacks)
     ]
 
@@ -821,9 +809,8 @@ def main(args):
     if not args.load_without_yaml:
         print('Filtering with yaml file...')
         params = yaml.safe_load(open(args.split_filter_yaml, 'r'))
-        params['log_names'] = None
-        scenario_filter = hydra.utils.instantiate(params)
-        # scenario_filter = ScenarioFilter(**params)
+        scenario_filter = ScenarioFilter(**params)
+        
     else:
         print('Filtering with types ...')
         scenario_filter = ScenarioFilter(*get_filter_parameters(args.scenarios_per_type))
@@ -890,9 +877,9 @@ if __name__ == "__main__":
     parser.add_argument('--local_rank', type=int, default=0)
     parser.add_argument('--pdm_lateral_offsets', type=str, default="none")      # 若要设置，形式例如 "-1 1"
     parser.add_argument('--pdm_speed_limit_fraction', type=str, default="0.2 0.4 0.6 0.8 1.0")
-    parser.add_argument('--conservative_factor', type=float, default=1.0)
-    parser.add_argument('--comfort_weight', type=float, default=2.0)
-    parser.add_argument('--initstable_time', type=int, default=5)
+    parser.add_argument('--conservative_factor', type=float, default=0.7)
+    parser.add_argument('--comfort_weight', type=float, default=10.0)
+    parser.add_argument('--initstable_time', type=int, default=8)
     
     # param of reuse pdm centerline
     def set_nested(dic, keys, value):

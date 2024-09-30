@@ -101,8 +101,6 @@ def main(args):
     cfg = parse_hydra_config(args)
     nuplan_run_nuboard(cfg)
 
-    print(1)
-
 
 if __name__ == "__main__":
     args = arg_parse()
