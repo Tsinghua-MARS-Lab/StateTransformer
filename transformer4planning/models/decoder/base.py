@@ -56,7 +56,7 @@ class TrajectoryDecoder(nn.Module):
                                        config.n_embd,
                                        out_features=out_features,
                                        dropout=self.config.traj_dropout)
-   
+
 
         if self.config.task == "waymo": loss_reduction = "none"
         else: loss_reduction = "mean"
@@ -119,7 +119,7 @@ class TrajectoryDecoder(nn.Module):
             starting_index = context_length - 1
             if candi_proposal_num is not None:
                 # using proposal, 1 is for the proposal score
-                starting_index += candi_proposal_num + 1
+                starting_index += candi_proposal_num + pred_length
             if selected_indices is not None:
                 # using key points
                 starting_index += len(selected_indices)
@@ -392,7 +392,6 @@ class TrajDecoderCLS(nn.Module):
         self.proposal_num = proposal_num
         self.proposal_cls_decoder = DecoderResCat(config.n_inner, config.n_embd, out_features=proposal_num)
         self.cls_proposal_loss = CrossEntropyLoss(reduction="none")
-
     def compute_traj_loss(self, hidden_output, info_dict):
         """
         pred future 8-s trajectory and compute loss(l2 loss or smooth l1)
@@ -421,28 +420,27 @@ class TrajDecoderCLS(nn.Module):
         pred_proposal_scores = self.proposal_cls_decoder(pred_proposal_embed)  # (bs, n_candi, 1)
         # pred_proposal_logits = pred_proposal_scores.squeeze(-1) # (bs, n_candi)
         loss_proposal = self.cls_proposal_loss(pred_proposal_scores.to(hidden_output.dtype), gt_prob.to(hidden_output.dtype))
-        pred_proposal_cls = pred_proposal_scores.argmax(dim=-1)
-        pred_trajs = self.traj_tokenizer.decode(pred_proposal_cls)
-        return loss_proposal.mean(), pred_trajs
+
+        return loss_proposal.mean()
 
     def generate_trajs(self, hidden_state, info_dict):
         # batch_size, seq_len, hidden_dim = hidden_state.shape
         # bs,n_candi,n_embed -> bs,n_candi,1
         context_length = info_dict["context_length"]
         candi_proposal_num = info_dict['candi_proposal_num']
-        key_point_id_scores = self.proposal_cls_decoder(hidden_state[:, context_length + candi_proposal_num-1, :])
+        proposal_id_scores = self.proposal_cls_decoder(hidden_state[:, context_length + candi_proposal_num-1, :])
         # -> bs,n_candi
         # key_point_id_logits = key_point_id_scores.squeeze(-1)
         # -> bs,n_candi
-        key_point_id_scores = nn.Softmax(dim=-1)(key_point_id_scores)
+        proposal_id_scores = nn.Softmax(dim=-1)(proposal_id_scores)
         # -> bs,
-        key_point_ids = key_point_id_scores.argmax(dim=-1)
-        pred_trajs = self.traj_tokenizer.decode(key_point_ids)
+        proposal_ids = proposal_id_scores.argmax(dim=-1)
+        pred_trajs = self.traj_tokenizer.decode(proposal_ids)
         # padding z, from x, y, yaw to x, y, z, yaw
         zeros_tensor = torch.zeros([pred_trajs.shape[0], pred_trajs.shape[1], 1]).to(pred_trajs.device)
         pred_trajs_total = torch.cat((pred_trajs[ :, :, :2], zeros_tensor, pred_trajs[ :, :, 2:]), dim=-1)
         # key_point_logits = self.tokenizer.decode(key_point_id)  # b, s=1, 2
-        return pred_trajs_total, key_point_id_scores
+        return pred_trajs_total, proposal_id_scores
 
 
 class KeyPointMLPDeocder(nn.Module):
@@ -503,13 +501,13 @@ class KeyPointMLPDeocder(nn.Module):
 
         context_length = info_dict.get("context_length", None)
         future_key_points = info_dict["future_key_points"]
-
+        pred_length = info_dict["pred_length"]
         kp_start_index = context_length - 1
         if self.config.use_proposal:
             if self.config.task == 'waymo':
-                kp_start_index += 1
+                kp_start_index += pred_length
             elif self.config.task == 'nuplan':
-                kp_start_index += self.config.use_proposal + 1
+                kp_start_index += self.config.use_proposal + pred_length
 
         # print('testing decoder keypoint index: ', self.config.proposal_num, context_length, kp_start_index)
         future_key_points_hidden_state = hidden_output[:, kp_start_index:kp_start_index + future_key_points.shape[1], :]
@@ -616,6 +614,7 @@ class KeyPointMLPDeocder(nn.Module):
         # print("hidden_state shape: ",transformer_outputs_hidden_state.shape)
         current_device_idx = int(str(input_embeds.device)[-1])
         context_length = info_dict.get("context_length", None)
+        pred_length = info_dict["pred_length"]
         assert context_length is not None, "context length can not be None"
         if context_length is None: # pdm encoder
             input_length = info_dict.get("input_length", None)
@@ -626,9 +625,9 @@ class KeyPointMLPDeocder(nn.Module):
         kp_end_index = context_length
         if self.config.use_proposal:
             if self.config.task == 'waymo':
-                kp_start_index += 1
+                kp_start_index += pred_length
             elif self.config.task == 'nuplan':
-                kp_start_index += self.config.proposal_num + 1
+                kp_start_index += self.config.proposal_num + pred_length
         # print("kp_end_index: ",kp_end_index)
         save_id = (self.gpu_device_count * self.current_idx + current_device_idx)*key_points_num
         for key_point_idx in range(key_points_num):

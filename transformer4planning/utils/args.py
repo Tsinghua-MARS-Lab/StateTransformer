@@ -348,6 +348,9 @@ class ModelArguments:
     sim_eval_with_gt: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use gt for sim"}
     )
+    skip_yaw_norm: Optional[bool] = field(
+        default=False, metadata={"help": "Skip rotation normalization during preprocess"}
+    )
 
     autoregressive: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use autoregressive prediction"}

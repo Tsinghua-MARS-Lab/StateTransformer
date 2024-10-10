@@ -107,6 +107,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         # separate key point encoder is hard to train with larger models due to sparse signals
         input_dim = 7 if self.config.use_speed else 4
         self.action_m_embed = nn.Sequential(nn.Linear(input_dim, action_kwargs.get("d_embed")), nn.Tanh())
+        self.action_m_embed_traj = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 
         self.traj_tokenizer = None
 
@@ -175,16 +176,20 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         # compute gt distance to score and embed
         gt_l2_distance = info_dict['future_traj_diff']  # bs,n_cluster,2
-        # bs,n_cluster,2 -> bs,n_cluster
-        # gt_l2_distance = torch.norm(gt_diff, p=2, dim=-1)
-        mask = gt_l2_distance > 30
-        gt_l2_distance[mask] = float('inf')
-        gt_prob = torch.softmax(-gt_l2_distance, dim=1)
-        if not self.training:
-            gt_prob = torch.zeros_like(gt_prob)
-        gt_prob_embed = self.proposal_score_embed(gt_prob)  # bs, 256
-        input_embeds = torch.cat([input_embeds,
-                                  gt_prob_embed.unsqueeze(1)], dim=1)  # bs,context_length+n_candi+1,256
+        # mask = gt_l2_distance > 30
+        # gt_l2_distance[mask] = float('inf')
+        # gt_prob = torch.softmax(-gt_l2_distance, dim=1)
+        # if not self.training:
+        #     gt_prob = torch.zeros_like(gt_prob)
+        # gt_prob_embed = self.proposal_score_embed(gt_prob)  # bs, 256
+        # input_embeds = torch.cat([input_embeds,
+        #                           gt_prob_embed.unsqueeze(1)], dim=1)  # bs,context_length+n_candi+1,256
+        gt_index = torch.argmin(gt_l2_distance, dim=-1)
+        traj_cls_gt = self.traj_tokenizer.decode(gt_index)
+        zeros_tensor = torch.zeros([traj_cls_gt.shape[0], traj_cls_gt.shape[1], 1]).to(traj_cls_gt.device)
+        traj_cls_gt = torch.cat((traj_cls_gt[:, :, :2], zeros_tensor, traj_cls_gt[:, :, 2:]), dim=-1)
+        traj_cls_embedding = self.action_m_embed_traj(traj_cls_gt)
+        input_embeds = torch.cat([input_embeds, traj_cls_embedding], dim=1)
 
         return input_embeds, info_dict, candi_embeds
 
@@ -316,7 +321,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
             if self.config.separate_kp_encoder:
                 if self.config.kp_decoder_type == "mlp":
-                    # 1301 -> 1301+5=1306
+                    # 1380 -> 1380+5=1385
                     future_key_embeds = self.kps_m_embed(future_key_points_aug)
                     input_embeds = torch.cat([input_embeds, future_key_embeds], dim=1)
             else:
@@ -324,7 +329,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             info_dict['future_key_points'] = future_key_points
 
         # padding the input_embeds with pred_length zeros
-        # 1306 -> 1306+80=1386
+        # 1385 -> 1385+80=1465
         input_embeds = torch.cat([input_embeds,
                                   torch.zeros((batch_size, pred_length, n_embed),
                                               device=device,

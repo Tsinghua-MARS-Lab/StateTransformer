@@ -227,7 +227,7 @@ def _within_bound(
 
 
 def _compute_lon_acceleration(
-    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64]
+    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64], conservative_factor
 ) -> npt.NDArray[np.bool_]:
     """
     Compute longitudinal acceleration over batch-dim of simulated proposals
@@ -240,12 +240,12 @@ def _compute_lon_acceleration(
         states, acceleration_coordinate="x", window_length=n_time
     )
     return _within_bound(
-        lon_acceleration, min_bound=min_lon_accel, max_bound=max_lon_accel
+        lon_acceleration, min_bound=min_lon_accel*conservative_factor, max_bound=max_lon_accel*conservative_factor
     )
 
 
 def _compute_lat_acceleration(
-    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64]
+    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64], conservative_factor
 ) -> npt.NDArray[np.bool_]:
     """
     Compute lateral acceleration over batch-dim of simulated proposals
@@ -258,12 +258,12 @@ def _compute_lat_acceleration(
         states, acceleration_coordinate="y", window_length=n_time
     )
     return _within_bound(
-        lat_acceleration, min_bound=-max_abs_lat_accel, max_bound=max_abs_lat_accel
+        lat_acceleration, min_bound=-max_abs_lat_accel*conservative_factor, max_bound=max_abs_lat_accel*conservative_factor
     )
 
 
 def _compute_jerk_metric(
-    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64]
+    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64], conservative_factor
 ) -> npt.NDArray[np.bool_]:
     """
     Compute absolute jerk over batch-dim of simulated proposals
@@ -279,12 +279,12 @@ def _compute_jerk_metric(
         window_length=n_time,
     )
     return _within_bound(
-        jerk_metric, min_bound=-max_abs_mag_jerk, max_bound=max_abs_mag_jerk
+        jerk_metric, min_bound=-max_abs_mag_jerk*conservative_factor, max_bound=max_abs_mag_jerk*conservative_factor
     )
 
 
 def _compute_lon_jerk_metric(
-    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64]
+    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64],conservative_factor
 ) -> npt.NDArray[np.bool_]:
     """
     Compute longitudinal jerk over batch-dim of simulated proposals
@@ -300,12 +300,12 @@ def _compute_lon_jerk_metric(
         window_length=n_time,
     )
     return _within_bound(
-        lon_jerk_metric, min_bound=-max_abs_lon_jerk, max_bound=max_abs_lon_jerk
+        lon_jerk_metric, min_bound=-max_abs_lon_jerk*conservative_factor, max_bound=max_abs_lon_jerk*conservative_factor
     )
 
 
 def _compute_yaw_accel(
-    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64]
+    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64],conservative_factor
 ) -> npt.NDArray[np.bool_]:
     """
     Compute acceleration of yaw-angle over batch-dim of simulated proposals
@@ -318,12 +318,12 @@ def _compute_yaw_accel(
         states, time_steps_s, deriv_order=2, poly_order=3, window_length=n_time
     )
     return _within_bound(
-        yaw_accel_metric, min_bound=-max_abs_yaw_accel, max_bound=max_abs_yaw_accel
+        yaw_accel_metric, min_bound=-max_abs_yaw_accel*conservative_factor, max_bound=max_abs_yaw_accel*conservative_factor
     )
 
 
 def _compute_yaw_rate(
-    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64]
+    states: npt.NDArray[np.float64], time_steps_s: npt.NDArray[np.float64],conservative_factor
 ) -> npt.NDArray[np.bool_]:
     """
     Compute velocity of yaw-angle over batch-dim of simulated proposals
@@ -334,12 +334,12 @@ def _compute_yaw_rate(
     n_batch, n_time, n_states = states.shape
     yaw_rate_metric = _extract_ego_yaw_rate(states, time_steps_s, window_length=n_time)
     return _within_bound(
-        yaw_rate_metric, min_bound=-max_abs_yaw_rate, max_bound=max_abs_yaw_rate
+        yaw_rate_metric, min_bound=-max_abs_yaw_rate*conservative_factor, max_bound=max_abs_yaw_rate*conservative_factor
     )
 
 
 def ego_is_comfortable(
-    states: npt.NDArray[np.float64], time_point_s: npt.NDArray[np.float64]
+    states: npt.NDArray[np.float64], time_point_s: npt.NDArray[np.float64], conservative_factor: float=1.0
 ) -> npt.NDArray[np.bool_]:
     """
     Accumulates all within-bound comfortability metrics
@@ -363,6 +363,6 @@ def ego_is_comfortable(
         (n_batch, len(comfort_metric_functions)), dtype=np.bool_
     )
     for idx, metric_function in enumerate(comfort_metric_functions):
-        results[:, idx] = metric_function(states, time_point_s)
+        results[:, idx] = metric_function(states, time_point_s, conservative_factor)
 
     return results

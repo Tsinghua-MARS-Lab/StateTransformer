@@ -1,0 +1,52 @@
+str_closed_planner:
+  _target_: tuplan_garage.planning.simulation.planner.pdm_planner.pdm_str_closed_planner.STRClosedPlanner
+  _convert_: 'all'
+
+  str_generator:
+    _target_: nuplan_simulation.str_trajectory_generator.STRTrajectoryGenerator
+    _convert_: 'all'
+    model_path: '/lpai/volumes/lpai-autopilot-root-muses/wanghuimin/1b_model_nuplan/model/str-output/24-06-06-4500/checkpoint-328000/checkpoint-328000'
+    build_model: True
+
+  # parameters for output trajectory
+  trajectory_sampling:
+    _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+    _convert_: 'all'
+    num_poses: 80 # target future poses
+    interval_length: 0.1 # interval of samples [s]
+
+  # parameters for proposals
+  proposal_sampling:
+    _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+    _convert_: 'all'
+    num_poses: 40 # target future poses
+    interval_length: 0.1 # interval of samples [s]
+
+  idm_policies:
+    _target_: tuplan_garage.planning.simulation.planner.pdm_planner.proposal.batch_idm_policy.BatchIDMPolicy
+    _convert_: 'all'
+    speed_limit_fraction: [0.2,0.4,0.6,0.8,1.0] # Target velocity as fractions of current speed-limit
+    fallback_target_velocity: 15.0 # Desired fallback velocity in free traffic [m/s]
+    min_gap_to_lead_agent: 1.0 # Minimum relative distance to lead vehicle [m]
+    headway_time: 1.5 # Desired time headway. The minimum possible time to the vehicle in front [s]
+    accel_max: 1.5 # Maximum acceleration [m/s^2]
+    decel_max: 3.0 # Maximum deceleration (positive value) [m/s^2]
+
+  str_idm_policies:
+    _target_: tuplan_garage.planning.simulation.planner.pdm_planner.proposal.batch_idm_policy.BatchIDMPolicy
+    _convert_: 'all'
+    speed_limit_fraction: [0.2,0.4,0.6,0.8,1.0] # Target velocity as fractions of current speed-limit
+    fallback_target_velocity: 15.0 # Desired fallback velocity in free traffic [m/s]
+    min_gap_to_lead_agent: 1.0 # Minimum relative distance to lead vehicle [m]
+    headway_time: 1.5 # Desired time headway. The minimum possible time to the vehicle in front [s]
+    accel_max: 1.5 # Maximum acceleration [m/s^2]
+    decel_max: 3.0 # Maximum deceleration (positive value) [m/s^2]
+
+  lateral_offsets: null # Signed offsets from centerline (or null) [m]
+  str_lateral_offsets: [-1.0, 1.0] # Signed offsets from centerline (or null) [m]
+  map_radius: 50 # Radius to consider around ego [m]
+  debug_candidate_trajectories: False # Whether to visualize candidate trajectories
+  always_emergency_brake: True
+  conservative_factor: 0.7
+  comfort_weight: 10.0
+  initstable_time: 8

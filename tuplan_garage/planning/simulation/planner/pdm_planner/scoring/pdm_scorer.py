@@ -88,6 +88,9 @@ class PDMScorer:
         self._collision_time_idcs: Optional[npt.NDArray[np.float64]] = None
         self._ttc_time_idcs: Optional[npt.NDArray[np.float64]] = None
 
+        self.conservative_factor = 1.0
+        self.comfort_weight = 2.0
+
     def time_to_at_fault_collision(self, proposal_idx: int) -> float:
         """
         Returns time to at-fault collision for given proposal
@@ -118,6 +121,7 @@ class PDMScorer:
         route_lane_dict: Dict[str, LaneGraphEdgeMapObject],
         drivable_area_map: PDMOccupancyMap,
         map_api: AbstractMap,
+        speed_limit: float = float("inf"),
     ) -> npt.NDArray[np.float64]:
         """
         Scores proposal similar to nuPlan's closed-loop metrics
@@ -131,6 +135,8 @@ class PDMScorer:
         :return: array containing score of each proposal
         """
 
+        WEIGHTED_METRICS_WEIGHTS[WeightedMetricIndex.COMFORTABLE] = self.comfort_weight
+        
         # initialize & lazy load class values
         self._reset(
             states,
@@ -140,6 +146,7 @@ class PDMScorer:
             route_lane_dict,
             drivable_area_map,
             map_api,
+            speed_limit,
         )
 
         # fill value ego-area array (used across multiple metrics)
@@ -149,6 +156,7 @@ class PDMScorer:
         self._calculate_no_at_fault_collision()
         self._calculate_driving_direction_compliance()
         self._calculate_drivable_area_compliance()
+        self._calculate_is_not_overspeed()
 
         # 2. weighted metrics
         self._calculate_progress()
@@ -196,6 +204,7 @@ class PDMScorer:
         route_lane_dict: Dict[str, LaneGraphEdgeMapObject],
         drivable_area_map: PDMOccupancyMap,
         map_api: AbstractMap,
+        speed_limit: float,
     ) -> None:
         """
         Resets metric values and lazy loads input classes.
@@ -217,6 +226,7 @@ class PDMScorer:
         self._route_lane_dict = route_lane_dict
         self._drivable_area_map = drivable_area_map
         self._map_api = map_api
+        self._speed_limit = speed_limit
 
         self._num_proposals = states.shape[0]
 
@@ -508,6 +518,22 @@ class PDMScorer:
 
         self._progress_raw = progress_in_meter
 
+    def _calculate_is_not_overspeed(self) -> None:
+            """
+            Re-implementation of nuPlan's speed limit metric
+            """
+            # get speeds of the  ego's proposals 
+            speeds: npt.NDArray[np.float64] = np.hypot(
+                self._states[..., StateIndex.VELOCITY_X],
+                self._states[..., StateIndex.VELOCITY_Y],
+            )
+
+            metric_is_not_overspeed = speeds <= self._speed_limit
+            self._multi_metrics[MultiMetricIndex.SPEED_LIMIT] = np.all(
+                metric_is_not_overspeed, axis=-1
+            ).astype(np.float64)
+
+
     def _calculate_is_comfortable(self) -> None:
         """
         Re-implementation of nuPlan's comfortability metric.
@@ -516,7 +542,7 @@ class PDMScorer:
             np.arange(0, self._proposal_sampling.num_poses + 1).astype(np.float64)
             * self._proposal_sampling.interval_length
         )
-        is_comfortable = ego_is_comfortable(self._states, time_point_s)
+        is_comfortable = ego_is_comfortable(self._states, time_point_s, self.conservative_factor)
         self._weighted_metrics[WeightedMetricIndex.COMFORTABLE] = np.all(
             is_comfortable, axis=-1
         )
