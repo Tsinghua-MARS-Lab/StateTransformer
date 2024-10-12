@@ -13,7 +13,7 @@ from nuplan.planning.training.modeling.types import (
     TargetsType,
 )
 from nuplan.planning.training.preprocessing.features.trajectory import Trajectory
-
+from transformer4planning.models.decoder.base import mean_circular_error
 
 class L1Objective(AbstractObjective):
     """
@@ -66,13 +66,25 @@ class L1Objective(AbstractObjective):
             self._scenario_type_loss_weighting,
             device=predicted_trajectory.data.device,
         )
-
+        # data shape: bsz seq_len 3
         batch_size = predicted_trajectory.data.shape[0]
         assert predicted_trajectory.data.shape == targets_trajectory.data.shape
 
+        xy_data = predicted_trajectory.data[:,:,:2]
+        xy_targets = targets_trajectory.data[:,:,:2]
+        yaw_data = predicted_trajectory.data[:,:,2]
+        yaw_targets = targets_trajectory.data[:,:,2]
+        
         loss = self._loss_function(
-            predicted_trajectory.data.view(batch_size, -1),
-            targets_trajectory.data.view(batch_size, -1),
+            xy_data.view(batch_size, -1),
+            xy_targets.view(batch_size, -1),
         )
+        
+        # calculate the mean circular error
+        mean_circular_error_value = mean_circular_error(
+            yaw_data,
+            xy_targets,
+        )
+        loss += mean_circular_error_value
 
         return self._weight * torch.mean(loss * scenario_weights[..., None])

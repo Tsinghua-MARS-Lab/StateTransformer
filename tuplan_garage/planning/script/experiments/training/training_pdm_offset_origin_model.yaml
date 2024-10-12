@@ -8,7 +8,7 @@ defaults:
   - override /objective:
       - l1_objective
   - override /splitter: nuplan
-  - override /model: pdm_ref_offset_model
+  - override /model: pdm_offset_origin_model
   - override /scenario_filter: train150k_split
   - override /training_metric:
       - avg_displacement_error

@@ -139,7 +139,6 @@ class PDMRefOffsetModel(TorchModuleWrapper):
             "context_actions": input.context_actions,
             "ego_pose": input.ego_pose,
             }
-
         batch_size = input.ego_position.shape[0]
 
         ego_position = input.ego_position.reshape(batch_size, -1).float()

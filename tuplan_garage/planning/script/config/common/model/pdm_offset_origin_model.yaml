@@ -1,4 +1,4 @@
-_target_: tuplan_garage.planning.training.modeling.models.pdm_offset_origin_model.PDMOffsetOriginModel
+_target_: tuplan_garage.planning.training.modeling.models.pdm_offset_model_origin.PDMOffsetOriginModel
 _convert_: 'all'
 
 trajectory_sampling:

@@ -160,7 +160,7 @@ class PDMHybridPlanner(AbstractPDMClosedPlanner):
             self._model.trajectory_sampling.time_horizon,
             self._model.trajectory_sampling.step_time,
         )
-
+        
         # apply correction by fusing
         trajectory = self._apply_trajectory_correction(
             uncorrected_states, corrected_states
