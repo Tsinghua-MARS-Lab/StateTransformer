@@ -1,21 +1,26 @@
-# State Transformer
+<div align="center">
 
-State Transformer (STR) is a general model for both motion prediction and motion planning  across multiple large-scale real-world datasets. We reformulate the motion prediction and motion planning problem by arranging all elements into a sequence modeling task. Our experiment results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by presenting outstanding adaptability and learning efficiency when trained using larger Transformer backbones. Qualitative analysis illustrates that LTMs are capable of generating plausible predictions in scenarios that diverge significantly from the training dataset’s distribution. LTMs can also learn to make complex reasonings for long-term planning, extending beyond the horizon of 8 seconds, without explicit loss designs or costly high-level annotations. Checkout our paper for more details.
+# State Transformer 2
+**Generalizing Motion Planners with Mixture of Experts for Autonomous
+Driving**
+______________________________________________________________________
+![Banner img](asset/banner_img.png)
+<!-- State Transformer (STR) is a general model for both motion prediction and motion planning  across multiple large-scale real-world datasets. We reformulate the motion prediction and motion planning problem by arranging all elements into a sequence modeling task. Our experiment results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by presenting outstanding adaptability and learning efficiency when trained using larger Transformer backbones. Qualitative analysis illustrates that LTMs are capable of generating plausible predictions in scenarios that diverge significantly from the training dataset’s distribution. LTMs can also learn to make complex reasonings for long-term planning, extending beyond the horizon of 8 seconds, without explicit loss designs or costly high-level annotations. Checkout our paper for more details. -->
 
-**Large Trajectory Models are Scalable Motion Predictors and Planners**
+<!-- **Generalizing Motion Planners with Mixture of Experts for Autonomous Driving**
 
 Authors: [Qiao Sun](https://qiaosun.me/), [Shiduo Zhang](https://github.com/Shiduo-zh), [Danjiao Ma](https://github.com/dmame), [Jingzhe Shi](https://github.com/JingzheShi), [Derun Li](https://github.com/Dylan-LDR/), [Simian Luo](https://github.com/luosiallen), [Yu Wang](https://scholar.google.com/citations?user=uNj2w9gAAAAJ&hl=en), [Ningyi Xu](http://www.qingyuan.sjtu.edu.cn/a/xu-ning-yi-1.html), [Guangzhi Cao](https://scholar.google.com/citations?user=XY7knjAAAAAJ&hl=en&oi=ao), [Hang Zhao](https://hangzhaomit.github.io/)
 
-[[Arxiv](http://arxiv.org/abs/2310.19620)]
+[[Arxiv](http://arxiv.org/abs/2310.19620)] -->
+<div align="left">
 
 # Abstract
 
-Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches. 
-The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space. 
-Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called State Transformer (STR). STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
-Our approach unites trajectory generation problems with other sequence modeling problems, powering rapid iterations with breakthroughs in neighbor domains such as language modeling.
-Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by presenting outstanding adaptability and learning efficiency.
-Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
+
+Large real-world driving datasets have sparked significant research into various aspects of data-driven motion planners for autonomous driving. These include data augmentation, model architecture, reward design, training strategies, and planner pipelines. 
+These planners promise better generalizations on complicated and few-shot cases than previous methods.
+However, experiment results show that many of these approaches produce limited generalization abilities in planning performance due to overly complex designs or training paradigms. 
+In this paper, we review and benchmark previous methods focusing on generalizations. The experimental results indicate that as models are appropriately scaled, many design elements become redundant. We introduce StateTransformer-2 (STR2), a scalable, decoder-only motion planner that uses a Vision Transformer (ViT) encoder and a mixture-of-experts (MoE) causal Transformer architecture. The MoE backbone addresses modality collapse and reward balancing by expert routing during training. Extensive experiments on the NuPlan dataset show that our method generalizes better than previous approaches across different test sets and closed-loop simulations. Furthermore, we assess its scalability on billions of real-world urban driving scenarios, demonstrating consistent accuracy improvements as both data and model size grow.
 
 # Method
 
@@ -23,7 +28,9 @@ Qualitative results further demonstrate that LTMs are capable of making plausibl
 * Easy modify the backbone to scale or replace with other LLMs
 * Versatile for adding classification loss or rule-based post-processions
 
-![STR Sequence Modeling](pipeline.gif)
+[![Watch the Video](https://img.youtube.com/vi/NnoTwXzC4ec/maxresdefault.jpg
+)](https://www.youtube.com/watch?v=NnoTwXzC4ec)
+
 
 # Usage
 
