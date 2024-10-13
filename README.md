@@ -28,7 +28,7 @@ In this paper, we review and benchmark previous methods focusing on generalizati
 * Easy modify the backbone to scale or replace with other LLMs
 * Versatile for adding classification loss or rule-based post-processions
 
-[![Watch the Video](https://img.youtube.com/vi/NnoTwXzC4ec/maxresdefault.jpg
+[![Watch the Video](asset/cover.png
 )](https://www.youtube.com/watch?v=NnoTwXzC4ec)
 
 
