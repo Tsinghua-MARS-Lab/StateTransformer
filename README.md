@@ -1,29 +1,76 @@
-# State Transformer
+<div align="center">
 
-State Transformer (STR) is a general model for both motion prediction and motion planning  across multiple large-scale real-world datasets. We reformulate the motion prediction and motion planning problem by arranging all elements into a sequence modeling task. Our experiment results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by presenting outstanding adaptability and learning efficiency when trained using larger Transformer backbones. Qualitative analysis illustrates that LTMs are capable of generating plausible predictions in scenarios that diverge significantly from the training dataset’s distribution. LTMs can also learn to make complex reasonings for long-term planning, extending beyond the horizon of 8 seconds, without explicit loss designs or costly high-level annotations. Checkout our paper for more details.
+![Banner img](asset/banner_img.png)
+<!-- # State Transformer 2 -->
+<!-- **Generalizing Motion Planners with Mixture of Experts for Autonomous
+Driving** -->
+<span style="font-size:22px;">Generalizing Motion Planners with Mixture of Experts for Autonomous
+Driving</span>
 
-**Large Trajectory Models are Scalable Motion Predictors and Planners**
+**Author**: [Qiao Sun](https://qiaosun.me/)\*, Huimin Wang\*, [Jiahao Zhan](https://github.com/JohnZhan2023), [Fan Nie](https://github.com/fannie1208/), Xin Wen, Leimeng Xu, Kun Zhan, Peng Jia, Xianpeng Lang, [Hang Zhao](https://hangzhaomit.github.io/)
 
-Authors: [Qiao Sun](https://qiaosun.me/), [Shiduo Zhang](https://github.com/Shiduo-zh), [Danjiao Ma](https://github.com/dmame), [Jingzhe Shi](https://github.com/JingzheShi), [Derun Li](https://github.com/Dylan-LDR/), [Simian Luo](https://github.com/luosiallen), [Yu Wang](https://scholar.google.com/citations?user=uNj2w9gAAAAJ&hl=en), [Ningyi Xu](http://www.qingyuan.sjtu.edu.cn/a/xu-ning-yi-1.html), [Guangzhi Cao](https://scholar.google.com/citations?user=XY7knjAAAAAJ&hl=en&oi=ao), [Hang Zhao](https://hangzhaomit.github.io/)
+**Arxiv**:
 
-[[Arxiv](http://arxiv.org/abs/2310.19620)]
+______________________________________________________________________
+
+
+![Demo](asset/demo.gif)
+
+<div align="left">
+
+> Our demonstration video is: [Demonstration](https://www.youtube.com/watch?v=NnoTwXzC4ec)
+
+
+
+
 
 # Abstract
 
-Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches. 
-The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space. 
-Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called State Transformer (STR). STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
-Our approach unites trajectory generation problems with other sequence modeling problems, powering rapid iterations with breakthroughs in neighbor domains such as language modeling.
-Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the scaling laws by presenting outstanding adaptability and learning efficiency.
-Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
+
+Large real-world driving datasets have sparked significant research into various aspects of data-driven motion planners for autonomous driving. These include data augmentation, model architecture, reward design, training strategies, and planner pipelines. 
+These planners promise better generalizations on complicated and few-shot cases than previous methods.
+However, experiment results show that many of these approaches produce limited generalization abilities in planning performance due to overly complex designs or training paradigms. 
+In this paper, we review and benchmark previous methods focusing on generalizations. The experimental results indicate that as models are appropriately scaled, many design elements become redundant. We introduce StateTransformer-2 (STR2), a scalable, decoder-only motion planner that uses a Vision Transformer (ViT) encoder and a mixture-of-experts (MoE) causal Transformer architecture. The MoE backbone addresses modality collapse and reward balancing by expert routing during training. Extensive experiments on the NuPlan dataset show that our method generalizes better than previous approaches across different test sets and closed-loop simulations. Furthermore, we assess its scalability on billions of real-world urban driving scenarios, demonstrating consistent accuracy improvements as both data and model size grow.
 
 # Method
 
-* Causal Transformer for sequence modeling instead of Encoder-Decoder models
-* Easy modify the backbone to scale or replace with other LLMs
-* Versatile for adding classification loss or rule-based post-processions
+* a scalable MoE-based autoregressive model
+to learn different explicit rewards for motion planning
+* a general raster representation of the environment
+* faster model
+inference during simulations
 
-![STR Sequence Modeling](pipeline.gif)
+![architexture](asset/architexture.png)
+
+# Experiment
+
+* Closed-loop 
+
+| Methods               | NR (Val14 Set) | R (Val14 Set) | NR (TestHard Set) | R (TestHard Set) | NR (Val4k Set) | R (Val4k Set) | NR (Test4k Set) | R (Test4k Set) | InterPlan Score |
+|-----------------------|----------------|---------------|-------------------|------------------|----------------|--------------|-----------------|---------------|-----------------|
+| Expert (log replay)   | 94             | 80            | 85.96             | 68.80            | 93.08          | 76.91        | 93.12           | 75.01         | 14.76           |
+| IDM                   | 75.59          | 77.32         | 56.16             | 62.26            | 72.52          | 76.03        | 72.45           | 74.10         | -               |
+| GameFormer            | 82.95          | 83.88         | 66.59             | 68.83            | -              | -            | -               | -             | -               |
+| PDM-Hybrid            | 92.84          | 92.12         | 65.07             | 75.18            | 90.31          | 90.62        | 90.65           | 90.13         | 41.61           |
+| PlanTF                | 84.72          | 76.25         | 72.59             | 60.62            | 80.52          | 70.84        | 80.90           | 70.62         | 30.53           |
+| DTPP                  | 71.66          | 66.09         | 60.11             | 63.66            | 68.43          | 65.24        | 71.98           | 70.20         | 30.32           |
+| STR-16m               | 45.06          | 49.69         | 27.59             | 36.13            | 42.27          | 45.16        | 39.66           | 39.62         | -               |
+| STR2-CPKS-100m (Ours) | 92.79          | 92.18         | 74.25             | 78.40            | 90.45          | 91.14        | 90.66           | 90.25         | 42.13           |
+| STR2-CKS-800m (Ours)  | 92.32          | 92.12         | 74.21             | 78.58            | 90.64          | 91.15        | 90.35           | 90.37         | 44.77           |
+| STR2-CPKS-800m (Ours) | **93.91**      | **92.51**     | **77.54**         | **82.02**        | **91.41**      | **91.53**    | **92.14**       | **91.38**     | **46.03**       |
+
+
+* Open-loop performance
+
+| Methods              | OLS (Val4k Set) | 8sADE (Val4k Set) | 8sFDE (Val4k Set) | OLS (Test4k Set) | 8sADE (Test4k Set) | 8sFDE (Test4k Set) | OLS (Val14 Set) | 8sADE (Val14 Set) | 8sFDE (Val14 Set) |
+|----------------------|-----------------|-------------------|-------------------|------------------|--------------------|--------------------|-----------------|-------------------|-------------------|
+| PlanCNN              | -               | -                 | -                 | -                | -                  | -                  | 64              | 2.468             | 5.936             |
+| PDM-Hybrid           | 84.06           | 2.435             | 5.202             | 82.01            | 2.618              | 5.546              | 84              | 2.382             | 5.068             |
+| PlanTF               | 88.59           | 1.774             | **3.892**         | 87.30            | 1.855              | **4.042**          | 89.18           | 1.697             | **3.714**         |
+| DTPP                 | 65.15           | 4.196             | 9.231             | 64.18            | 4.117              | 9.181              | 67.33           | 4.088             | 8.846             |
+| STR-124m             | 81.88           | 1.939             | 4.968             | 82.68            | 2.003              | 4.972              | 88.0            | 1.777             | 4.515             |
+| STR2-CKS-800m (Ours) | **90.07**       | **1.473**         | 4.124             | **89.12**        | **1.537**          | 4.269              | **89.2**        | **1.496**         | 4.210             |
+
 
 # Usage
 
@@ -45,25 +92,17 @@ Then install these packages:
     pip install aiofiles
     pip install bokeh==2.4.1
 
-### Install WOMD-Devkit
-
-run `pip install waymo-open-dataset-tf-2-11-0==1.6.0` to install WOMD-Devkit following [here](https://github.com/waymo-research/waymo-open-dataset).
 
 ## Dataset
 
-We process the dataset into the Hugging Face Dataset format. Click [here](http://180.167.251.46:880/NuPlanSTR/nuplan-v1.1_STR.zip) to download the NuPlan dataset. And [here](http://180.167.251.46:880/WOMDSTR/t4p_waymo_full.tar.gz) to download the Waymo Motion Open Dataset.
+We process the dataset into the Hugging Face Dataset format. Click [here](http://180.167.251.46:880/NuPlanSTR/nuplan-v1.1_STR.zip) to download the NuPlan dataset.
 Unzip the file and pass the path to the '--saved_dataset_folder' argument to use it.
 This dataset contains the training, validation, and the test set.
-
-Waymo dataset will be updated soon on the server to download.
 
 If you need to customize your dataset, you would need to process the official dataset by our scripts.
 
 - For NuPlan dataset, please refer to the `generation.py` and read the following 'NuPlan Dataset Pipeline' section for more details. 
-- For Waymo dataset, please refer to the `waymo_generation.py` and read the following 'Waymo Dataset Pipeline' section for more details. 
-
 ### NuPlan Dataset Pipeline
-
 Usage:
 
 1. process NuPlan .db files to .pkl files (to agent dictionaries)
@@ -186,365 +225,103 @@ root-
         --*.arrow    
 ```
 
-## Load checkpoints and evaluate:
-
-We provide the pretrained checkpoint for STR(CKS) - 16M. This is a checkpoint with a diffusion decoder. You can download via [this link](http://180.167.251.46:880/NuPlanSTR/checkpoints/small_state_dict_1by1_Decckpt_12e.pth) for STR(CKS)-16M-Diff.12e, and [this link](http://180.167.251.46:880/NuPlanSTR/checkpoints/Small_CKS_PI2.zip) for STR(CKS)-16M.
-These checkpoints were trained with the NuPlan dataset, so please make sure to read their [non-comercial policies](https://www.nuscenes.org/terms-of-use) carefully before using them.
-
-The OLS (Open Loop Simulation) performance of these checkpoints is as follows:
-
-|                       | OLS   | 8sADE  | 3sFDE  | 5sFDE  | 8sFDE  |
-|-----------------------|-------|--------|--------|--------|--------|
-| STR(CKS)-16M          | 83.42 | 1.9134 | 1.0463 | 2.2173 | 4.8369 |
-| STR(CKS)-16M-Diff.12e | 86.52 | 1.773  | 0.9477 | 2.104  | 4.505  |
-
-The CLS-NR (Closed Loop Simulation - Not Reactive) performance of this checkpoint is as follows:
-
-|                       | CLS-NR | drivable_area_compliance | driving_direction_compliance | ego_is_comfortable | ego_is_making_progress | ego_progress_along_expert_route | no_ego_at_fault_collisions | speed_limit_compliance | time_to_collision_within_bound |
-|-----------------------|--------|--------------------------|------------------------------|--------------------|------------------------|---------------------------------|----------------------------|------------------------|--------------------------------|
-| STR(CKS)-16M-Diff.12e | 54.46  | 0.81216458               | 0.961091234                  | 0.973166369        | 0.921288014            | 0.709096891                     | 0.763416816                | 0.957543143            | 0.711091234                    |
-
-The CLS-R (Closed Loop Simulation - Reactive) performance of this checkpoint is as follows:
-
-|                       | CLS-R | drivable_area_compliance | driving_direction_compliance | ego_is_comfortable | ego_is_making_progress | ego_progress_along_expert_route | no_ego_at_fault_collisions | speed_limit_compliance | time_to_collision_within_bound |
-|-----------------------|-------|--------------------------|------------------------------|--------------------|------------------------|---------------------------------|----------------------------|------------------------|--------------------------------|
-| STR(CKS)-16M-Diff.12e | 57.34 | 0.810375671              | 0.96019678                   | 0.972271914        | 0.913237925            | 0.708428908                     | 0.813953488                | 0.955975959            | 0.770125224                    |
-
 
 ## To train and evaluate during training:
 
-`--model_name` can choose from ["gpt-large","gpt-medium","gpt-small","gpt-mini"] and with prefix of `scratch-` or `pretrain-` to determine wether load pretrained weights from existed checkpoints, whose attributes is `--model_pretrain_name_or_path`
+`--model_name` can choose from ```["mixtral-small-wide","mixtral-small","mixtral-200m","mixtral-medium","mixtral-800m","mixtral-1b","mixtral-3b-deep","mixtral-3b-wide","mixtral-6b-deep"]``` and with prefix of `scratch-` or `pretrain-` to determine wether load pretrained weights from existed checkpoints, whose attributes is `--model_pretrain_name_or_path`
 
 The common training settings are shown below.
 
-```
+``` sh
 python -m torch.distributed.run \
---nproc_per_node=8 runner.py \
---do_train --do_eval\
---model_name scratch-gpt-mini \
---saved_dataset_folder  {PATH_TO_DATASET_FOLDER} \
---output_dir {PATH_TO_OUTPUT_FOLDER} \
---logging_dir {PATH_TO_LOG_FOLDER} \
---run_name {RUN_NAME} \
---num_train_epochs 100 \
---per_device_train_batch_size 16 --warmup_steps 50 \
---weight_decay 0.01 --logging_steps 2 --save_strategy steps \
---dataloader_num_workers 10 \
---save_total_limit 2 \
---dataloader_drop_last True \
---task nuplan \
---remove_unused_columns False \
---evaluation_strategy steps \
---eval_steps 1000 \
---per_device_eval_batch_size 8 \
---predict_yaw True \
---past_sample_interval 2 \
---x_random_walk 0.1 --y_random_walk 0.1 --augment_current_pose_rate 0.1
-```
-
-To choose different encoder, please set the attribute `--encoder_type`. The choices are [`raster`, `vector`]. With different `--task` setting, the encoder can be initilized with different classes.
-
-To choose different decoder, please set the attribute `--decoder_type`. The choices are [`mlp`, `diffusion`].
-
-### Train only diffusion decoder, without backbone
-
-Training the diffusion decoder together with the backbone is not recommended due to extremely slow convergence. We recommand you to train the backbone and ecoders with the MLP decoder, and train the diffusion decoder after convergence.
-
-After training with an MLP decoder, you need to generate the dataset for training the diffusion decoder using `generate_diffusion_feature.py`: this is done using the same command for eval except that you need to set `--generate_diffusion_dataset_for_key_points_decoder` to True and `--diffusion_feature_save_dir` to the dir to save the pth files for training diffusion decoders.
-An example:
-```
-python -m torch.distributed.run \
---nproc_per_node=8 generate_diffusion_feature.py \
---model_name pretrain-gpt-mini \
---model_pretrain_name_or_path {PATH_TO_PRETRAINED_CHECKPOINT} \
---saved_dataset_folder  {PATH_TO_DATASET_FOLDER} \
---output_dir {PATH_TO_OUTPUT_FOLDER} \
---logging_dir {PATH_TO_LOG_FOLDER} \
---run_name {RUN_NAME} \
---dataloader_num_workers 10 \
---dataloader_drop_last True \
---task nuplan \
---future_sample_interval 2 \
---past_sample_interval 5 \
---evaluation_strategy steps \
---overwrite_output_dir \
---next_token_scorer True \
---pred_key_points_only False \
---diffusion_feature_save_dir {PATH_TO_DIFFUSION_FEATURE_SAVE_DIR} \
-```
-After running these, you are supposed to get three folders under `diffusion_feature_save_dir` for `train`, `val` and `test` diffusion features respectively.
-
-```
-diffusion_feature_save_dir
- |--train
-    --future_key_points_[0-9]*.pth
-    --future_key_points_hidden_state_[0-9]*.pth
- |--val
-    --future_key_points_[0-9]*.pth
-    --future_key_points_hidden_state_[0-9]*.pth
- |--test
-    --future_key_points_[0-9]*.pth
-    --future_key_points_hidden_state_[0-9]*.pth
-```
-
-After saving the pth files, you need to run `convert_diffusion_dataset.py` to convert them into arrow dataset which is consistent with the training format we are using here.
-```
-python3 convert_diffusion_dataset.py \
-    --save_dir {PATH_TO_SAVE_DIR} \
-    --data_dir {PATH_TO_DIFFUSION_FEATURE_SAVE_DIR} \
-    --num_proc 10 \
-    --dataset_name train \
-    --map_dir {PATH_TO_MAP_DIR} \
-    --saved_datase_folder {PATH_TO_DATASET_FOLDER} \
-    --use_centerline False \
-    --split train \
-```
-
-After which you are expected to see such structures in save_dir:
-```
-save_dir
-    |--generator
-        |--*
-    |--train
-        *.arrow
-        dataset_info.json
-        state.json
-    *.lock
-```
-
-Fianlly, please set `--task` to `train_diffusion_decoder`. In this case, the model is initilized without a transformer backbone(Reduce the infence time to build backbone feature). 
-In the meanwhile, please change the `--saved_dataset_folder` to the folder which stores 'backbone features dataset', obtained previously by `convert_diffusion_dataset.py`. In this case it should be consistent with `save_dir` in the previous step.
-```
-python3 -m torch.distributed.run \
---nproc_per_node=8 runner.py \
---model_name pretrain-gpt-small \
---model_pretrain_name_or_path {PATH_TO_PRETRAINED_CHECKPOINT} \
+--nproc_per_node=8 --master_port 12345 runner.py \
+--model_name scratch-mixtral-800m-deep \
+--model_pretrain_name_or_path None \
 --saved_dataset_folder {PATH_TO_DATASET_FOLDER} \
 --output_dir {PATH_TO_OUTPUT_FOLDER} \
 --logging_dir {PATH_TO_LOG_FOLDER} \
---run_name {RUN_NAME} \
---num_train_epochs 10 \
---weight_decay 0.00001 --learning_rate 0.0001 --logging_steps 2 --save_strategy steps \
---dataloader_num_workers 10 \
---per_device_train_batch_size 2 \
---save_total_limit 2  --predict_yaw True \
+--run_name {EXPERIMENT_NAME} \
+--num_train_epochs 20 \
+--per_device_train_batch_size 16 \
+--warmup_steps 50 \
+--weight_decay 0.01 \
+--logging_steps 100 \
+--save_strategy steps \
+--save_steps 6000 \
+--dataloader_num_workers 24 \
 --dataloader_drop_last True \
---task train_diffusion_decoder \
---remove_unused_columns False \
+--save_total_limit 5 \
 --do_train \
---loss_fn mse \
---per_device_eval_batch_size 2 \
---past_sample_interval 2 \
---trajectory_loss_rescale 0.00001 \
-```
-
-### Evaluate the performance of diffusion decoder
-
-After training the diffusion keypoint decoder separately, you may use such command to eval its performance:
-```
-export CUDA_VISIBLE_DEVICES=0; \
-nohup python3 -m torch.distributed.run \
---nproc_per_node=1 runner.py \
---model_name pretrain-gpt-small-gen1by1 \
---model_pretrain_name_or_path {PATH_TO_PRETRAINED_CHECKPOINT} \
---saved_dataset_folder  {PATH_TO_DATASET_FOLDER} \
---output_dir {PATH_TO_OUTPUT_FOLDER} \
---logging_dir {PATH_TO_LOG_FOLDER} \
---run_name {RUN_NAME} \
---num_train_epochs 1 \
---weight_decay 0.00 --learning_rate 0.00 --logging_steps 2 --save_strategy steps \
---dataloader_num_workers 10 \
---per_device_train_batch_size 2 \
---save_total_limit 2  --predict_yaw True \
---dataloader_drop_last True \
 --task nuplan \
 --remove_unused_columns False \
 --do_eval \
 --evaluation_strategy epoch \
---per_device_eval_batch_size 2 \
---past_sample_interval 2 \
---kp_decoder_type diffusion --key_points_diffusion_decoder_feat_dim 256 --diffusion_condition_sequence_lenth 1 \
---key_points_diffusion_decoder_load_from {KEY_POINT_DIFFUSION_CHECKPOINT_PATH}
+--per_device_eval_batch_size 8 \
+--predict_yaw True \
+--use_proposal 0 \
+--selected_exponential_past True \
+--mean_circular_loss True \
+--raster_channels 34 \
+--use_mission_goal False \
+--raster_encoder_type vit \
+--vit_intermediate_size 768 \
+--lr_scheduler_type cosine_with_restarts \
+--num_cycles 10 \
+--use_speed \
+--use_key_points specified_backward \
+--augment_current_pose_rate 0.5 \
+--augment_current_with_past_linear_changes True \
+--augment_index 5 \
+--attn_implementation flash_attention_2 \
+--sync_norm True \
+--bf16 True \
+--do_sim_val \
+--nuplan_sim_exp_root {SIMULATION_EXPERIMENT_PATH} \
+--nuplan_sim_data_path {SIMULATION_DATA} \
+--max_sim_samples 64 \
+--inspect_kp_loss \
+--kp_dropout 0.1 \
+--report_to wandb \
+--output_router_logits True \
+--augment_method track \
+--augment_max_dy 0.5 \
+--augment_max_dyaw 0.05 \
+--state_separate_embed True \
+--overwrite_output_dir
 ```
 
+The simulation data should be the raw data from nuplan ended with ```.db```.
 
-## Waymo Dataset Pipeline
+## To run closed-loop simulation:
 
-Generate WOMD training data dictionary and index:
-
-`
-python waymo_generation.py --mode train --save_dict --agent_type 1 2 3 
-`
-
-Here you got the original pickle data files. By default, we require the distribution of data and index files to be as follow.
-```
-WOMD_data_save_dir
- |--index
-    --train
-    --val
-    --test
- |--origin
-    --train
-    --val
-    --test
-```
-To accelerate the data loading part, we suggest to split the large pickle files into small ones per scenario by:
-
-`
-python split_scenario_waymo.py --delete_origin True
-`
+The checkpoints have been updoaded on huggingface, and you can resort to: [STR2](https://huggingface.co/JohnZhan/StateTransformer2)
 
 
-## To evaluate on NuBoard:
 
-WARNING: This is still under development.
+After downloading, the path to the downloaded model should be given to the model path below.
 
-We use the NuPlan Garage environment to evaluate the NuPlan model on NuBoard. The NuPlan Garage environment is a wrapper around the NuPlan-Devkit environment. It is used to run the NuPlan model in the NuBoard environment. The NuPlan Garage environment is located in the `nuplan_garage` folder.
-
-### Install Transformer4Planning
-
-run `pip install -e .` from the root directory of Transformer4Planning.
-
-### Install NuPlan-Devkit
-(tested with v1.2)
-run `pip install -e .` from the root directory of NuPlan-Devkit.
-Then install these additional packages:
-
-    pip install aioboto3
-    pip install retry
-    pip install aiofiles
-    pip install bokeh==2.4.1
-
-
-### Register the planner
-Create a new yaml file for Hydra at: `script/config/simulation/planner/str_planner.yaml` with:
-    control_tf_planner:
-        _target_: transformer4planning.submission.planner.STRPlanner
-        horizon_seconds: 10.0
-        sampling_time: 0.1
-        acceleration: [5.0, 5.0]  # x (longitudinal), y (lateral)
-        thread_safe: true
-
-Create a new yaml file for Hydra at: `script/config/simulation/planner/rule_based_planner.yaml` with:
-    rule_based_planner:
-        _target_: transformer4planning.submission.rule_based_planner.RuleBasedPlanner
-        horizon_seconds: 10.0
-        sampling_time: 0.1
-        acceleration: [5.0, 5.0]  # x (longitudinal), y (lateral)
-        thread_safe: true
-
-### Run simulation without yaml changing
-
-
-1. Install Transformer4Planning and NuPlan-Devkit
-2. (Optional) Copy the script folder from NuPlan's Official Repo to update
-3. Modify dataset path in the `run_simulation.py` and run it to evaluate the model with the STR planner
-```
-python nuplan_garage/run_simulation.py 'planner=str_planner' \
-'scenario_filter=val14_split' \
-'job_name=closed_loop_nonreactive_agents' 'scenario_builder=nuplan' \
-'ego_controller=perfect_tracking_controller' 'observation=box_observation' \
-hydra.searchpath="[pkg://nuplan_garage.planning.script.config.common, pkg://nuplan_garage.planning.script.config.simulation, pkg://nuplan.planning.script.config.common, pkg://nuplan.planning.script.config.simulation, pkg://nuplan.planning.script.experiments]"
-```
-To debug, add these arguments:
-```
-'scenario_filter.limit_total_scenarios=1' 'scenario_filter.num_scenarios_per_type=1' \
+```sh
+python run_simulation.py \
+--test_type closed_loop_nonreactive_agents \
+--data_path {SIMULATION_DATA} \
+--map_path {MAP_PATH} \
+--model_path {MODEL_CHECKPOINT_PATH} \
+--split_filter_yaml nuplan_simulation/test14_hard.yaml \
+--max_scenario_num 10000 \
+--batch_size 8 \
+--device cuda \
+--exp_folder TestHard14_MixtralM_CKS_SepLoss_AugCur50Pct_PastProj_S6_bf16_Jun28_ckpt150k\
+--processes-repetition 8
 ```
 
-### Or Modify yaml files and py scripts 
-#### Modify the following variables in yaml files
-nuplan/planning/script/config/common/default_experiment.yaml
+Test type can be chosen from ```["closed_loop_nonreactive_agents","closed_loop_reactive_agents","open_loop_boxes"]```
 
-`job_name: open_loop_boxes` or
-`job_name: closed_loop_nonreactive_agents` or 
-`job_name: closed_loop_reactive_agents`
+The split filter yaml can be found in ```nuplan_simulation```. Changing the yaml file can run simulation on different splits of the test set or the val set.
 
-nuplan/planning/script/config/common/default_common.yaml
 
-`scenario_builder: nuplan` correspond to the yaml filename in scripts/config/common/scenario_builder
-
-`scenario_filter: all_scenarios` correspond to the yaml filenmae in scripts/config/common/scnario_filter 
-
-nuplan/planning/script/config/common/worker/ray_distributed.yaml
-
-`threads_per_node: 6`
-
-nuplan/planning/script/config/common/worker/single_machine_thread_pool.yaml
-
-`max_workers: 6`
-
-nuplan/planning/script/config/simulation/default_simulation.yaml
-
-    observation: box_observation
-    ego_controller: perfect_tracking_controller
-    planner: str_planner
-
-nuplan/planning/script/config/common/default_common.yaml
-
-debug mode `- worker: sequential`
-    
-multi-threading `- worker: ray_distributed`
-
-nuplan/planning/script/config/common/scenario_filter/all_scenarios.yaml
-
-`num_scenarios_per_type: 1`
-
-`limit_total_scenarios: 5`
-   
-`log_names: []` to filter the db files to run simulation
-
-#### Add the following at the beginning of run_xxx.py
-
-    os.environ['USE_PYGEOS'] = '0'
-    import geopandas
-    os.environ['HYDRA_FULL_ERROR'] = '1'
-    os.environ['NUPLAN_DATA_ROOT'] = ''
-    os.environ['NUPLAN_MAPS_ROOT'] = ''
-    os.environ['NUPLAN_DB_FILES'] = ''
-    os.environ['NUPLAN_MAP_VERSION'] = ''
-
-#### Filter log files or maps
-set `scenario_builder` `scenario_filter` to correspond scenario_builder yaml file and scenario_filter yaml file in `script/config/common/default_common.yaml`. scenario_builder path is `script/config/common/scenario_builder` and scenario_filter path is `script/config/common/scenario_filter`. For example, choose builder yaml as nuplan, and filter yaml as all_scenarios, if you want to filter specify logs or maps, please add `[log_name1, ..., log_namen]` to log_names.
-
-#### Run the following command from NuPlan-Devkit
-
-`python nuplan/planning/script/run_simulation.py`
-
-to set configs: 
-planner choice: `planner=control_tf_planner` Optional `[control_tf_planner, rule_based_planner]`
-chanllenge choice: `+simulation=closed_loop_reactive_agents` Optional `[closed_loop_reactive_agents, open_loop_boxes, closed_loop_nonreactive_agents]`
-
-### Launch nuboard for visualization
-
-```
-python /cephfs/zhanjh/PDM_EXP/StateTransformer/tuplan_garage/nuplan-devkit/nuplan/planning/script/run_nuboard.py simulation_path='[/cephfs/zhanjh/PDM_EXP/EXP/exp/simulation/closed_loop_nonreactive_agents/36epoch_clnon_val2]' 'scenario_builder=nuplan' 'port_number=5009'
-```
-
-or
-
-`python nuplan/planning/script/run_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/open_loop_boxes/2023.04.21.21.47.58]'`
-
-### Statics Simulation Scores
-`python script/run_metric_scores.py --file_path ... --save_dir ... --exp_name ... --simulation_type ...`
-
-## Different Backbones
-
-The default transformer backbone is the [GPT2 model](https://huggingface.co/docs/transformers/model_doc/gpt2) from the Hugging Face's Transformers Lib.
-We also tried the recent Mamba backbone and it works even better (with some minor bugs to be fixed in the current version).
-Follow the instructions from the [official Mamba](https://github.com/state-spaces/mamba) repo to install and change the model name from `gpt` to `mamba` to use it.
-
-## Updates
-
-- 2024.04.09: Running NuPlan's simulation with LARGE models will cause a saving crash when each simulation ends. You need to verify the source code in the nuplan-devkit to fix this.
-Add this line `self.planner.model = None` of code to replace the model in the planner to the line 127 before calling the `on_simulation_end` function in the `simulations_runner.py` file.
 
 ## Citation
 If you find this work useful in your research, please consider cite:
 ```
-@article{sun2023large,
-  title={Large Trajectory Models are Scalable Motion Predictors and Planners},
-  author={Qiao Sun and Shiduo Zhang and Danjiao Ma and Jingzhe Shi and Derun Li and Simian Luo and Yu Wang and Ningyi Xu and Guangzhi Cao and Hang Zhao},
-  journal={arXiv preprint arXiv:2310.19620},
-  year={2023}
-}
+coming soon
 ```
