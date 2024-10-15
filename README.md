@@ -12,12 +12,16 @@ Driving</span>
 **Arxiv**:
 
 ______________________________________________________________________
+
+
+![Demo](asset/output.gif)
+
 <div align="left">
 
-# Demo
+> Our demonstration video is: [Demonstration](https://www.youtube.com/watch?v=NnoTwXzC4ec)
 
-[![Watch the Video](asset/cover.png
-)](https://www.youtube.com/watch?v=NnoTwXzC4ec)
+
+
 
 
 # Abstract
@@ -289,6 +293,12 @@ python -m torch.distributed.run \
 The simulation data should be the raw data from nuplan ended with ```.db```.
 
 ## To run closed-loop simulation:
+
+The checkpoints have been updoaded on huggingface, and you can resort to: [STR2](https://huggingface.co/JohnZhan/StateTransformer2)
+
+
+
+After downloading, the path to the downloaded model should be given to the model path below.
 
 ```sh
 python run_simulation.py \
