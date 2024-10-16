@@ -531,13 +531,29 @@ def get_observation_for_autoregression_basedon_previous_coor(observation_kwargs,
 
     return result_to_return
 
+
+def check_if_constant_v(observation_kwargs, data_dic):
+    ego_pose_current = data_dic["agent"]["ego"]["pose"][40, :]
+    ego_pose_past1s = data_dic["agent"]["ego"]["pose"][20, :]
+    ego_pose_future1s = data_dic["agent"]["ego"]["pose"][60, :]
+    # check if ego is moving with a constant speed
+    past_dx = ego_pose_current[0] - ego_pose_past1s[0]
+    past_dy = ego_pose_current[1] - ego_pose_past1s[1]
+    future_dx = ego_pose_future1s[0] - ego_pose_current[0]
+    future_dy = ego_pose_future1s[1] - ego_pose_current[1]
+    if abs(past_dx - future_dx) < 0.1 and abs(past_dy - future_dy) < 0.1:
+        print('skipping: ', abs(past_dx - future_dx), abs(past_dy - future_dy))
+        return True
+    return False
+
+
 def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=40):
     max_dis = observation_kwargs["max_dis"]
     past_frames_number = observation_kwargs["past_frame_num"]
     frame_sample_interval = observation_kwargs["frame_sample_interval"]
     sample_frames = list(range(scenario_frame_number - past_frames_number, scenario_frame_number + 1, frame_sample_interval))
 
-    ego_pose = data_dic["agent"]["ego"]["pose"][scenario_frame_number]
+    ego_pose = data_dic["agent"]["ego"]["pose"][scenario_frame_number].copy()  # [341, 4], past 2s + future 15s
     data_to_return = dict()
     route_ids = data_dic["route"]
     data_to_return["route_ids"] = list()
@@ -578,7 +594,7 @@ def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=
     data_to_return["agent_ids"] = set()
     for sample_frame in sample_frames:
         for _, key in enumerate(data_dic["agent"]):
-            pose = data_dic['agent'][key]['pose'][sample_frame, :]
+            pose = data_dic['agent'][key]['pose'][sample_frame, :].copy()
             if pose[0] < 0 and pose[1] < 0:
                 continue
             pose -= ego_pose
@@ -589,5 +605,7 @@ def get_scenario_data_index(observation_kwargs, data_dic, scenario_frame_number=
     # other infomation record
     for key in ["frame_id", "file_name", "map", "timestamp", "scenario_type", "scenario_id", "t0_frame_id",
                 "intentions", "expert_goal", "mission_goal", "navigation", "images_path"]:
+        if key not in data_dic:
+            continue
         data_to_return[key] = data_dic[key]
     return data_to_return

@@ -21,12 +21,12 @@ class TrajectoryEncoder(nn.Module):
                 self.selected_indices = [79, 39, 19, 9, 4]
             elif self.use_key_points == 'specified_two_backward':
                 self.selected_indices = [79, 4]
+            elif self.use_key_points == 'specified_first_second':
+                self.selected_indices = [10]
             else:
                 assert False, f"specified key points should be either specified_forward or specified_backward {self.use_key_points}"
         elif 'universal' in self.use_key_points:
             self.selected_indices = [15, 31, 47, 63, 79]
-        elif 'denoise_kp' in self.use_key_points:
-            self.selected_indices = [79] * 10 + [39, 19, 9, 4]
         else:
             self.selected_indices = []
 
@@ -58,9 +58,6 @@ class TrajectoryEncoder(nn.Module):
             future_key_points = trajectory_label[:, ar_future_interval - 1::ar_future_interval, :]
             # indices = torch.arange(future_key_points.shape[1], device=device) / future_key_points.shape[1]
             # self.selected_indices = [15, 31, 47, 63, 79]
-        elif 'denoise_kp' in self.use_key_points:
-            # WIP
-            future_key_points = trajectory_label[:, self.selected_indices, :2]
         else:
             assert False, "key points should be either specified or universal"
         

@@ -47,22 +47,22 @@ class ModelArguments:
         metadata={"help": "default is 0, automatically compute. [WARNING] only supports nonauto-gpt now."},
     )
     raster_encoder_type: Optional[str] = field(
-        default='resnet18',
+        default='vit',
         metadata={"help": "choose from [vit, resnet18, resnet34, resnet50, resnet101, resnet152]"}
     )
     vit_intermediate_size: Optional[int] = field(
-        default=3072,
+        default=768,  # 3072,
     )
-    # resnet_type: Optional[str] = field(
-    #     default="resnet18",
-    #     metadata={"help": "choose from [resnet18, resnet34, resnet50, resnet101, resnet152]"}
-    # )
     pretrain_encoder: Optional[bool] = field(
         default=False,
     )
     k: Optional[int] = field(
         default=1,
         metadata={"help": "Set k for top-k predictions, set to -1 to not use top-k predictions."},
+    )
+    n_action_steps:Optional[int] = field(
+        default=80,
+        metadata={"help": "Set the number of action steps for the model."},
     )
     x_random_walk: Optional[float] = field(
         default=0.0
@@ -71,7 +71,7 @@ class ModelArguments:
         default=0.0
     )
     predict_yaw: Optional[bool] = field(
-        default=False
+        default=True
     )
     loss_fn: Optional[str] = field(
         default="mse",
@@ -80,7 +80,7 @@ class ModelArguments:
         default=1.0
     )
     mean_circular_loss: Optional[bool] = field(
-        default=False
+        default=True
     )
 
     ######## begin of proposal args ########
@@ -88,9 +88,9 @@ class ModelArguments:
         default=0,
         metadata={"help": "number of proposal candidates. 0: not using proposal"}
     )
-    ######## end of proposal args ########
+    ######## end of speed args ########
     use_speed: Optional[bool] = field(
-        default=False
+        default=True
     )
     ######## begin of key points args ########
     use_key_points: Optional[str] = field(
@@ -100,12 +100,12 @@ class ModelArguments:
                           "specified_forward: using specified key points, with exponentially growing frame indices."
                           "specified_backward: using specified key points, with exponentially growing frame indices."
                           "specified_two_backward: 8s, and 0.5s only"
-                          "denoise_kp: de-noising 8s x 10 and 0.5s"}
+                          "specified_first_second: 1s only"}
     )
     separate_kp_encoder: Optional[bool] = field(
-        default=False
+        default=True
     )
-    pred_key_points_only: Optional[bool] = field(
+    skip_trajectory_decoding: Optional[bool] = field(
         default=False
     )
     arf_x_random_walk: Optional[float] = field(
@@ -116,7 +116,17 @@ class ModelArguments:
     )
     kp_decoder_type: Optional[str] = field(
         default='mlp',
-        metadata={"help": "choose from [mlp, diffusion]"}
+        metadata={"help": "choose from [linear, mlp, diffusion]"}
+    )
+    kp_dropout: Optional[float] = field(
+        default=0.0
+    )
+    trajectory_decoder_type: Optional[str] = field(
+        default='mlp',
+        metadata={"help": "choose from [linear, mlp]"}
+    )
+    traj_dropout: Optional[float] = field(
+        default=0.0
     )
     ######## end of key points args ########
 
@@ -159,6 +169,9 @@ class ModelArguments:
         default=2
     )
     selected_exponential_past: Optional[bool] = field(
+        default=True
+    )
+    current_frame_only: Optional[bool] = field(
         default=False
     )
     future_sample_interval: Optional[int] = field(
@@ -167,6 +180,24 @@ class ModelArguments:
     augment_current_pose_rate: Optional[float] = field(
         # currently this only works for raster preprocess, and aug_x, aug_y are default to 1.0
         default=0.0, metadata={"help": "The rate of augmenting current pose in the preprocess"}
+    )
+    augment_current_ratio: Optional[float] = field(
+        default=0.3, metadata={"help": "The ratio of augmenting current pose in the preprocess"}
+    )
+    augment_current_with_past_linear_changes: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to augment past poses with linear changes"}
+    )
+    augment_current_with_future_linear_changes: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to augment future poses with linear changes"}
+    )
+    augment_method: Optional[str] = field(
+        default="linear", metadata={"help": "How to augment future poses, linear or track"}
+    )
+    augment_max_dy: Optional[float] = field(
+        default=0.5, metadata={"help": "The max value along y axis of augmenting current pose in the preprocess"}
+    )
+    augment_max_dyaw: Optional[float] = field(
+        default=0.05, metadata={"help": "The max angle of augmenting current pose in the preprocess"}
     )
     generate_diffusion_dataset_for_key_points_decoder: Optional[bool] = field(
         default = False, metadata={"help": "Whether to generate and save the diffusion_dataset_for_keypoint_decoder. This is meant to train the diffusion decoder for class TrajectoryGPTDiffusionKPDecoder, in which ar_future_interval > 0 and the key_poins_decoder is a diffusion decoder while the traj_decoder is a plain decoder. Need to be used with a pretrained model of name pretrain-gpt and ar_future_interval > 0."}
@@ -185,13 +216,10 @@ class ModelArguments:
     )
     ######## end of WOMD args ########
 
-    # WIP args
-    autoregressive_proposals: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use autoregressive proposals in MTR model"}
-    )
-    proposal_num: Optional[int] = field(
-        default=13
-    )
+    # # WIP args
+    # proposal_num: Optional[int] = field(
+    #     default=13
+    # )
 
     ######## begin of Mamba args ########
     rms_norm: Optional[bool] = field(
@@ -208,23 +236,151 @@ class ModelArguments:
     use_mission_goal: Optional[bool] = field(
         default=False, metadata={"help": "Whether to use mission goal in the model"}
     )
-
-    ######## temporal model args, check your model config before using it! ########
+    mission_goal_dropout: Optional[float] = field(
+        default=1.0, metadata={"help": "Rate to dropout the mission goal, 1 is no dropout"}
+    )
     attention_dropout: Optional[float] = field(
         default=0.0, metadata={"help": "The dropout ratio for attention layers."}
     )
     num_local_experts: Optional[int] = field(
         default=8, metadata={"help": "The number of local experts."}
     )
-
     debug_raster_path: Optional[str] = field(
         default=None, metadata={"help": "The path of raster image for debugging."}
     )
-
-    # WIP args
     augment_index: Optional[int] = field(
         default=0, metadata={"help": "The index of augmenting current pose in the preprocess"}
     )
+
+    use_cache: Optional[bool] = field(
+        default=True, metadata={"help": "Whether to use cache in the model"}
+    )
+    attn_implementation: Optional[str] = field(
+        default=None, metadata={"help": "The implementation of attention layers."}
+    )
+    sync_norm: Optional[bool] = field(
+        default=False, metadata={"help": "use SyncBatchNorm over all GPUs."}
+    )
+    ######## temporal model args, check your model config before using it! ########
+    trajectory_prediction_mode: Optional[str] = field(
+        default='all_frames', metadata={"help": "choose from [all_frames, start_frame, both, rebalance], experimental [off_roadx100, ]"}
+    )
+    finetuning_with_stepping: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping"}
+    )
+    finetuning_gamma: Optional[float] = field(
+        default=1, metadata={"help": "Discount of loss from the next step"}
+    )
+    finetuning_with_stepping_random_steps: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping with random steps"}
+    )
+    finetuning_with_stepping_minimal_step: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping 0.1s"}
+    )
+    finetuning_with_stepping_without_first_step_loss: Optional[bool] = field(  # about to delete
+        default=False, metadata={"help": "Whether to use finetuning with stepping without first step loss"}
+    )
+    no_yaw_with_stepping: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with stepping without yaw"}
+    )
+    first_frame_scele: Optional[float] = field(
+        default=1000.0, metadata={"help": "The scale of the first frame"}
+    )
+    kp_loss_rescale: Optional[float] = field(
+        default=1.0, metadata={"help": "Whether to rescale the key points loss"}
+    )
+    # end of auturegressive args
+    reverse_traj_index_order: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to reverse the trajectory index order"}
+    )
+    inspect_kp_loss: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to inspect the key points loss one by one"}
+    )
+
+    # begin of MoE configs
+    num_local_experts: Optional[int] = field(
+        default=8, metadata={"help": "The number of local experts."}
+    )
+    num_experts_per_token: Optional[int] = field(
+        default=2, metadata={"help": "The number of experts to route per-token, can be also interpreted as the top-k routing parameter."}
+    )
+    router_jitter_noise: Optional[float] = field(
+        default=0.0, metadata={"help": "The noise added to the router logits. From 0 to 1."}
+    )
+    output_router_logits: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to output the router logits."}
+    )
+    router_aux_loss_coef: Optional[float] = field(
+        default=0.001, metadata={"help": "The coefficient of the router auxiliary loss."}
+    )
+    sliding_window: Optional[int] = field(
+        default=4096, metadata={"help": "The sliding window size for the MoE."}
+    )
+    # end of MoE configs
+
+    # WIP: key point tokenize
+    traj_tokenizer: Optional[str] = field(
+        default='cluster_traj', metadata={"help": "choose from [none, cluster_traj]"}
+    )
+
+    traj_proposal_points_num: Optional[int] = field(
+        default=80, metadata={"help": "The number of points for each trajectory proposal, set smaller than 80 to slice later"}
+    )
+
+    traj_cluster_file: Optional[str] = field(
+        default=None, metadata={"help": "the csv file which record all cluster center info for the whole 8s trajectory"}
+    )
+
+    regression_long_class_short: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use regression long class short"}
+    )
+
+    # WIP: training with the simulation scores as loss
+    finetuning_with_simulation_on_val: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use finetuning with simulation on val"}
+    )
+    simulate_one_step_on_training: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to simulate one step on training"}
+    )
+    simulate_with_5f_smoothing: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to simulate with 5 frame smoothing"}
+    )
+    sim_eval_with_gt: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use gt for sim"}
+    )
+    skip_yaw_norm: Optional[bool] = field(
+        default=False, metadata={"help": "Skip rotation normalization during preprocess"}
+    )
+
+    autoregressive: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use autoregressive prediction"}
+    )
+    future_seconds: Optional[int] = field(
+        default=8, metadata={"help": "The number of seconds to predict in the future"}
+    )
+    # WIP
+    pass_agent_dic_to_model: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to pass agent dic to the model"}
+    )
+    dense_off_road_check: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to use dense off road check, this might significantly slow down the eval"}
+    )
+    rebalance_key_points: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to rebalance the key points loss"}
+    )
+
+    multiple_propose: Optional[int] = field(
+        default=0, metadata={"help": "The number of proposals to use during simulations"}
+    )
+    # testing usage args
+    stick_sim_to_lane: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to stick the simulation to the lane"}
+    )
+    # for pdm+str
+    model_type: Optional[str] = field(
+        default='naive', metadata={"help": "choose from [pdm, str]"}
+    )
+
 
 
 @dataclass
@@ -259,11 +415,20 @@ class DataTrainingArguments:
             )
         },
     )
-    max_predict_samples: Optional[int] = field(
+    max_test_samples: Optional[int] = field(
         default=None,
         metadata={
             "help": (
-                "For debugging purposes or quicker training, truncate the number of prediction examples to this "
+                "For debugging purposes or quicker training, truncate the number of test examples to this "
+                "value if set."
+            )
+        },
+    )
+    max_sim_samples: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of simulation examples to this "
                 "value if set."
             )
         },
@@ -277,18 +442,12 @@ class DataTrainingArguments:
     nuplan_map_path: Optional[str] = field(
         default=None, metadata={"help": "The root path of map file, to init map api used in nuplan package"}
     )
-    use_full_training_set: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to use the full training index from train_alltype"}
-    )
     agent_type: Optional[str] = field(
         default="all", metadata={"help": "all: no filter on WOMD"
                                         "1: vehicle on WOMD"
                                         "2: pedestrian on WOMD"
                                         "3: cyclist on WOMD"
                                         "any combination of numbers will be decoded into list of int (1 2;2 3;1 3)"}
-    )
-    do_closed_loop_simulation: Optional[bool] = field(
-        default=False, metadata={"help": "Whether to do closed loop simulation, This is a seperate process. Do not use with training."}
     )
 
 
@@ -297,17 +456,11 @@ class ConfigArguments:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
-    save_model_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current model config to a json file if not None"}
+    analyze_dataset_target: Optional[str] = field(
+        default=None, metadata={"help": "choose from train/val/test to choose which dataset to analyze"}
     )
-    save_data_config_to_path: Optional[str] = field(
-        default=None, metadata={"help": "save current data config to a json file if not None"}
-    )
-    load_model_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load model config from a json file if not None"}
-    )
-    load_data_config_from_path: Optional[str] = field(
-        default=None, metadata={"help": "load data config to a json file if not None"}
+    save_analyze_result_to_path: Optional[str] = field(
+        default=None, metadata={"help": "save analyze result to path if not None"}
     )
 
 
@@ -330,6 +483,46 @@ class PlanningTrainingArguments(TrainingArguments):
     images_cleaning_to_folder: Optional[str] = field(
         default=None, metadata={"help": "Pass a target folder to clean the raw image folder to the target folder."}
     )
+
+    num_cycles: Optional[int] = field(
+        default=None, metadata={"help": "The number of cycles for the cosine learning rate scheduler."}
+    )
+
+    # arguments for simulations testings in the training loop
+    do_sim_val: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to do simulation validation"}
+    )
+    do_sim_test: Optional[bool] = field(
+        default=False, metadata={"help": "Whether to do simulation test"}
+    )
+    sim_test_type: Optional[str] = field(
+        default='closed_loop_nonreactive_agents', metadata={"help": "choose from test/val to choose which simulation dataset to use"}
+    )
+    nuplan_sim_data_path: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan simulation raw db data"}
+    )
+    nuplan_sim_map_folder: Optional[str] = field(
+        default=None, metadata={"help": "The folder of nuplan simulation raw map"}
+    )
+    nuplan_sim_exp_root: Optional[str] = field(
+        default=None, metadata={"help": "The root path of nuplan simulation experiment data"}
+    )
+    nuplan_sim_split_filter_yaml: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan simulation split filter yaml"}
+    )
+    nuplan_train_data_path: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan training raw db data"}
+    )
+    nuplan_train_split_filter_yaml: Optional[str] = field(
+        default=None, metadata={"help": "The path of nuplan train split filter yaml"}
+    )
+    sim_steps: Optional[int] = field(
+        default=None, metadata={"help": "The number of simulation steps"}
+    )
+    sim_controller: Optional[str] = field(
+        default='two_stage_controller', metadata={"help": "The controller for simulation, choose from [perfect_controller, two_stage_controller]"}
+    )
+
 
     # label_names: Optional[List[str]] = field(
     #     default=lambda: ['trajectory_label']
