@@ -186,10 +186,16 @@ def main():
     
     root_folders = os.listdir(index_root)
 
-    if 'train' in root_folders:
-        train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, True)
+    if data_args.use_full_training_set:
+        if 'train_alltype' in root_folders:
+            train_dataset = load_dataset(index_root, "train_alltype", data_args.dataset_scale, True)
+        else:
+            raise ValueError("No training dataset found in {}, must include at least one city in /train_alltype".format(index_root))
     else:
-        raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
+        if 'train' in root_folders:
+            train_dataset = load_dataset(index_root, "train", data_args.dataset_scale, True)
+        else:
+            raise ValueError("No training dataset found in {}, must include at least one city in /train".format(index_root))
     
     if 'test' in root_folders:
         test_dataset = load_dataset(index_root, "test", data_args.dataset_scale, False)

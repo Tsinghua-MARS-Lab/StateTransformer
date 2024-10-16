@@ -21,32 +21,27 @@ class LayerNorm(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, hidden_size, out_features=None, dropout=0.0):
+    def __init__(self, hidden_size, out_features=None):
         super(MLP, self).__init__()
         if out_features is None:
             out_features = hidden_size
         self.linear = nn.Linear(hidden_size, out_features)
         self.layer_norm = LayerNorm(out_features)
-        self.dropout_rate = dropout
-        if dropout > 0:
-            self.dropout = nn.Dropout(dropout)
 
     def forward(self, hidden_states):
         hidden_states = self.linear(hidden_states)
         hidden_states = self.layer_norm(hidden_states)
         hidden_states = torch.nn.functional.relu(hidden_states)
-        if self.dropout_rate > 0 and self.training:
-            hidden_states = self.dropout(hidden_states)
         return hidden_states
     
     
 class DecoderResCat(nn.Module):
-    def __init__(self, hidden_size, in_features, out_features=60, dropout=0.0):
+    def __init__(self, hidden_size, in_features, out_features=60):
         super(DecoderResCat, self).__init__()
         self.hidden_size = hidden_size
         self.in_features = in_features
         self.out_features = out_features
-        self.mlp = MLP(in_features, hidden_size, dropout)
+        self.mlp = MLP(in_features, hidden_size)
         self.fc = nn.Linear(hidden_size + in_features, out_features)
 
     def forward(self, hidden_states):

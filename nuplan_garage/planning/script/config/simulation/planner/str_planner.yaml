@@ -1,0 +1,7 @@
+STRPlanner:
+  _target_: nuplan_garage.planning.simulation.planner.str_planner.str_planner.STRPlanner
+  _convert_: 'all'
+
+  map_radius: 300 # Radius to consider around ego [m]
+  thread_safe: true
+  checkpoint_path: {CHECKPOINT_FOLDER} # Path to checkpoint file

@@ -6,7 +6,6 @@ import pickle
 import pandas as pd
 from shapely import geometry
 
-
 def rotate_array(origin, points, angle, tuple=False):
     """
     Rotate a numpy array of points counter-clockwise by a given angle around a given origin.
@@ -73,43 +72,23 @@ def get_closest_lane_on_route(pred_key_point_global,
 
 def get_closest_lane_point_on_route(pred_key_point_global,
                                     route_ids,
-                                    road_dic,
-                                    include_yaw=False):
-
+                                    road_dic):
     # loop over all the route ids
     pred_key_point_global_copy = copy.deepcopy(pred_key_point_global)
     route_lanes = []
-    route_ids = route_ids[:100]
     for each_route_block in route_ids:
-        if each_route_block == -1:
-            continue
-        if each_route_block not in road_dic:
-            print('Route block not found in road dic: ', each_route_block, len(list(road_dic.keys())), list(road_dic.keys())[:10])
-            continue
         route_lanes += road_dic[each_route_block]['lower_level']
     route_lane_pts = []
     lane_ids = []
     for each_lane in route_lanes:
-        if each_lane not in road_dic:
-            print('lane not found in road dic: ', each_lane)
-            continue
         if road_dic[each_lane]['type'] not in [0, 11]:
             continue
-        if include_yaw:
-            point = road_dic[each_lane]['xyz'][:, :2]
-            yaw = road_dic[each_lane]['dir']
-            yaw[0] = yaw[1]
-            route_lane_pts.append(np.concatenate([point, yaw], axis=1))
-        else:
-            route_lane_pts.append(road_dic[each_lane]['xyz'][:, :2])
+        route_lane_pts.append(road_dic[each_lane]['xyz'][:, :2])
         lane_ids += [each_lane] * road_dic[each_lane]['xyz'].shape[0]
-    if len(route_lane_pts) == 0:
-        print('no route lane points found at all ', route_ids, len(road_dic.keys()))
-        return None, None, None, None, None
     # concatenate all points in the list in one dimension
     route_lane_pts_np = np.concatenate(route_lane_pts, axis=0)
     # get the closest point over all of the selected lanes
-    dist = np.linalg.norm(route_lane_pts_np[:, :2] - pred_key_point_global_copy[:2], axis=1)
+    dist = np.linalg.norm(route_lane_pts_np - pred_key_point_global_copy[:2], axis=1)
     closest_index = np.argmin(dist)
     closest_lane_point = route_lane_pts_np[closest_index]
 
@@ -126,7 +105,7 @@ def get_closest_lane_point_on_route(pred_key_point_global,
     polygon = geometry.Polygon(line)
     on_road = polygon.contains(point)
 
-    return closest_lane_point, dist[closest_index], closest_index, closest_lane_id, on_road
+    return closest_lane_point, dist[closest_index], on_road
 
 
 def normalize_angle(angle):
@@ -213,31 +192,6 @@ def generate_contour_pts(center_pt, w, l, direction):
     pt4 = rotate(center_pt, (center_pt[0]-w/2, center_pt[1]+l/2), direction, tuple=True)
     return pt1, pt2, pt3, pt4
 
-def calculate_angle(vector1, vector2):
-    """
-    calculate angle of two vectors。
-
-    args:
-    vector1 [x1, y1]。
-    vector2 [x2, y2]。
-
-    return:
-    angle of two vectors , between [-π, π]。
-    """
-
-    dot_product = vector1[0] * vector2[0] + vector1[1] * vector2[1]
-
-    magnitude1 = math.sqrt(vector1[0] ** 2 + vector1[1] ** 2)
-    magnitude2 = math.sqrt(vector2[0] ** 2 + vector2[1] ** 2)
-
-    cosine_angle = dot_product / (magnitude1 * magnitude2)
-
-
-    angle = math.acos(cosine_angle)
-
-    if vector1[0] * vector2[1] - vector1[1] * vector2[0] < 0:
-        angle = -angle
-    return angle
 def rotate(origin, point, angle, tuple=False):
     """
     Rotate a point counter-clockwise by a given angle around a given origin.
@@ -267,7 +221,7 @@ HEADING_WEIGHT = 2
 def compute_average_score(horizon_3, horizon_5, horizon_8, threshold):
     avg_value =  np.mean((np.array(horizon_3) + np.array(horizon_5) + np.array(horizon_8))) / 3
     score = max(1 - avg_value/threshold, 0)
-    return score
+    return score    
 
 
 def compute_scenario_score(eval_results: List, scenario_id: int):
@@ -311,7 +265,7 @@ def compute_scenario_score(eval_results: List, scenario_id: int):
     else:
         miss_score = 1
     score =(ade_score + fde_score + ahe_score * 2 + fhe_score * 2) / 6
-
+    
     data_to_return = dict(
         # file_name = VALIDATION_LIST[int(scenario[0]["file_id"])],
         scenario15s_id=scenario_id,
@@ -323,8 +277,8 @@ def compute_scenario_score(eval_results: List, scenario_id: int):
         score=miss_score * score,
     )
     return data_to_return
-
-
+    
+        
 def compute_scores(data):
     scenarios = dict()
     data_frame = pd.DataFrame(data)
