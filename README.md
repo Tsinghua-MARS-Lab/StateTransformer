@@ -11,6 +11,8 @@ Driving</span>
 
 **Arxiv**:
 
+**Website**:
+
 ______________________________________________________________________
 
 
@@ -95,13 +97,16 @@ Then install these packages:
 
 ## Dataset
 
-We process the dataset into the Hugging Face Dataset format. Click [here](http://180.167.251.46:880/NuPlanSTR/nuplan-v1.1_STR.zip) to download the NuPlan dataset.
+For Li-Auto Dataset, since it belongs to Li Auto and Li Auto currently does not intend to make it public, the LiAuto dataset is not freely available online at the moment.
+
+For NuPlan, we process the dataset into the Hugging Face Dataset format. Click [here](http://180.167.251.46:880/NuPlanSTR/nuplan-v1.1_STR.zip) to download the NuPlan dataset.
 Unzip the file and pass the path to the '--saved_dataset_folder' argument to use it.
 This dataset contains the training, validation, and the test set.
 
 If you need to customize your dataset, you would need to process the official dataset by our scripts.
 
 - For NuPlan dataset, please refer to the `generation.py` and read the following 'NuPlan Dataset Pipeline' section for more details. 
+
 ### NuPlan Dataset Pipeline
 Usage:
 
@@ -301,7 +306,7 @@ The checkpoints have been updoaded on huggingface, and you can resort to: [STR2]
 After downloading, the path to the downloaded model should be given to the model path below.
 
 ```sh
-python run_simulation.py \
+python run_nuplan_simulation.py \
 --test_type closed_loop_nonreactive_agents \
 --data_path {SIMULATION_DATA} \
 --map_path {MAP_PATH} \
@@ -319,8 +324,18 @@ Test type can be chosen from ```["closed_loop_nonreactive_agents","closed_loop_r
 The split filter yaml can be found in ```nuplan_simulation```. Changing the yaml file can run simulation on different splits of the test set or the val set.
 
 
+## Visualization
 
-## Citation
+Based on the simulation directory generated before, the visualization will be realized by using the command:
+
+``python run_nuplan_nuboard.py simulation_path='[/home/sunq/nuplan/exp/exp/simulation/test/2023.05.08.19.17.16]' 'scenario_builder=nuplan' 'port_number=5005'``
+
+
+# Previous work
+
+The previous work of StateTransformer2 is the [StateTransformer](https://arxiv.org/abs/2310.19620). The code can be available found in this repository under the commit ```61922dc889bdafe04340b4e363e151a771fe1729``` in the ```main``` branch.
+
+# Citation
 If you find this work useful in your research, please consider cite:
 ```
 coming soon
