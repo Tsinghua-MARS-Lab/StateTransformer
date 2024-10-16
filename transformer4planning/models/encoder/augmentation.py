@@ -36,7 +36,7 @@ class DataAugmentation(nn.Module):
         # augment with linear scale
         device = target_traj.device
         context_length = target_traj.shape[1]
-        scale = (torch.arange(context_length, device=device, dtype=target_traj.dtype) + 1) / context_length
+        scale = (torch.arange(context_length, device=device, dtype=torch.float32) + 1) / context_length
         if reverse_scale:
             scale = scale.flip(0)
         scale = scale.unsqueeze(0).unsqueeze(-1).repeat(target_traj.shape[0], 1, target_traj.shape[-1])

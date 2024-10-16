@@ -23,8 +23,7 @@ def main(args):
     data_path = {
         'NUPLAN_DATA_ROOT': args.dataset_root,
         'NUPLAN_MAPS_ROOT': os.path.join(args.dataset_root, "maps"),
-        # 'NUPLAN_DB_FILES': os.path.join(args.dataset_root, "nuplan-v1.1", args.data_path),
-        'NUPLAN_DB_FILES': os.path.join(args.dataset_root, args.data_path),
+        'NUPLAN_DB_FILES': os.path.join(args.dataset_root, "nuplan-v1.1", args.data_path),
     }
     road_path = args.road_dic_path
 
@@ -111,7 +110,6 @@ def main(args):
         scenarios_to_keep = None
 
     def yield_data_by_scenario(shards):
-        assert False, 'Deprecated'
         for shard in shards:
             dl = NuPlanDL(scenario_to_start=0,
                           file_to_start=shard,
@@ -172,9 +170,7 @@ def main(args):
                                             scenarios_to_keep=scenarios_to_keep,
                                             filter_still=args.filter_still,
                                             sensor_meta_path=args.sensor_meta_path,
-                                            sensor_blob_path=args.sensor_blob_path,
-                                            correct_route_ids=args.correct_route_ids
-                                            )
+                                            sensor_blob_path=args.sensor_blob_path)
                 if loaded_dic is None:
                     continue
                 if args.keep_future_steps:
@@ -212,9 +208,9 @@ def main(args):
                                 print("WARNING: None data in ", each_key)
                         if error:
                             continue
-                        if 'intentions' in each_loaded_dic:
-                            for each_intention in each_loaded_dic["intentions"]:
-                                intention_label_data_counter[int(each_intention)] += 1
+                        for each_intention in each_loaded_dic["intentions"]:
+                            intention_label_data_counter[int(each_intention)] += 1
+                        # intention_label_data_counter[int(each_loaded_dic["halfs_intention"])] += 1
                         if shard % 200 == 0:
                             print('intention_label_data_counter', intention_label_data_counter)
                         yield data_to_return_filtered
@@ -232,11 +228,6 @@ def main(args):
                         if random.random() > 1.0 / balance_dic[loaded_dic["scenario_type"]]:
                             continue
                     data_to_return = get_scenario_data_index(observation_kwargs, loaded_dic)
-                    if args.constant_v_dropout > 0:
-                        # check if ego speed is constant
-                        cv_scenario = check_if_constant_v(observation_kwargs, loaded_dic)
-                        if cv_scenario and random.random() < args.constant_v_dropout:
-                            continue
                     # legitimacy check
                     data_to_return_filtered = {}
                     error = False
@@ -262,9 +253,9 @@ def main(args):
                             print("WARNING: None data in ", each_key)
                     if error:
                         continue
-                    if 'intentions' in data_to_return:
-                        for each_intention in data_to_return["intentions"]:
-                            intention_label_data_counter[int(each_intention)] += 1
+                    for each_intention in data_to_return["intentions"]:
+                        intention_label_data_counter[int(each_intention)] += 1
+                    # intention_label_data_counter[int(data_to_return["halfs_intention"])] += 1
                     if shard % 200 == 0:
                         print('intention_label_data_counter', intention_label_data_counter)
                     yield data_to_return_filtered
@@ -343,10 +334,6 @@ def main(args):
             del dl
             break
 
-    def yield_data_index_with_simulation(shards):
-        for shard in shards:
-            pass
-
     # dic = yield_data_dic([0])
     starting_scenario = args.starting_scenario if args.starting_scenario != -1 else 0
 
@@ -382,7 +369,7 @@ def main(args):
             else:
                 print(f'file {each_file} not found in evaluation result pkl')
         print(
-            f'Filtered {len(file_indices_filtered)} files and {len(list(filter_dic.keys()))} keys')
+            f'Filtered {len(file_indices_filtered)} files from {total_file_number} files and {len(list(filter_dic.keys()))} keys')
         file_indices = file_indices_filtered
         print(file_indices)
         total_file_number = len(file_indices)
@@ -437,6 +424,7 @@ def main(args):
                                                                    "scenario_type": Value("string"),
                                                                    "t0_frame_id": Value("int64"),
                                                                    "scenario_id": Value("string"),
+                                                                   # "halfs_intention": Value("int64"),
                                                                    "intentions": Sequence(Value("int64")),
                                                                    "mission_goal": Sequence(Value("float32")),
                                                                    "expert_goal": Sequence(Value("float32")),
@@ -466,7 +454,11 @@ def main(args):
                                                 num_proc=args.num_proc
                                                 )
     else:
-        assert False, "Please specify the generation mode"
+        nuplan_dataset = Dataset.from_generator(yield_data,
+                                                gen_kwargs={'shards': file_indices, 'dl': None,
+                                                            'filter_info': filter_dic},
+                                                writer_batch_size=10, cache_dir=args.cache_folder,
+                                                num_proc=args.num_proc)
     print('Saving dataset with ', args.num_proc)
     nuplan_dataset.set_format(type="torch")
     nuplan_dataset.save_to_disk(os.path.join(args.cache_folder, args.dataset_name), num_proc=args.num_proc)
@@ -534,9 +526,5 @@ if __name__ == '__main__':
     parser.add_argument('--keep_future_steps', default=False, action='store_true')  # use with scenario_filter_yaml_path for val14
     parser.add_argument('--balance', default=False, action='store_true')
     parser.add_argument('--filter_still', default=False, action='store_true')
-    parser.add_argument('--index_with_planner', default=False, action='store_true')
-    parser.add_argument('--correct_route_ids', default=False, action='store_true')
-
-    parser.add_argument('--constant_v_dropout', type=float, default=0.0)  # 0=no dropout, 1=drop all
     args_p = parser.parse_args()
     main(args_p)

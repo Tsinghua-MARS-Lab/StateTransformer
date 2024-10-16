@@ -183,8 +183,7 @@ class NuPlanDL:
                  scenarios_to_keep=None,
                  filter_still=False,
                  sensor_blob_path=None,
-                 sensor_meta_path=None,
-                 correct_route_ids=False):
+                 sensor_meta_path=None):
         """
         :param sample_interval:
         :param agent_only:
@@ -278,8 +277,7 @@ class NuPlanDL:
                                                   scenario_id=scenario_id,
                                                   agent_only=agent_only,
                                                   seconds_in_future=seconds_in_future,
-                                                  filter_still=filter_still,
-                                                  correct_route_ids=correct_route_ids)
+                                                  filter_still=filter_still)
                 if data_to_return is None:
                     continue
                 data_to_return['scenario_type'] = scenario_type
@@ -356,8 +354,7 @@ class NuPlanDL:
                                           scenario_id=scenario_id, 
                                           agent_only=agent_only,
                                           seconds_in_future=seconds_in_future,
-                                          filter_still=filter_still,
-                                          correct_route_ids=correct_route_ids)
+                                          filter_still=filter_still)
         if data_to_return is None:
             data_to_return = {'skip': True}
             return data_to_return, new_files_loaded
@@ -1093,10 +1090,9 @@ class NuPlanDL:
                     agent_only=False,
                     seconds_in_future=TOTAL_FRAMES_IN_FUTURE,
                     routes_per_file=False,
-                    include_intentions=False,
+                    include_intentions=True,
                     include_navigation=True,
-                    filter_still=False,
-                    correct_route_ids=False) -> dict:
+                    filter_still=False,) -> dict:
 
         skip = False
         agent_dic = self.pack_scenario_to_agentdic(scenario=scenario, total_frames_future=seconds_in_future)
@@ -1282,23 +1278,6 @@ class NuPlanDL:
             except:
                 print("Invalid scenario, cannot get route!, skipping")
                 return None
-
-            if correct_route_ids:
-                # fix route id
-                from nuplan_simulation.route_corrections.route_utils import route_roadblock_correction
-                try:
-                    route_ids = route_road_ids
-                    revised_route_ids = route_roadblock_correction(
-                        scenario.get_ego_state_at_iteration(0),
-                        self.map_api,
-                        route_ids
-                    )
-                    route_road_ids = revised_route_ids
-                    print('testing route correction: ', route_road_ids)
-                except:
-                    print("Invalid route given, Skipping ", route_road_ids)
-                    return None
-
             route_road_ids = list(set(route_road_ids))
             route_ids_processed = []
             for each_id in route_road_ids:
@@ -1313,23 +1292,7 @@ class NuPlanDL:
                 print("Invalid route given, Skipping")
                 return None
             else:
-                if correct_route_ids:
-                    # fix route id
-                    from nuplan_simulation.route_corrections.route_utils import route_roadblock_correction
-                    try:
-                        route_ids = self.route_idx_mem
-                        revised_route_ids = route_roadblock_correction(
-                            scenario.get_ego_state_at_iteration(0),
-                            self.map_api,
-                            route_ids
-                        )
-                        data_to_return['route'] = revised_route_ids
-                    except:
-                        print("Invalid route given, Skipping ", self.route_idx_mem)
-                        data_to_return['route'] = self.route_idx_mem
-                        return None
-                else:
-                    data_to_return['route'] = self.route_idx_mem
+                data_to_return['route'] = self.route_idx_mem
 
         if include_intentions:
             # WARNING: this only works for NuPlan (since using index of 40 as current frame)

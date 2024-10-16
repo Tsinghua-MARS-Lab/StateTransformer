@@ -1,4 +1,0 @@
-dummy_callback:
-  _target_: tuplan_garage.planning.simulation.callback.dummy_callback.DummyCallback
-  _convert_: 'all'
-

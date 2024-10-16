@@ -3,14 +3,6 @@ import torch
 from torch import nn
 from transformer4planning.models.utils import *
 from transformer4planning.models.encoder.base import TrajectoryEncoder
-from transformers.utils import logging
-logging.set_verbosity_info()
-logger = logging.get_logger("transformers")
-
-
-def normalize_angles(angles):
-    return torch.atan2(torch.sin(angles), torch.cos(angles))
-
 
 class CNNDownSamplingResNet(nn.Module):
     def __init__(self, d_embed, in_channels, resnet_type='resnet18', pretrain=False):
@@ -82,7 +74,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             vit_config.num_attention_heads = self.config.n_head
             vit_config.return_dict = True
             self.image_downsample = ViTModel(vit_config)
-            logger.info(f'Building ViT encoder with key points indices of {self.selected_indices}')
+            print('Building ViT encoder')
         else:
             try:
                 cnn_kwargs = dict(
@@ -102,25 +94,20 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                                                         in_channels=cnn_kwargs.get("in_channels", None),
                                                         resnet_type=cnn_kwargs.get("resnet_type", "resnet18"),
                                                         pretrain=cnn_kwargs.get("pretrain", False))
-            logger.info(f'Building ResNet encoder with key points indices of {self.selected_indices}')
-
+            print('Building ResNet encoder')
         # separate key point encoder is hard to train with larger models due to sparse signals
-        input_dim = 7 if self.config.use_speed else 4
-        self.action_m_embed = nn.Sequential(nn.Linear(input_dim, action_kwargs.get("d_embed")), nn.Tanh())
-        self.action_m_embed_traj = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if self.config.use_speed:
+            self.action_m_embed = nn.Sequential(nn.Linear(7, action_kwargs.get("d_embed")), nn.Tanh())
+        else:
+            self.action_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
 
-        self.traj_tokenizer = None
-
-        # For key points, only use x, and y
-        # currently forcing key point to be 2 dimension, with no speed and no yaw
-        # if self.config.separate_kp_encoder:
-        if self.use_proposal:
-            # self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())  # Deprecated
-            # each point has 3 dimensions, x, y, and yaw
-            self.proposal_m_embed = nn.Sequential(nn.Linear(self.config.traj_proposal_points_num * 3, action_kwargs.get("d_embed")), nn.Tanh())
-            self.proposal_score_embed = nn.Sequential(nn.Linear(int(self.config.use_proposal), action_kwargs.get("d_embed")), nn.Tanh())
-        if self.config.use_key_points != 'no':
+        if self.config.separate_kp_encoder:
+            self.kps_m_embed = nn.Sequential(nn.Linear(4, action_kwargs.get("d_embed")), nn.Tanh())
+        if 'denoise_kp' in self.use_key_points:
             self.kps_m_embed = nn.Sequential(nn.Linear(2, action_kwargs.get("d_embed")), nn.Tanh())
+
+        if self.use_proposal:
+            self.proposal_m_embed = nn.Sequential(nn.Linear(1, action_kwargs.get("d_embed")), nn.Tanh())
 
         self.image_processor = None
         self.camera_image_encoder = None
@@ -133,66 +120,15 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
                 self.camera_image_encoder = Dinov2Model.from_pretrained("facebook/dinov2-base")
             except:
                 # using local checkpoints due to the GFW blocking of China
-                # self.image_processor = AutoImageProcessor.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
-                # self.camera_image_encoder = Dinov2Model.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
-                self.image_processor = AutoImageProcessor.from_pretrained("/cephfs/sunq/dinov2", local_files_only=True)
-                self.camera_image_encoder = Dinov2Model.from_pretrained("/cephfs/sunq/dinov2", local_files_only=True)
+                self.image_processor = AutoImageProcessor.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
+                self.camera_image_encoder = Dinov2Model.from_pretrained("/public/MARS/t4p/dinov2", local_files_only=True)
             # self.camera_image_m_embed = nn.Sequential(nn.Linear(257*768, action_kwargs.get("d_embed")), nn.Tanh())
             # self.camera_image_m_embed = nn.Sequential(nn.Linear(768, action_kwargs.get("d_embed")), nn.Tanh())
             # self.camera_image_m_embed = nn.Sequential(nn.Linear(768, action_kwargs.get("d_embed"), bias=False))
             self.camera_image_m_embed = STRMultiModalProjector(action_kwargs)
             for param in self.camera_image_encoder.parameters():
                 param.requires_grad = False
-
-    def get_proposal_cluster_embedding(self, info_dict, device, input_embeds, trajectory_label=None):
-        # pass score when generate function is called
-        candidate_proposal = self.traj_tokenizer.trajs.to(device)[:, :self.config.traj_proposal_points_num, :]
-        info_dict['candi_proposal_num'] = candidate_proposal.shape[0]
-        assert int(info_dict['candi_proposal_num']) == int(self.config.use_proposal), f'proposal {candidate_proposal.shape[0]}, but got {self.config.use_proposal}'
-        # n_candi,80, 3 -> n_candi,240 -> n_candi,256
-        candidate_proposal_ = candidate_proposal.reshape(candidate_proposal.shape[0], -1)
-        candi_embeds = self.proposal_m_embed(candidate_proposal_)
-        # n_candi,256 -> bs,n_candi,256
-        bs = input_embeds.shape[0]
-        candi_embeds = candi_embeds.unsqueeze(0).repeat(bs, 1, 1)
-        input_embeds = torch.cat([input_embeds, candi_embeds], dim=1)  # bs,context_length+n_candi,256
-        # use gt score for training
-        traj_gt = trajectory_label[:, :, [0, 1]].unsqueeze(1)  # bs,1,seq,2
-        expanded_candidate_trajectory = candidate_proposal[:, :, [0, 1]].unsqueeze(0).repeat(bs, 1, 1, 1)  # bs,n_candi,seq,2
-        # 计算每条轨迹与目标轨迹对应点之间的差值
-        diff = expanded_candidate_trajectory - traj_gt  # bs, n_candi, seq, 2
-        # 计算欧式距离
-        distances = torch.sqrt(torch.sum(diff ** 2, dim=-1))  # 对最后一个维度求和  bs, n_candi, seq
-        distances = torch.mean(distances, dim=-1)  # ADE: bs, n_candi
-        info_dict['future_traj_diff'] = distances.to(device)
-        # import matplotlib.pyplot as plt
-        # for i in range(candidate_proposal.shape[0]):
-        #     plt.plot(candidate_proposal[i,:,0].cpu(),candidate_proposal[i,:,1].cpu(),alpha=0.2)
-        # index = torch.argmin(future_trajs_diff[0,0,:])
-        # plt.plot(candidate_proposal[index,:,0].cpu(),candidate_proposal[index,:,1].cpu(),'r')
-        # plt.plot(traj_gt[0,0,:,0].cpu(),traj_gt[0,0,:,1].cpu(),'b')
-        # plt.savefig('help.jpg')
-        # plt.close()
-
-        # compute gt distance to score and embed
-        gt_l2_distance = info_dict['future_traj_diff']  # bs,n_cluster,2
-        # mask = gt_l2_distance > 30
-        # gt_l2_distance[mask] = float('inf')
-        # gt_prob = torch.softmax(-gt_l2_distance, dim=1)
-        # if not self.training:
-        #     gt_prob = torch.zeros_like(gt_prob)
-        # gt_prob_embed = self.proposal_score_embed(gt_prob)  # bs, 256
-        # input_embeds = torch.cat([input_embeds,
-        #                           gt_prob_embed.unsqueeze(1)], dim=1)  # bs,context_length+n_candi+1,256
-        gt_index = torch.argmin(gt_l2_distance, dim=-1)
-        traj_cls_gt = self.traj_tokenizer.decode(gt_index)
-        zeros_tensor = torch.zeros([traj_cls_gt.shape[0], traj_cls_gt.shape[1], 1]).to(traj_cls_gt.device)
-        traj_cls_gt = torch.cat((traj_cls_gt[:, :, :2], zeros_tensor, traj_cls_gt[:, :, 2:]), dim=-1)
-        traj_cls_embedding = self.action_m_embed_traj(traj_cls_gt)
-        input_embeds = torch.cat([input_embeds, traj_cls_embedding], dim=1)
-
-        return input_embeds, info_dict, candi_embeds
-
+        
     def forward(self, **kwargs):
         """
         Nuplan raster encoder require inputs:
@@ -214,12 +150,9 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
 
         is_training = kwargs.get("is_training", None)
         assert is_training is not None, "is_training should not be None"
-        assert self.training == is_training, "training status should be the same"
         self.augmentation.training = is_training
 
-        # assert trajectory_label is not None, "trajectory_label should not be None"
-        if trajectory_label is None:
-            trajectory_label = torch.zeros((high_res_raster.shape[0], 80, 4), device=high_res_raster.device)
+        assert trajectory_label is not None, "trajectory_label should not be None"
         device = trajectory_label.device
         _, pred_length = trajectory_label.shape[:2]
         action_seq_length = context_actions.shape[1] if context_actions is not None else -1  # -1 in case of pdm encoder
@@ -228,7 +161,7 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         context_actions = self.augmentation.trajectory_linear_augmentation(context_actions, self.config.x_random_walk, self.config.y_random_walk)
         # raster observation encoding & context action ecoding
         action_embeds = self.action_m_embed(context_actions)
-
+        
         high_res_seq = cat_raster_seq(high_res_raster.permute(0, 3, 2, 1).to(device), action_seq_length, self.config.with_traffic_light)
         low_res_seq = cat_raster_seq(low_res_raster.permute(0, 3, 2, 1).to(device), action_seq_length, self.config.with_traffic_light)
         # casted channel number: 33 - 1 goal, 20 raod types, 3 traffic light, 9 agent types for each time frame
@@ -237,36 +170,36 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
         assert c == self.config.raster_channels, "raster channel number should be {}, but got {}".format(self.config.raster_channels, c)
 
         if self.config.raster_encoder_type == 'vit':
-            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
-            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
+            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
             # batch_size * context_length, 196 (14*14), embed_dim//2
             _, sequence_length, half_embed = high_res_embed.shape
             high_res_embed = high_res_embed.reshape(batch_size, action_seq_length, sequence_length, half_embed)
             low_res_embed = low_res_embed.reshape(batch_size, action_seq_length, sequence_length, half_embed)
 
-            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(action_embeds.dtype)  # batch_size, action_seq_length, sequence_length, embed_dim
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)  # batch_size, action_seq_length, sequence_length, embed_dim
             n_embed = action_embeds.shape[-1]
             context_length = action_seq_length + action_seq_length * sequence_length
             input_embeds = torch.zeros(
                 (batch_size, context_length, n_embed),
-                dtype=action_embeds.dtype,
+                dtype=torch.float32,
                 device=device
             )
             for j in range(action_seq_length):
                 input_embeds[:, j * (1 + sequence_length): j * (1 + sequence_length) + sequence_length, :] = state_embeds[:, j, :, :]
             input_embeds[:, sequence_length::1 + sequence_length, :] = action_embeds
         else:
-            high_res_embed = self.cnn_downsample(high_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w))
-            low_res_embed = self.cnn_downsample(low_res_seq.to(action_embeds.dtype).reshape(batch_size * action_seq_length, c, h, w))
+            high_res_embed = self.cnn_downsample(high_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w))
+            low_res_embed = self.cnn_downsample(low_res_seq.to(torch.float32).reshape(batch_size * action_seq_length, c, h, w))
             high_res_embed = high_res_embed.reshape(batch_size, action_seq_length, -1)
             low_res_embed = low_res_embed.reshape(batch_size, action_seq_length, -1)
 
-            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(action_embeds.dtype)
+            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(torch.float32)
             n_embed = action_embeds.shape[-1]
             context_length = action_seq_length * 2
             input_embeds = torch.zeros(
                 (batch_size, context_length, n_embed),
-                dtype=action_embeds.dtype,
+                dtype=torch.float32,
                 device=device
             )
             input_embeds[:, ::2, :] = state_embeds  # index: 0, 2, 4, .., 18
@@ -294,6 +227,30 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             input_embeds = torch.cat([input_embeds, camera_image_embed], dim=1)
             context_length += 8 * 257
 
+        # add proposal embedding
+        if self.use_proposal:
+            if self.config.autoregressive_proposals:
+                intentions = kwargs.get('intentions', None)  # batch_size, 16
+                assert intentions is not None, "intentions should not be None when using proposal"
+                proposal_embeds = self.proposal_m_embed(intentions.unsqueeze(-1).float())  # batch_size, 16, 256
+                # print('test encoder 1: ', proposal_embeds.shape)
+                input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
+            else:
+                halfs_intention = kwargs.get("halfs_intention", None)
+                intentions = kwargs.get("intentions", None)
+                if halfs_intention is None:
+                    if len(intentions.shape) == 1:
+                        intentions = intentions.unsqueeze(0)  # add batch dimension
+                    halfs_intention = intentions[:, 0]
+                assert halfs_intention is not None, "halfs_intention should not be None when using proposal"
+                # check if halfs_intention is a scalar
+                if len(halfs_intention.shape) == 0:
+                    halfs_intention = halfs_intention.unsqueeze(0)  # add batch dimension
+                # print('test encoder 1: ', halfs_intention, halfs_intention.shape, halfs_intention.unsqueeze(-1).float().shape)
+                proposal_embeds = self.proposal_m_embed(halfs_intention.unsqueeze(-1).float()).unsqueeze(1)  # batch_size, 1, 256
+                # print('test encoder 2: ', proposal_embeds.shape)
+                input_embeds = torch.cat([input_embeds, proposal_embeds], dim=1)
+
         info_dict = {
             "trajectory_label": trajectory_label,
             "pred_length": pred_length,
@@ -301,100 +258,45 @@ class NuplanRasterizeEncoder(TrajectoryEncoder):
             "aug_current": aug_current,
         }
 
-        # add proposal embedding
-        if self.use_proposal:
-            assert self.config.traj_tokenizer == 'cluster_traj', 'only support cluster_traj for now'
-            # inpute_embedc -> bs,context_length+n_candi+1,256  (788->1301 (512+1))
-            input_embeds, info_dict, candi_embeds = self.get_proposal_cluster_embedding(info_dict, device, input_embeds,
-                                                                                        trajectory_label=trajectory_label)
-
         # add keypoints encoded embedding
         if self.use_key_points == 'no':
+            input_embeds = torch.cat([input_embeds,
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             info_dict['future_key_points'] = None
+            future_key_points = None
         else:
             future_key_points = self.select_keypoints(info_dict)
             assert future_key_points.shape[1] != 0, 'future points not enough to sample'
             # expanded_indices = indices.unsqueeze(0).unsqueeze(-1).expand(future_key_points.shape)
-            # argument future trajectory
-            future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk)  # bs, seq, 4
-            future_key_points_aug = future_key_points_aug[:, :, :2]
-
-            if self.config.separate_kp_encoder:
-                if self.config.kp_decoder_type == "mlp":
-                    # 1380 -> 1380+5=1385
-                    future_key_embeds = self.kps_m_embed(future_key_points_aug)
-                    input_embeds = torch.cat([input_embeds, future_key_embeds], dim=1)
+            if 'denoise_kp' in self.use_key_points:
+                future_key_points_aug = self.augmentation.kp_denoising(future_key_points.clone())
+                future_key_embeds = self.kps_m_embed(future_key_points_aug)
             else:
-                assert False, 'deprecated for clarity, use separate_kp_encoder instead'
+                # argument future trajectory
+                future_key_points_aug = self.augmentation.trajectory_linear_augmentation(future_key_points.clone(), self.config.arf_x_random_walk, self.config.arf_y_random_walk)
+                if not self.config.predict_yaw:
+                    # keep the same information when generating future points
+                    future_key_points_aug[:, :, 2:] = 0
+
+                if self.config.separate_kp_encoder:
+                    future_key_embeds = self.kps_m_embed(future_key_points_aug)
+                else:
+                    if self.config.use_speed:
+                        # padding speed, padding the last dimension from 4 to 7
+                        future_key_points_aug = torch.cat([future_key_points_aug, torch.zeros_like(future_key_points_aug)[:, :, :3]], dim=-1)
+                        future_key_embeds = self.action_m_embed(future_key_points_aug)
+                    else:
+                        future_key_embeds = self.action_m_embed(future_key_points_aug)
+
+            input_embeds = torch.cat([input_embeds, future_key_embeds,
+                                      torch.zeros((batch_size, pred_length, n_embed), device=device)], dim=1)
             info_dict['future_key_points'] = future_key_points
 
-        # padding the input_embeds with pred_length zeros
-        # 1385 -> 1385+80=1465
-        input_embeds = torch.cat([input_embeds,
-                                  torch.zeros((batch_size, pred_length, n_embed),
-                                              device=device,
-                                              dtype=action_embeds.dtype)], dim=1)
         info_dict['selected_indices'] = self.selected_indices
-        return input_embeds, info_dict
+        if self.use_proposal:
+            if self.config.autoregressive_proposals:
+                info_dict["intentions"] = intentions
+            else:
+                info_dict["halfs_intention"] = halfs_intention
 
-
-class NuplanRasterizeAutoRegressiveEncoder(NuplanRasterizeEncoder):
-    def forward(self, **kwargs):
-        high_res_raster = kwargs.get("high_res_raster", None)
-        low_res_raster = kwargs.get("low_res_raster", None)
-        trajectory = kwargs.get("trajectory_label", None)
-        aug_current = kwargs.get("aug_current", None)
-
-        is_training = kwargs.get("is_training", None)
-        assert is_training is not None, "is_training should not be None"
-        self.augmentation.training = is_training
-
-        assert trajectory is not None, "trajectory should not be None"
-        device = trajectory.device
-        _, trajectory_length = trajectory.shape[:2]
-
-        assert self.config.x_random_walk == 0 and self.config.y_random_walk == 0, "AutoRegressiveEncoder does not support random walk"
-        # assert not self.config.use_speed, "AutoRegressiveEncoder does not support speed, generating speed with autoregression is not reasonable"
-        action_embeds = self.action_m_embed(trajectory)
-
-        high_res_seq = high_res_raster.permute(0, 1, 4, 2, 3).to(device)
-        low_res_seq = low_res_raster.permute(0, 1, 4, 2, 3).to(device)
-        batch_size, raster_seq_length, c, h, w = high_res_seq.shape
-        assert c == self.config.raster_channels, "raster channel number should be {}, but got {}".format(self.config.raster_channels, c)
-
-        if self.config.raster_encoder_type == 'vit':
-            high_res_embed = self.image_downsample(pixel_values=high_res_seq.to(action_embeds.dtype).reshape(batch_size * raster_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
-            low_res_embed = self.image_downsample(pixel_values=low_res_seq.to(action_embeds.dtype).reshape(batch_size * raster_seq_length, c, h, w)).last_hidden_state[:, 1:, :]
-            # batch_size * context_length, 196 (14*14), embed_dim//2
-            _, sequence_length, half_embed = high_res_embed.shape
-            high_res_embed = high_res_embed.reshape(batch_size, raster_seq_length, sequence_length, half_embed)
-            low_res_embed = low_res_embed.reshape(batch_size, raster_seq_length, sequence_length, half_embed)
-
-            state_embeds = torch.cat((high_res_embed, low_res_embed), dim=-1).to(action_embeds.dtype)
-            n_embed = action_embeds.shape[-1]
-            embed_sequence_length = raster_seq_length + raster_seq_length * sequence_length  # each O occupy 196 states
-            input_embeds = torch.zeros(
-                (batch_size, embed_sequence_length, n_embed),
-                dtype=action_embeds.dtype,
-                device=device
-            )
-            for j in range(raster_seq_length):
-                # apply raster embedding to the input
-                input_embeds[:, j * (1 + sequence_length): j * (1 + sequence_length) + sequence_length, :] = state_embeds[:, j, :, :]
-            input_embeds[:, sequence_length::1 + sequence_length, :] = action_embeds
-        else:
-            assert False, "AutoRegressiveEncoder does not support ResNet encoder"
-
-        assert self.camera_image_encoder is None, "AutoRegressiveEncoder does not support camera image encoder"
-        assert not self.use_proposal, "AutoRegressiveEncoder does not support proposal"
-        assert self.use_key_points == 'no', "AutoRegressiveEncoder does not support key points"
-
-        info_dict = {
-            "trajectory_label": trajectory,
-            "context_length": kwargs.get('past_frame_num')[0] * (1 + sequence_length) + 1,  # OAOAO -> A
-            "aug_current": aug_current,
-            "selected_indices": self.selected_indices,
-            "pred_length": kwargs.get('future_frame_num')[0],
-            "sequence_length": sequence_length
-        }
         return input_embeds, info_dict
