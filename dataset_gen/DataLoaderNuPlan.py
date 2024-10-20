@@ -521,6 +521,7 @@ class NuPlanDL:
                     # init
                     new_dic = {'pose': np.ones([total_frames, 4], dtype=np.float32) * -1,
                                'shape': np.ones([total_frames, 3], dtype=np.float32) * -1,
+                               "speed": np.ones([total_frames, 1], dtype=np.float32) * -1,
                                'type': int(agent_type),
                                'is_sdc': 0, 'to_predict': 0,
                                'starting_frame': i,
@@ -528,8 +529,11 @@ class NuPlanDL:
                     agent_dic[token] = new_dic
                 poses_np = agent_dic[token]['pose']
                 shapes_np = agent_dic[token]['shape']
+                speed_np = agent_dic[token]["speed"]
                 poses_np[i, :] = [each_agent.center.x, each_agent.center.y, 0, each_agent.center.heading]
                 shapes_np[i, :] = [each_agent.box.width, each_agent.box.length, 2]
+
+                speed_np[i, :] = [np.sqrt(each_agent._velocity.x ** 2 + each_agent._velocity.y ** 2)]
                 agent_dic[token]['ending_frame'] = i
             if current_pc != last_lidar_pc:
                 current_pc = current_pc.next
@@ -548,6 +552,7 @@ class NuPlanDL:
             if ending_frame == -1:
                 agent_dic[key]['pose'] = agent_dic[key]['pose'][starting_frame:, :]
                 agent_dic[key]['shape'] = agent_dic[key]['shape'][starting_frame:, :]
+                agent_dic[key]['speed'] = agent_dic[key]['speed'][starting_frame:, :]
             elif ending_frame <= 0 or ending_frame <= starting_frame:
                 if ending_frame == starting_frame:
                     # skip agent with only one valid frame
@@ -557,14 +562,15 @@ class NuPlanDL:
             else:
                 agent_dic[key]['pose'] = agent_dic[key]['pose'][starting_frame:ending_frame, :]
                 agent_dic[key]['shape'] = agent_dic[key]['shape'][starting_frame:ending_frame, :]
+                agent_dic[key]['speed'] = agent_dic[key]['speed'][starting_frame:ending_frame, :]
 
         # convert to float16 to save disk space: ERROR: float16 does not have enough space for pose
         for key in agent_dic.keys():
             # change 20hz into 10hz to save disk space
             agent_dic[key]['pose'] = agent_dic[key]['pose'][::sample_interval, :].astype(np.float32)
             agent_dic[key]['shape'] = agent_dic[key]['shape'][::sample_interval, :].astype(np.float16)
-            if key == 'ego':
-                agent_dic[key]['speed'] = agent_dic[key]['speed'][::sample_interval, :].astype(np.float32)
+            # if key == 'ego':
+            agent_dic[key]['speed'] = agent_dic[key]['speed'][::sample_interval, :].astype(np.float32)
         skip = False
         if not agent_only:
             road_dic = self.pack_scenario_to_roaddic(starting_scenario, map_radius=100,

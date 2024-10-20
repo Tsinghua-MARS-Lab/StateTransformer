@@ -1,0 +1,1 @@
+python generation.py  --num_proc 1 --sample_interval 1  --dataset_name vegas6_v2  --starting_file_num 0  --ending_file_num 100000000  --cache_folder /localssd  --data_path train_vegas_6  --only_data_dic --dataset_root /localssd

@@ -446,7 +446,7 @@ def main(args):
     elif args.only_data_dic:
         nuplan_dataset = Dataset.from_generator(yield_data_dic,
                                                 gen_kwargs={'shards': file_indices},
-                                                writer_batch_size=10, cache_dir=args.cache_folder,
+                                                writer_batch_size=1, cache_dir=args.cache_folder,
                                                 num_proc=args.num_proc,
                                                 features=Features({"file_name": Value("string")})
                                                 )
