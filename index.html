@@ -1,1067 +1,806 @@
-<!DOCTYPE HTML>
-<html>
-	<head>
-		<title>Large Trajectory Models are Scalable Motion Predictors and Planners</title>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-		<link rel="stylesheet" href="assets/css/main.css" />
-		<noscript><link rel="stylesheet" href="assets/css/noscript.css" /></noscript>
-		<link href="images/favicon.png" rel="shortcut icon" />
-	</head>
-	<body class="is-preload">
-
-		<!-- Wrapper -->
-			<div id="wrapper" class="divided">
-
-				<!-- One -->
-					<section class="banner style1 orient-left content-align-center image-position-center fullscreen onload-image-fade-in onload-content-fade-right">
-						<div class="content">
-							<!-- <h1>InterSim</h1> -->
-							<!-- <p>* Denotes equal contribution</p> -->
-							<h2>Large Trajectory Models are Scalable Motion Predictors and Planners</h2>
-							<!-- <h3>A Simulator for <strong>Interactive</strong> Behaviour Simulations</h3> -->
-							<p><a href="https://scholar.google.com/citations?user=D1KNQasAAAAJ&amp;hl=en&amp;authuser=1">Qiao Sun</a><sup>1</sup>,
-								<a href="">Shiduo Zhang</a><sup>1,2</sup>,
-								<a href="">Danjiao Ma</a><sup>3</sup>,
-								<a href="">Jingzhe Shi</a><sup>1,4</sup>,
-								<a href="">Derun Li</a><sup>1,5</sup>,
-								<a href="">Simian Luo</a><sup>1,4</sup>,
-								<a href="">Yu Wang</a><sup>3</sup>,
-								<a href="">Ningyi Xu</a><sup>5</sup>,
-								<a href="">Guangzhi Cao</a><sup>3</sup>,
-								<a href="https://hangzhaomit.github.io/">Hang Zhao</a><sup>1,4</sup>
-							</p>
-							<h5><sup>1</sup> Shanghai Qi Zhi Institute, <sup>2</sup> Fudan University, <sup>3</sup> Pegasus Tech,  <sup>4</sup> IIIS, Tsinghua University,  <sup>5</sup> Shanghai Jiaotong University</h5>
-							<!-- <h3>IROS 2022</h3> -->
-							<!-- <p>InterSim is a simulator that loads real world dataset and run <strong>interactive</strong> closed-loop simulations. 
-								InterSim minimizes the sim2real gap by explicitly modeling the relations of the surrouding traffic. </p> -->
-							<!-- <p>Coming Soon! <br> Stay tuned for our presentation and beta release on IROS 2022, Wed 26 Oct 2022.</p> -->
-							<!-- <p class="major">A (modular, highly tweakable) responsive one-page template designed by <a href="https://html5up.net">HTML5 UP</a> and released for free under the <a href="https://html5up.net/license">Creative Commons</a>.</p> -->
-							<div class="inner">
-								<ul class="icons">
-									<li><a href="https://github.com/Tsinghua-MARS-Lab/StateTransformer" class="icon brands style2 fa-github"><span class="label">Github</span></a></li>
-									<li><a href="https://arxiv.org/abs/2310.19620" class="icon style2 fa-file-pdf"><span class="label">Arxiv</span></a></li>
-								</ul>
-							</div>
-							<ul class="actions stacked">
-								<li><a href="#third" class="button big wide smooth-scroll-middle">Learn More</a></li>
-							</ul>
-						</div>
-						<div class="image">
-							<img src="images/teaser.png" alt="" />
-						</div>
-					</section>
-
-				<!-- Closed-loop_Simulation -->
-				<!--
-				<section class="spotlight style1 fullscreen orient-right content-align-left image-position-right" id="first">
-					<div class="content">
-						<h2>Abstract</h2>
-						<p>
-							Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches.
-							The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space.
-							Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called <strong>State Transformer (STR)</strong>. <br>
-							STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
-							Our approach unites trajectory generation problems with other sequence modeling problems, powering rapid iterations with breakthroughs in neighbor domains such as language modeling. <br>
-							Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the <strong>scaling laws</strong> by presenting outstanding adaptability and learning efficiency.
-							Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
-						<ul class="actions stacked">
-							<li><a href="#second" class="button big wide smooth-scroll-middle">Next</a></li>
-						</ul>
-					</div>
-					<div class="image">
-						<img src="images/traffic.png" alt="">
-					</div>
-				</section>
-				-->
-
-
-				<!-- dashboard -->
-				<!-- 
-				<section class="spotlight style4 fullscreen orient-left content-align-left image-position-right" id="second">
-					<div class="content">
-						<h2>Dashboard</h2>
-						<p>Forget about complex versions and directories configurations. <br>
-							InterSim dashboard helps you to focus on what is important with diverse default and customized settings. <br>
-							You can upload your predictors and planners, select the configs, launch a simulation and check them with our dashboard. Here are some simulation results with playbacks from the <a href="https://waymo.com/open/">Waymo Open Motion Dataset</a>. </p>
-						<ul class="actions stacked">
-							<li><a href="#third" class="button big wide smooth-scroll-middle">Next</a></li>
-						</ul>
-					</div>
-					<div class="image">
-						<img src="images/intersim_simlist_1.png" alt="">
-					</div>
-				</section>
-
-				-->
-
-				<section class="wrapper style1 align-left" id="third">
-					<div class="inner">
-						<h2>Abstract</h2>
-						<p>	Motion prediction and planning are vital tasks in autonomous driving, and recent efforts have shifted to machine learning-based approaches.
-							The challenges include understanding diverse road topologies, reasoning traffic dynamics over a long time horizon, interpreting heterogeneous behaviors, and generating policies in a large continuous state space.
-							Inspired by the success of large language models in addressing similar complexities through model scaling, we introduce a scalable trajectory model called <strong>State Transformer (STR)</strong>.
-							STR reformulates the motion prediction and motion planning problems by arranging observations, states, and actions into one unified sequence modeling task.
-							Our approach unites trajectory generation problems with other sequence modeling problems, powering rapid iterations with breakthroughs in neighbor domains such as language modeling.
-							Remarkably, experimental results reveal that large trajectory models (LTMs), such as STR, adhere to the <strong>scaling laws</strong> by presenting outstanding adaptability and learning efficiency.
-							Qualitative results further demonstrate that LTMs are capable of making plausible predictions in scenarios that diverge significantly from the training data distribution. LTMs also learn to make complex reasonings for long-term planning, without explicit loss designs or costly high-level annotations.
-						</p>
-					</div>
-				</section>
-
-				<section class="wrapper style1 align-left">
-					<div class="inner">
-						<h2>State Transformer</h2>
-						<p>The main idea is to formulate the future states prediction problem as a conditional sequence modeling problem. This formulation
-arranges the observations, the past states, and the future states into one large sequence. This formulation is maintained as general, allowing it to be applicable for both motion planning and motion
-prediction tasks with diverse intermediate supervisions or priors.
-						</p>
-						<span class="image main"><img src="images/pipeline.gif" alt=""></span>
-					</div>
-				</section>
-
-				<section class="wrapper style1 align-left">
-					<div class="inner">
-						<h2>Scalability Analysis</h2>
-						<p>These two figures demonstrate the substantial scalability of STR, illustrating the scaling laws for training LTMs. The left figure reveals that LTMs exhibit smooth scalability with the size of the training dataset. When the training is not constrained by the size of the dataset, larger trajectory models tend to converge to a lower evaluation loss. The right figure shows that larger trajectory models learn faster to converge than their smaller counterparts, indicating superior data efficiency.
-						</p>
-						<span class="image main"><img src="images/scaling.png" alt=""></span>
-					</div>
-				</section>
-
-
-				<!-- Relation prediction demos -->
-
-				<section class="wrapper style1 align-left">
-					<div class="inner">
-						<h2>Qualitative analysis</h2>
-						<p>Qualitative analysis on trajectory models of different scales. The route given for each
-							scenario is marked as green roadblocks. The ego vehicle to plan is marked as the dark blue box.
-							All the other road users are marked as green boxes with their given size of shape as well as the yaw
-							angles. The planning results are marked as larger circles in orange for larger models and purple for
-							smaller models. These circles are sampled at every second from the trajectory of 8 seconds in total.
-						</p>
-						<span class="image main"><img src="images/qualitative.png" alt=""></span>
-<!--						<img width=80% height=auto src="images/qualitative.png" alt="" />-->
-					</div>
-<!--					<div class="spotlight onscroll-fade-in">-->
-<!--						<span class="video">-->
-<!--							<video controls autoplay muted loop class="html-video" width=100% height=auto>-->
-<!--								<source src="videos/demo_compress_2.mp4" type="video/mp4">-->
-<!--								</video>-->
-<!--							</span>-->
-<!--					</div>-->
-				</section>
-
-				<!--
-				<section class="wrapper style1 align-left">
-					<div class="inner">
-						<h2>Play with More Demos</h2>
-						<p>This visualization loops through 30 randomly chosen simulations with the Waymo Open Motion Dataset - Interactive Validation Subset.
-							The white vehicle is controlled by a fairly basic planner. 
-							The yellow agents, if any, were detected as relevant agents and hence controlled by the simulator.
-							The red pin is the goal point assigned to the ego vehicle.
-						</p>
-						<p>Drag to move the center of the visualization in case of misalignment. </p>
-						<div class="spotlight", id="canvas">
-						</div>
-					</div>
-
-				</section>
-
-
-				<section class="wrapper style1 align-left">
-					<div class="inner">
-						<h2>Contact Us</h2>
-						<p>
-							We release InterSim Beta as an open-source project. 
-							We hope this tool can help the community push the frontline of interactive planning systems. 
-							If you are enlightened, please consider citing our paper. 
-							If you like our idea and want to give your planner a test, follow our easier-than-you-thought tutorials and fork our codes. 
-							Moreover, building a realistic planning simulator is a big challenge demanding broad collaborations across multiple communities. 
-							If you are annoyed by some bugs, unfinished functions, or lacking fundamental extensions, 
-							please consider contributing your effort and building it for all. 
-							And you are more than welcome to connect with us if you don't know where to start.
-						</p>
-						
-						<div class="index align-left">
-							
-							<form action="https://submit-form.com/3TNtd6SQ">
-								<div class="fields">
-									<div class="field half">
-										<label for="name">Name</label>
-										<input type="text" id="name" name="name" value=""/>
-									</div>
-									<div class="field half">
-										<label for="email">Email</label>
-										<input type="email" name="email" id="email" value="">
-									</div>
-									<div class="field">
-										<label for="message">Message</label>
-										<textarea name="message" id="message" rows="5"></textarea>
-									</div>
-									<div class="field align-center">
-										<ul class="actions">
-											<li><input type="submit" name="submit" id="submit" value="Send This Message"></li>
-										</ul>
-									</div>
-
-								</div>
-
-							</form>
-						</div>					
-					</div>					
-				</section>
-				-->
-
-				<section class="wrapper style1 align-center">
-					<div class="inner">
-						<h2>Citing</h2>
-						<blockquote style="text-align:left; background-color:#EEEEEE">
-							@article{sun2023large,<br>
-							  title={Large Trajectory Models are Scalable Motion Predictors and Planners},<br>
-							  author={Sun, Qiao and Zhang, Shiduo and Ma, Danjiao and Shi, Jingzhe and Li, Derun and Luo, Simian and Wang, Yu and Xu, Ningyi and Cao, Guangzhi and Zhao, Hang},<br>
-							  journal={arXiv preprint arXiv:2310.19620},<br>
-							  year={2023}<br>
-							}
-							</blockquote>						
-					</div>					
-				</section>
-			</div>
-
-		<!-- Scripts -->
-			<script src="assets/js/jquery.min.js"></script>
-			<script src="assets/js/jquery.scrollex.min.js"></script>
-			<script src="assets/js/jquery.scrolly.min.js"></script>
-			<script src="assets/js/browser.min.js"></script>
-			<script src="assets/js/breakpoints.min.js"></script>
-			<script src="assets/js/util.js"></script>
-			<script src="assets/js/main.js"></script>
-
-
-
-
-
-
-
-
-
-			
-			<script>
-			  jQuery(document).ready(function() {
-				jQuery('input[name="dateRange"]').daterangepicker({
-				autoUpdateInput: false,
-				singleDatePicker: true,
-				locale: {
-				  cancelLabel: 'Clear'
-				}
-			  });
-				jQuery('input[name="dateRange"]').on('apply.daterangepicker', function (ev, picker) {
-				  jQuery(this).val(picker.startDate.format('MM/DD/YYYY'));
-				});
-				jQuery('input[name="dateRange"]').on('cancel.daterangepicker', function (ev, picker) {
-				  jQuery(this).val('');
-				});
-			  });
-			</script>
-
-			<!-- <script type="module" src="js/draw.js"></script> -->
-			<script src="assets/js/two.js"></script>
-			<script src="assets/js/zui.js"></script>
-
-			
-
-			<script>
-			  var params = {
-			  fitted: true,
-			  autostart: true
-			  };
-			  
-
-			  var elem = document.getElementById('canvas');
-			  var two = new Two(params).appendTo(elem);
-			  // two.renderer.domElement.style.background = 'rgb(0, 191, 168)';
-			  two.renderer.domElement.style.background = 'rgb(0, 128, 150)';
-			  // two.renderer.domElement.style.background = 'black';
-			  // two.width = elem.clientWidth - 70;
-			  // two.height = elem.clientHeight - 70;
-			  two.height = elem.clientHeight + 90;
-
-			  var stage = new Two.Group();
-			  var understage = new Two.Group();
-			  var shape = new Two.Rectangle(0, 0, 1, 1);
-			  var offsets = undefined;
-
-			  // LANE = 0
-			  // INTERSECTION = 1
-			  // STOP_LINE = 2
-			  // TURN_STOP = 3
-			  // CROSSWALK = 4
-			  // DRIVABLE_AREA = 5
-			  // YIELD = 6
-			  // TRAFFIC_LIGHT = 7
-			  // STOP_SIGN = 8
-			  // EXTENDED_PUDO = 9
-			  // SPEED_BUMP = 10
-			  // LANE_CONNECTOR = 11
-			  // BASELINE_PATHS = 12
-			  // WALKWAYS = 13
-			  // CARPARK_AREA = 14
-			  // PUDO = 15
-			  // ROADBLOCK = 16
-			  // ROADBLOCK_CONNECTOR = 17
-			  var sceneIndex = 0;
-			  var totalScenes = undefined;
-			  var allScenes = undefined;
-			  var shownScenes = 0;
-
-			  var accu_dx = 0;
-			  var accu_dy = 0;
-
-			  const polyTypes = [16, 1];
-			  var lineTypes = [0];
-			  const rectTypes = [99];
-			  const scale = 3;
-			  const lineWidth = 1;
-			  const xReverse = -1;
-			  var agentPoly = {};
-			  const btnOffset = 70;
-			  var isPlaying = true;
-			  var currentFrame = 0;
-			  var totalFrame = undefined;
-			  var loadedData = undefined;
-			  var agentGroup = new Two.Group();
-			  var mapGroup = new Two.Group();
-			  var goalGroup = new Two.Group();
-			  var percCirclesGroup = new Two.Group();
-			  var offsetFromLastFrame = [0, 0, 0];
-			  var maxFrames = 80;
-			  var lanes_to_mark = undefined;
-			  var goal_pts = undefined;      
-			  var currentScene = 0;    
-			  var egoId = 'ego';          
-
-			  const datasetName = 'Waymo';
-			  var loadDemo = true;
-
-			  var playBtn = two.load('images/icons/play.svg');
-			  var pauseBtn = two.load('images/icons/pause.svg');
-
-			  function drawPoly(dic, selected){
-				const roadType = dic['type'];
-				if (selected.includes(roadType)){
-				  var pointsArray = new Array();
-				  const points = dic['xyz'];
-				  for (let xyzArray of points){
-					if (offsets === undefined){
-					  offsets = [-xyzArray[0], -xyzArray[1]];
-					}
-					pointsArray.push(new Two.Anchor((xyzArray[0]+offsets[0])*scale*xReverse, (xyzArray[1]+offsets[1])*scale));
-				  }
-				  var poly = two.makePath(pointsArray);
-				  // draw polygons
-				  // var poly = new two.makePath);
-				  poly.linewidth = lineWidth / 2;
-				  poly.opacity = 0.5;
-				  if (polyTypes.includes(roadType)){
-					poly.fill = 'gray';
-					poly.opacity = 1;
-				  }
-				  else if (roadType == 4){
-					poly.fill = 'white';
-				  }
-				  else if (roadType == 2){
-					poly.fill = 'red';
-				  }
-				  else if (roadType == 13){
-					poly.fill = 'brown';
-				  }
-				  else if (roadType == 14){
-					poly.fill = 'blue';
-				  }
-				  else{
-					poly.fill = 'black';
-				  }
-				  mapGroup.add(poly);
-				}
-			  }
-			  
-			  function drawALine(points, arrow, color, dash, continuous = false){
-				var ptCounter = 0;
-				var prev_x = undefined;
-				var prev_y = undefined;
-				var interval = 0;
-				if (dash){
-				  interval = 10;
-				}
-				for (let xyzArray of points){
-				  if (ptCounter == interval){
-					ptCounter = 0;
-				  }
-				  else{
-					ptCounter ++;
-					continue;
-				  }
-				  if (prev_x === undefined){
-					prev_x = (xyzArray[0] + offsets[0]) * scale * xReverse;
-					prev_y = (xyzArray[1] + offsets[1]) * scale;
-				  }
-				  else{
-					x = (xyzArray[0] + offsets[0]) * scale * xReverse;
-					y = (xyzArray[1] + offsets[1]) * scale;
-					if (arrow){
-					  var line = two.makeArrow(prev_x, prev_y, x, y);
-					  line.linewidth = lineWidth*3;
-					}
-					else{
-					  var line = two.makeLine(prev_x, prev_y, x, y);
-					  // line.stroke = 'white';
-					  line.linewidth = lineWidth;
-					}
-					prev_x = x;
-					prev_y = y;
-					line.stroke = color;
-					mapGroup.add(line);
-					if (!continuous){
-					  prev_x = undefined;
-					  prev_y = undefined;
-					}
-				  }
-				}
-			  }
-			  function drawLanes(roads){
-				if (datasetName === 'Waymo'){
-				  for (var key in roads){
-					const dic = roads[key];
-					var roadType = dic['type'];
-					if (Array.isArray(roadType)){
-					  roadType = roadType[0];
-					}
-					const pointsToGo = dic['xyz'];
-					if (roadType == 1){
-					  drawALine(pointsToGo, false, 'brown', false);
-					}
-					if (roadType == 2){
-					  drawALine(pointsToGo, false, 'rgba(80,0,94,1)', false);
-					}
-					if (roadType == 3){
-					  drawALine(pointsToGo, false, 'blue', false);
-					}
-					if (roadType == 6){
-					  drawALine(pointsToGo, false, 'white', true);
-					}
-					if (roadType == 8){
-					  drawALine(pointsToGo, false, 'white', false, true);
-					}
-					if (roadType == 9){
-					  drawALine(pointsToGo, false, 'yellow', false, true);
-					}
-					if (roadType == 10){
-					  drawALine(pointsToGo, false, 'rgba(235, 207, 111, 1)', true);
-					}
-					if (roadType == 11){
-					  drawALine(pointsToGo, false, 'yellow', false, true);
-					}
-					if (roadType == 12){
-					  drawALine(pointsToGo, false, 'yellow', false, true);
-					}
-					if (roadType == 13){
-					  drawALine(pointsToGo, false, 'rgba(235, 207, 111, 1)', false, true);
-					}
-					if (roadType == 15){
-					  drawALine(pointsToGo, false, 'green', false, true);
-					}
-					if (roadType == 16){
-					  drawALine(pointsToGo, false, 'rgba(0, 235, 132, 1)', false, true);
-					}
-					if (roadType == 18){
-					  drawALine(pointsToGo, false, 'purple', false, true);
-					}
-					if (roadType == 19){
-					  drawALine(pointsToGo, false, 'red', false, true);
-					}
-				  }
-				}
-				if (datasetName === 'NuPlan'){
-				  for (var key in roads) {
-					const dic = roads[key];
-					var roadType = dic['type'];
-					if (Array.isArray(roadType)){
-					  roadType = roadType[0];
-					}
-					const pointsToGo = dic['xyz'];
-					if (lineTypes.includes(roadType)){
-					  var to_mark = false;
-					  var colorToGo = 'white'
-					  var dashToGO = true;
-					  if (lanes_to_mark !== undefined && lanes_to_mark.includes(key)){
-						to_mark = true;
-						colorToGo = 'black'
-						dashToGO = true;
-					  }
-					  drawALine(pointsToGo, to_mark, colorToGo, dashToGO);
-
-					  // var ptCounter = 0;
-					  // prev_x = undefined;
-					  // prev_y = undefined;
-					  // const points = dic['xyz'];
-
-					  // if (offsets === undefined){
-					  //     offsets = [-points[0][0], -points[0][1]];
-					  //   }
-					  // x0 = (points[0][0] + offsets[0]) * scale * xReverse;
-					  // y0 = (points[0][1] + offsets[1]) * scale;
-					  // if (true){  // (Math.abs(x0) < 3000 && Math.abs(y0) < 3000){
-					  //   for (let xyzArray of points){
-					  //     if (ptCounter == 10){
-					  //       ptCounter = 0;
-					  //     }
-					  //     else{
-					  //       ptCounter ++;
-					  //       continue;
-					  //     }
-					  //     if (prev_x === undefined){
-					  //       prev_x = (xyzArray[0] + offsets[0]) * scale * xReverse;
-					  //       prev_y = (xyzArray[1] + offsets[1]) * scale;
-					  //     }
-					  //     else{
-					  //       x = (xyzArray[0] + offsets[0]) * scale * xReverse;
-					  //       y = (xyzArray[1] + offsets[1]) * scale;
-					  //       if (lanes_to_mark !== undefined && lanes_to_mark.includes(key)){
-					  //         var line = two.makeArrow(prev_x, prev_y, x, y);
-					  //         prev_x = x;
-					  //         prev_y = y;
-					  //         line.stroke = 'black';
-					  //         line.linewidth = lineWidth*3;
-					  //       }
-					  //       else{
-					  //         var line = two.makeLine(prev_x, prev_y, x, y);
-					  //         prev_x = x;
-					  //         prev_y = y;
-					  //         line.stroke = 'white';
-					  //         line.linewidth = lineWidth;
-					  //     }
-					  //       mapGroup.add(line);
-					  //       prev_x = undefined;
-					  //       prev_y = undefined;
-					  //     }
-					  //   }
-					  // }
-					}
-				  }
-				}
-			  }
-			  function drawMap(roads){
-				for (var key in roads) {
-				  drawPoly(roads[key], polyTypes);  // 17=1
-				}
-				// draw lanes
-				drawLanes(roads);
-				// draw others
-				for (var key in roads) {
-				  drawPoly(roads[key], [2, 4, 13, 14, 7, 8]);  // no 3, 5, 6
-				}
-				// draw parking lots
-				for (var key in roads) {  
-				  const dic = roads[key];
-				  const roadType = dic['type'];
-				  if (rectTypes.includes(roadType)){
-					const points = dic['xyz'];
-					rectShape = dic['shape'];
-					x = (points[0] + offsets[0]) * scale * xReverse;
-					y = (points[1] + offsets[1]) * scale;
-					var rect = two.makeRectangle(x, y, rectShape[0]*scale, rectShape[1]*scale);
-					rect.rotation = Math.PI/2 - dic['dir'];
-					rect.fill = 'white';
-					rect.opacity = 0.3;
-					mapGroup.add(rect);
-				  }                          
-				}
-
-				// draw circle
-				circle = two.makeCircle(two.width / 4, two.height / 4, 300*scale);
-				// circle.fill = 'gray';
-				circle.opacity = 0.2;
-				circle.stroke = 'red';
-				percCirclesGroup.add(circle);
-				circle = two.makeCircle(two.width / 4, two.height / 4, 150*scale);
-				// circle.fill = 'gray';
-				circle.stroke = 'green';
-				circle.opacity = 0.2;
-				percCirclesGroup.add(circle);
-				stage.add(percCirclesGroup);
-				stage.add(mapGroup);
-
-				understage.add(stage);
-				two.add(understage);
-				// two.add(stage);
-			  }
-
-			  function drawScenario(dataDic, scenarioId){
-				var agents = dataDic[scenarioId]['agent'];
-				for (var key in agents){
-				  [x, y, z, yaw] = agents[key]['pose'][0];
-				  if (totalFrame === undefined){
-					totalFrame = agents[key]['pose'].length;
-				  }
-				  else{
-					totalFrame = Math.min(totalFrame, agents[key]['pose'].length);
-				  }
-				  // yaw = 0;
-				  if (x == -1){
-					continue;
-				  }
-				  [w, h] = agents[key]['shape'][0];
-
-				  var pointsArray = new Array();
-				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse-w*scale/2, (y+offsets[1])*scale-h*scale/2));
-				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale-h*scale/2*1.3));
-				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse+w*scale/2, (y+offsets[1])*scale-h*scale/2));
-				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse+w*scale/2, (y+offsets[1])*scale+h*scale/2));
-				  pointsArray.push(new Two.Anchor((x+offsets[0])*scale*xReverse-w*scale/2, (y+offsets[1])*scale+h*scale/2));
-				  var poly = two.makePath(pointsArray);
-
-				  // poly = new Two.Rectangle((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale, w*scale, h*scale);
-				  if (key == egoId){
-					poly.fill = 'white';
-				  }
-				  else{
-					if ('predicting' in dataDic[scenarioId] && 'relevant_agents' in dataDic[scenarioId]['predicting'] && dataDic[scenarioId]['predicting']['relevant_agents'].includes(parseInt(key))){
-						poly.fill = 'yellow';
-					}
-					// if ('action' in agents){
-					// 	poly.fill = 'yellow';
-					// }
-					else{
-						poly.fill = 'green';
-					}
-				  }
-				  // poly.rotation = -Math.PI/2+yaw;
-				  // Math.PI/2 - dic['dir'];
-				  // poly.rotation = yaw;
-				  poly.rotation = -yaw - Math.PI/2;
-				  agentPoly[key] = poly;
-				  agentGroup.add(poly);
-				}
-				stage.add(agentGroup);
-			  }
-
-			  function drawGoals(dataDic, scenarioId){
-				// var goals = dataDic[scenarioId]['ltp_goals'];
-				// if (goals !== undefined){
-				//   goalGroup = new Two.Group();
-				//   for (var goal of goals){
-				//     const pt = goal[0];
-				//     [x, y] = pt;
-				//     // poly = two.makeArrow((x+offsets[0])*scale*xReverse, (y-5+offsets[1])*scale, 
-				//     // (x+offsets[0])*scale*xReverse, (y+offsets[1])*scale, 30);
-				//     // poly.center();
-				//     // poly.position.x = (x+offsets[0])*scale*xReverse;
-				//     // poly.position.y = (y+offsets[1])*scale;
-				//     // poly.stroke = 'red';
-				//     var line = two.makeLine((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale,
-				//     (x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale);
-				//     line.stroke = 'black';
-				//     goalGroup.add(line);
-				//     var circle = two.makeCircle((x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale, 2*scale);
-				//     circle.fill = 'red';
-				//     goalGroup.add(circle);
-				//   }
-				// }
-				// stage.add(goalGroup);
-				if (goal_pts !== undefined){
-				  goalGroup = new Two.Group();
-				  [x, y] = goal_pts;
-				  var line = two.makeLine((x+offsets[0])*scale*xReverse, (y+offsets[1])*scale, (x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale);
-				  line.stroke = 'black';
-				  goalGroup.add(line);
-				  var circle = two.makeCircle((x+offsets[0])*scale*xReverse, (y-6+offsets[1])*scale, 2*scale);
-				  circle.fill = 'red';
-				  goalGroup.add(circle);                          
-				  stage.add(goalGroup);
-				}
-			  }
-
-			  function setOffset(){
-				if (loadedData !== undefined && currentFrame !== undefined){
-				  if (datasetName == 'Waymo'){
-					egoId = loadedData['predicting']['ego_id'][1];
-					var ego = loadedData['agent'][egoId];
-				  }
-				  if (datasetName == 'NuPlan'){
-					egoId = 'ego';
-					var ego = loadedData['agent'][egoId];
-				  }
-				  [x, y, z, yaw] = ego['pose'][currentFrame];
-				  if (offsets !== undefined){
-					var dx = -x - two.width / 4 / scale - offsets[0];
-					var dy = -y + two.height / 4 / scale - offsets[1];
-					// var dyaw = -yaw - offsets[2];
-					// offsetFromLastFrame = [dx, dy, dyaw];
-					offsetFromLastFrame = [dx, dy, 0];
-				  }
-				  // offsets = [-x - two.width / 4 / scale, -y + two.height / 4 / scale, -yaw];
-				  // offsets = [-x - two.width / 4 / scale, -y + two.height / 4 / scale, yaw*xReverse];
-				  offsets = [-x - two.width / 4 / scale, -y + two.height / 4 / scale, 0];
-				}
-
-				if (lanes_to_mark === undefined){
-				  lanes_to_mark = [];
-				  if (ego['current_route'] !== undefined){
-					for (const each_route of ego['current_route']){
-					for (const lane_id of each_route){
-					  if (!lanes_to_mark.includes(lane_id)){
-						lanes_to_mark.push(lane_id);
-					  } 
-					}
-					}
-				  }
-				  if (loadedData['predicting']['route'][egoId] !== undefined){
-					for (const each_lane_id of loadedData['predicting']['route'][egoId]){
-					  if (!lanes_to_mark.includes(each_lane_id)){
-						lanes_to_mark.push(each_lane_id);
-					  }
-					}
-				  }
-				}
-
-				if (goal_pts === undefined){
-				  if (loadedData['goals'] !== undefined){
-					goal_pts = loadedData['goals'][egoId][0][0];
-				  }
-				  if (loadedData['predicting']['goal_pts'][egoId] !== undefined){
-					goal_pts = loadedData['predicting']['goal_pts'][egoId][0];
-				  }
-				  
-				}
-			  }
-
-			  function addBtn(){
-				  
-				  var btnGroup = new Two.Group();
-
-				  var panel = two.makeRoundedRectangle(two.width/2 + 65, two.height - 123, 390, 70, 35);
-				  panel.fill = 'white';
-				  btnGroup.add(panel);
-
-				  playBtn.position.set(two.width/2 + 50, two.height-140);
-				  playBtn.scale = 0.07;
-				  // playBtn.opacity = 1;
-				  btnGroup.add(playBtn);
-
-				  pauseBtn.position.set(two.width/2 + 50, two.height-140);
-				  pauseBtn.scale = 0.75;
-				  pauseBtn.opacity = 0;
-				  btnGroup.add(pauseBtn);
-
-				  var nextFrameBtn = two.load('images/icons/next-frame.svg');
-				  nextFrameBtn.position.set(two.width/2 + 50 + btnOffset, two.height-140);
-				  nextFrameBtn.scale = 0.12;
-				  btnGroup.add(nextFrameBtn);
-
-				  var nextScenarioBtn = two.load('images/icons/next-scenario.svg');
-				  nextScenarioBtn.position.set(two.width/2 + 50 + btnOffset * 2, two.height-140);
-				  nextScenarioBtn.scale = 0.07;
-				  btnGroup.add(nextScenarioBtn);
-
-				  var previousFrameBtn = two.load('images/icons/previous-frame.svg');
-				  previousFrameBtn.position.set(two.width/2 + 50 - btnOffset, two.height-140);
-				  previousFrameBtn.scale = 0.07;
-				  btnGroup.add(previousFrameBtn);
-
-				  var previousScenarioBtn = two.load('images/icons/previous-scenario.svg');
-				  previousScenarioBtn.position.set(two.width/2 + 50 - btnOffset * 2, two.height-140);
-				  previousScenarioBtn.scale = 0.07;
-				  btnGroup.add(previousScenarioBtn);
-
-				  var previousScenarioBtn = two.load('images/icons/previous-scenario.svg');
-				  previousScenarioBtn.position.set(two.width/2 + 50 - btnOffset * 2, two.height-140);
-				  previousScenarioBtn.scale = 0.07;
-				  btnGroup.add(previousScenarioBtn);
-
-				  two.add(btnGroup);
-				}
-			
-			
-			  if (loadDemo){
-				fetch("demo/validation_interactive_tfexample.tfrecord-00009-of-00150.json")
-				  .then(response => response.json())
-				  .then(data => {
-					allScenes = data;
-					keys = Object.keys(data);
-					totalScenes = keys.length;
-					sceneIndex = Math.floor(Math.random()*totalScenes);
-					const key = keys[sceneIndex];
-					loadedData = data[key];
-
-					if (loadedData['info'] !== undefined){
-						maxFrames = loadedData['info']['max_frames'];
-					}
-					const roads = loadedData['road'];
-					setOffset();
-					drawMap(roads);
-					drawScenario(data, key);
-					drawGoals(data, key);
-					// // Bind a function to scale and rotate the group to the animation loop.
-					two.bind('update', update);
-					// // Finally, start the animation loop
-					two.play();
-					addZUI();
-					});
-			  }
-			var FRAMERATE = 6;  //10fps
-            function update(frameCount){
-				isPlaying = true;
-
-				two.fit();
-				
-				if (shownScenes >= 100){
-					isPlaying = false;
-					two.pause();
-				}
-
-				if (isPlaying){
-					playBtn.opacity = 0;
-					pauseBtn.opacity = 1;
-				}
-				else{
-					playBtn.opacity = 1;
-					pauseBtn.opacity = 0;
-				}
-				if (isPlaying && totalFrame !== undefined && loadedData !== undefined 
-				&& frameCount % FRAMERATE == 0){
-					if (currentFrame < totalFrame && currentFrame < maxFrames){
-						setOffset();
-						// if (currentFrame == 0){
-						// 	}
-							// offsets[1] -= 230;}
-						if (accu_dx == 0 && accu_dy == 0){
-							accu_dx = 200;
-							accu_dy = 900;
-						}
-						understage.position.y = accu_dy;
-						understage.position.x = accu_dx;
-
-						agents = loadedData['agent'];
-						for (var key in agentPoly){
-							poly = agentPoly[key];
-							[x, y, z, yaw] = agents[key]['pose'][currentFrame];
-							// [w, h] = agents[key]['shape'][currentFrame];
-							[w, h] = agents[key]['shape'][0];
-							poly.position.x = (x+offsets[0])*scale*xReverse;
-							poly.position.y = (y+offsets[1])*scale;
-							poly.rotation = - yaw - Math.PI/2;
-							// poly.rotation = yaw;
-							// poly.shape.width = w;
-							// poly.shape.height = h;
-						}
-						mapGroup.position.x += offsetFromLastFrame[0]*scale*xReverse;
-						mapGroup.position.y += offsetFromLastFrame[1]*scale;
-
-						goalGroup.position.x += offsetFromLastFrame[0]*scale*xReverse;
-						goalGroup.position.y += offsetFromLastFrame[1]*scale;
-
-						// stage.position.x += deltaX*scale*xReverse;
-						// stage.position.y += deltaY*scale;
-						// stage.rotation += deltaYaw;
-
-						currentFrame ++;
-					}
-					else{
-						two.clear();
-						shownScenes += 1;
-
-						prev_stage_x = stage.position.x;
-						prev_stage_y = stage.position.y;
-						stage = new Two.Group();
-						understage = new Two.Group();
-						understage.position.x = prev_stage_x;
-						understage.position.y = prev_stage_y;
-
-						agentPoly = {};
-						currentFrame = 0;
-						totalFrame = undefined;
-						loadedData = undefined;
-						agentGroup = new Two.Group();
-						mapGroup = new Two.Group();
-						goalGroup = new Two.Group();
-						percCirclesGroup = new Two.Group();
-						offsetFromLastFrame = [0, 0, 0];
-						maxFrames = 80;
-						lanes_to_mark = undefined;
-						goal_pts = undefined;      
-						currentScene = 0;    
-						egoId = 'ego';          
-
-						currentFrame = 0;
-
-						keys = Object.keys(allScenes);
-						totalScenes = keys.length;
-						sceneIndex = Math.floor(Math.random()*totalScenes);
-						const key = keys[sceneIndex];
-						loadedData = allScenes[key];
-
-						if (loadedData['info'] !== undefined){
-							maxFrames = loadedData['info']['max_frames'];
-						}
-						const roads = loadedData['road'];
-						
-						setOffset();
-						drawMap(roads);
-						drawScenario(allScenes, key);
-						drawGoals(allScenes, key);
-						addZUI();
-					}
-				}
-				// if (frameCount > 50){
-				//   two.pause();
-				// }
-				}
-				function addZUI() {
-					var domElement = two.renderer.domElement;
-					var zui = new Two.ZUI(stage);
-					var mouse = new Two.Vector();
-					var touches = {};
-					var distance = 0;
-					var dragging = false;
-
-					zui.zoomBy(0.15, 0, 0);
-					zui.addLimits(0.06, 8);
-
-					domElement.addEventListener('mousedown', mousedown, false);
-					// domElement.addEventListener('mousewheel', mousewheel, false);
-					// domElement.addEventListener('wheel', mousewheel, false);
-
-					domElement.addEventListener('touchstart', touchstart, false);
-					domElement.addEventListener('touchmove', touchmove, false);
-					domElement.addEventListener('touchend', touchend, false);
-					domElement.addEventListener('touchcancel', touchend, false);
-
-					function mousedown(e) {
-						mouse.x = e.clientX;
-						mouse.y = e.clientY;
-
-						// process btn actions
-						two.width/2 + 50, two.height-140
-						if (mouse.x < (two.width/2 + 50 + btnOffset / 2 * 1.2) && mouse.x > (two.width/2 + 50 - btnOffset / 2 * 0.2) 
-						&& mouse.y > (two.height - 140 - 30) && mouse.y < (two.height - 140 + 30)){
-						isPlaying = !isPlaying;
-						}
-						else{
-						var rect = shape.getBoundingClientRect();
-						dragging = mouse.x > rect.left && mouse.x < rect.right
-							&& mouse.y > rect.top && mouse.y < rect.bottom;
-						window.addEventListener('mousemove', mousemove, false);
-						window.addEventListener('mouseup', mouseup, false);
-						}
-					}
-
-					function mousemove(e) {
-						var dx = e.clientX - mouse.x;
-						var dy = e.clientY - mouse.y;
-						accu_dx += dx;
-						accu_dy += dy;
-						if (dragging) {
-						shape.position.x += dx / zui.scale;
-						shape.position.y += dy / zui.scale;
-						} else {
-						zui.translateSurface(dx, dy);
-						}
-						mouse.set(e.clientX, e.clientY);
-					}
-
-					function mouseup(e) {
-						window.removeEventListener('mousemove', mousemove, false);
-						window.removeEventListener('mouseup', mouseup, false);
-					}
-
-					function mousewheel(e) {
-						var dy = (e.wheelDeltaY || - e.deltaY) / 1000;
-						zui.zoomBy(dy, e.clientX, e.clientY);
-					}
-
-					function touchstart(e) {
-						switch (e.touches.length) {
-						case 2:
-							pinchstart(e);
-							break;
-						case 1:
-							panstart(e)
-							break;
-						}
-					}
-
-					function touchmove(e) {
-						switch (e.touches.length) {
-						case 2:
-							pinchmove(e);
-							break;
-						case 1:
-							panmove(e)
-							break;
-						}
-					}
-
-					function touchend(e) {
-						touches = {};
-						var touch = e.touches[ 0 ];
-						if (touch) {  // Pass through for panning after pinching
-						mouse.x = touch.clientX;
-						mouse.y = touch.clientY;
-						}
-					}
-
-					function panstart(e) {
-						var touch = e.touches[ 0 ];
-						mouse.x = touch.clientX;
-						mouse.y = touch.clientY;
-					}
-
-					function panmove(e) {
-						var touch = e.touches[ 0 ];
-						var dx = touch.clientX - mouse.x;
-						var dy = touch.clientY - mouse.y;
-						zui.translateSurface(dx, dy);
-						mouse.set(touch.clientX, touch.clientY);
-					}
-
-					function pinchstart(e) {
-						for (var i = 0; i < e.touches.length; i++) {
-						var touch = e.touches[ i ];
-						touches[ touch.identifier ] = touch;
-						}
-						var a = touches[ 0 ];
-						var b = touches[ 1 ];
-						var dx = b.clientX - a.clientX;
-						var dy = b.clientY - a.clientY;
-						distance = Math.sqrt(dx * dx + dy * dy);
-						mouse.x = dx / 2 + a.clientX;
-						mouse.y = dy / 2 + a.clientY;
-					}
-
-					function pinchmove(e) {
-						for (var i = 0; i < e.touches.length; i++) {
-						var touch = e.touches[ i ];
-						touches[ touch.identifier ] = touch;
-						}
-						var a = touches[ 0 ];
-						var b = touches[ 1 ];
-						var dx = b.clientX - a.clientX;
-						var dy = b.clientY - a.clientY;
-						var d = Math.sqrt(dx * dx + dy * dy);
-						var delta = d - distance;
-						zui.zoomBy(delta / 250, mouse.x, mouse.y);
-						distance = d;
-					}
-					}
-
-
-
-
-
-			</script>
-
-			
-
-	</body>
-</html>
+<html class="fontawesome-i2svg-active fontawesome-i2svg-complete"><head>
+    <meta charset="utf-8">
+    <meta name="description" content="Pushing the Limit of Imitation Learning-based Planning for Autonomous Driving">
+    <meta name="keywords" content="Autonomous Driving, Imitation Learning, Planning">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pushing the Limit of Learning-based Planning for Autonomous Driving</title>
+  
+  
+    <style type="text/css">svg:not(:root).svg-inline--fa{overflow:visible}.svg-inline--fa{display:inline-block;font-size:inherit;height:1em;overflow:visible;vertical-align:-.125em}.svg-inline--fa.fa-lg{vertical-align:-.225em}.svg-inline--fa.fa-w-1{width:.0625em}.svg-inline--fa.fa-w-2{width:.125em}.svg-inline--fa.fa-w-3{width:.1875em}.svg-inline--fa.fa-w-4{width:.25em}.svg-inline--fa.fa-w-5{width:.3125em}.svg-inline--fa.fa-w-6{width:.375em}.svg-inline--fa.fa-w-7{width:.4375em}.svg-inline--fa.fa-w-8{width:.5em}.svg-inline--fa.fa-w-9{width:.5625em}.svg-inline--fa.fa-w-10{width:.625em}.svg-inline--fa.fa-w-11{width:.6875em}.svg-inline--fa.fa-w-12{width:.75em}.svg-inline--fa.fa-w-13{width:.8125em}.svg-inline--fa.fa-w-14{width:.875em}.svg-inline--fa.fa-w-15{width:.9375em}.svg-inline--fa.fa-w-16{width:1em}.svg-inline--fa.fa-w-17{width:1.0625em}.svg-inline--fa.fa-w-18{width:1.125em}.svg-inline--fa.fa-w-19{width:1.1875em}.svg-inline--fa.fa-w-20{width:1.25em}.svg-inline--fa.fa-pull-left{margin-right:.3em;width:auto}.svg-inline--fa.fa-pull-right{margin-left:.3em;width:auto}.svg-inline--fa.fa-border{height:1.5em}.svg-inline--fa.fa-li{width:2em}.svg-inline--fa.fa-fw{width:1.25em}.fa-layers svg.svg-inline--fa{bottom:0;left:0;margin:auto;position:absolute;right:0;top:0}.fa-layers{display:inline-block;height:1em;position:relative;text-align:center;vertical-align:-.125em;width:1em}.fa-layers svg.svg-inline--fa{-webkit-transform-origin:center center;transform-origin:center center}.fa-layers-counter,.fa-layers-text{display:inline-block;position:absolute;text-align:center}.fa-layers-text{left:50%;top:50%;-webkit-transform:translate(-50%,-50%);transform:translate(-50%,-50%);-webkit-transform-origin:center center;transform-origin:center center}.fa-layers-counter{background-color:#ff253a;border-radius:1em;-webkit-box-sizing:border-box;box-sizing:border-box;color:#fff;height:1.5em;line-height:1;max-width:5em;min-width:1.5em;overflow:hidden;padding:.25em;right:0;text-overflow:ellipsis;top:0;-webkit-transform:scale(.25);transform:scale(.25);-webkit-transform-origin:top right;transform-origin:top right}.fa-layers-bottom-right{bottom:0;right:0;top:auto;-webkit-transform:scale(.25);transform:scale(.25);-webkit-transform-origin:bottom right;transform-origin:bottom right}.fa-layers-bottom-left{bottom:0;left:0;right:auto;top:auto;-webkit-transform:scale(.25);transform:scale(.25);-webkit-transform-origin:bottom left;transform-origin:bottom left}.fa-layers-top-right{right:0;top:0;-webkit-transform:scale(.25);transform:scale(.25);-webkit-transform-origin:top right;transform-origin:top right}.fa-layers-top-left{left:0;right:auto;top:0;-webkit-transform:scale(.25);transform:scale(.25);-webkit-transform-origin:top left;transform-origin:top left}.fa-lg{font-size:1.3333333333em;line-height:.75em;vertical-align:-.0667em}.fa-xs{font-size:.75em}.fa-sm{font-size:.875em}.fa-1x{font-size:1em}.fa-2x{font-size:2em}.fa-3x{font-size:3em}.fa-4x{font-size:4em}.fa-5x{font-size:5em}.fa-6x{font-size:6em}.fa-7x{font-size:7em}.fa-8x{font-size:8em}.fa-9x{font-size:9em}.fa-10x{font-size:10em}.fa-fw{text-align:center;width:1.25em}.fa-ul{list-style-type:none;margin-left:2.5em;padding-left:0}.fa-ul>li{position:relative}.fa-li{left:-2em;position:absolute;text-align:center;width:2em;line-height:inherit}.fa-border{border:solid .08em #eee;border-radius:.1em;padding:.2em .25em .15em}.fa-pull-left{float:left}.fa-pull-right{float:right}.fa.fa-pull-left,.fab.fa-pull-left,.fal.fa-pull-left,.far.fa-pull-left,.fas.fa-pull-left{margin-right:.3em}.fa.fa-pull-right,.fab.fa-pull-right,.fal.fa-pull-right,.far.fa-pull-right,.fas.fa-pull-right{margin-left:.3em}.fa-spin{-webkit-animation:fa-spin 2s infinite linear;animation:fa-spin 2s infinite linear}.fa-pulse{-webkit-animation:fa-spin 1s infinite steps(8);animation:fa-spin 1s infinite steps(8)}@-webkit-keyframes fa-spin{0%{-webkit-transform:rotate(0);transform:rotate(0)}100%{-webkit-transform:rotate(360deg);transform:rotate(360deg)}}@keyframes fa-spin{0%{-webkit-transform:rotate(0);transform:rotate(0)}100%{-webkit-transform:rotate(360deg);transform:rotate(360deg)}}.fa-rotate-90{-webkit-transform:rotate(90deg);transform:rotate(90deg)}.fa-rotate-180{-webkit-transform:rotate(180deg);transform:rotate(180deg)}.fa-rotate-270{-webkit-transform:rotate(270deg);transform:rotate(270deg)}.fa-flip-horizontal{-webkit-transform:scale(-1,1);transform:scale(-1,1)}.fa-flip-vertical{-webkit-transform:scale(1,-1);transform:scale(1,-1)}.fa-flip-both,.fa-flip-horizontal.fa-flip-vertical{-webkit-transform:scale(-1,-1);transform:scale(-1,-1)}:root .fa-flip-both,:root .fa-flip-horizontal,:root .fa-flip-vertical,:root .fa-rotate-180,:root .fa-rotate-270,:root .fa-rotate-90{-webkit-filter:none;filter:none}.fa-stack{display:inline-block;height:2em;position:relative;width:2.5em}.fa-stack-1x,.fa-stack-2x{bottom:0;left:0;margin:auto;position:absolute;right:0;top:0}.svg-inline--fa.fa-stack-1x{height:1em;width:1.25em}.svg-inline--fa.fa-stack-2x{height:2em;width:2.5em}.fa-inverse{color:#fff}.sr-only{border:0;clip:rect(0,0,0,0);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px}.sr-only-focusable:active,.sr-only-focusable:focus{clip:auto;height:auto;margin:0;overflow:visible;position:static;width:auto}.svg-inline--fa .fa-primary{fill:var(--fa-primary-color,currentColor);opacity:1;opacity:var(--fa-primary-opacity,1)}.svg-inline--fa .fa-secondary{fill:var(--fa-secondary-color,currentColor);opacity:.4;opacity:var(--fa-secondary-opacity,.4)}.svg-inline--fa.fa-swap-opacity .fa-primary{opacity:.4;opacity:var(--fa-secondary-opacity,.4)}.svg-inline--fa.fa-swap-opacity .fa-secondary{opacity:1;opacity:var(--fa-primary-opacity,1)}.svg-inline--fa mask .fa-primary,.svg-inline--fa mask .fa-secondary{fill:#000}.fad.fa-inverse{color:#fff}</style><link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+  
+    <link rel="stylesheet" href="./static/css/bulma.min.css">
+    <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+    <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+    <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+    <link rel="stylesheet" href="./static/css/index.css">
+    <link rel="icon" href="./static/images/UST.svg">
+  
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script type="text/javascript" id="MathJax-script" async="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js">
+      </script>
+    <script defer="" src="./static/js/fontawesome.all.min.js"></script>
+    <script src="./static/js/bulma-carousel.min.js"></script>
+    <script src="./static/js/bulma-slider.min.js"></script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <!-- <script src="./static/js/index.js"></script> -->
+  <style type="text/css">.CtxtMenu_InfoClose {  top:.2em; right:.2em;}
+  .CtxtMenu_InfoContent {  overflow:auto; text-align:left; font-size:80%;  padding:.4em .6em; border:1px inset; margin:1em 0px;  max-height:20em; max-width:30em; background-color:#EEEEEE;  white-space:normal;}
+  .CtxtMenu_Info.CtxtMenu_MousePost {outline:none;}
+  .CtxtMenu_Info {  position:fixed; left:50%; width:auto; text-align:center;  border:3px outset; padding:1em 2em; background-color:#DDDDDD;  color:black;  cursor:default; font-family:message-box; font-size:120%;  font-style:normal; text-indent:0; text-transform:none;  line-height:normal; letter-spacing:normal; word-spacing:normal;  word-wrap:normal; white-space:nowrap; float:none; z-index:201;  border-radius: 15px;                     /* Opera 10.5 and IE9 */  -webkit-border-radius:15px;               /* Safari and Chrome */  -moz-border-radius:15px;                  /* Firefox */  -khtml-border-radius:15px;                /* Konqueror */  box-shadow:0px 10px 20px #808080;         /* Opera 10.5 and IE9 */  -webkit-box-shadow:0px 10px 20px #808080; /* Safari 3 & Chrome */  -moz-box-shadow:0px 10px 20px #808080;    /* Forefox 3.5 */  -khtml-box-shadow:0px 10px 20px #808080;  /* Konqueror */  filter:progid:DXImageTransform.Microsoft.dropshadow(OffX=2, OffY=2, Color="gray", Positive="true"); /* IE */}
+  </style><style type="text/css">.CtxtMenu_MenuClose {  position:absolute;  cursor:pointer;  display:inline-block;  border:2px solid #AAA;  border-radius:18px;  -webkit-border-radius: 18px;             /* Safari and Chrome */  -moz-border-radius: 18px;                /* Firefox */  -khtml-border-radius: 18px;              /* Konqueror */  font-family: "Courier New", Courier;  font-size:24px;  color:#F0F0F0}
+  .CtxtMenu_MenuClose span {  display:block; background-color:#AAA; border:1.5px solid;  border-radius:18px;  -webkit-border-radius: 18px;             /* Safari and Chrome */  -moz-border-radius: 18px;                /* Firefox */  -khtml-border-radius: 18px;              /* Konqueror */  line-height:0;  padding:8px 0 6px     /* may need to be browser-specific */}
+  .CtxtMenu_MenuClose:hover {  color:white!important;  border:2px solid #CCC!important}
+  .CtxtMenu_MenuClose:hover span {  background-color:#CCC!important}
+  .CtxtMenu_MenuClose:hover:focus {  outline:none}
+  </style><style type="text/css">.CtxtMenu_Menu {  position:absolute;  background-color:white;  color:black;  width:auto; padding:5px 0px;  border:1px solid #CCCCCC; margin:0; cursor:default;  font: menu; text-align:left; text-indent:0; text-transform:none;  line-height:normal; letter-spacing:normal; word-spacing:normal;  word-wrap:normal; white-space:nowrap; float:none; z-index:201;  border-radius: 5px;                     /* Opera 10.5 and IE9 */  -webkit-border-radius: 5px;             /* Safari and Chrome */  -moz-border-radius: 5px;                /* Firefox */  -khtml-border-radius: 5px;              /* Konqueror */  box-shadow:0px 10px 20px #808080;         /* Opera 10.5 and IE9 */  -webkit-box-shadow:0px 10px 20px #808080; /* Safari 3 & Chrome */  -moz-box-shadow:0px 10px 20px #808080;    /* Forefox 3.5 */  -khtml-box-shadow:0px 10px 20px #808080;  /* Konqueror */}
+  .CtxtMenu_MenuItem {  padding: 1px 2em;  background:transparent;}
+  .CtxtMenu_MenuArrow {  position:absolute; right:.5em; padding-top:.25em; color:#666666;  font-family: null; font-size: .75em}
+  .CtxtMenu_MenuActive .CtxtMenu_MenuArrow {color:white}
+  .CtxtMenu_MenuArrow.CtxtMenu_RTL {left:.5em; right:auto}
+  .CtxtMenu_MenuCheck {  position:absolute; left:.7em;  font-family: null}
+  .CtxtMenu_MenuCheck.CtxtMenu_RTL { right:.7em; left:auto }
+  .CtxtMenu_MenuRadioCheck {  position:absolute; left: .7em;}
+  .CtxtMenu_MenuRadioCheck.CtxtMenu_RTL {  right: .7em; left:auto}
+  .CtxtMenu_MenuInputBox {  padding-left: 1em; right:.5em; color:#666666;  font-family: null;}
+  .CtxtMenu_MenuInputBox.CtxtMenu_RTL {  left: .1em;}
+  .CtxtMenu_MenuComboBox {  left:.1em; padding-bottom:.5em;}
+  .CtxtMenu_MenuSlider {  left: .1em;}
+  .CtxtMenu_SliderValue {  position:absolute; right:.1em; padding-top:.25em; color:#333333;  font-size: .75em}
+  .CtxtMenu_SliderBar {  outline: none; background: #d3d3d3}
+  .CtxtMenu_MenuLabel {  padding: 1px 2em 3px 1.33em;  font-style:italic}
+  .CtxtMenu_MenuRule {  border-top: 1px solid #DDDDDD;  margin: 4px 3px;}
+  .CtxtMenu_MenuDisabled {  color:GrayText}
+  .CtxtMenu_MenuActive {  background-color: #606872;  color: white;}
+  .CtxtMenu_MenuDisabled:focus {  background-color: #E8E8E8}
+  .CtxtMenu_MenuLabel:focus {  background-color: #E8E8E8}
+  .CtxtMenu_ContextMenu:focus {  outline:none}
+  .CtxtMenu_ContextMenu .CtxtMenu_MenuItem:focus {  outline:none}
+  .CtxtMenu_SelectionMenu {  position:relative; float:left;  border-bottom: none; -webkit-box-shadow:none; -webkit-border-radius:0px; }
+  .CtxtMenu_SelectionItem {  padding-right: 1em;}
+  .CtxtMenu_Selection {  right: 40%; width:50%; }
+  .CtxtMenu_SelectionBox {  padding: 0em; max-height:20em; max-width: none;  background-color:#FFFFFF;}
+  .CtxtMenu_SelectionDivider {  clear: both; border-top: 2px solid #000000;}
+  .CtxtMenu_Menu .CtxtMenu_MenuClose {  top:-10px; left:-10px}
+  </style><style id="MJX-CHTML-styles">
+  mjx-container[jax="CHTML"] {
+    line-height: 0;
+  }
+  
+  mjx-container [space="1"] {
+    margin-left: .111em;
+  }
+  
+  mjx-container [space="2"] {
+    margin-left: .167em;
+  }
+  
+  mjx-container [space="3"] {
+    margin-left: .222em;
+  }
+  
+  mjx-container [space="4"] {
+    margin-left: .278em;
+  }
+  
+  mjx-container [space="5"] {
+    margin-left: .333em;
+  }
+  
+  mjx-container [rspace="1"] {
+    margin-right: .111em;
+  }
+  
+  mjx-container [rspace="2"] {
+    margin-right: .167em;
+  }
+  
+  mjx-container [rspace="3"] {
+    margin-right: .222em;
+  }
+  
+  mjx-container [rspace="4"] {
+    margin-right: .278em;
+  }
+  
+  mjx-container [rspace="5"] {
+    margin-right: .333em;
+  }
+  
+  mjx-container [size="s"] {
+    font-size: 70.7%;
+  }
+  
+  mjx-container [size="ss"] {
+    font-size: 50%;
+  }
+  
+  mjx-container [size="Tn"] {
+    font-size: 60%;
+  }
+  
+  mjx-container [size="sm"] {
+    font-size: 85%;
+  }
+  
+  mjx-container [size="lg"] {
+    font-size: 120%;
+  }
+  
+  mjx-container [size="Lg"] {
+    font-size: 144%;
+  }
+  
+  mjx-container [size="LG"] {
+    font-size: 173%;
+  }
+  
+  mjx-container [size="hg"] {
+    font-size: 207%;
+  }
+  
+  mjx-container [size="HG"] {
+    font-size: 249%;
+  }
+  
+  mjx-container [width="full"] {
+    width: 100%;
+  }
+  
+  mjx-box {
+    display: inline-block;
+  }
+  
+  mjx-block {
+    display: block;
+  }
+  
+  mjx-itable {
+    display: inline-table;
+  }
+  
+  mjx-row {
+    display: table-row;
+  }
+  
+  mjx-row > * {
+    display: table-cell;
+  }
+  
+  mjx-mtext {
+    display: inline-block;
+  }
+  
+  mjx-mstyle {
+    display: inline-block;
+  }
+  
+  mjx-merror {
+    display: inline-block;
+    color: red;
+    background-color: yellow;
+  }
+  
+  mjx-mphantom {
+    visibility: hidden;
+  }
+  
+  _::-webkit-full-page-media, _:future, :root mjx-container {
+    will-change: opacity;
+  }
+  
+  mjx-assistive-mml {
+    position: absolute !important;
+    top: 0px;
+    left: 0px;
+    clip: rect(1px, 1px, 1px, 1px);
+    padding: 1px 0px 0px 0px !important;
+    border: 0px !important;
+    display: block !important;
+    width: auto !important;
+    overflow: hidden !important;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+  
+  mjx-assistive-mml[display="block"] {
+    width: 100% !important;
+  }
+  
+  mjx-math {
+    display: inline-block;
+    text-align: left;
+    line-height: 0;
+    text-indent: 0;
+    font-style: normal;
+    font-weight: normal;
+    font-size: 100%;
+    font-size-adjust: none;
+    letter-spacing: normal;
+    border-collapse: collapse;
+    word-wrap: normal;
+    word-spacing: normal;
+    white-space: nowrap;
+    direction: ltr;
+    padding: 1px 0;
+  }
+  
+  mjx-container[jax="CHTML"][display="true"] {
+    display: block;
+    text-align: center;
+    margin: 1em 0;
+  }
+  
+  mjx-container[jax="CHTML"][display="true"][width="full"] {
+    display: flex;
+  }
+  
+  mjx-container[jax="CHTML"][display="true"] mjx-math {
+    padding: 0;
+  }
+  
+  mjx-container[jax="CHTML"][justify="left"] {
+    text-align: left;
+  }
+  
+  mjx-container[jax="CHTML"][justify="right"] {
+    text-align: right;
+  }
+  
+  mjx-msub {
+    display: inline-block;
+    text-align: left;
+  }
+  
+  mjx-TeXAtom {
+    display: inline-block;
+    text-align: left;
+  }
+  
+  mjx-mi {
+    display: inline-block;
+    text-align: left;
+  }
+  
+  mjx-c {
+    display: inline-block;
+  }
+  
+  mjx-utext {
+    display: inline-block;
+    padding: .75em 0 .2em 0;
+  }
+  
+  mjx-mn {
+    display: inline-block;
+    text-align: left;
+  }
+  
+  mjx-c::before {
+    display: block;
+    width: 0;
+  }
+  
+  .MJX-TEX {
+    font-family: MJXZERO, MJXTEX;
+  }
+  
+  .TEX-B {
+    font-family: MJXZERO, MJXTEX-B;
+  }
+  
+  .TEX-I {
+    font-family: MJXZERO, MJXTEX-I;
+  }
+  
+  .TEX-MI {
+    font-family: MJXZERO, MJXTEX-MI;
+  }
+  
+  .TEX-BI {
+    font-family: MJXZERO, MJXTEX-BI;
+  }
+  
+  .TEX-S1 {
+    font-family: MJXZERO, MJXTEX-S1;
+  }
+  
+  .TEX-S2 {
+    font-family: MJXZERO, MJXTEX-S2;
+  }
+  
+  .TEX-S3 {
+    font-family: MJXZERO, MJXTEX-S3;
+  }
+  
+  .TEX-S4 {
+    font-family: MJXZERO, MJXTEX-S4;
+  }
+  
+  .TEX-A {
+    font-family: MJXZERO, MJXTEX-A;
+  }
+  
+  .TEX-C {
+    font-family: MJXZERO, MJXTEX-C;
+  }
+  
+  .TEX-CB {
+    font-family: MJXZERO, MJXTEX-CB;
+  }
+  
+  .TEX-FR {
+    font-family: MJXZERO, MJXTEX-FR;
+  }
+  
+  .TEX-FRB {
+    font-family: MJXZERO, MJXTEX-FRB;
+  }
+  
+  .TEX-SS {
+    font-family: MJXZERO, MJXTEX-SS;
+  }
+  
+  .TEX-SSB {
+    font-family: MJXZERO, MJXTEX-SSB;
+  }
+  
+  .TEX-SSI {
+    font-family: MJXZERO, MJXTEX-SSI;
+  }
+  
+  .TEX-SC {
+    font-family: MJXZERO, MJXTEX-SC;
+  }
+  
+  .TEX-T {
+    font-family: MJXZERO, MJXTEX-T;
+  }
+  
+  .TEX-V {
+    font-family: MJXZERO, MJXTEX-V;
+  }
+  
+  .TEX-VB {
+    font-family: MJXZERO, MJXTEX-VB;
+  }
+  
+  mjx-stretchy-v mjx-c, mjx-stretchy-h mjx-c {
+    font-family: MJXZERO, MJXTEX-S1, MJXTEX-S4, MJXTEX, MJXTEX-A ! important;
+  }
+  
+  @font-face /* 0 */ {
+    font-family: MJXZERO;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Zero.woff") format("woff");
+  }
+  
+  @font-face /* 1 */ {
+    font-family: MJXTEX;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Main-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 2 */ {
+    font-family: MJXTEX-B;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Main-Bold.woff") format("woff");
+  }
+  
+  @font-face /* 3 */ {
+    font-family: MJXTEX-I;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Math-Italic.woff") format("woff");
+  }
+  
+  @font-face /* 4 */ {
+    font-family: MJXTEX-MI;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Main-Italic.woff") format("woff");
+  }
+  
+  @font-face /* 5 */ {
+    font-family: MJXTEX-BI;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Math-BoldItalic.woff") format("woff");
+  }
+  
+  @font-face /* 6 */ {
+    font-family: MJXTEX-S1;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Size1-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 7 */ {
+    font-family: MJXTEX-S2;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Size2-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 8 */ {
+    font-family: MJXTEX-S3;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Size3-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 9 */ {
+    font-family: MJXTEX-S4;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Size4-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 10 */ {
+    font-family: MJXTEX-A;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_AMS-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 11 */ {
+    font-family: MJXTEX-C;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Calligraphic-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 12 */ {
+    font-family: MJXTEX-CB;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Calligraphic-Bold.woff") format("woff");
+  }
+  
+  @font-face /* 13 */ {
+    font-family: MJXTEX-FR;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Fraktur-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 14 */ {
+    font-family: MJXTEX-FRB;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Fraktur-Bold.woff") format("woff");
+  }
+  
+  @font-face /* 15 */ {
+    font-family: MJXTEX-SS;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_SansSerif-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 16 */ {
+    font-family: MJXTEX-SSB;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_SansSerif-Bold.woff") format("woff");
+  }
+  
+  @font-face /* 17 */ {
+    font-family: MJXTEX-SSI;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_SansSerif-Italic.woff") format("woff");
+  }
+  
+  @font-face /* 18 */ {
+    font-family: MJXTEX-SC;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Script-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 19 */ {
+    font-family: MJXTEX-T;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Typewriter-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 20 */ {
+    font-family: MJXTEX-V;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Vector-Regular.woff") format("woff");
+  }
+  
+  @font-face /* 21 */ {
+    font-family: MJXTEX-VB;
+    src: url("https://cdn.jsdelivr.net/npm/mathjax@3/es5/output/chtml/fonts/woff-v2/MathJax_Vector-Bold.woff") format("woff");
+  }
+  
+  mjx-c.mjx-c4D.TEX-C::before {
+    padding: 0.705em 1.201em 0.05em 0;
+    content: "M";
+  }
+  
+  mjx-c.mjx-c31::before {
+    padding: 0.666em 0.5em 0 0;
+    content: "1";
+  }
+  
+  mjx-c.mjx-c33::before {
+    padding: 0.665em 0.5em 0.022em 0;
+    content: "3";
+  }
+  
+  mjx-c.mjx-c34::before {
+    padding: 0.677em 0.5em 0 0;
+    content: "4";
+  }
+  </style></head>
+  
+  <body>
+  
+    <!-- <nav class="navbar"
+  
+    <!-- <nav class="navbar" role="navigation" aria-label="main navigation">
+  class="navbar-burger" aria-label="menu" aria-expanded="false">
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+        </a>
+      </div>
+      <div class="navbar-menu">
+        <div class="navbar-start" style="flex-grow: 1; justify-content: center;">
+          <a class="navbar-item" href="https://keunhong.com">
+            <span class="icon">
+              <i class="fas fa-home"></i>
+            </span>
+          </a>
+  
+          <div class="navbar-item has-dropdown is-hoverable">
+            <a class="navbar-link">
+              More Research
+            </a>
+            <div class="navbar-dropdown">
+              <a class="navbar-item" href="https://hypernerf.github.io">
+                HyperNeRF
+              </a>
+              <a class="navbar-item" href="https://nerfies.github.io">
+                Nerfies
+              </a>
+              <a class="navbar-item" href="https://latentfusion.github.io">
+                LatentFusion
+              </a>
+              <a class="navbar-item" href="https://photoshape.github.io">
+                PhotoShape
+              </a>
+            </div>
+          </div>
+        </div>
+  
+      </div>
+    </nav> -->
+  
+  
+    <section class="hero">
+      <div class="hero-body">
+        <div class="container is-max-desktop">
+          <div class="columns is-centered">
+            <div class="column has-text-centered">
+              <h1 class="title is-2 publication-title">
+                Generalizing Motion Planners with Mixture of Experts for Autonomous Driving
+              </h1>
+              <div class="is-size-5 publication-authors">
+                <span class="author-block">
+                  Qiao Sun<sup>1</sup>, Huimin Wang<sup>4</sup>, Jiahao Zhan<sup>2</sup>, Fan Nie<sup>3</sup>, Xin Wen<sup>4</sup>, Leimeng Xu<sup>4</sup>, Kun Zhan<sup>4</sup>, Peng Jia<sup>4</sup>, Xianpeng Lang<sup>4</sup>, </span>
+                <span class="author-block">
+                  <a href="https://hangzhaomit.github.io/" target="”_blank”">Hang Zhao<sup>5</sup></a>,</span>
+              </div>
+  
+              <div class="is-size-5 publication-authors">
+                <span class="author-block">1.Shanghai Qi Zhi Institute 2.Fudan University 3.Stanford University
+                    4.LiAuto 5.Tsinghua University</span>
+              </div>
+              <div class="publication-links">
+                <!-- PDF Link. -->
+                <span class="link-block">
+                  <a href="https://jchengai.github.io/pluto" class="external-link button is-normal is-rounded is-gray">
+                    <span class="icon">
+                      <svg class="svg-inline--fa fa-file-pdf fa-w-12" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="file-pdf" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" data-fa-i2svg=""><path fill="currentColor" d="M181.9 256.1c-5-16-4.9-46.9-2-46.9 8.4 0 7.6 36.9 2 46.9zm-1.7 47.2c-7.7 20.2-17.3 43.3-28.4 62.7 18.3-7 39-17.2 62.9-21.9-12.7-9.6-24.9-23.4-34.5-40.8zM86.1 428.1c0 .8 13.2-5.4 34.9-40.2-6.7 6.3-29.1 24.5-34.9 40.2zM248 160h136v328c0 13.3-10.7 24-24 24H24c-13.3 0-24-10.7-24-24V24C0 10.7 10.7 0 24 0h200v136c0 13.2 10.8 24 24 24zm-8 171.8c-20-12.2-33.3-29-42.7-53.8 4.5-18.5 11.6-46.6 6.2-64.2-4.7-29.4-42.4-26.5-47.8-6.8-5 18.3-.4 44.1 8.1 77-11.6 27.6-28.7 64.6-40.8 85.8-.1 0-.1.1-.2.1-27.1 13.9-73.6 44.5-54.5 68 5.6 6.9 16 10 21.5 10 17.9 0 35.7-18 61.1-61.8 25.8-8.5 54.1-19.1 79-23.2 21.7 11.8 47.1 19.5 64 19.5 29.2 0 31.2-32 19.7-43.4-13.9-13.6-54.3-9.7-73.6-7.2zM377 105L279 7c-4.5-4.5-10.6-7-17-7h-6v128h128v-6.1c0-6.3-2.5-12.4-7-16.9zm-74.1 255.3c4.1-2.7-2.5-11.9-42.8-9 37.1 15.8 42.8 9 42.8 9z"></path></svg><!-- <i class="fas fa-file-pdf"></i> Font Awesome fontawesome.com -->
+                    </span>
+                    <span>Paper</span>
+                  </a>
+                </span>
+                <span class="link-block">
+                  <a href="https://arxiv.org/abs/2404.14327" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                    </span>
+                    <span>arXiv</span>
+                  </a>
+                </span>
+                <!-- Code Link. -->
+                <span class="link-block">
+                  <a href="https://github.com/Tsinghua-MARS-Lab/StateTransformer" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <svg class="svg-inline--fa fa-github fa-w-16" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="github" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512" data-fa-i2svg=""><path fill="currentColor" d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"></path></svg><!-- <i class="fab fa-github"></i> Font Awesome fontawesome.com -->
+                    </span>
+                    <span>Code</span>
+                  </a>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+    </section>
+  
+    <section class="section">
+      <div class="container is-max-desktop">
+        <!-- Abstract. -->
+        <div class="columns is-centered has-text-centered" style="border-radius: 10px; padding: 10px;">
+          <div class="column is-four-fifths">
+            <h2 class="title is-3">Abstract</h2>
+            <div class="content has-text-justified">
+                Large real-world driving datasets have sparked significant research into various aspects of data-driven motion planners for autonomous driving. These include data augmentation, model architecture, reward design, training strategies, and planner pipelines. 
+                These planners promise better generalizations on complicated and few-shot cases than previous methods.
+                However, experiment results show that many of these approaches produce limited generalization abilities in planning performance due to overly complex designs or training paradigms. 
+                In this paper, we review and benchmark previous methods focusing on generalizations. The experimental results indicate that as models are appropriately scaled, many design elements become redundant. We introduce StateTransformer-2 (STR2), a scalable, decoder-only motion planner that uses a Vision Transformer (ViT) encoder and a mixture-of-experts (MoE) causal Transformer architecture. The MoE backbone addresses modality collapse and reward balancing by expert routing during training. Extensive experiments on the NuPlan dataset show that our method generalizes better than previous approaches across different test sets and closed-loop simulations. Furthermore, we assess its scalability on billions of real-world urban driving scenarios, demonstrating consistent accuracy improvements as both data and model size grow.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  
+    <section class="section" style="margin-top: 0; padding-top: 50px;">
+      <h2 class="title is-4" style="text-align: center;">Method Overview</h2>
+      <div class="container is-max-desktop">
+        <div class="demo-block">
+          <div style="padding: 10px;">
+            <h2 class="title is-5" style="text-align: center;">Model Architecture</h2>
+            <img class="summary-img" src="All_materials/20240918-173941.png" width="85%">
+            <div style="padding: 10px; margin-left: 30px; margin-right: 30px;">
+              <p style="text-align: left;">
+                An overview of the STR2-CPKS model which has a sequence of context, proposal, key points, and future states for the MoE backbone to model. For STR2-CKS, proposals are removed in the sequence for better efficiency. The context part has rasterized environment information encoded by scalable ViT encoders and past ego states.
+              </p>
+            </div>
+          </div>
+  
+          <div style="padding: 10px;">
+            <h2 class="title is-5" style="text-align: center;">Model Performance </h2>
+            <img class="summary-img" src="All_materials/20240918-173724.jpeg" width="85%">
+            <div style="padding: 10px; margin-left: 30px; margin-right: 30px;">
+              <p style="text-align: left;">
+                The planning results, in red, from PDM-Hybrid and
+                STR2 at the pickup area at the top, and an illustration of
+                the MoE model learning and balancing different explicit
+                rewards at the bottom.
+              </p>
+            </div>
+            <img class="summary-img" src="All_materials/20240919-094509.jpeg" width="85%">
+            <div style="padding: 10px; margin-left: 30px; margin-right: 30px;">
+              <p style="text-align: left;">
+                Performance comparison on testHard Set with details of the closed-loop reactive simulations. Higher scores
+indicate better performance
+              </p>
+            </div>
+            <img class="summary-img" src="All_materials/图片 2.png" width="85%">
+            <div style="padding: 10px; margin-left: 30px; margin-right: 30px;">
+              <p style="text-align: left;">
+                Scaling results with the size of the training dataset, counted as the number of tokens D in the left and scaling results
+with model parameters N in the right. All axes are logarithmically scaled.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+  
+    </section>
+  
+    <section class="section" style="margin-top: 0; padding-top: 50px;">
+      <h2 class="title is-4" style="text-align: center;">Qualitative Results(good cases)</h2>
+      <div class="container is-max-desktop">
+      </div>
+  
+      <div class="container is-max-desktop">
+        <div class="demo-block">
+          <div class="video-grid-2">
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+            <source src="All_materials/good_case_set/3b.mp4" type="video/mp4">
+            </video>
+          </div>
+            <div class="text-grid-2">
+              <div class="grid-content">
+                Traversing pickup dropoff(Test14-hard).
+              </div>
+            </div>
+            <div class="video-grid-2">
+              <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+                <source src="All_materials/good and bad/good2.mov" type="video/mp4">
+              </video>
+            </div>
+            <div class="text-grid-2">
+              <div class="grid-content">
+                Overtake parked vehicle.
+              </div>
+            </div>
+            <div class="video-grid-2">
+                <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+                  <source src="All_materials/good and bad/good3.mov" type="video/mp4">
+                </video>
+              </div>
+              <div class="text-grid-2">
+                <div class="grid-content">
+                  Construction Zone.
+                </div>
+              </div>
+            </div> 
+        </div>
+      </div>
+  
+    </section>
+  
+    <section class="section" style="margin-top: 0; padding-top: 50px;">
+      <h2 class="title is-4" style="text-align: center;">Model Ablation Results</h2>
+  
+      <div class="container is-max-desktop">
+        <div class="demo-block">
+          <div class="video-grid-3">
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set1.mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set2.mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set3.mp4" type="video/mp4">
+            </video>
+          </div>
+  
+          <div class="video-grid-3">
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set4.mp4" type="video/mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set5.mp4" type="video/mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set6.mp4" type="video/mp4">
+            </video>
+          </div>
+  
+          <div class="video-grid-3">
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set7.mp4" type="video/mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/good_set8.mp4" type="video/mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/interplan/good_set9.mp4" type="video/mp4">
+            </video>
+          </div>
+  
+          <div class="video-grid-3">
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/interplan/good_set10.mp4" type="video/mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/interplan/good_case11.mp4" type="video/mp4">
+            </video>
+            <video class="video-border" autoplay="" controls="" muted="" loop="" playsinline="">
+              <source src="All_materials/good_case_set/interplan/good_case12.mp4" type="video/mp4">
+            </video>
+          </div>
+        </div>
+      </div>
+      
+    </section>
+  
+    <!-- <section class="section" id="BibTeX">
+      <div class="container is-max-desktop content">
+        <h2 class="title">BibTeX</h2>
+        <pre><code></code></pre>
+      </div>
+    </section> -->
+  
+  
+    <footer class="footer">
+      <div class="container">
+        <!-- <div class="content has-text-centered">
+          <a class="icon-link" href="./static/videos/nerfies_paper.pdf">
+            <i class="fas fa-file-pdf"></i>
+          </a>
+          <a class="icon-link" href="https://github.com/keunhong" class="external-link" disabled>
+            <i class="fab fa-github"></i>
+          </a>
+        </div> -->
+        <div class="columns is-centered">
+          <div class="content">
+            <p>
+              Project page is inspired by <a href="https://github.com/nerfies/nerfies.github.io">Nerfies</a>.
+            </p>
+          </div>
+        </div>
+      </div>
+      
+    </footer>
+  
+    <script type="text/javascript">
+      var videos = document.querySelectorAll('video');
+      for (var i = 0; i < videos.length; i++) {
+        videos[i].playbackRate = 2.0;
+      }
+    </script>
+  
+  
+  
+  
+  </body></html>
