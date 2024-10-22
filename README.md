@@ -9,7 +9,7 @@ Driving</span>
 
 **Author**: [Qiao Sun](https://qiaosun.me/)\*, Huimin Wang\*, [Jiahao Zhan](https://github.com/JohnZhan2023), [Fan Nie](https://github.com/fannie1208/), Xin Wen, Leimeng Xu, Kun Zhan, Peng Jia, Xianpeng Lang, [Hang Zhao](https://hangzhaomit.github.io/)
 
-**Arxiv**:
+**Arxiv**: https://arxiv.org/abs/2410.15774
 
 **Website**: https://tsinghua-mars-lab.github.io/StateTransformer/
 
