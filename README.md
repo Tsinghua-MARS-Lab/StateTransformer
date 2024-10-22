@@ -338,5 +338,13 @@ The previous work of StateTransformer2 is the [StateTransformer](https://arxiv.o
 # Citation
 If you find this work useful in your research, please consider cite:
 ```
-coming soon
+@misc{sun2024generalizingmotionplannersmixture,
+      title={Generalizing Motion Planners with Mixture of Experts for Autonomous Driving}, 
+      author={Qiao Sun and Huimin Wang and Jiahao Zhan and Fan Nie and Xin Wen and Leimeng Xu and Kun Zhan and Peng Jia and Xianpeng Lang and Hang Zhao},
+      year={2024},
+      eprint={2410.15774},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2410.15774}, 
+}
 ```
