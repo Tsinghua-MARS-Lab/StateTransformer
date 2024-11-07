@@ -7,7 +7,7 @@ Driving** -->
 <span style="font-size:22px;">Generalizing Motion Planners with Mixture of Experts for Autonomous
 Driving</span>
 
-**Author**: [Qiao Sun](https://qiaosun.me/)\*, Huimin Wang\*, [Jiahao Zhan](https://github.com/JohnZhan2023), [Fan Nie](https://github.com/fannie1208/), Xin Wen, Leimeng Xu, Kun Zhan, Peng Jia, Xianpeng Lang, [Hang Zhao](https://hangzhaomit.github.io/)
+**Author**: [Qiao Sun](https://qiaosun.me/)\*, Huimin Wang\*, [Jiahao Zhan](https://johnzhan2023.github.io/), [Fan Nie](https://github.com/fannie1208/), Xin Wen, Leimeng Xu, Kun Zhan, Peng Jia, Xianpeng Lang, [Hang Zhao](https://hangzhaomit.github.io/)
 
 **Arxiv**: https://arxiv.org/abs/2410.15774
 
