@@ -306,17 +306,18 @@ The checkpoints have been updoaded on huggingface, and you can resort to: [STR2]
 After downloading, the path to the downloaded model should be given to the model path below.
 
 ```sh
-python run_nuplan_simulation.py \
---test_type closed_loop_nonreactive_agents \
---data_path {SIMULATION_DATA} \
---map_path {MAP_PATH} \
---model_path {MODEL_CHECKPOINT_PATH} \
---split_filter_yaml nuplan_simulation/test14_hard.yaml \
---max_scenario_num 10000 \
---batch_size 8 \
---device cuda \
---exp_folder TestHard14_MixtralM_CKS_SepLoss_AugCur50Pct_PastProj_S6_bf16_Jun28_ckpt150k\
---processes-repetition 8
+python run_simulation_closed.py \
+    --data_path ${DATA_PATH} \
+    --map_path ${NUPLAN_MAP_ROOT} \
+    --model_path ${MODEL_PATH} \
+    --split_filter_yaml ${SPLIT_FILTER_YAML} \
+    --initstable_time 8 \
+    --conservative_factor 0.8 \
+    --comfort_weight 10.0 \
+    --batch_size 7 \
+    --processes-repetition 5 \
+	--test_type 'closed_loop_reactive_agents' \
+    --pdm_lateral_offsets none;
 ```
 
 Test type can be chosen from ```["closed_loop_nonreactive_agents","closed_loop_reactive_agents","open_loop_boxes"]```
